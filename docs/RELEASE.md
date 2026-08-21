@@ -15,6 +15,10 @@ Personal-assistant product layer on DeepSeek Harness **0.1.0-rc.8**. Not a produ
 - Package/profile metadata, remount without duplicate tools, `npm pack` ship list
 - Official DSH 0.1.0-rc.8 profile/bundle load (`loadProfile` / `renderConfigDump` / `boot`): assistant patch applied, `remember_memory` mounted, dispose + remount keeps one copy
 
+## Designed only
+
+- Self-Extension architecture and governance ([docs/self-extension.md](./self-extension.md)): public DSH seams only; no self-authorization; reuse before new plugins
+
 ## Implemented only (not live providers)
 
 - `FakeReplyAdapter` and `PlanMyDayAdapter` — scripted local LLM adapters
@@ -27,3 +31,4 @@ Personal-assistant product layer on DeepSeek Harness **0.1.0-rc.8**. Not a produ
 - Vector DB, crawler, hosted production persistence
 - Durable user-level reminders (prefer a future official DSH Schedule seam)
 - Public npm publish from this repository
+- Capability Registry, autonomous plugin generation, and automatic install/upgrade/remove

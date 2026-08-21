@@ -2,7 +2,7 @@
 
 This document is **normative**. Humans and AI contributors must follow it. If a change conflicts with this file, change the design (and this file) first, or do not make the change.
 
-Companion documents: [README.md](./README.md) (product boundary), [ARCHITECTURE.md](./ARCHITECTURE.md) (layers and seams).
+Companion documents: [README.md](./README.md) (product boundary), [ARCHITECTURE.md](./ARCHITECTURE.md) (layers and seams), [docs/self-extension.md](./docs/self-extension.md) (Self-Extension governance).
 
 ## 1. Purpose
 
@@ -60,7 +60,18 @@ Claims about capabilities, compatibility, or completeness must use this vocabula
 1. Product “what / what not” lives in README. Architecture ownership lives in ARCHITECTURE.md. Contributor must-follow rules live here.
 2. When implementation lands, update status with evidence language. Do not leave README claiming Verified behavior that is only Designed.
 
-## 8. Non-goals (engineering)
+## 8. Self-Extension
+
+Normative. Details: [docs/self-extension.md](./docs/self-extension.md).
+
+1. **Self-extension without self-authorization.** The assistant may research, design, write, build, and test candidates. It must never authorize install, upgrade, remove, switch, or capability/permission expansion.
+2. **Prefer reuse and evolution over capability proliferation.** A new plugin is the last option. Complete a Capability Resolution Review (reuse → configure → evolve → adopt → provider → new plugin) before proposing a new plugin.
+3. Generated and managed plugins share the same public DSH plugin/runtime model. Provenance is metadata, not a privileged loader.
+4. Active plugin code is immutable. Modifications produce a new candidate version.
+5. Writing code is not authorization to execute or mount that code.
+6. Do not implement a Capability Registry, generated-plugin installer, or autonomous writer unless a later issue asks for it.
+
+## 9. Non-goals (engineering)
 
 These are **Unsupported** unless a later issue explicitly promotes them:
 
@@ -70,3 +81,5 @@ These are **Unsupported** unless a later issue explicitly promotes them:
 - Speculative multi-agent framework
 - Committing secrets or real personal data
 - Forcing a database choice ahead of a storage issue
+- Self-authorizing capability changes
+- Privileged runtime paths for assistant-generated plugins
