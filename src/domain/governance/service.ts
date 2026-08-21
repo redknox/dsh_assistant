@@ -150,6 +150,9 @@ export class GovernanceService implements ExtensionGovernance, ExtensionActivati
       const prepared = await this.runtime.prepare(candidateId, {
         workspaceRoot: record.workspaceRoot,
         entryPoints: record.manifest.entryPoints,
+        owner: record.owner,
+        resolutionKind: record.manifest.resolutionKind,
+        baseVersion: record.baseVersion,
         tools: record.manifest.tools,
         services: record.manifest.services,
         providers: record.manifest.providers,

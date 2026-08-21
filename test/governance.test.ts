@@ -52,6 +52,21 @@ function seeded(runtime = new InMemoryActivationRuntime()) {
   return { registry, workspace, governance: root.service, root, human, runtime }
 }
 
+async function listCalendar(ctx: Context) {
+  const result = await ctx.tools.execute({
+    callId: CallId(`cal-${Math.random().toString(16).slice(2)}`),
+    name: 'calendar_list_events',
+    arguments: {
+      from: '2026-08-21T00:00:00.000Z',
+      to: '2026-08-23T00:00:00.000Z',
+      limit: 1,
+    },
+    signal: AbortSignal.timeout(5000),
+  })
+  assert.equal(result.isError, false, String(result.value))
+  return JSON.parse(String(result.value)) as { source?: string; items?: { title?: string }[] }
+}
+
 function ready(
   workspace: CandidateService,
   input: { owner?: string; version?: string; permissions?: string[]; capabilities?: string[] } = {},
@@ -364,7 +379,7 @@ export function apply(ctx) {
     }
   })
 
-  it('does not treat pre-existing product tools as candidate health', async () => {
+  it('does not treat a swapped owner as healthy unless the candidate produces the surface', async () => {
     const { ctx, recoveryRoot } = await bootAssistantControl()
     try {
       assert.ok(ctx.tools.get('calendar_list_events'))
@@ -397,10 +412,85 @@ export function apply() {}
       const status = await recoveryRoot.activate(sealed.id, human)
       assert.equal(status.state, 'activation-failed')
       assert.equal(status.lastFailure?.phase, 'health')
-      assert.match(status.lastFailure?.diagnostics ?? '', /already present/)
+      assert.match(status.lastFailure?.diagnostics ?? '', /missing after candidate mount|already present/)
       assert.ok(ctx.tools.get('calendar_list_events'))
+      const restoredPage = await listCalendar(ctx)
+      assert.equal(restoredPage.items[0]?.title, 'Team standup')
       assert.equal(ctx.capabilityRegistry.get('managed/integrations', '0.1.0')?.status, 'active')
       assert.equal(ctx.capabilityRegistry.get('managed/integrations', '0.2.0'), undefined)
+    } finally {
+      await ctx.fiber.dispose()
+    }
+  })
+
+  it('swaps managed/integrations 0.1.0 to 0.2.0 and restores the old implementation', async () => {
+    const { ctx, recoveryRoot } = await bootAssistantControl()
+    try {
+      const before = await listCalendar(ctx)
+      assert.equal(before.items[0]?.title, 'Team standup')
+      const candidate = ctx.candidateWorkspace.create({
+        review: review(),
+        owner: 'managed/integrations',
+        version: '0.2.0',
+        baseVersion: '0.1.0',
+        manifest: {
+          capabilities: ['calendar.read', 'calendar.freebusy'],
+          permissions: ['local.fake.suite'],
+          runtimeSeams: ['integrations.calendar'],
+          tools: ['calendar_list_events'],
+          entryPoints: ['src/plugin.js'],
+        },
+      })
+      ctx.candidateWorkspace.writeFile(candidate.id, 'package.json', `${JSON.stringify({
+        name: 'dsh-candidate-integrations-0.2.0',
+        type: 'module',
+        main: 'src/plugin.js',
+      }, null, 2)}\n`)
+      ctx.candidateWorkspace.writeFile(candidate.id, 'src/plugin.js', `export const name = 'managed-integrations-0.2.0'
+export const inject = ['tools']
+export function apply(ctx) {
+  const dispose = ctx.tools.register({
+    name: 'calendar_list_events',
+    description: 'Evolved calendar list from managed/integrations@0.2.0.',
+    parameters: {
+      from: { type: 'string', required: true },
+      to: { type: 'string', required: true },
+      limit: { type: 'integer' },
+      cursor: { type: 'string' },
+    },
+    output: {
+      schema: { type: 'string' },
+      render(_args, value) { return [{ type: 'text', text: String(value) }] },
+    },
+    async execute() {
+      return JSON.stringify({
+        source: 'managed/integrations@0.2.0',
+        items: [{ id: 'evt-evolved', title: 'Evolved calendar view' }],
+      })
+    },
+  })
+  ctx.effect(() => dispose)
+}
+`)
+      ctx.candidateValidation.validate(candidate.id)
+      const sealed = ctx.candidateWorkspace.seal(candidate.id)
+      const human = recoveryRoot.issueAuthority({ kind: 'human-control', source: 'application-ui' })
+      const fingerprint = ctx.extensionGovernance.requestApproval(sealed.id).fingerprint
+      recoveryRoot.recordApproval(human, { candidateId: sealed.id, fingerprint, decision: 'approved-for-exact-diff' })
+      const after = await recoveryRoot.activate(sealed.id, human)
+      assert.equal(after.state, 'active')
+      assert.equal(ctx.capabilityRegistry.get('managed/integrations', '0.1.0')?.status, 'disabled')
+      assert.equal(ctx.capabilityRegistry.get('managed/integrations', '0.2.0')?.status, 'active')
+      const evolved = await listCalendar(ctx)
+      assert.equal(evolved.source, 'managed/integrations@0.2.0')
+      assert.equal(evolved.items[0]?.title, 'Evolved calendar view')
+      const restored = await recoveryRoot.rollback(human)
+      assert.equal(restored.state, 'rolled-back')
+      assert.equal(ctx.capabilityRegistry.get('managed/integrations', '0.1.0')?.status, 'active')
+      assert.equal(ctx.capabilityRegistry.get('managed/integrations', '0.2.0')?.status, 'disabled')
+      const rolled = await listCalendar(ctx)
+      assert.equal(rolled.items[0]?.title, 'Team standup')
+      assert.notEqual(rolled.source, 'managed/integrations@0.2.0')
     } finally {
       await ctx.fiber.dispose()
     }
