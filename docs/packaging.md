@@ -62,4 +62,29 @@ Optional capability providers (replaceable, not required to boot):
 
 Product plugins register tools/services through Cordis effects. Disposing the product fiber (or the whole context) must drop `personalMemory`, `personalKnowledge`, `actionPolicy`, `assistantJobs`, and the product tools. Loading the bundle again on the same DSH stack must restore one copy of each name, not duplicates.
 
-`npm test` covers unload + remount (`test/packaging.test.ts`).
+`npm test` covers unload + remount of the product fiber on `bootAssistantRuntime()`, and a separate official DSH profile/bundle smoke in the same file.
+
+## Official DSH profile/bundle smoke (0.1.0-rc.8)
+
+Issue #11 requires the example profile to be loaded by DSH itself, not only by this repository's `bootAssistantRuntime()`.
+
+Exact APIs (same composition `dsh --profile assistant --dump-config` / `dsh --profile assistant` use):
+
+| Step | `@deepseek-ai/dsh-app-boot` API | CLI equivalent |
+| --- | --- | --- |
+| Create `$DSH_HOME/profiles/assistant` | `initProfile` + `resolveProfileDir` | `dsh plugin --profile assistant add <this package>` |
+| Resolve `dsh.profile.bundles` and each bundle patch | `loadProfile` | profile boot / dump |
+| Print layered tree | `renderConfigDump` | `dsh --profile assistant --dump-config` |
+| Compose rows | `composeEntries` | same algorithm dump/boot share |
+| Mount the tree | `boot` | `dsh --profile assistant` |
+| Unload / remount | dispose the root fiber, then `boot` again | SIGINT/SIGTERM dispose, then start again |
+
+Observed in `test/packaging.test.ts` (isolated `$DSH_HOME`, DSH 0.1.0-rc.8):
+
+- `loadProfile` resolves `@deepseek-ai/dsh-base` then `dsh-assistant`.
+- `renderConfigDump` includes `# == @deepseek-ai/dsh-base`, `# == dsh-assistant`, and `id: dsh-assistant`.
+- `composeEntries` contains exactly one `dsh-assistant` row, plus base rows `agent` and `system-prompt`.
+- `boot` mounts `remember_memory` and `personalMemory`.
+- Dispose drops those registrations; a second `boot` restores one copy of each (three unique assistant jobs).
+
+The smoke overlay disables the base `hmr` row (Loader internals are not exposed under `tsx --test`) and sets `jobs.autoTickMs: null`. That overlay is test-only; the shipped example `profiles/assistant/cordis.patch.yml` stays `[]`.

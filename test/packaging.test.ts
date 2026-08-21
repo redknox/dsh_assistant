@@ -15,6 +15,7 @@ import ToolRuntime from '@deepseek-ai/dsh-tools'
 import * as assistantProduct from '../src/product/bundle.js'
 import { PRODUCT_TOOL_NAMES } from '../src/product/bundle.js'
 import { bootAssistantRuntime, createAssistantAgent } from '../src/runtime/boot.js'
+import { withDshAssistantProfile } from './helpers/dsh-profile-loader.js'
 
 const root = join(import.meta.dirname, '..')
 
@@ -96,6 +97,46 @@ describe('product package and profile', () => {
     assert.equal(second.agents.list().length, 1)
     await again.dispose()
     await second.fiber.dispose()
+  })
+
+  it('loads the example profile through official DSH app-boot APIs', async () => {
+    await withDshAssistantProfile(async ({ profile, dump, composedIds, bootProfile }) => {
+      assert.deepEqual(
+        profile.layers.map((layer) => layer.packageName),
+        ['@deepseek-ai/dsh-base', 'dsh-assistant'],
+      )
+      assert.match(dump, /# == @deepseek-ai\/dsh-base/)
+      assert.match(dump, /# == dsh-assistant/)
+      assert.match(dump, /id: dsh-assistant/)
+      assert.equal(composedIds.filter((id) => id === 'dsh-assistant').length, 1)
+      assert.ok(composedIds.includes('agent'))
+      assert.ok(composedIds.includes('system-prompt'))
+
+      const first = await bootProfile()
+      try {
+        assert.ok(first.tools.get('remember_memory'), 'remember_memory')
+        assert.ok(first.get('personalMemory'))
+        assert.equal(
+          first.assistantJobs.service.list().map((item: { name: string }) => item.name).sort().join(','),
+          'create-followup-task,delete-file,morning-brief',
+        )
+      } finally {
+        await first.fiber.dispose()
+      }
+      assert.equal(first.get('personalMemory'), undefined)
+      assert.equal(first.get('assistantJobs'), undefined)
+
+      const second = await bootProfile()
+      try {
+        assert.ok(second.tools.get('remember_memory'), 'remember_memory after remount')
+        assert.ok(second.get('personalMemory'))
+        const jobs = second.assistantJobs.service.list().map((item: { name: string }) => item.name)
+        assert.equal(jobs.length, 3)
+        assert.equal(new Set(jobs).size, 3)
+      } finally {
+        await second.fiber.dispose()
+      }
+    })
   })
 
   it('packs only the intended release files', () => {

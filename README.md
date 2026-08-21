@@ -82,7 +82,7 @@ Do not call a capability **Verified** without reproducible evidence. Use:
 | UI projection + control surface | no | **Verified** by `npm test` | Pixel/mobile UI **Unsupported** |
 | Plan My Day vertical slice | no | **Verified** by `test/vertical-slice.test.ts` | Uses scripted `PlanMyDayAdapter` + fake calendar, not a live model |
 | Scripted local LLM adapters | no | **Implemented** | `FakeReplyAdapter`, `PlanMyDayAdapter`. A live LLM account is **Unsupported** |
-| DSH bundle + example profile + remount | yes (metadata) | **Verified** by `test/packaging.test.ts` | See [docs/packaging.md](./docs/packaging.md) |
+| DSH bundle + example profile + remount | yes (metadata) | **Verified** by `test/packaging.test.ts` | Official `loadProfile` / `boot` path, not only `bootAssistantRuntime()`. See [docs/packaging.md](./docs/packaging.md) |
 | Production persistence, public npm publish | no | **Unsupported** | Package is `private` |
 
 Known limitations: no live provider credentials, no production security certification, no durable user-level Schedule, no mobile distribution. Release status: [docs/RELEASE.md](./docs/RELEASE.md).

@@ -13,6 +13,7 @@ Personal-assistant product layer on DeepSeek Harness **0.1.0-rc.8**. Not a produ
 - UI projection + control surface (`followup` wakes the agent)
 - Plan My Day vertical slice through the real loop, recorded in `docs/vertical-slice.md`
 - Package/profile metadata, remount without duplicate tools, `npm pack` ship list
+- Official DSH 0.1.0-rc.8 profile/bundle load (`loadProfile` / `renderConfigDump` / `boot`): assistant patch applied, `remember_memory` mounted, dispose + remount keeps one copy
 
 ## Implemented only (not live providers)
 
