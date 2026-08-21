@@ -1,0 +1,73 @@
+import type { ActivityItem, WorkspaceSnapshotInput } from './types.js'
+
+const TOOL_LABELS: Record<string, string> = {
+  calendar_list_events: 'Calendar inspected',
+  calendar_get_event: 'Calendar event read',
+  calendar_freebusy: 'Free/busy calculated',
+  calendar_propose_event: 'Event proposal prepared',
+  calendar_create_event: 'Calendar create requested',
+  retrieve_knowledge: 'Knowledge retrieved',
+  recall_memory: 'Memory recalled',
+  remember_memory: 'Memory write requested',
+  integration_status: 'Integration status inspected',
+}
+
+export function projectActivity(input: WorkspaceSnapshotInput): readonly ActivityItem[] {
+  const items: ActivityItem[] = []
+  for (const event of input.toolEvents) {
+    const label = TOOL_LABELS[event.name ?? ''] ?? operationalLabel(event.name ?? 'tool')
+    if (event.type === 'tool/call') {
+      items.push({
+        id: `tool-${event.seq}`,
+        kind: 'RUNNING',
+        summary: label,
+        source: 'session.tool',
+      })
+      continue
+    }
+    items.push({
+      id: `tool-${event.seq}`,
+      kind: event.isError ? 'FAILED' : 'COMPLETED',
+      summary: event.isError ? `${label} failed` : completedLabel(event.name, event.text, label),
+      source: 'session.tool',
+    })
+  }
+  for (const ticket of input.pendingConfirmations.filter((item) => item.status === 'pending')) {
+    items.push({
+      id: `approval-${ticket.id}`,
+      kind: 'APPROVAL_REQUIRED',
+      summary: `${ticket.capability}.${ticket.operation} waiting for approval`,
+      source: 'actionPolicy',
+    })
+  }
+  if (input.blockedReason) {
+    items.push({
+      id: 'blocked',
+      kind: 'BLOCKED',
+      summary: input.blockedReason,
+      source: 'workspace',
+    })
+  }
+  if (input.recoveryRequired && input.recoveryWhy) {
+    items.push({
+      id: 'recovery',
+      kind: input.safeMode ? 'BLOCKED' : 'FAILED',
+      summary: input.recoveryWhy,
+      source: 'extensionRecovery',
+    })
+  }
+  return items
+}
+
+function operationalLabel(name: string): string {
+  return name.replaceAll('_', ' ')
+}
+
+function completedLabel(name: string | undefined, text: string, fallback: string): string {
+  if (name === 'calendar_list_events') {
+    const match = text.match(/(\d+)/)
+    if (match) return `${match[1]} events found`
+  }
+  if (name === 'calendar_freebusy') return 'Free/busy calculated'
+  return fallback
+}

@@ -153,6 +153,14 @@ describe('assistant UI projection and control surface', () => {
       assert.match(html, /data-confirmation-id="conf-/)
       assert.match(html, /id="knowledge-sources"/)
 
+      const workspace = ui.workspace()
+      assert.equal(workspace.identity, 'TARS-NG')
+      assert.equal(workspace.developmentControlPlaneSeparated, true)
+      ui.setObjective('Finish the morning brief')
+      assert.equal(ui.workspace().objective?.text, 'Finish the morning brief')
+      const preview = ui.setPersonality({ humor: 20 })
+      assert.ok(preview.changed.includes('humor'))
+
       ui.forgetMemory(remembered.record.id)
       assert.equal(ui.snapshot().memory.find((item) => item.id === remembered.record.id)?.status, 'deleted')
     } finally {
