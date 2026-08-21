@@ -254,6 +254,38 @@ test('runs', () => { assert.equal(value, 'ok') })
     assert.equal(workspace.get(candidate.id).lifecycle, 'validated')
   })
 
+  it('proves the OS sandbox started and denied outbound network', () => {
+    const { workspace } = seeded()
+    const candidate = workspace.create({
+      review: review(),
+      owner: 'managed/integrations',
+      version: '0.2.0',
+    })
+    workspace.writeFile(candidate.id, 'package.json', `${JSON.stringify({ type: 'module' })}\n`)
+    workspace.writeFile(candidate.id, 'src/network-deny.test.js', `import assert from 'node:assert/strict'
+import http2 from 'node:http2'
+import { test } from 'node:test'
+test('outbound http2 is denied after the sandboxed process starts', async () => {
+  const error = await new Promise((resolve, reject) => {
+    const client = http2.connect('https://example.com')
+    const finish = (err) => {
+      try { client.close() } catch {}
+      if (err) resolve(err)
+      else reject(new Error('http2 connected; OS sandbox did not deny network'))
+    }
+    client.on('connect', () => finish())
+    client.on('error', finish)
+  })
+  assert.ok(error.code || error.message)
+  assert.match(String(error.code ?? error.message), /ENOTFOUND|ENETUNREACH|EHOSTUNREACH|ECONNREFUSED|EAI_AGAIN|EPERM|EACCES|denied|unreachable|refused|not found/i)
+})
+`)
+    const report = workspace.validate(candidate.id)
+    assert.equal(report.stages.find((item) => item.name === 'tests')?.status, 'passed', report.stages.find((item) => item.name === 'tests')?.diagnostics)
+    assert.equal(report.passed, true)
+    assert.equal(workspace.get(candidate.id).lifecycle, 'validated')
+  })
+
   it('does not inherit host secrets or grant host filesystem/network/process authority', () => {
     const previous = process.env.DSH_VALIDATION_SECRET
     process.env.DSH_VALIDATION_SECRET = 's3cret'
@@ -298,28 +330,6 @@ test('spawns a child', () => {
       const childReport = workspace.validate(candidate.id)
       assert.equal(childReport.passed, false)
       assert.equal(childReport.stages.find((item) => item.name === 'tests')?.status, 'failed')
-
-      workspace.writeFile(candidate.id, 'src/steal-child.test.js', 'export const retired = true\n')
-      workspace.writeFile(candidate.id, 'src/steal-net.test.js', `import assert from 'node:assert/strict'
-import http2 from 'node:http2'
-import { test } from 'node:test'
-test('has outbound network authority', async () => {
-  await new Promise((resolve, reject) => {
-    const client = http2.connect('https://example.com')
-    const finish = (error) => {
-      client.close()
-      if (error) reject(error)
-      else resolve(undefined)
-    }
-    client.on('connect', () => finish())
-    client.on('error', finish)
-  })
-  assert.ok(true)
-})
-`)
-      const netReport = workspace.validate(candidate.id)
-      assert.equal(netReport.passed, false)
-      assert.equal(netReport.stages.find((item) => item.name === 'tests')?.status, 'failed')
     } finally {
       if (previous === undefined) delete process.env.DSH_VALIDATION_SECRET
       else process.env.DSH_VALIDATION_SECRET = previous

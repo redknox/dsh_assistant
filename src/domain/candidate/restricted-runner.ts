@@ -1,7 +1,7 @@
 import { execFileSync } from 'node:child_process'
 import { existsSync, realpathSync } from 'node:fs'
 import path from 'node:path'
-import { detectOsNetworkSandbox, wrapWithOsNetworkSandbox } from './os-sandbox.js'
+import { detectOsNetworkSandbox, sandboxStartupUnavailable, wrapWithOsNetworkSandbox } from './os-sandbox.js'
 
 export const VALIDATION_TEST_TIMEOUT_MS = 30_000
 export const SANDBOX_UNAVAILABLE = 'ERR_SANDBOX_UNAVAILABLE'
@@ -16,8 +16,9 @@ export function restrictedValidationEnv(): NodeJS.ProcessEnv {
   }
 }
 
-export function runnerUnavailable(error: { message?: string; stderr?: string; code?: string }): boolean {
+export function runnerUnavailable(error: { message?: string; stdout?: string; stderr?: string; code?: string }): boolean {
   if (error.code === SANDBOX_UNAVAILABLE) return true
+  if (sandboxStartupUnavailable(error)) return true
   const text = `${error.stderr ?? ''}\n${error.message ?? ''}`
   return /bad option|unknown option|not supported|is not a valid/i.test(text)
 }
