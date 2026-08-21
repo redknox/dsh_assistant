@@ -136,7 +136,7 @@ export function startWebUiServer(options: WebUiServerOptions): Promise<WebUiServ
       return { status: 200 as const, body: { action, result: await options.recoveryRoot.rollback(human) } }
     }
     const status = options.recoveryRoot.inspect()
-    if (status.lastFailure?.safeModeRequired || status.lastFailure) {
+    if (status.recoveryRequired) {
       return { status: 409 as const, body: { error: 'integrity-failure', action: 'exit-safe-mode' } }
     }
     return { status: 200 as const, body: { action, result: options.recoveryRoot.exitSafeMode(human) } }

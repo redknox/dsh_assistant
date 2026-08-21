@@ -56,6 +56,7 @@ export function hydrateFromAuthority(authority: DurableAuthorityStore): Governan
     rollbackTarget: file.recovery.rollbackTarget,
     lastFailure: file.recovery.lastFailure,
     safeMode: file.recovery.safeMode,
+    integrityVerified: file.recovery.integrityVerified,
   }
 }
 
@@ -77,6 +78,7 @@ export function persistGovernance(authority: DurableAuthorityStore, hydrate: Gov
       rollbackTarget: hydrate.rollbackTarget,
       lastFailure: hydrate.lastFailure,
       safeMode: hydrate.safeMode,
+      integrityVerified: hydrate.integrityVerified,
       diagnostics: current.recovery.diagnostics,
     },
     reviewLineage: current.reviewLineage ?? { generation: 0 },

@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { mkdtempSync, writeFileSync } from 'node:fs'
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, it } from 'node:test'
@@ -136,6 +136,8 @@ describe('local Mission-Control Web UI', () => {
       assert.ok(after.view, JSON.stringify(after))
       assert.equal(after.view.conversation.some((item) => item.kind === 'user-message' && item.text.includes('Hello from the Web UI')), true)
       assert.equal(after.view.conversation.some((item) => item.kind === 'assistant-response' && item.text.includes('ack')), true)
+      assert.equal(after.view.conversation.some((item) => item.text.includes('Current runtime context')), false)
+      assert.equal(after.view.conversation.some((item) => item.text.includes('Contextual Expression')), false)
       assert.equal(surface.workspace().systemState, after.view.systemState)
 
       const cookie = await cookieHeader(url)
@@ -229,6 +231,98 @@ describe('local Mission-Control Web UI', () => {
         body: JSON.stringify({ action: 'diagnostics' }),
       })
       assert.equal(diagnostics.status, 200)
+    } finally {
+      await web.close()
+      await control.ctx.fiber.dispose()
+    }
+  })
+
+  it('completes Safe Mode recovery after verified rollback while keeping lastFailure', async () => {
+    const home = mkdtempSync(join(tmpdir(), 'web-ui-recovery-loop-'))
+    const control = await bootAssistantControl({ home })
+    const review: ResolutionReview = {
+      kind: 'new-plugin',
+      capability: 'restart.probe.ping',
+      need: 'web ui recovery loop',
+      recommendation: 'new plugin',
+      rationale: 'no owner',
+      implications: [],
+      assumptions: [],
+      unresolved: [],
+      steps: [],
+      registryFacts: { exact: { kind: 'unknown', capability: 'restart.probe.ping' }, domainOwners: [], conflicts: [] },
+    }
+    const created = control.ctx.candidateWorkspace.create({
+      review,
+      owner: 'generated/restart-probe',
+      version: '0.1.0',
+      manifest: { capabilities: ['restart.probe.ping'], tools: ['restart_probe_ping'], entryPoints: ['src/plugin.js'] },
+    })
+    control.ctx.candidateWorkspace.writeFile(created.id, 'package.json', `${JSON.stringify({ name: 'dsh-generated-restart-probe', type: 'module', main: 'src/plugin.js' }, null, 2)}\n`)
+    control.ctx.candidateWorkspace.writeFile(created.id, 'src/plugin.js', `export const name = 'generated-restart-probe'
+export const inject = ['tools']
+export function apply(ctx) {
+  const dispose = ctx.tools.register({
+    name: 'restart_probe_ping',
+    description: 'Restart durability probe',
+    parameters: {},
+    output: { schema: { type: 'string' }, render(_args, value) { return [{ type: 'text', text: String(value) }] } },
+    async execute() { return 'pong' },
+  })
+  ctx.effect(() => dispose)
+}
+`)
+    control.ctx.candidateValidation.validate(created.id)
+    const sealed = control.ctx.candidateWorkspace.seal(created.id)
+    const human = control.recoveryRoot.issueAuthority({ kind: 'human-control', source: 'application-ui' })
+    const fingerprint = control.ctx.extensionGovernance.requestApproval(sealed.id).fingerprint
+    control.recoveryRoot.recordApproval(human, { candidateId: sealed.id, fingerprint, decision: 'approved-for-exact-diff' })
+    await control.recoveryRoot.activate(sealed.id, human)
+    rmSync(sealed.workspaceRoot, { recursive: true, force: true })
+    const remount = await control.recoveryRoot.remountCommittedGenerated()
+    assert.equal(remount.some((item) => item.includes('missing-active-artifact')), true)
+    const surface = new AssistantControlSurface(control.ctx, 'web-ui-recovery-loop')
+    const web = await startWebUiServer({
+      surface,
+      recoveryRoot: control.recoveryRoot,
+      port: 0,
+    })
+    try {
+      const cookie = await cookieHeader(web.url)
+      const before = await fetch(`${web.url}/api/view`).then((res) => res.json()) as { view: MissionControlView }
+      assert.equal(before.view.systemState === 'SAFE_MODE' || before.view.systemState === 'RECOVERY', true)
+      const immediate = await fetch(`${web.url}/api/recovery`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', ...authHeaders(cookie) },
+        body: JSON.stringify({ action: 'exit-safe-mode', confirm: true }),
+      })
+      assert.equal(immediate.status, 409)
+      const rolled = await fetch(`${web.url}/api/recovery`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', ...authHeaders(cookie) },
+        body: JSON.stringify({ action: 'rollback', confirm: true }),
+      })
+      assert.equal(rolled.status, 200)
+      const verified = control.recoveryRoot.inspect()
+      assert.equal(verified.integrityVerified, true)
+      assert.equal(verified.recoveryRequired, false)
+      assert.match(verified.lastFailure?.diagnostics ?? '', /missing-active-artifact/)
+      const exited = await fetch(`${web.url}/api/recovery`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', ...authHeaders(cookie) },
+        body: JSON.stringify({ action: 'exit-safe-mode', confirm: true }),
+      })
+      assert.equal(exited.status, 200, await exited.text())
+      const after = await fetch(`${web.url}/api/view`).then((res) => res.json()) as { view: MissionControlView }
+      assert.notEqual(after.view.systemState, 'SAFE_MODE')
+      assert.notEqual(after.view.systemState, 'RECOVERY')
+      const diagnostics = await fetch(`${web.url}/api/recovery`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', ...authHeaders(cookie) },
+        body: JSON.stringify({ action: 'diagnostics' }),
+      }).then((res) => res.json()) as { diagnostics: { activation?: { lastFailure?: { diagnostics: string } } } }
+      assert.match(JSON.stringify(diagnostics), /missing-active-artifact/)
+      assert.match(control.recoveryRoot.inspect().lastFailure?.diagnostics ?? '', /missing-active-artifact/)
     } finally {
       await web.close()
       await control.ctx.fiber.dispose()

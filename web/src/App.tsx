@@ -146,11 +146,19 @@ export function App() {
 
   useEffect(() => {
     let closed = false
-    void establishSession()
-    fetchView().then((next) => { if (!closed) setEnvelope(next) }).catch((caught: unknown) => {
-      if (!closed) setError(caught instanceof Error ? caught.message : 'unable to load workspace')
-    })
-    const stop = openViewStream((next) => setEnvelope(next), setConnected)
+    let stop = () => {}
+    void (async () => {
+      try {
+        await establishSession()
+        if (closed) return
+        const next = await fetchView()
+        if (!closed) setEnvelope(next)
+      } catch (caught: unknown) {
+        if (!closed) setError(caught instanceof Error ? caught.message : 'unable to load workspace')
+      }
+      if (closed) return
+      stop = openViewStream((next) => setEnvelope(next), setConnected)
+    })()
     return () => {
       closed = true
       stop()

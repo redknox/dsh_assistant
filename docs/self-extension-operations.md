@@ -49,4 +49,4 @@ Backup/restore procedures and the v0.2.x release-confidence command: [docs/v0.2-
 - Interrupted activation after commit: restart remounts the committed version.
 - One committed generated artifact missing or mutated: Safe Mode, no generated extension remounts.
 - Interrupted rollback: restart completes rollback or enters Safe Mode.
-- Exit Safe Mode is a trusted operator action. It does not remount a failed generated plugin by itself.
+- Exit Safe Mode is a trusted operator action. It does not remount a failed generated plugin by itself. Historical `lastFailure` remains diagnosable after a verified rollback; that history is not the current recovery-required condition.

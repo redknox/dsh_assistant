@@ -110,6 +110,10 @@ export interface ActivationStatus {
   readonly rollbackTarget?: ActivationSnapshot
   readonly lastFailure?: ActivationFailure
   readonly safeMode: boolean
+  /** Current blocking condition. Historical `lastFailure` can remain after this is false. */
+  readonly recoveryRequired: boolean
+  /** Current evidence that restored LKG / Registry / artifacts were revalidated. */
+  readonly integrityVerified: boolean
 }
 
 export interface TrustedApprovalInput {

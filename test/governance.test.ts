@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { mkdtempSync } from 'node:fs'
+import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { describe, it } from 'node:test'
@@ -11,6 +11,7 @@ import { CandidateService } from '../src/domain/candidate/index.js'
 import {
   ActivationDeniedError,
   GovernanceAuthorityError,
+  GovernanceContractError,
   InMemoryActivationRuntime,
   RecoveryRoot,
   TrustedAuthorityCredential,
@@ -215,6 +216,38 @@ describe('extension governance and recovery', () => {
     assert.equal(registry.get('managed/integrations', '0.1.0')?.status, 'active')
     assert.equal(registry.get('managed/integrations', '0.2.0')?.status, 'disabled')
     assert.equal(registry.conflicts().length, 0)
+  })
+
+  it('H2. verified rollback resolves recoveryRequired without dropping lastFailure', async () => {
+    const { registry, workspace, governance, root, human } = seeded()
+    const candidate = ready(workspace, {
+      owner: 'generated/matter-home',
+      version: '0.1.0',
+      capabilities: ['matter.light.set'],
+    })
+    const fingerprint = governance.requestApproval(candidate.id).fingerprint
+    root.recordApproval(human, { candidateId: candidate.id, fingerprint, decision: 'approved-for-exact-diff' })
+    await root.activate(candidate.id, human)
+    rmSync(candidate.workspaceRoot, { recursive: true, force: true })
+    const diagnostics = await root.remountCommittedGenerated()
+    assert.equal(diagnostics.some((item) => item.includes('missing-active-artifact')), true)
+    const failed = root.inspect()
+    assert.equal(failed.safeMode, true)
+    assert.equal(failed.recoveryRequired, true)
+    assert.equal(failed.integrityVerified, false)
+    assert.match(failed.lastFailure?.diagnostics ?? '', /missing-active-artifact/)
+    assert.throws(() => root.exitSafeMode(human), GovernanceContractError)
+    const restored = await root.rollback(human)
+    assert.equal(restored.integrityVerified, true)
+    assert.equal(restored.recoveryRequired, false)
+    assert.equal(restored.safeMode, true)
+    assert.match(restored.lastFailure?.diagnostics ?? '', /missing-active-artifact/)
+    const exited = root.exitSafeMode(human)
+    assert.equal(exited.safeMode, false)
+    assert.equal(exited.recoveryRequired, false)
+    assert.notEqual(exited.state, 'safe-mode')
+    assert.match(exited.lastFailure?.diagnostics ?? '', /missing-active-artifact/)
+    assert.equal(registry.get('generated/matter-home', '0.1.0')?.status, 'disabled')
   })
 
   it('I. enters Safe Mode without the generated extension', async () => {

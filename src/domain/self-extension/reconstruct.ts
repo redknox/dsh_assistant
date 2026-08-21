@@ -22,6 +22,6 @@ export async function reconstructCommittedExtensions(
   return {
     diagnostics: [...durable.authority.snapshot().recovery.diagnostics],
     safeMode: status.safeMode,
-    recoveryRequired: status.safeMode || status.state === 'activation-failed' || status.state === 'rollback-pending',
+    recoveryRequired: status.recoveryRequired || status.safeMode || status.state === 'activation-failed' || status.state === 'rollback-pending',
   }
 }

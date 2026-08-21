@@ -39,6 +39,7 @@ export async function decideApproval(card: ApprovalCard, decision: 'approve' | '
       id: card.id,
       fingerprint: card.fingerprint,
       ...(card.candidateId ? { candidateId: card.candidateId } : {}),
+      ...(card.digest ? { digest: card.digest } : {}),
     }),
   }))
 }
