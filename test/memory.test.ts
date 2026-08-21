@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import { readFileSync, readdirSync, statSync } from 'node:fs'
 import { describe, it } from 'node:test'
 import { join } from 'node:path'
-import { InMemoryPersonalMemory } from '../src/domain/memory/in-memory-store.js'
+import { InMemoryPersonalMemory } from '../src/domain/memory/service.js'
 import {
   MemoryContractError,
   normalizeWriteInput,
@@ -48,6 +48,8 @@ describe('memory contracts', () => {
     const result = memory.query({ topicKey: 'lives in' })
     assert.equal(result.records.length, 2)
     assert.equal(result.conflicts.length, 1)
+    assert.match(result.trace.why, /2 selected/)
+    assert.ok(result.trace.selections.every((item) => item.reasons.includes('topicKey=lives in')))
     assert.ok(result.conflicts[0]?.recordIds.includes(first.record.id))
     assert.ok(result.conflicts[0]?.recordIds.includes(second.record.id))
   })

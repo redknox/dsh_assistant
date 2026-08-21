@@ -74,7 +74,7 @@ Current status of this repository:
 | --- | --- |
 | Product/engineering/architecture contracts | **Implemented** |
 | DSH-native runtime scaffold (public plugin boot + one agent) | **Implemented**; boot/lifecycle **Verified** by `npm test` |
-| Personal memory domain contracts + in-memory adapter | **Implemented**; normalization/update/delete/conflict **Verified** by `npm test` |
+| Personal memory service + replaceable local persistence | **Implemented**; CRUD/conflict/delete and JSON adapter **Verified** by `npm test` |
 | UI, integrations, RAG, production persistence | **Unsupported** / not started |
 
 ## Develop

@@ -1,5 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import { MemoryContractError, normalizeStatement, normalizeWriteInput, statementsConflict } from './normalize.js'
+import type { MemoryPersistence } from './persistence.js'
+import { InMemoryPersistence } from './persistence.js'
 import {
   isSessionHistoryRef,
   type ConflictGroup,
@@ -10,11 +12,14 @@ import {
   type PersonalMemory,
   type Provenance,
   type QueryResult,
+  type RetrievalTrace,
+  type SelectionReason,
   type WriteResult,
 } from './types.js'
 
-function nowIso(): string {
-  return new Date().toISOString()
+export interface MemoryServiceOptions {
+  now?: () => string
+  id?: () => string
 }
 
 function clone(record: MemoryRecord): MemoryRecord {
@@ -25,12 +30,50 @@ function clone(record: MemoryRecord): MemoryRecord {
   }
 }
 
+function matchesQuery(record: MemoryRecord, query: MemoryQuery): string[] | undefined {
+  const reasons: string[] = [`status=${record.status}`]
+  if (query.category) {
+    if (record.category !== query.category) return undefined
+    reasons.push(`category=${query.category}`)
+  }
+  if (query.topicKey) {
+    if (record.topicKey !== query.topicKey) return undefined
+    reasons.push(`topicKey=${query.topicKey}`)
+  }
+  if (!query.includeDeleted && record.status === 'deleted') return undefined
+  if (!query.includeSuperseded && record.status === 'superseded') return undefined
+  if (record.status === 'active' && !query.includeDeleted && !query.includeSuperseded) {
+    reasons.push('default-excludes-deleted-and-superseded')
+  }
+  const visibility = query.visibility ?? 'any'
+  if (visibility !== 'any') {
+    if (record.visibility !== visibility) return undefined
+    reasons.push(`visibility=${visibility}`)
+  } else {
+    reasons.push('visibility=any')
+  }
+  return reasons
+}
+
 /**
- * In-process memory adapter for tests and smoke boot.
- * Not a production database; domain types stay provider-neutral.
+ * Application memory service. Persistence is injected and swappable.
+ * Writes happen only through explicit {@link write}/{@link replace}/{@link delete} — never from session history.
  */
-export class InMemoryPersonalMemory implements PersonalMemory {
+export class MemoryService implements PersonalMemory {
   private readonly records = new Map<string, MemoryRecord>()
+  private readonly now: () => string
+  private readonly id: () => string
+
+  constructor(
+    private readonly persistence: MemoryPersistence,
+    options: MemoryServiceOptions = {},
+  ) {
+    this.now = options.now ?? (() => new Date().toISOString())
+    this.id = options.id ?? (() => randomUUID())
+    for (const record of persistence.load()) {
+      this.records.set(record.id, clone(record))
+    }
+  }
 
   get(id: string): MemoryRecord | undefined {
     const record = this.records.get(id)
@@ -38,28 +81,23 @@ export class InMemoryPersonalMemory implements PersonalMemory {
   }
 
   query(query: MemoryQuery = {}): QueryResult {
-    const visibility = query.visibility ?? 'any'
-    const records = [...this.records.values()]
-      .filter((record) => {
-        if (query.category && record.category !== query.category) return false
-        if (query.topicKey && record.topicKey !== query.topicKey) return false
-        if (!query.includeDeleted && record.status === 'deleted') return false
-        if (!query.includeSuperseded && record.status === 'superseded') return false
-        if (visibility !== 'any' && record.visibility !== visibility) return false
-        return true
-      })
-      .map(clone)
-
-    const conflicts = this.conflictsAmong(records.filter((record) => record.status === 'active'))
-    return {
-      records,
-      conflicts,
-      trace: {
-        query,
-        recordIds: records.map((record) => record.id),
-        conflictTopicKeys: conflicts.map((group) => group.topicKey),
-      },
+    const selections: SelectionReason[] = []
+    const records: MemoryRecord[] = []
+    for (const record of this.records.values()) {
+      const reasons = matchesQuery(record, query)
+      if (!reasons) continue
+      records.push(clone(record))
+      selections.push({ recordId: record.id, reasons })
     }
+    const conflicts = this.conflictsAmong(records.filter((record) => record.status === 'active'))
+    const trace: RetrievalTrace = {
+      query,
+      recordIds: records.map((record) => record.id),
+      conflictTopicKeys: conflicts.map((group) => group.topicKey),
+      selections,
+      why: summarizeTrace(query, selections, conflicts.length),
+    }
+    return { records, conflicts, trace }
   }
 
   write(input: MemoryWriteInput): WriteResult {
@@ -67,7 +105,7 @@ export class InMemoryPersonalMemory implements PersonalMemory {
       throw new MemoryContractError('session history is not durable memory and must not be written')
     }
     const normalized = normalizeWriteInput(input)
-    const at = nowIso()
+    const at = this.now()
     const supersededIds: string[] = []
 
     if (normalized.conflictPolicy === 'supersede_topic') {
@@ -78,7 +116,7 @@ export class InMemoryPersonalMemory implements PersonalMemory {
       }
     }
 
-    const id = randomUUID()
+    const id = this.id()
     for (const supersededId of supersededIds) {
       this.markSuperseded(supersededId, id, at)
     }
@@ -97,6 +135,7 @@ export class InMemoryPersonalMemory implements PersonalMemory {
       visibility: normalized.visibility,
     }
     this.records.set(id, record)
+    this.flush()
     return { record: clone(record), supersededIds, conflicts: this.topicConflicts(normalized.topicKey) }
   }
 
@@ -105,8 +144,8 @@ export class InMemoryPersonalMemory implements PersonalMemory {
     if (!existing) throw new MemoryContractError(`memory not found: ${id}`)
     if (existing.status === 'deleted') throw new MemoryContractError(`cannot replace deleted memory: ${id}`)
 
-    const replacementId = randomUUID()
-    const at = nowIso()
+    const replacementId = this.id()
+    const at = this.now()
     this.markSuperseded(id, replacementId, at)
 
     const statement = input.statement === undefined ? existing.statement : normalizeStatement(input.statement)
@@ -127,13 +166,14 @@ export class InMemoryPersonalMemory implements PersonalMemory {
       visibility,
     }
     this.records.set(replacementId, record)
+    this.flush()
     return { record: clone(record), supersededIds: [id], conflicts: this.topicConflicts(record.topicKey) }
   }
 
   delete(id: string, provenance: Provenance): MemoryRecord {
     const existing = this.records.get(id)
     if (!existing) throw new MemoryContractError(`memory not found: ${id}`)
-    const at = nowIso()
+    const at = this.now()
     const deleted: MemoryRecord = {
       ...existing,
       status: 'deleted',
@@ -142,6 +182,7 @@ export class InMemoryPersonalMemory implements PersonalMemory {
       provenance,
     }
     this.records.set(id, deleted)
+    this.flush()
     return clone(deleted)
   }
 
@@ -154,6 +195,10 @@ export class InMemoryPersonalMemory implements PersonalMemory {
       supersededBy: successorId,
       updatedAt: at,
     })
+  }
+
+  private flush(): void {
+    this.persistence.save([...this.records.values()].map(clone))
   }
 
   private topicConflicts(topicKey: string): ConflictGroup[] {
@@ -189,17 +234,36 @@ export class InMemoryPersonalMemory implements PersonalMemory {
   }
 }
 
+export class InMemoryPersonalMemory extends MemoryService {
+  constructor(options: MemoryServiceOptions = {}) {
+    super(new InMemoryPersistence(), options)
+  }
+}
+
 export function renderModelVisibleMemory(memory: PersonalMemory): { text: string; trace: QueryResult['trace'] } {
   const result = memory.query({ visibility: 'model' })
   if (result.records.length === 0) {
     return { text: '', trace: result.trace }
   }
-  const lines = result.records.map((record) => {
-    const conflict = result.conflicts.some((group) => group.recordIds.includes(record.id)) ? ' [conflict]' : ''
-    return `- (${record.category}/${record.polarity}${conflict}) ${record.topicKey}: ${record.statement} [${record.id}]`
-  })
-  return {
-    text: ['Durable personal memory (not session history):', ...lines].join('\n'),
-    trace: result.trace,
-  }
+  const lines = [
+    'Durable personal memory (not session history):',
+    `Selected ${result.trace.recordIds.length} record(s): ${result.trace.why}`,
+    ...result.records.map((record) => {
+      const conflict = result.conflicts.some((group) => group.recordIds.includes(record.id)) ? ' [conflict]' : ''
+      const reasons = result.trace.selections.find((item) => item.recordId === record.id)?.reasons.join(', ') ?? ''
+      return `- (${record.category}/${record.polarity}${conflict}) ${record.topicKey}: ${record.statement} [${record.id}; ${reasons}]`
+    }),
+  ]
+  return { text: lines.join('\n'), trace: result.trace }
+}
+
+function summarizeTrace(query: MemoryQuery, selections: readonly SelectionReason[], conflictCount: number): string {
+  const filters: string[] = []
+  if (query.category) filters.push(`category=${query.category}`)
+  if (query.topicKey) filters.push(`topicKey=${query.topicKey}`)
+  if (query.visibility && query.visibility !== 'any') filters.push(`visibility=${query.visibility}`)
+  if (!query.includeDeleted) filters.push('exclude-deleted')
+  if (!query.includeSuperseded) filters.push('exclude-superseded')
+  const filterText = filters.length > 0 ? filters.join(', ') : 'no extra filters'
+  return `${selections.length} selected by ${filterText}; ${conflictCount} conflict group(s)`
 }

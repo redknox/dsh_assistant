@@ -103,10 +103,18 @@ export interface ConflictGroup {
   readonly recordIds: readonly string[]
 }
 
+export interface SelectionReason {
+  readonly recordId: string
+  /** Why this record was included (filter matches). */
+  readonly reasons: readonly string[]
+}
+
 export interface RetrievalTrace {
   readonly query: MemoryQuery
   readonly recordIds: readonly string[]
   readonly conflictTopicKeys: readonly string[]
+  readonly selections: readonly SelectionReason[]
+  readonly why: string
 }
 
 export interface QueryResult {

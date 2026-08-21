@@ -1,5 +1,12 @@
 import { Service, type Context } from '@deepseek-ai/cordis'
-import { InMemoryPersonalMemory, renderModelVisibleMemory, type PersonalMemory } from '../domain/memory/index.js'
+import { JsonFileMemoryPersistence } from '../adapters/memory/json-file-persistence.js'
+import {
+  InMemoryPersistence,
+  MemoryService,
+  renderModelVisibleMemory,
+  type PersonalMemory,
+} from '../domain/memory/index.js'
+import { registerMemoryTools } from './memory-tools.js'
 
 declare module '@deepseek-ai/cordis' {
   interface Context {
@@ -10,7 +17,7 @@ declare module '@deepseek-ai/cordis' {
 export class PersonalMemoryService extends Service implements PersonalMemory {
   constructor(
     ctx: Context,
-    private readonly store: InMemoryPersonalMemory,
+    private readonly store: PersonalMemory,
   ) {
     super(ctx, 'personalMemory')
   }
@@ -36,22 +43,31 @@ export class PersonalMemoryService extends Service implements PersonalMemory {
   }
 }
 
-export const name = 'dsh-assistant-memory'
-export const inject = ['systemPrompt']
+export interface MemoryPluginConfig {
+  persistence?: 'memory' | 'json-file'
+  jsonFilePath?: string
+}
 
-/** Memory service + model-visible injection through public `ctx.systemPrompt.context`. */
-export async function apply(ctx: Context) {
-  const store = new InMemoryPersonalMemory()
+export const name = 'dsh-assistant-memory'
+export const inject = ['systemPrompt', 'tools']
+
+/** Memory service, optional JSON persistence, prompt injection, and explicit remember/forget/recall tools. */
+export async function apply(ctx: Context, config: MemoryPluginConfig = {}) {
+  const persistence = config.persistence === 'json-file'
+    ? new JsonFileMemoryPersistence(config.jsonFilePath ?? '.dsh-assistant/memory.json')
+    : new InMemoryPersistence()
+  const memory = new MemoryService(persistence)
   await ctx.plugin(class extends PersonalMemoryService {
     constructor(scope: Context) {
-      super(scope, store)
+      super(scope, memory)
     }
   })
   ctx.systemPrompt.context({
     name: 'personal-memory',
     order: 50,
     text() {
-      return renderModelVisibleMemory(store).text
+      return renderModelVisibleMemory(memory).text
     },
   })
+  ctx.effect(() => registerMemoryTools(ctx.tools, memory))
 }

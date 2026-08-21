@@ -13,4 +13,5 @@ export function apply(ctx: Context) {
 
 export { bootAssistantRuntime, createAssistantAgent } from './runtime/boot.js'
 export { ASSISTANT_PERSONA } from './product/persona.js'
+export { JsonFileMemoryPersistence } from './adapters/memory/json-file-persistence.js'
 export * from './domain/memory/index.js'
