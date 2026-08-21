@@ -47,3 +47,4 @@ export type {
 } from './ui/index.js'
 export { FakeIntegrationSuite } from './adapters/integrations/fake-providers.js'
 export { FakeReplyAdapter } from './adapters/llm/fake-reply-adapter.js'
+export { PLAN_MY_DAY_FOCUS, PlanMyDayAdapter } from './adapters/llm/plan-my-day-adapter.js'

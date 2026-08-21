@@ -80,6 +80,7 @@ Current status of this repository:
 | Trust/policy (L0–L4, confirmation, audit) | **Implemented**; read/propose/confirm/deny/cancel/replay **Verified** by `npm test` |
 | Proactive jobs / scheduled workflows | **Implemented** on public `ctx.jobs` plus a process-local interval scheduler; morning brief recurrence and policy-gated mutations **Verified** by `npm test`. Cross-restart durability is **Unsupported**. |
 | UI projection + control surface (text/HTML, no framework) | **Implemented**; conversation/jobs/confirmations/memory/knowledge/capabilities **Verified** by `npm test`. Pixel design and mobile apps are **Unsupported**. |
+| Plan My Day vertical slice (user input → DSH loop → memory/knowledge/tools/policy/jobs/UI) | **Verified** by `npm test` / `test/vertical-slice.test.ts`; reproduction notes in [docs/vertical-slice.md](./docs/vertical-slice.md). Live LLM and vendor integrations remain **Implemented** only (scripted `PlanMyDayAdapter` + `FakeIntegrationSuite`). |
 | Real vendor accounts, vector DB, production persistence | **Unsupported** / not started |
 
 ## Develop
@@ -91,11 +92,14 @@ npm run test
 npm run build
 npm run boot
 npm run ui
+npm run slice
 ```
 
 `npm run boot` starts a headless Cordis composition using public DSH services (`ctx.agents`, `ctx.systemPrompt`, …), creates one assistant session, then disposes it. It does not call a live LLM.
 
 `npm run ui` boots the same stack, sends one message through the public agent followup seam (fake local LLM adapter), and prints a text control-surface snapshot. It does not call a live LLM.
+
+`npm run slice` replays the Plan My Day vertical slice (scripted local LLM, fake calendar/tasks). See [docs/vertical-slice.md](./docs/vertical-slice.md).
 
 Composition is replaceable: this package declares `dsh.bundle` (`cordis.patch.yml`). An example profile lives in `profiles/assistant/`.
 
@@ -106,3 +110,4 @@ Composition is replaceable: this package declares `dsh.bundle` (`cordis.patch.ym
 | [README.md](./README.md) | Product vision, boundary, MVP, non-goals |
 | [ENGINEERING.md](./ENGINEERING.md) | Normative rules for humans and AI contributors |
 | [ARCHITECTURE.md](./ARCHITECTURE.md) | Layers, ownership, dependency direction, extension seams |
+| [docs/vertical-slice.md](./docs/vertical-slice.md) | Issue #10 Plan My Day evidence (versions, commands, fakes, observed results) |
