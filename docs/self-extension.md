@@ -16,7 +16,7 @@ Self-Extension is extension through **public DSH** plugin, service, provider, to
 
 Assistant-generated code has **no privileged runtime path**. It uses the same public DSH plugin contract as human-authored code.
 
-The v0.1.0 Assistant Core MVP remains the stable product/runtime baseline underneath Self-Extension. Self-Extension sits beside that baseline; it does not replace it. The current product release is v0.2.0.
+The v0.1.0 Assistant Core MVP remains the stable product/runtime baseline underneath Self-Extension. Self-Extension sits beside that baseline; it does not replace it. v0.2.0 is the Governed Self-Extension baseline. The current product release is v0.3.0 (Product Soak baseline).
 
 ## Three separate questions
 

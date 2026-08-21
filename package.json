@@ -1,6 +1,6 @@
 {
   "name": "dsh-assistant",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "private": true,
   "type": "module",
   "description": "Personal AI assistant product layer on DeepSeek Harness public seams",

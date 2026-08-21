@@ -1,8 +1,8 @@
 # Feature freeze and real-world soak
 
-Status: **Implemented** as the M5 product-readiness policy. Duration is operational, not a release metric.
+Status: **Implemented** as the v0.3.0 Product Soak policy. Duration is operational, not a release metric.
 
-After [Issue #51](https://github.com/redknox/dsh_assistant/issues/51) is accepted:
+After annotated tag `v0.3.0` exists on `main`:
 
 - do not add new user-facing capabilities during the initial soak;
 - do not add providers merely because they are interesting;
@@ -13,9 +13,13 @@ After [Issue #51](https://github.com/redknox/dsh_assistant/issues/51) is accepte
 
 The question to answer is: **can I depend on this product every day?**
 
+Allowed v0.3.x work: security, authority/governance, data-loss, reliability/recovery, packaging/install/upgrade, secret/configuration, performance/resource leaks found during soak, usability that makes the existing product operable, documentation corrections.
+
+Normally deferred: new integrations, new tool categories, new providers for optionality, new Self-Extension authority, additional product features unrelated to a real soak defect.
+
 ## Window
 
-Recommended: **2–4 weeks of daily use** after Product Readiness is accepted. Adjust for usage density, not calendar vanity.
+Recommended: **2–4 weeks of daily use** after `v0.3.0` is tagged. Adjust for usage density, not calendar vanity.
 
 ## Classification
 
@@ -29,10 +33,16 @@ Recommended: **2–4 weeks of daily use** after Product Readiness is accepted. A
 
 ## Observe
 
-Runtime: startup/restart, persistence, session continuity, candidate/review/approval lineage, Safe Mode, provider outages and Calendar token expiry, cancellation/timeout, long-running stability.
+Runtime: startup/restart, persistence, session continuity, candidate/review/approval lineage, Safe Mode, provider outages and Calendar token expiry, cancellation/timeout, long-running stability, CPU/memory/log growth, stop/restart, loopback Web UI reconnect.
 
-Usability: install, first-run config, approval noise, Mission-Control usefulness, whether errors say what to do next, whether daily work feels like a product.
+LLM: `deepseek-official` / `deepseek-v4-flash` stability; response/tool-use quality; provider failures surfaced clearly; missing/invalid credential behavior remains understandable.
+
+Integrations: Calendar token expiry and manual replacement; uncertain side effects remain reconciled rather than blindly retried; no fixture/live confusion. Search credentials may be present; Search is not a shipped TARS-NG capability.
+
+Usability: install, first-run config, approval noise, Mission-Control usefulness (including the local Web UI), whether errors say what to do next, whether daily work feels like a product.
 
 Trust: no silent authority escalation; no secret leakage; no fixture/live confusion; no hidden retry of uncertain side effects; no review/approval bypass after restart; generated capability remains observable and reversible.
 
 `review-complete` remains distinct from approval and activation.
+
+Soak configuration shape: [v0.3.0-seal.md](./v0.3.0-seal.md).
