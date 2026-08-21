@@ -52,13 +52,57 @@ export function registerIntegrationTools(tools: Pick<ToolRuntime, 'register'>, h
         title: { type: 'string', required: true },
         start: { type: 'string', required: true },
         end: { type: 'string', required: true },
+        timeZone: { type: 'string' },
+        calendarId: { type: 'string' },
+        description: { type: 'string' },
+        attendees: { type: 'array', items: { type: 'string' } },
+        allDay: { type: 'boolean' },
       },
       output: textOutput(),
       async execute(args, exec) {
-        return runJson(() => hub.calendar().proposeCreateEvent(
-          { title: args.title, start: args.start, end: args.end },
-          exec.signal,
-        ))
+        return runJson(() => hub.calendar().proposeCreateEvent({
+          title: args.title,
+          start: args.start,
+          end: args.end,
+          timeZone: args.timeZone,
+          calendarId: args.calendarId,
+          description: args.description,
+          attendees: args.attendees,
+          allDay: args.allDay,
+        }, exec.signal))
+      },
+    })),
+    tools.register(defineTool({
+      name: 'calendar_get_event',
+      description: 'Read-only: inspect one calendar event by id. Does not create or change events.',
+      parameters: {
+        id: { type: 'string', required: true },
+      },
+      output: textOutput(),
+      async execute(args, exec) {
+        return runJson(() => hub.calendar().getEvent(args.id, exec.signal))
+      },
+    })),
+    tools.register(defineTool({
+      name: 'calendar_freebusy',
+      description: 'Read-only: list busy windows in a time range. Does not create or change events.',
+      parameters: {
+        from: { type: 'string', required: true },
+        to: { type: 'string', required: true },
+        timeZone: { type: 'string' },
+        limit: { type: 'integer' },
+        cursor: { type: 'string' },
+      },
+      output: textOutput(),
+      async execute(args, exec) {
+        return runJson(() => hub.calendar().freeBusy({
+          from: args.from,
+          to: args.to,
+          timeZone: args.timeZone,
+          limit: args.limit,
+          cursor: args.cursor,
+          signal: exec.signal,
+        }))
       },
     })),
     tools.register(defineTool({

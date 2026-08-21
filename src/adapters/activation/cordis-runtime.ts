@@ -24,6 +24,7 @@ const OWNER_PLUGIN_NAMES: Readonly<Record<string, string>> = {
   'managed/personal-knowledge': 'dsh-assistant-knowledge',
   'managed/trust-policy': 'dsh-assistant-policy',
   'managed/assistant-jobs': 'dsh-assistant-jobs',
+  'generated/google-calendar': 'generated-google-calendar',
 }
 
 const SWAP_KINDS = new Set(['evolve-owner', 'configure', 'adopt-existing', 'implement-provider'])

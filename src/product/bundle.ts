@@ -67,6 +67,8 @@ export const PRODUCT_TOOL_NAMES = [
   'recall_memory',
   'retrieve_knowledge',
   'calendar_list_events',
+  'calendar_get_event',
+  'calendar_freebusy',
   'calendar_propose_event',
   'mail_list_messages',
   'tasks_propose_create',
