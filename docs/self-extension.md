@@ -1,15 +1,16 @@
 # Self-Extension architecture and governance
 
-Status: governance contract is **Designed** and remains normative. The Capability Registry, Resolution Review, candidate workspace/validation, governed activation/recovery, and the Obsidian Vault plus Calendar generated slices are **Verified**. See [docs/capability-registry.md](./capability-registry.md), [docs/capability-resolution.md](./capability-resolution.md), [docs/candidate-workspace.md](./candidate-workspace.md), [docs/extension-governance.md](./extension-governance.md), [docs/obsidian-self-extension.md](./obsidian-self-extension.md), and [docs/calendar-self-extension.md](./calendar-self-extension.md).
+Status: governance contract is **Designed** and remains normative. The Capability Registry, Resolution Review, candidate workspace/validation, engineering reliability, independent review, governed activation/recovery, and the Obsidian Vault plus Calendar generated slices are **Verified**. See [docs/capability-registry.md](./capability-registry.md), [docs/capability-resolution.md](./capability-resolution.md), [docs/candidate-workspace.md](./candidate-workspace.md), [docs/engineering-reliability.md](./engineering-reliability.md), [docs/independent-review.md](./independent-review.md), [docs/extension-governance.md](./extension-governance.md), [docs/obsidian-self-extension.md](./obsidian-self-extension.md), and [docs/calendar-self-extension.md](./calendar-self-extension.md).
 
 Companion documents: [ARCHITECTURE.md](../ARCHITECTURE.md) (layers and public seams), [ENGINEERING.md](../ENGINEERING.md) (normative contributor rules), [README.md](../README.md) (product boundary).
 
 ## Invariants
 
-Two principles are normative. A later implementation that violates them is out of contract, not a small product tweak.
+Three principles are normative. A later implementation that violates them is out of contract, not a small product tweak.
 
 1. **Self-extension without self-authorization.** The assistant may discover gaps, design, write, build, and test candidate plugins. It must **never authorize its own capability changes**. Writing code is not permission to mount, install, upgrade, remove, or switch that code.
-2. **Prefer reuse and evolution over capability proliferation.** A new plugin is the last option, not the default. If an owner already covers the domain, evolve that owner.
+2. **Self-development without self-certification.** The assistant may review and repair its own candidates, but review evidence must be independently produced. `review-complete` is not approval.
+3. **Prefer reuse and evolution over capability proliferation.** A new plugin is the last option, not the default. If an owner already covers the domain, evolve that owner.
 
 Self-Extension is extension through **public DSH** plugin, service, provider, tool, event, profile, and bundle seams. It is not unrestricted self-modification of the running product, and it must not patch or depend on DSH package-internal Agent Loop / `src/*` internals.
 
@@ -28,8 +29,9 @@ These concerns must stay separate. Do not collapse them into one “the assistan
 | **What should change?** | Capability Resolution Review | `ctx.capabilityResolution.review` ([docs/capability-resolution.md](./capability-resolution.md)) |
 | **May I change it?** | User approval / governance | Recovery Root `recordApproval` + transactional activate ([docs/extension-governance.md](./extension-governance.md)) |
 | **Is the behavior reliable under real failure semantics?** | Engineering Reliability | Risk Model + `reliability.gate` ([docs/engineering-reliability.md](./engineering-reliability.md)) |
+| **Is this sealed revision independently reviewed?** | Independent Review | `ctx.independentReview` ([docs/independent-review.md](./independent-review.md)) |
 
-Visibility is not a change proposal. A change proposal is not authorization. Authorization is not a license to expand capabilities or permissions later without a new review.
+Visibility is not a change proposal. A change proposal is not authorization. Authorization is not a license to expand capabilities or permissions later without a new review. Independent review is not authorization.
 
 ## Provenance model
 
@@ -122,7 +124,9 @@ Change Proposal
   ↓
 Candidate version/workspace
   ↓
-Build / Test / Validation
+Build / Test / Validation + Reliability gate
+  ↓
+Independent Review (fresh context, sealed digest)
   ↓
 Capability + Permission Diff
   ↓
