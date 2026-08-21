@@ -46,7 +46,7 @@ Projected from authoritative runtime/governance/policy/integration state, never 
 
 Calendar create is an ordinary external side-effect card: target, when, attendees, external side effect, no authority change.
 
-Self-Extension is a capability/permission/effect diff bound to digest/fingerprint. It is not self-authorization. UI approve still goes through the existing policy/governance roots.
+Self-Extension is a capability/permission/effect diff bound to digest/fingerprint. Effect diffs include secret-access metadata (name/scope/type only); secret values are never rendered. It is not self-authorization. UI approve still goes through the existing policy/governance roots.
 
 ## Memory and context
 

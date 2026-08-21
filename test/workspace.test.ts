@@ -1,7 +1,11 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 import { PERSONALITY_CORPUS } from '../src/domain/personality/index.js'
-import { projectMissionControl, type WorkspaceSnapshotInput } from '../src/domain/workspace/index.js'
+import { googleCalendarReadRiskModel } from '../src/domain/reliability/index.js'
+import type { ResolutionReview } from '../src/domain/resolution/index.js'
+import { flattenEffects, projectMissionControl, type WorkspaceSnapshotInput } from '../src/domain/workspace/index.js'
+import { bootAssistantControl, createAssistantAgent } from '../src/runtime/boot.js'
+import { AssistantControlSurface } from '../src/ui/controller.js'
 import { renderMissionControlAsHtml, renderMissionControlAsText } from '../src/ui/mission-control.js'
 
 function snapshot(overrides: Partial<WorkspaceSnapshotInput> = {}): WorkspaceSnapshotInput {
@@ -186,5 +190,76 @@ describe('TARS-NG mission-control workspace', () => {
     assert.equal(view.systemState, 'BLOCKED')
     assert.equal(view.activity.every((item) => !/hidden reasoning|chain-of-thought/i.test(item.summary)), true)
     assert.match(renderMissionControlAsHtml(view), /data-control-plane="user-workspace"/)
+  })
+
+  it('includes secret-access metadata and redacts credential values', () => {
+    const effects = flattenEffects({
+      filesystem: [],
+      network: ['https://www.googleapis.com/calendar/v3'],
+      process: [],
+      secrets: ['google.calendar.oauth', 'ya29.not-a-real-token'],
+      externalSystems: ['google-calendar-v3'],
+    }, ['google.calendar.oauth'])
+    assert.ok(effects.some((item) => item === 'secret-access google.calendar.oauth'))
+    assert.ok(effects.some((item) => item === 'secret-access (redacted)'))
+    assert.equal(effects.some((item) => item.includes('ya29')), false)
+  })
+
+  it('projects secret-access effects from a live governance summary without secret values', async () => {
+    const { ctx } = await bootAssistantControl()
+    const handle = await createAssistantAgent(ctx, 'ws-secret-approval')
+    try {
+      const review: ResolutionReview = {
+        kind: 'evolve-owner',
+        capability: 'calendar.read',
+        need: 'Google Calendar read with declared oauth scope',
+        recommendation: 'evolve managed/integrations',
+        rationale: 'owned',
+        implications: [],
+        assumptions: [],
+        unresolved: [],
+        steps: [],
+        registryFacts: { exact: { kind: 'unknown', capability: 'calendar.read' }, domainOwners: [], conflicts: [] },
+        target: { owner: 'managed/integrations', version: '0.1.0' },
+      }
+      const created = ctx.candidateWorkspace.create({
+        review,
+        owner: 'managed/integrations',
+        version: '0.2.0',
+        baseVersion: '0.1.0',
+        manifest: {
+          capabilities: ['calendar.read', 'calendar.freebusy'],
+          permissions: ['local.fake.suite'],
+          secrets: ['google.calendar.oauth'],
+          effects: {
+            filesystem: [],
+            network: ['https://www.googleapis.com/calendar/v3'],
+            process: [],
+            secrets: ['google.calendar.oauth', 'ya29.not-a-real-token'],
+            externalSystems: ['google-calendar-v3'],
+            remoteSideEffect: 'read-only',
+          },
+          riskModel: googleCalendarReadRiskModel(),
+        },
+      })
+      ctx.candidateWorkspace.writeFile(created.id, 'src/ok.ts', 'export const value: string = "ok"\n')
+      ctx.candidateValidation.validate(created.id)
+      const sealed = ctx.candidateWorkspace.seal(created.id)
+      const requested = ctx.extensionGovernance.requestApproval(sealed.id)
+      assert.equal(requested.decision, 'approval-requested')
+      assert.ok(ctx.extensionGovernance.inspectSummary(sealed.id).effects.secrets.includes('google.calendar.oauth'))
+
+      const ui = new AssistantControlSurface(ctx, 'ws-secret-approval')
+      const view = ui.workspace()
+      const card = view.approvals.find((item) => item.kind === 'self-extension')
+      assert.ok(card)
+      const rendered = [card.sideEffect, ...card.details, renderMissionControlAsText(view), renderMissionControlAsHtml(view)].join('\n')
+      assert.match(rendered, /secret-access google\.calendar\.oauth/)
+      assert.doesNotMatch(rendered, /ya29\.not-a-real-token/)
+      assert.doesNotMatch(rendered, /ya29\.|Bearer |access_token=|refresh_token=|client_secret=/)
+    } finally {
+      await handle.dispose()
+      await ctx.fiber.dispose()
+    }
   })
 })

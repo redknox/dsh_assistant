@@ -57,6 +57,7 @@ function selfExtensionCard(approval: NonNullable<WorkspaceSnapshotInput['extensi
       `Digest      ${approval.digest}`,
       `Capabilities +${approval.capabilitiesAdded.join(', ') || 'none'} −${approval.capabilitiesRemoved.join(', ') || 'none'}`,
       `Permissions +${approval.permissionsAdded.join(', ') || 'none'} −${approval.permissionsRemoved.join(', ') || 'none'}`,
+      `Effects     ${approval.effects.join('; ') || 'none'}`,
       'This is not self-authorization. Model/tools cannot mint approval.',
     ],
   }

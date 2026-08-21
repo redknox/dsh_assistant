@@ -3,6 +3,7 @@ import { SessionId, isAppendSurfaceEvent, type SessionEvent } from '@deepseek-ai
 import type { Context } from '@deepseek-ai/cordis'
 import { humorSuppressed } from '../personality/effective.js'
 import type { TarsPersonality } from '../personality/types.js'
+import { flattenEffects } from './effects.js'
 import type { MissionControlView, ObjectiveView, WorkspaceSnapshotInput } from './types.js'
 import { projectMissionControl } from './project.js'
 
@@ -159,6 +160,7 @@ function extensionApprovals(ctx: Context): WorkspaceSnapshotInput['extensionAppr
       digest: string
       capabilities: { added: readonly string[]; removed: readonly string[] }
       permissions: { added: readonly string[]; removed: readonly string[] }
+      secrets: readonly string[]
       effects: { filesystem: readonly string[]; network: readonly string[]; process: readonly string[]; secrets: readonly string[]; externalSystems: readonly string[] }
     }
   } | undefined
@@ -193,23 +195,8 @@ function extensionApprovals(ctx: Context): WorkspaceSnapshotInput['extensionAppr
       capabilitiesRemoved: [...(summary.capabilities.removed ?? [])],
       permissionsAdded: [...(summary.permissions.added ?? [])],
       permissionsRemoved: [...(summary.permissions.removed ?? [])],
-      effects: flattenEffects(summary.effects),
+      effects: flattenEffects(summary.effects, summary.secrets ?? []),
     })
   }
   return out
-}
-
-function flattenEffects(effects: {
-  readonly filesystem: readonly string[]
-  readonly network: readonly string[]
-  readonly process: readonly string[]
-  readonly secrets: readonly string[]
-  readonly externalSystems: readonly string[]
-}): readonly string[] {
-  return [
-    ...effects.externalSystems,
-    ...effects.filesystem,
-    ...effects.network,
-    ...effects.process,
-  ]
 }
