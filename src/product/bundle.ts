@@ -9,12 +9,15 @@ import * as memoryPlugin from '../plugins/memory-plugin.js'
 import type { MemoryPluginConfig } from '../plugins/memory-plugin.js'
 import * as policyPlugin from '../plugins/policy-plugin.js'
 import type { PolicyPluginConfig } from '../plugins/policy-plugin.js'
+import * as registryPlugin from '../plugins/registry-plugin.js'
+import type { RegistryPluginConfig } from '../plugins/registry-plugin.js'
 
 export const name = 'dsh-assistant'
 export const inject = ['systemPrompt', 'agents']
 
 /** Product-bundle config. Secrets never belong here; pass local paths only. */
 export interface AssistantBundleConfig {
+  readonly registry?: RegistryPluginConfig
   readonly memory?: MemoryPluginConfig
   readonly knowledge?: KnowledgePluginConfig
   readonly policy?: PolicyPluginConfig
@@ -23,6 +26,7 @@ export interface AssistantBundleConfig {
 
 /** Bundle entry: compose product plugins through public Cordis lifecycle. */
 export async function apply(ctx: Context, config: AssistantBundleConfig = {}) {
+  await ctx.plugin(registryPlugin, config.registry)
   await ctx.plugin(memoryPlugin, config.memory)
   await ctx.plugin(knowledgePlugin, config.knowledge)
   await ctx.plugin(integrationsPlugin)
@@ -32,6 +36,8 @@ export async function apply(ctx: Context, config: AssistantBundleConfig = {}) {
 }
 
 export const PRODUCT_TOOL_NAMES = [
+  'list_capabilities',
+  'lookup_capability',
   'remember_memory',
   'forget_memory',
   'recall_memory',

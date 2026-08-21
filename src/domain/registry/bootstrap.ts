@@ -1,0 +1,116 @@
+import type { RegistryRegisterInput } from './types.js'
+
+/**
+ * Conservative inventory of Assistant Core MVP capabilities.
+ * Fake integration providers are recorded as `fake`, never as live vendor accounts.
+ */
+export const CORE_BOOTSTRAP_INVENTORY: readonly RegistryRegisterInput[] = [
+  {
+    owner: 'managed/personal-memory',
+    version: '0.1.0',
+    provenance: { kind: 'managed', origin: 'human' },
+    status: 'active',
+    evidence: 'Verified',
+    approval: 'approved-for-this-diff',
+    capabilities: [
+      { id: 'memory.read', permissions: [] },
+      { id: 'memory.write', permissions: [] },
+      { id: 'memory.forget', permissions: [] },
+    ],
+    runtimeSeams: ['memory'],
+    tools: ['remember_memory', 'forget_memory', 'recall_memory'],
+    services: ['personalMemory'],
+  },
+  {
+    owner: 'managed/personal-knowledge',
+    version: '0.1.0',
+    provenance: { kind: 'managed', origin: 'human' },
+    status: 'active',
+    evidence: 'Verified',
+    approval: 'approved-for-this-diff',
+    capabilities: [{ id: 'knowledge.retrieve', permissions: [] }],
+    runtimeSeams: ['knowledge'],
+    tools: ['retrieve_knowledge'],
+    services: ['personalKnowledge'],
+  },
+  {
+    owner: 'managed/integrations',
+    version: '0.1.0',
+    provenance: { kind: 'managed', origin: 'human' },
+    status: 'active',
+    evidence: 'Verified',
+    approval: 'approved-for-this-diff',
+    capabilities: [
+      { id: 'calendar.read', permissions: ['local.fake.calendar.read'] },
+      { id: 'calendar.propose', permissions: ['local.fake.calendar.propose'] },
+      { id: 'calendar.execute', permissions: ['local.fake.calendar.execute'] },
+      { id: 'mail.read', permissions: ['local.fake.mail.read'] },
+      { id: 'mail.propose', permissions: ['local.fake.mail.propose'] },
+      { id: 'tasks.read', permissions: ['local.fake.tasks.read'] },
+      { id: 'tasks.propose', permissions: ['local.fake.tasks.propose'] },
+      { id: 'tasks.create', permissions: ['local.fake.tasks.create'] },
+      { id: 'files.read', permissions: ['local.fake.files.read'] },
+      { id: 'files.delete', permissions: ['local.fake.files.delete'] },
+      { id: 'contacts.read', permissions: ['local.fake.contacts.read'] },
+    ],
+    permissions: ['local.fake.suite'],
+    runtimeSeams: [
+      'integrations.calendar',
+      'integrations.mail',
+      'integrations.tasks',
+      'integrations.files',
+      'integrations.contacts',
+    ],
+    provider: 'fake',
+    tools: [
+      'calendar_list_events',
+      'calendar_propose_event',
+      'calendar_create_event',
+      'mail_list_messages',
+      'tasks_propose_create',
+      'tasks_create',
+      'files_delete',
+      'integration_status',
+    ],
+    services: ['integrations'],
+    providers: ['fake'],
+  },
+  {
+    owner: 'managed/trust-policy',
+    version: '0.1.0',
+    provenance: { kind: 'managed', origin: 'human' },
+    status: 'active',
+    evidence: 'Verified',
+    approval: 'approved-for-this-diff',
+    capabilities: [{ id: 'policy.confirm', permissions: [] }],
+    runtimeSeams: ['policy'],
+    tools: ['confirm_action'],
+    services: ['actionPolicy'],
+  },
+  {
+    owner: 'managed/assistant-jobs',
+    version: '0.1.0',
+    provenance: { kind: 'managed', origin: 'human' },
+    status: 'active',
+    evidence: 'Verified',
+    approval: 'approved-for-this-diff',
+    capabilities: [{ id: 'jobs.run', permissions: [] }],
+    runtimeSeams: ['jobs'],
+    services: ['assistantJobs'],
+  },
+  {
+    owner: 'managed/ui-control-surface',
+    version: '0.1.0',
+    provenance: { kind: 'managed', origin: 'human' },
+    status: 'active',
+    evidence: 'Verified',
+    approval: 'approved-for-this-diff',
+    capabilities: [{ id: 'ui.control', permissions: [] }],
+    runtimeSeams: ['ui'],
+    services: ['assistantControl'],
+  },
+]
+
+export function bootstrapCoreInventory(register: (input: RegistryRegisterInput) => unknown): void {
+  for (const record of CORE_BOOTSTRAP_INVENTORY) register(record)
+}

@@ -45,7 +45,7 @@ This project must extend DSH through **public** plugin / service / provider / ev
 
 Prefer **reversible plugin composition** (load/unload, `cordis`/profile layering) over modifying Harness core. One role (definition, provider, or consumer) is not a full capability seam; replace providers without rewriting consumers when DSH already exposes that split.
 
-**Self-Extension** (later issues) must use these same public seams. It is **Designed** only: [docs/self-extension.md](./docs/self-extension.md). Invariants: **self-extension without self-authorization**, and prefer reuse/evolution over new plugins. Assistant-generated code has no privileged runtime path.
+**Self-Extension** must use these same public seams. Governance is **Designed** ([docs/self-extension.md](./docs/self-extension.md)). The Capability Registry that answers **What do I have?** is **Verified** ([docs/capability-registry.md](./docs/capability-registry.md)). Invariants: **self-extension without self-authorization**, and prefer reuse/evolution over new plugins. Assistant-generated code has no privileged runtime path. Registry `active` is metadata, not a mount.
 
 ## Capability boundaries
 
@@ -87,8 +87,8 @@ Do not inject unsigned or unowned blobs into the model context.
 
 **MVP:** compose on DSH public seams; keep domain independent of model/UI; separate memory, knowledge, tools, and policy; distinguish read / propose / execute; smallest useful product loop. Runtime scaffold and memory contracts are **Implemented** in this repo.
 
-**Out of scope unless a later issue says otherwise (Unsupported here):** custom Agent Loop; speculative multi-agent framework; forced production database; pixel-perfect or mobile UI; credentials or real personal data in the repo; Capability Registry implementation; autonomous plugin generation or install.
+**Out of scope unless a later issue says otherwise (Unsupported here):** custom Agent Loop; speculative multi-agent framework; forced production database; pixel-perfect or mobile UI; credentials or real personal data in the repo; autonomous plugin generation or install.
 
 ## Evidence
 
-This document is **Implemented** as a contract. Runtime boot, personal services, the UI control surface, the Plan My Day slice, and the DSH bundle/profile pack are **Verified** by `npm test`. Scripted local LLM adapters and fake integration providers are **Implemented**. Self-Extension is **Designed** only ([docs/self-extension.md](./docs/self-extension.md)). Live LLM accounts, vendor OAuth, pixel-perfect UI, RAG, production persistence, and autonomous install are **Unsupported**. See [docs/vertical-slice.md](./docs/vertical-slice.md) and [docs/packaging.md](./docs/packaging.md).
+This document is **Implemented** as a contract. Runtime boot, personal services, the UI control surface, the Plan My Day slice, the DSH bundle/profile pack, and the Capability Registry are **Verified** by `npm test`. Scripted local LLM adapters and fake integration providers are **Implemented**. Self-Extension governance is **Designed** ([docs/self-extension.md](./docs/self-extension.md)). Live LLM accounts, vendor OAuth, pixel-perfect UI, RAG, production persistence, and autonomous install are **Unsupported**. See [docs/vertical-slice.md](./docs/vertical-slice.md), [docs/packaging.md](./docs/packaging.md), and [docs/capability-registry.md](./docs/capability-registry.md).
