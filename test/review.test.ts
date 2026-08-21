@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { mkdtempSync } from 'node:fs'
+import { mkdtempSync, mkdirSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { describe, it } from 'node:test'
@@ -27,6 +27,7 @@ import type { ResolutionReview } from '../src/domain/resolution/index.js'
 import * as candidatePlugin from '../src/plugins/candidate-plugin.js'
 import * as registryPlugin from '../src/plugins/registry-plugin.js'
 import * as reviewPlugin from '../src/plugins/review-plugin.js'
+import { DurableReviewLineage, PersistenceIntegrityError, selfExtensionPaths } from '../src/domain/self-extension/index.js'
 import { bootAssistantControl } from '../src/runtime/boot.js'
 
 function resolution(overrides: Partial<ResolutionReview> = {}): ResolutionReview {
@@ -437,6 +438,51 @@ describe('independent review', () => {
     assert.equal(built.builderClaims?.reviewPassed, true)
     assert.equal(report.state, 'review-complete')
     assert.equal(report.approvalStatus, 'NOT APPROVED')
+  })
+
+  it('recovers inherited BLOCKERs after recreating the service from durable lineage', () => {
+    const home = selfExtensionPaths(mkdtempSync(path.join(tmpdir(), 'dsh-rev-lineage-')))
+    const provider = new PolicyReviewerProvider((input) => (
+      input.candidate.digest === 'rev-a' ? [trustFinding('rev-a', 'open')] : []
+    ))
+    const firstStore = new DurableReviewLineage(home)
+    const first = new ReviewService(provider, undefined, {
+      restore: firstStore.restore(),
+      persist: (reports) => firstStore.save(reports),
+      hostLineage: true,
+    })
+    const initial = first.review(r3({ digest: 'rev-a' }))
+    assert.equal(initial.state, 'changes-required')
+    const secondStore = new DurableReviewLineage(home)
+    const second = new ReviewService(provider, undefined, {
+      restore: secondStore.restore(),
+      persist: (reports) => secondStore.save(reports),
+      hostLineage: true,
+    })
+    const report = second.review(r3({ digest: 'rev-b', priorFindings: [] }))
+    assert.equal(report.state, 'changes-required')
+    assert.ok(report.findings.some((item) => item.claim === 'forged-discovery-trust' && item.status === 'open'))
+  })
+
+  it('does not treat caller priorFindings as lineage when host lineage is required', () => {
+    const report = new ReviewService(new PermissiveReviewerProvider(), undefined, { hostLineage: true }).review(r3({
+      digest: 'rev-b',
+      priorFindings: [trustFinding('rev-a', 'open')],
+    }))
+    assert.equal(report.findings.some((item) => item.claim === 'forged-discovery-trust'), false)
+  })
+
+  it('fails closed when durable review lineage is unavailable', () => {
+    const report = new ReviewService(undefined, undefined, { lineageUnavailable: true }).review(pkg())
+    assert.equal(report.state, 'changes-required')
+    assert.ok(report.findings.some((item) => item.claim === 'review-lineage-unavailable'))
+  })
+
+  it('fails closed on corrupt durable review lineage', () => {
+    const home = selfExtensionPaths(mkdtempSync(path.join(tmpdir(), 'dsh-rev-corrupt-')))
+    mkdirSync(home.root, { recursive: true })
+    writeFileSync(home.reviewLineagePath, '{not-json')
+    assert.throws(() => new DurableReviewLineage(home), PersistenceIntegrityError)
   })
 })
 

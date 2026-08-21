@@ -27,6 +27,10 @@ export class IndependentReviewService extends Service implements IndependentRevi
 
 export interface ReviewPluginConfig {
   readonly provider?: ReviewerProvider
+  readonly restore?: readonly import('../domain/review/types.js').ReviewReport[]
+  readonly persist?: (reports: readonly import('../domain/review/types.js').ReviewReport[]) => void
+  readonly hostLineage?: boolean
+  readonly lineageUnavailable?: boolean
 }
 
 export const name = 'dsh-assistant-review'
@@ -37,6 +41,12 @@ export async function apply(ctx: Context, config: ReviewPluginConfig = {}) {
   const service = new ReviewService(
     config.provider ?? new PolicyReviewerProvider(),
     (id) => ctx.candidateWorkspace.get(id),
+    {
+      restore: config.restore,
+      persist: config.persist,
+      hostLineage: config.hostLineage,
+      lineageUnavailable: config.lineageUnavailable,
+    },
   )
   await ctx.plugin(class extends IndependentReviewService {
     constructor(scope: Context) {

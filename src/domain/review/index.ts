@@ -24,4 +24,4 @@ export { deterministicPrechecks, lineageOmissions, openBlockers } from './preche
 export { hostResolutionEvidence, inheritedOpenBlockers, resolveCarriedFindings, resolveHostParent } from './lineage.js'
 export { PermissiveReviewerProvider, PolicyReviewerProvider } from './provider.js'
 export { formatReviewReport } from './format.js'
-export { ReviewService } from './service.js'
+export { ReviewService, type ReviewServiceOptions } from './service.js'

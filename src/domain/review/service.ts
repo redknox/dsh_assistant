@@ -1,7 +1,13 @@
 import type { CandidateRecord } from '../candidate/types.js'
 import { reviewPackageFromCandidate } from './package.js'
 import { formatReviewReport } from './format.js'
-import { bindResolutionToDigest, inheritedOpenBlockers, resolveCarriedFindings, resolveHostParent } from './lineage.js'
+import {
+  bindResolutionToDigest,
+  inheritedOpenBlockers,
+  lineageUnavailableFinding,
+  resolveCarriedFindings,
+  resolveHostParent,
+} from './lineage.js'
 import { deterministicPrechecks, lineageOmissions, reportState } from './precheck.js'
 import { PolicyReviewerProvider } from './provider.js'
 import type {
@@ -15,6 +21,15 @@ import type {
 } from './types.js'
 import { REVIEW_POLICY_VERSION } from './types.js'
 
+export interface ReviewServiceOptions {
+  readonly restore?: readonly ReviewReport[]
+  readonly persist?: (reports: readonly ReviewReport[]) => void
+  /** When true, inherited blockers come only from host reports, never caller priorFindings. */
+  readonly hostLineage?: boolean
+  /** Durable lineage was expected but missing or corrupt. */
+  readonly lineageUnavailable?: boolean
+}
+
 export class ReviewService implements IndependentReview {
   private readonly byCandidate = new Map<string, ReviewReport>()
   private readonly byDigest = new Map<string, ReviewReport>()
@@ -22,9 +37,15 @@ export class ReviewService implements IndependentReview {
   constructor(
     private readonly semantic: ReviewerProvider = new PolicyReviewerProvider(),
     private readonly loadCandidate?: (id: string) => CandidateRecord,
-  ) {}
+    private readonly options: ReviewServiceOptions = {},
+  ) {
+    for (const report of options.restore ?? []) this.remember(report)
+  }
 
   review(pkg: ReviewPackage): ReviewReport {
+    if (this.options.lineageUnavailable) {
+      return this.finish(pkg, [lineageUnavailableFinding(pkg.candidate.digest)], false)
+    }
     const policy = { version: pkg.policyVersion, riskClass: pkg.riskClass }
     const prechecks = deterministicPrechecks(pkg)
     const semantic = this.semantic.semanticReview(pkg, policy)
@@ -33,7 +54,7 @@ export class ReviewService implements IndependentReview {
       previousForCandidate: (id) => this.byCandidate.get(id),
       reportForDigest: (digest) => this.byDigest.get(digest),
     })
-    const inherited = inheritedOpenBlockers(parent.report, pkg.priorFindings)
+    const inherited = inheritedOpenBlockers(parent.report, pkg.priorFindings, this.options.hostLineage !== true)
     const omissions = lineageOmissions(inherited, pkg.priorFindings, pkg.candidate.digest)
     const carried = resolveCarriedFindings(inherited, current, pkg)
     const findings = dedupe([
@@ -42,21 +63,7 @@ export class ReviewService implements IndependentReview {
       ...omissions,
       ...(parent.invalidParent ? [parent.invalidParent] : []),
     ])
-    const state = reportState(findings)
-    const report: ReviewReport = {
-      candidateId: pkg.candidate.id,
-      digest: pkg.candidate.digest,
-      policyVersion: REVIEW_POLICY_VERSION,
-      riskClass: pkg.riskClass,
-      state,
-      findings,
-      approvalStatus: 'NOT APPROVED',
-      summary: '',
-    }
-    const withSummary = { ...report, summary: formatReviewReport(report) }
-    this.byCandidate.set(pkg.candidate.id, withSummary)
-    if (pkg.candidate.digest) this.byDigest.set(pkg.candidate.digest, withSummary)
-    return withSummary
+    return this.finish(pkg, findings, true)
   }
 
   reviewCandidate(id: string, extras: ReviewPackageExtras = {}): ReviewReport {
@@ -75,6 +82,30 @@ export class ReviewService implements IndependentReview {
 
   lastReport(candidateId: string): ReviewReport | undefined {
     return this.byCandidate.get(candidateId)
+  }
+
+  private finish(pkg: ReviewPackage, findings: readonly ReviewFinding[], persist: boolean): ReviewReport {
+    const report: ReviewReport = {
+      candidateId: pkg.candidate.id,
+      digest: pkg.candidate.digest,
+      policyVersion: REVIEW_POLICY_VERSION,
+      riskClass: pkg.riskClass,
+      state: reportState(findings),
+      findings,
+      approvalStatus: 'NOT APPROVED',
+      summary: '',
+    }
+    const withSummary = { ...report, summary: formatReviewReport(report) }
+    if (persist) {
+      this.remember(withSummary)
+      this.options.persist?.([...this.byDigest.values()])
+    }
+    return withSummary
+  }
+
+  private remember(report: ReviewReport): void {
+    this.byCandidate.set(report.candidateId, report)
+    if (report.digest) this.byDigest.set(report.digest, report)
   }
 }
 

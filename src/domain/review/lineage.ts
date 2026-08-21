@@ -61,13 +61,28 @@ export function resolveHostParent(
   return { report: claimed }
 }
 
-/** Host parent report is lineage authority. Package priorFindings cannot rewrite open → resolved. */
 export function inheritedOpenBlockers(
   parent: { readonly findings: readonly ReviewFinding[] } | undefined,
   declared: readonly ReviewFinding[],
+  allowCallerFallback = true,
 ): readonly ReviewFinding[] {
   if (parent) return openBlockersFrom(parent.findings)
+  if (!allowCallerFallback) return []
   return openBlockersFrom(declared)
+}
+
+export function lineageUnavailableFinding(digest: string): ReviewFinding {
+  return finding({
+    reviewedDigest: digest,
+    severity: 'BLOCKER',
+    category: 'lineage',
+    claim: 'review-lineage-unavailable',
+    location: 'review-lineage',
+    evidence: 'Authoritative review lineage is missing or corrupt.',
+    whyItMatters: 'Independent review must be durable. Missing lineage cannot be treated as a first review.',
+    requiredRemediation: 'Restore host-owned review lineage or fail closed into recovery.',
+    status: 'open',
+  })
 }
 
 /** Host-owned proof that a known invariant is satisfied on this revision. Silence is not proof. */
