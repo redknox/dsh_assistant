@@ -7,12 +7,8 @@ import LlmRuntime from '@deepseek-ai/dsh-llm'
 import SessionStore, { SessionId } from '@deepseek-ai/dsh-session'
 import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
 import ToolRuntime from '@deepseek-ai/dsh-tools'
-import * as assistantPlugin from '../plugins/assistant-plugin.js'
-import * as integrationsPlugin from '../plugins/integrations-plugin.js'
-import * as knowledgePlugin from '../plugins/knowledge-plugin.js'
-import * as memoryPlugin from '../plugins/memory-plugin.js'
-import * as jobsPlugin from '../plugins/jobs-plugin.js'
-import * as policyPlugin from '../plugins/policy-plugin.js'
+import * as assistantProduct from '../product/bundle.js'
+import type { MemoryPluginConfig } from '../plugins/memory-plugin.js'
 
 /**
  * Minimal public DSH plugin stack for this product layer.
@@ -20,6 +16,7 @@ import * as policyPlugin from '../plugins/policy-plugin.js'
  */
 export interface BootOptions {
   knowledgeFixturePaths?: string[]
+  memory?: MemoryPluginConfig
 }
 
 export async function bootAssistantRuntime(options: BootOptions = {}): Promise<Context> {
@@ -32,12 +29,10 @@ export async function bootAssistantRuntime(options: BootOptions = {}): Promise<C
   await ctx.plugin(ToolRuntime)
   await ctx.plugin(LocalJobRegistry)
   await ctx.plugin(AgentLoop, { agents: [] })
-  await ctx.plugin(memoryPlugin)
-  await ctx.plugin(knowledgePlugin, { fixturePaths: options.knowledgeFixturePaths })
-  await ctx.plugin(integrationsPlugin)
-  await ctx.plugin(policyPlugin)
-  await ctx.plugin(jobsPlugin)
-  await ctx.plugin(assistantPlugin)
+  await ctx.plugin(assistantProduct, {
+    memory: options.memory,
+    knowledge: { fixturePaths: options.knowledgeFixturePaths },
+  })
   return ctx
 }
 

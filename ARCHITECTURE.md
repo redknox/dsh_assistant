@@ -89,4 +89,4 @@ Do not inject unsigned or unowned blobs into the model context.
 
 ## Evidence
 
-This document is **Implemented** as a contract. Runtime boot, personal services, the UI control surface, and the Plan My Day vertical slice are **Verified** by `npm test`. Live LLM/vendor accounts, pixel-perfect UI, RAG, and production persistence remain **Designed** or **Unsupported**. See [docs/vertical-slice.md](./docs/vertical-slice.md).
+This document is **Implemented** as a contract. Runtime boot, personal services, the UI control surface, the Plan My Day slice, and the DSH bundle/profile pack are **Verified** by `npm test`. Scripted local LLM adapters and fake integration providers are **Implemented**. Live LLM accounts, vendor OAuth, pixel-perfect UI, RAG, and production persistence are **Unsupported**. See [docs/vertical-slice.md](./docs/vertical-slice.md) and [docs/packaging.md](./docs/packaging.md).

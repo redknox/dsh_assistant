@@ -28,7 +28,8 @@
     "test": "tsx --test test/**/*.test.ts",
     "boot": "tsx src/runtime/boot-cli.ts",
     "ui": "tsx src/ui/cli.ts",
-    "slice": "tsx src/runtime/slice-cli.ts"
+    "slice": "tsx src/runtime/slice-cli.ts",
+    "pack:inspect": "npm pack --dry-run --json"
   },
   "engines": {
     "node": ">=22"
@@ -51,6 +52,8 @@
     "@deepseek-ai/dsh-typert-protocol": "0.1.0-rc.8"
   },
   "devDependencies": {
+    "@deepseek-ai/dsh-app-boot": "0.1.0-rc.8",
+    "@deepseek-ai/dsh-base": "0.1.0-rc.8",
     "@types/node": "^24.3.0",
     "tsx": "^4.20.5",
     "typescript": "^5.9.2"
