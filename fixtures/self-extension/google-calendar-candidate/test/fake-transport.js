@@ -42,7 +42,12 @@ export function createFakeGoogleCalendarTransport(options = {}) {
     credentialState() {
       return 'absent'
     },
-    async request(input) {
+    async request(input, signal) {
+      if (signal?.aborted) {
+        const error = new Error('timeout')
+        error.code = 'cancelled'
+        throw error
+      }
       const path = String(input.path ?? '')
       if (path.includes('://') || path.startsWith('//') || !path.startsWith('/calendar/v3')) {
         const error = new Error('google calendar path is outside the approved boundary')

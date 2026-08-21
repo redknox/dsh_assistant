@@ -74,12 +74,12 @@ Google Calendar does not treat an application `idempotencyKey` as a first-class 
 ```text
 create with derived id
 → Google may have created the event
-→ client times out before seeing success
-→ GET calendars/{id}/events/{derivedId} recovers the event
+→ caller AbortSignal / timeout fires before seeing success
+→ GET calendars/{id}/events/{derivedId} uses a fresh reconciliation budget
 → retry insert is 409 conflict or GET-before-insert; still one logical event
 ```
 
-A timeout-after-success transport regression covers this path. The in-memory fake store is only a Google v3 double; it is not the idempotency strategy.
+The reconciliation GET must not reuse the already-aborted create signal. If the GET finds nothing, the operation stays failed and no second POST is issued. The in-memory fake store is only a Google v3 double; it is not the idempotency strategy.
 
 ## Control plane
 

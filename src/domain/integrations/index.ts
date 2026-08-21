@@ -34,5 +34,6 @@ export {
   GOOGLE_CALENDAR_ORIGIN,
   assertGoogleCalendarPath,
   eventIdFromOperation,
+  reconciliationSignal,
   type BoundedGoogleCalendarTransport,
 } from './google-api.js'

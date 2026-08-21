@@ -5,6 +5,12 @@ import { IntegrationError } from './types.js'
 export const GOOGLE_CALENDAR_ORIGIN = 'https://www.googleapis.com'
 export const GOOGLE_CALENDAR_API_PREFIX = '/calendar/v3'
 export const GOOGLE_CALENDAR_API_ORIGIN = `${GOOGLE_CALENDAR_ORIGIN}${GOOGLE_CALENDAR_API_PREFIX}`
+/** Fresh read budget after an uncertain create. Must not reuse an already-aborted create signal. */
+export const GOOGLE_CREATE_RECONCILE_TIMEOUT_MS = 3_000
+
+export function reconciliationSignal(): AbortSignal {
+  return AbortSignal.timeout(GOOGLE_CREATE_RECONCILE_TIMEOUT_MS)
+}
 
 export interface GoogleDateTime {
   readonly date?: string

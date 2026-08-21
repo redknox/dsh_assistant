@@ -79,6 +79,79 @@ describe('google calendar provider adapter', () => {
     await assert.rejects(() => transport.request({ method: 'GET', path: '/mail/v1/users/me/messages' }), IntegrationError)
   })
 
+  it('reconciles after the create AbortSignal fires once Google already has the event', async () => {
+    const remote: { id?: string; summary?: string }[] = []
+    const methods: string[] = []
+    const controller = new AbortController()
+    const eventId = eventIdFromOperation('op-abort-1')
+    const transport = createLiveGoogleCalendarTransport({
+      fetchImpl: async (url, init) => {
+        if (init?.signal?.aborted) {
+          const error = new Error('The operation was aborted')
+          error.name = 'AbortError'
+          throw error
+        }
+        const method = String(init?.method ?? 'GET')
+        methods.push(method)
+        if (method === 'POST') {
+          remote.push(JSON.parse(String(init?.body)))
+          controller.abort()
+          const error = new Error('The operation was aborted')
+          error.name = 'AbortError'
+          throw error
+        }
+        const found = remote.find((event) => String(url).includes(String(event.id)))
+        if (found === undefined) {
+          return { ok: false, status: 404, json: async () => ({ error: { message: 'not found' } }) } as Response
+        }
+        return { ok: true, status: 200, json: async () => found } as Response
+      },
+    })
+    const event = await createGoogleCalendarProvider({ transport, allowCreate: true }).createEvent({
+      title: 'Focus',
+      start: '2026-08-22T14:00:00.000Z',
+      end: '2026-08-22T15:00:00.000Z',
+      timeZone: 'UTC',
+      idempotencyKey: 'op-abort-1',
+    }, controller.signal)
+    assert.equal(event.id, eventId)
+    assert.equal(event.title, 'Focus')
+    assert.equal(remote.length, 1)
+    assert.deepEqual(methods, ['GET', 'POST', 'GET'])
+    assert.equal(controller.signal.aborted, true)
+  })
+
+  it('does not issue a second POST when timeout happens before remote success', async () => {
+    const methods: string[] = []
+    const controller = new AbortController()
+    const transport = createLiveGoogleCalendarTransport({
+      fetchImpl: async (_url, init) => {
+        if (init?.signal?.aborted) {
+          const error = new Error('The operation was aborted')
+          error.name = 'AbortError'
+          throw error
+        }
+        const method = String(init?.method ?? 'GET')
+        methods.push(method)
+        if (method === 'POST') {
+          controller.abort()
+          const error = new Error('The operation was aborted')
+          error.name = 'AbortError'
+          throw error
+        }
+        return { ok: false, status: 404, json: async () => ({ error: { message: 'not found' } }) } as Response
+      },
+    })
+    await assert.rejects(() => createGoogleCalendarProvider({ transport, allowCreate: true }).createEvent({
+      title: 'Focus',
+      start: '2026-08-22T14:00:00.000Z',
+      end: '2026-08-22T15:00:00.000Z',
+      timeZone: 'UTC',
+      idempotencyKey: 'op-abort-miss',
+    }, controller.signal), IntegrationError)
+    assert.deepEqual(methods, ['GET', 'POST', 'GET'])
+  })
+
   it('creates with Google event fields and reconciles remote success plus local timeout', async () => {
     const transport = createFakeGoogleCalendarTransport({ seed: [], failNextCreate: 'timeout-after-success' })
     const provider = createGoogleCalendarProvider({ transport, allowCreate: true })

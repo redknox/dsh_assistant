@@ -7,6 +7,7 @@ import {
   fromGoogleEvent,
   fromGoogleFreeBusy,
   isUncertainCreateError,
+  reconciliationSignal,
   toGoogleEvent,
 } from './google-event.js'
 
@@ -26,13 +27,13 @@ export function createGoogleCalendarProvider(options = {}) {
     throw new Error('host-managed Google Calendar transport is required')
   }
   const allowCreate = options.allowCreate === true
-  const call = async (input) => {
-    const response = await options.transport.request(input)
+  const call = async (input, signal) => {
+    const response = await options.transport.request(input, signal)
     if (response.status >= 400) fail(response.status, response.body)
     return response.body
   }
-  const tryGet = async (calendarId, eventId) => {
-    const response = await options.transport.request({ method: 'GET', path: calendarEventPath(calendarId, eventId) })
+  const tryGet = async (calendarId, eventId, signal) => {
+    const response = await options.transport.request({ method: 'GET', path: calendarEventPath(calendarId, eventId) }, signal)
     if (response.status === 404) return undefined
     if (response.status >= 400) fail(response.status, response.body)
     return fromGoogleEvent(response.body, calendarId)
@@ -70,7 +71,7 @@ export function createGoogleCalendarProvider(options = {}) {
         draft,
       }
     },
-    async createEvent(input) {
+    async createEvent(input, signal) {
       if (!allowCreate) {
         const error = new Error('calendar.events.create is not authorized on this candidate')
         error.capability = 'calendar'
@@ -80,7 +81,7 @@ export function createGoogleCalendarProvider(options = {}) {
       const calendarId = input.calendarId ?? 'primary'
       const eventId = input.idempotencyKey === undefined ? undefined : eventIdFromOperation(input.idempotencyKey)
       if (eventId !== undefined) {
-        const existing = await tryGet(calendarId, eventId)
+        const existing = await tryGet(calendarId, eventId, signal)
         if (existing !== undefined) return existing
       }
       try {
@@ -88,16 +89,16 @@ export function createGoogleCalendarProvider(options = {}) {
           method: 'POST',
           path: calendarEventsPath(calendarId),
           body: toGoogleEvent(input, eventId),
-        })
+        }, signal)
         if (response.status === 409 && eventId !== undefined) {
-          const recovered = await tryGet(calendarId, eventId)
+          const recovered = await tryGet(calendarId, eventId, reconciliationSignal())
           if (recovered !== undefined) return recovered
         }
         if (response.status >= 400) fail(response.status, response.body)
         return fromGoogleEvent(response.body, calendarId)
       } catch (error) {
         if (eventId !== undefined && isUncertainCreateError(error)) {
-          const recovered = await tryGet(calendarId, eventId)
+          const recovered = await tryGet(calendarId, eventId, reconciliationSignal())
           if (recovered !== undefined) return recovered
         }
         throw error

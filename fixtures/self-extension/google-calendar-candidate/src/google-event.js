@@ -1,6 +1,11 @@
 import { createHash } from 'node:crypto'
 
 export const GOOGLE_CALENDAR_API_ORIGIN = 'https://www.googleapis.com/calendar/v3'
+export const GOOGLE_CREATE_RECONCILE_TIMEOUT_MS = 3000
+
+export function reconciliationSignal() {
+  return AbortSignal.timeout(GOOGLE_CREATE_RECONCILE_TIMEOUT_MS)
+}
 
 export function eventIdFromOperation(idempotencyKey) {
   return createHash('sha256').update(String(idempotencyKey)).digest('hex').slice(0, 32)

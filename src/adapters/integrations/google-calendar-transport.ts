@@ -73,6 +73,7 @@ export function createLiveGoogleCalendarTransport(options: LiveGoogleCalendarTra
     credentialState: () => credentialState(options.getAccessToken),
     async request(input: BoundedGoogleCalendarRequest, signal?: AbortSignal): Promise<BoundedGoogleCalendarResponse> {
       const path = assertGoogleCalendarPath(input.path)
+      if (signal?.aborted) throw timeoutError()
       const token = options.getAccessToken?.()
       const headers: Record<string, string> = { Accept: 'application/json' }
       if (typeof token === 'string' && token !== '') headers.Authorization = `Bearer ${token}`
@@ -130,7 +131,8 @@ export function createFakeGoogleCalendarTransport(options: FakeGoogleCalendarTra
     origin: GOOGLE_CALENDAR_API_ORIGIN,
     events,
     credentialState: () => credentialState(options.getAccessToken),
-    async request(input) {
+    async request(input, signal) {
+      if (signal?.aborted) throw timeoutError()
       const path = assertGoogleCalendarPath(input.path)
       if (path.includes('unauthorized')) return { status: 401, body: { error: { message: 'Bearer leaked-credential' } } }
       if (path.includes('forbidden')) return { status: 403, body: { error: { message: 'insufficient scope' } } }

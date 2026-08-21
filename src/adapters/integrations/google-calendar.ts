@@ -7,6 +7,7 @@ import {
   fromGoogleEvent,
   fromGoogleFreeBusy,
   isUncertainCreateError,
+  reconciliationSignal,
   toGoogleEvent,
   type BoundedGoogleCalendarTransport,
 } from '../../domain/integrations/google-api.js'
@@ -104,14 +105,14 @@ export function createGoogleCalendarProvider(options: GoogleCalendarOptions): Ca
           body: toGoogleEvent(input, eventId),
         }, signal)
         if (response.status === 409 && eventId !== undefined) {
-          const recovered = await tryGet(calendarId, eventId, signal)
+          const recovered = await tryGet(calendarId, eventId, reconciliationSignal())
           if (recovered !== undefined) return recovered
         }
         if (response.status >= 400) fail(response.status, response.body)
         return fromGoogleEvent(response.body, calendarId)
       } catch (error) {
         if (eventId !== undefined && isUncertainCreateError(error)) {
-          const recovered = await tryGet(calendarId, eventId, signal)
+          const recovered = await tryGet(calendarId, eventId, reconciliationSignal())
           if (recovered !== undefined) return recovered
         }
         throw error
