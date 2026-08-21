@@ -76,7 +76,8 @@ Current status of this repository:
 | DSH-native runtime scaffold (public plugin boot + one agent) | **Implemented**; boot/lifecycle **Verified** by `npm test` |
 | Personal memory service + replaceable local persistence | **Implemented**; CRUD/conflict/delete, JSON adapter, and malformed-snapshot rejection **Verified** by `npm test` |
 | Personal knowledge/retrieval (local lexical index) | **Implemented**; ingest/citation/no-match/malformed **Verified** by `npm test` |
-| UI, integrations, vector DB, production persistence | **Unsupported** / not started |
+| Personal integration seams (fake providers) | **Implemented**; read vs propose and structured errors **Verified** by `npm test` |
+| UI, real vendor accounts, vector DB, production persistence | **Unsupported** / not started |
 
 ## Develop
 

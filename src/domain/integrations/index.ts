@@ -1,0 +1,27 @@
+export {
+  IntegrationError,
+  MAX_PAGE_SIZE,
+  type Availability,
+  type IntegrationCapability,
+  type IntegrationErrorCode,
+  type IntegrationTrust,
+  type Page,
+  type PageQuery,
+  type ProposedMutation,
+} from './types.js'
+export {
+  IntegrationHub,
+  type CalendarEvent,
+  type CalendarProvider,
+  type Contact,
+  type ContactsProvider,
+  type FileEntry,
+  type FilesProvider,
+  type IntegrationProviders,
+  type MailMessage,
+  type MailProvider,
+  type TaskItem,
+  type TasksProvider,
+  type WebSearchHit,
+  type WebSearchProvider,
+} from './hub.js'

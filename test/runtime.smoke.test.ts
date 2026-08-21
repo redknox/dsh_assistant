@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import { join } from 'node:path'
 import { describe, it } from 'node:test'
 import { Context } from '@deepseek-ai/cordis'
+import { CallId } from '@deepseek-ai/dsh-llm'
 import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
 import ToolRuntime from '@deepseek-ai/dsh-tools'
 import * as knowledgePlugin from '../src/plugins/knowledge-plugin.js'
@@ -67,8 +68,27 @@ describe('runtime smoke', () => {
     assert.ok(ctx.personalKnowledge)
     assert.ok(ctx.tools.get('remember_memory'))
     assert.ok(ctx.tools.get('retrieve_knowledge'))
+    assert.ok(ctx.tools.get('calendar_list_events'))
     await handle.dispose()
     assert.equal(ctx.agents.get(handle.agent.id), undefined)
+    await ctx.fiber.dispose()
+  })
+
+  it('keeps personal memory empty after retrieve_knowledge in the full runtime', async () => {
+    const fixture = join(import.meta.dirname, '..', 'fixtures', 'knowledge', 'office-hours.md')
+    const ctx = await bootAssistantRuntime({ knowledgeFixturePaths: [fixture] })
+    const handle = await createAssistantAgent(ctx, 'knowledge-memory-boundary')
+    assert.equal(ctx.personalMemory.query().records.length, 0)
+    const result = await ctx.tools.execute({
+      callId: CallId('test-retrieve-knowledge'),
+      name: 'retrieve_knowledge',
+      arguments: { query: 'print confirmation' },
+      signal: AbortSignal.timeout(5000),
+    })
+    assert.equal(result.isError, false)
+    assert.match(String(result.value), /office-hours/)
+    assert.equal(ctx.personalMemory.query().records.length, 0)
+    await handle.dispose()
     await ctx.fiber.dispose()
   })
 })
