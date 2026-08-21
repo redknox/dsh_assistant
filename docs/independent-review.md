@@ -143,7 +143,7 @@ Prior open BLOCKERs are inherited from the host-owned parent `ReviewReport`, not
 
 `priorFindings` is trace/context. It cannot rewrite an inherited BLOCKER from `open` to `resolved`. `parentRevision` is also a caller hint: the service derives the parent from host report history for the same candidate, and an unknown or mismatched parent digest fails closed instead of dropping lineage.
 
-Host review history is durable (`self-extension/review-lineage.json` when `$DSH_ASSISTANT_HOME` is set). Restart reconstructs `byCandidate` / `byDigest` from that file. Caller `priorFindings` are not authority when host lineage is required. Missing or corrupt lineage fails closed; it is not treated as a first review.
+Host review history is durable (`self-extension/review-lineage.json` when `$DSH_ASSISTANT_HOME` is set). `authority.json` records a review-lineage generation so first-ever empty history is distinct from a lineage file that should exist but is missing. Restart reconstructs `byCandidate` / `byDigest` from that file. Caller `priorFindings` are not authority when host lineage is required. Missing or corrupt lineage fails closed; it is not treated as a first review.
 
 Reviewer silence is not resolution. Stale resolution evidence bound to an older digest cannot close a newer revision. Builder text that says “fixed” is not proof. A BLOCKER omitted from `priorFindings` while the parent report still has it open also produces a lineage BLOCKER.
 

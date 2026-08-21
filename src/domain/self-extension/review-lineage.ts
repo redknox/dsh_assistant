@@ -1,6 +1,7 @@
 import { existsSync, readFileSync } from 'node:fs'
 import { writeJsonAtomic } from '../persistence/atomic.js'
 import type { ReviewFinding, ReviewReport } from '../review/types.js'
+import type { DurableAuthorityStore } from './authority-store.js'
 import { PersistenceIntegrityError, PersistenceSchemaError } from './errors.js'
 import { SELF_EXTENSION_SCHEMA_VERSION, type SelfExtensionHome } from './home.js'
 
@@ -54,17 +55,27 @@ export function parseReviewLineageFile(parsed: unknown): ReviewLineageFile {
   }
 }
 
-/** Host-owned durable ReviewReport history. Reconstructs after restart; corrupt files fail closed. */
+/** Host-owned durable ReviewReport history. Reconstructs after restart; corrupt or expected-missing files fail closed. */
 export class DurableReviewLineage {
   private reports: ReviewReport[] = []
+  readonly lineageUnavailable: boolean
 
-  constructor(private readonly home: SelfExtensionHome) {
-    if (!existsSync(home.reviewLineagePath)) return
+  constructor(
+    private readonly home: SelfExtensionHome,
+    private readonly authority?: DurableAuthorityStore,
+  ) {
+    const expected = (authority?.snapshot().reviewLineage.generation ?? 0) > 0
+    const present = existsSync(home.reviewLineagePath)
+    this.lineageUnavailable = expected && !present
+    if (!present) return
     try {
       this.reports = [...parseReviewLineageFile(JSON.parse(readFileSync(home.reviewLineagePath, 'utf8'))).reports]
     } catch (error) {
       if (error instanceof PersistenceIntegrityError || error instanceof PersistenceSchemaError) throw error
       throw new PersistenceIntegrityError(`review lineage is corrupt: ${error instanceof Error ? error.message : String(error)}`)
+    }
+    if (authority && authority.snapshot().reviewLineage.generation === 0) {
+      authority.saveReviewLineage({ generation: 1 })
     }
   }
 
@@ -76,5 +87,7 @@ export class DurableReviewLineage {
     this.reports = [...reports]
     const file: ReviewLineageFile = { schemaVersion: SELF_EXTENSION_SCHEMA_VERSION, reports: this.reports }
     writeJsonAtomic(this.home.reviewLineagePath, file)
+    if (!this.authority) return
+    this.authority.saveReviewLineage({ generation: this.authority.snapshot().reviewLineage.generation + 1 })
   }
 }

@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { mkdtempSync, mkdirSync, writeFileSync } from 'node:fs'
+import { mkdtempSync, mkdirSync, unlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { describe, it } from 'node:test'
@@ -27,7 +27,7 @@ import type { ResolutionReview } from '../src/domain/resolution/index.js'
 import * as candidatePlugin from '../src/plugins/candidate-plugin.js'
 import * as registryPlugin from '../src/plugins/registry-plugin.js'
 import * as reviewPlugin from '../src/plugins/review-plugin.js'
-import { DurableReviewLineage, PersistenceIntegrityError, selfExtensionPaths } from '../src/domain/self-extension/index.js'
+import { DurableAuthorityStore, DurableReviewLineage, PersistenceIntegrityError, selfExtensionPaths } from '../src/domain/self-extension/index.js'
 import { bootAssistantControl } from '../src/runtime/boot.js'
 
 function resolution(overrides: Partial<ResolutionReview> = {}): ResolutionReview {
@@ -445,7 +445,8 @@ describe('independent review', () => {
     const provider = new PolicyReviewerProvider((input) => (
       input.candidate.digest === 'rev-a' ? [trustFinding('rev-a', 'open')] : []
     ))
-    const firstStore = new DurableReviewLineage(home)
+    const authority = new DurableAuthorityStore(home)
+    const firstStore = new DurableReviewLineage(home, authority)
     const first = new ReviewService(provider, undefined, {
       restore: firstStore.restore(),
       persist: (reports) => firstStore.save(reports),
@@ -453,15 +454,44 @@ describe('independent review', () => {
     })
     const initial = first.review(r3({ digest: 'rev-a' }))
     assert.equal(initial.state, 'changes-required')
-    const secondStore = new DurableReviewLineage(home)
+    const restarted = new DurableAuthorityStore(home)
+    const secondStore = new DurableReviewLineage(home, restarted)
     const second = new ReviewService(provider, undefined, {
       restore: secondStore.restore(),
       persist: (reports) => secondStore.save(reports),
       hostLineage: true,
+      lineageUnavailable: secondStore.lineageUnavailable,
     })
     const report = second.review(r3({ digest: 'rev-b', priorFindings: [] }))
     assert.equal(report.state, 'changes-required')
     assert.ok(report.findings.some((item) => item.claim === 'forged-discovery-trust' && item.status === 'open'))
+  })
+
+  it('fails closed when expected durable review lineage is missing', () => {
+    const home = selfExtensionPaths(mkdtempSync(path.join(tmpdir(), 'dsh-rev-missing-')))
+    const provider = new PolicyReviewerProvider((input) => (
+      input.candidate.digest === 'rev-a' ? [trustFinding('rev-a', 'open')] : []
+    ))
+    const authority = new DurableAuthorityStore(home)
+    const firstStore = new DurableReviewLineage(home, authority)
+    new ReviewService(provider, undefined, {
+      restore: firstStore.restore(),
+      persist: (reports) => firstStore.save(reports),
+      hostLineage: true,
+    }).review(r3({ digest: 'rev-a' }))
+    unlinkSync(home.reviewLineagePath)
+    const restarted = new DurableAuthorityStore(home)
+    const secondStore = new DurableReviewLineage(home, restarted)
+    assert.equal(secondStore.lineageUnavailable, true)
+    const report = new ReviewService(provider, undefined, {
+      restore: secondStore.restore(),
+      persist: (reports) => secondStore.save(reports),
+      hostLineage: true,
+      lineageUnavailable: secondStore.lineageUnavailable,
+    }).review(r3({ digest: 'rev-b', priorFindings: [] }))
+    assert.equal(report.state, 'changes-required')
+    assert.ok(report.findings.some((item) => item.claim === 'review-lineage-unavailable'))
+    assert.equal(report.findings.some((item) => item.claim === 'forged-discovery-trust'), false)
   })
 
   it('does not treat caller priorFindings as lineage when host lineage is required', () => {

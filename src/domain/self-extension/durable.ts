@@ -26,12 +26,13 @@ export function openDurableSelfExtension(explicitHome?: string): DurableOpenResu
   if (root === undefined) return { diagnostics: [] }
   const home = ensureSelfExtensionHome(root)
   try {
+    const authority = new DurableAuthorityStore(home)
     return {
       durable: {
         home,
-        authority: new DurableAuthorityStore(home),
+        authority,
         candidates: new DurableCandidateIndex(home),
-        reviews: new DurableReviewLineage(home),
+        reviews: new DurableReviewLineage(home, authority),
       },
       diagnostics: [],
     }
@@ -78,6 +79,7 @@ export function persistGovernance(authority: DurableAuthorityStore, hydrate: Gov
       safeMode: hydrate.safeMode,
       diagnostics: current.recovery.diagnostics,
     },
+    reviewLineage: current.reviewLineage ?? { generation: 0 },
   })
 }
 
