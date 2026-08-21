@@ -1,6 +1,7 @@
 import type { Context } from '@deepseek-ai/cordis'
 import * as assistantPlugin from '../plugins/assistant-plugin.js'
 import * as integrationsPlugin from '../plugins/integrations-plugin.js'
+import type { IntegrationsPluginConfig } from '../plugins/integrations-plugin.js'
 import * as jobsPlugin from '../plugins/jobs-plugin.js'
 import type { JobsPluginConfig } from '../plugins/jobs-plugin.js'
 import * as knowledgePlugin from '../plugins/knowledge-plugin.js'
@@ -32,6 +33,7 @@ export interface AssistantBundleConfig {
   readonly personality?: PersonalityPluginConfig
   readonly memory?: MemoryPluginConfig
   readonly knowledge?: KnowledgePluginConfig
+  readonly integrations?: IntegrationsPluginConfig
   readonly policy?: PolicyPluginConfig
   readonly jobs?: JobsPluginConfig
   /** When true, skip optional/generated product plugins and boot the recovery core only. */
@@ -50,7 +52,7 @@ export async function apply(ctx: Context, config: AssistantBundleConfig = {}) {
   if (config.safeMode) return
   await ctx.plugin(memoryPlugin, config.memory)
   await ctx.plugin(knowledgePlugin, config.knowledge)
-  await ctx.plugin(integrationsPlugin)
+  await ctx.plugin(integrationsPlugin, config.integrations)
   await ctx.plugin(policyPlugin, config.policy)
   await ctx.plugin(jobsPlugin, config.jobs)
   await ctx.plugin(assistantPlugin)

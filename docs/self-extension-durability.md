@@ -2,7 +2,7 @@
 
 Status: **Verified** by `test/self-extension-restart.test.ts`.
 
-`$DSH_ASSISTANT_HOME/self-extension/` is the durable home. Directory presence is never authorization to mount.
+`$TARS_NG_HOME/self-extension/` (alias: `$DSH_ASSISTANT_HOME/self-extension/`) is the durable home. Directory presence is never authorization to mount. Product-facing name is `TARS_NG_HOME`; `DSH_ASSISTANT_HOME` remains a compatibility alias.
 
 ## Ownership
 

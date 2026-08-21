@@ -1,15 +1,18 @@
-# Package and profile
+# Package and product artifact
 
-How to install, boot, remove, and remount `dsh-assistant` as a DSH-native product. Targeted DSH version: **0.1.0-rc.8**. This package stays `private`; do not publish to a public registry from this issue.
+How to install and operate TARS-NG (`tars-ng`) as a DSH-native product. Targeted DSH version: **0.1.0-rc.8**. This package stays `private`; do not publish to a public registry from this issue.
+
+Operator-facing install/start/secrets: [operator.md](./operator.md). Soak/freeze: [soak.md](./soak.md).
 
 ## Composition
 
 | Piece | Location | Role |
 | --- | --- | --- |
+| Product command | `bin.tars-ng` → `dist/product/bin.js` | `start` / `status` / `doctor` / `stop` / `self-extension` |
 | Product bundle | `package.json` → `dsh.bundle.patch` = `cordis.patch.yml` | Inserts plugin id `dsh-assistant` |
 | Bundle entry | `src/product/bundle.ts` (`name`, `inject`, `apply`) | Loads registry, candidate, review, personality, governance, then optional memory/knowledge/integrations/policy/jobs |
 | Example profile | `profiles/assistant/` | `dsh.profile.bundles`: `@deepseek-ai/dsh-base` then `dsh-assistant` |
-| Headless boot | `npm run boot` | Public DSH plugins + product bundle, one agent, dispose |
+| Headless product start | `tars-ng start --once` | Compiled `dist/` entry; no `tsx` |
 
 The profile overlay `profiles/assistant/cordis.patch.yml` is empty so composition stays in bundle patches.
 
@@ -19,17 +22,16 @@ Required:
 
 - Node `>=22`
 - npm
-- This repository (or a packed `dsh-assistant-0.2.0.tgz` plus the same DSH 0.1.0-rc.8 dependencies)
+- A packed `dsh-assistant-0.2.0.tgz` (or this repository for contributors)
 
 ```sh
 npm install
 npm run typecheck
 npm test
 npm run build
-npm run boot
+npm pack
+tars-ng start --once
 ```
-
-`npm run boot` does not call a live LLM. Optional replays: `npm run ui`, `npm run slice`.
 
 Inspect the ship list without publishing:
 
@@ -37,30 +39,42 @@ Inspect the ship list without publishing:
 npm run pack:inspect
 ```
 
-Intended pack contents: `package.json`, `README.md`, `cordis.patch.yml`, and `dist/**`. Not shipped: `src/`, `test/`, `fixtures/`, `docs/`, `profiles/`, `.env*`, credentials.
+Intended pack contents: `package.json`, `README.md`, `cordis.patch.yml`, and `dist/**` (including `dist/product/bin.js`). Not shipped: `src/`, `test/`, `fixtures/`, `docs/`, `profiles/`, `.env*`, credentials, user home state.
+
+`test/packaging.test.ts` installs that tarball into a clean directory and runs `tars-ng doctor` / `start --once` with an isolated product home.
 
 ## Configuration (no secrets in git)
 
+Precedence: CLI flag → environment → env file → `product.json` → default. See [operator.md](./operator.md).
+
 | Variable | Required | Purpose |
 | --- | --- | --- |
-| `DSH_ASSISTANT_MEMORY` | no | `json-file` to persist memory locally; default is in-memory |
-| `DSH_ASSISTANT_MEMORY_PATH` | no | Local JSON path when memory is `json-file` (default `.dsh-assistant/memory.json`, gitignored) |
-| `DSH_ASSISTANT_KNOWLEDGE_FIXTURES` | no | Comma-separated **explicit** file paths to ingest; never a home-directory scan |
+| `TARS_NG_HOME` | no | Product home (default `~/.local/share/tars-ng`) |
+| `DSH_ASSISTANT_HOME` | no | Compatibility alias for the same home |
+| `TARS_NG_ALLOW_FIXTURES` | no | `1` enables explicit fixture integrations (not live data) |
+| `DSH_ASSISTANT_GOOGLE_CALENDAR_MODE` | no | `live` selects the host-bounded Google Calendar transport |
+| `DSH_ASSISTANT_GOOGLE_CALENDAR_ACCESS_TOKEN` | no | Secret. OAuth access token; expires; never commit |
+| `GOOGLE_SEARCH_API_KEY` | no | Secret. Diagnosed by name; Search is not shipped |
+| `GOOGLE_SEARCH_ENGINE_ID` | no | Non-secret config. Diagnosed by name; Search is not shipped |
+| `DSH_ASSISTANT_MEMORY` | no | Contributor boot: `json-file` (product CLI already persists under home) |
+| `DSH_ASSISTANT_KNOWLEDGE_FIXTURES` | no | Comma-separated **explicit** file paths; never a home-directory scan |
 
-Live model API keys and vendor OAuth tokens are **not** product env vars. They belong to a DSH LLM adapter plugin or a replaceable integration provider you load yourself. Do not commit `.env`, tokens, or real personal ids.
+Live model API keys belong to a DSH LLM adapter you load yourself. Do not commit `.env`, tokens, or real personal ids.
 
 Optional capability providers (replaceable, not required to boot):
 
-| Provider | Default in this repo | Status |
+| Provider | Default in product CLI | Status |
 | --- | --- | --- |
-| LLM adapter | none on `npm run boot`; scripted fakes on `ui` / `slice` | Fake adapters **Implemented**; live DeepSeek/other accounts **Unsupported** |
-| Calendar / mail / tasks / files / contacts | `FakeIntegrationSuite` | Fake suite **Verified** for read/propose/error; vendor accounts **Unsupported** |
-| Memory persistence | in-memory; optional local JSON | JSON adapter **Verified**; hosted DB **Unsupported** |
-| Knowledge ingest | none, or explicit fixture paths | Local lexical index **Verified**; crawler/vector DB **Unsupported** |
+| LLM adapter | none | Fake adapters **Implemented** for tests/`ui`/`slice`; live accounts **Unsupported** |
+| Calendar | **unavailable** unless live token+mode or explicit fixtures | Fake suite **Verified** for tests; product default does not return fixture events as live data |
+| Memory persistence | `$TARS_NG_HOME/data/memory.json` | JSON adapter **Verified**; hosted DB **Unsupported** |
+| Knowledge ingest | none, or explicit fixture paths | Local lexical index **Verified** |
 
 ## Lifecycle
 
 Product plugins register tools/services through Cordis effects. Disposing the product fiber (or the whole context) must drop `personalMemory`, `personalKnowledge`, `actionPolicy`, `assistantJobs`, and the product tools. Loading the bundle again on the same DSH stack must restore one copy of each name, not duplicates.
+
+`tars-ng start` writes `$TARS_NG_HOME/state/tars-ng.pid`. `tars-ng stop` sends SIGTERM. Uninstalling the npm package does not delete `$TARS_NG_HOME`.
 
 `npm test` covers unload + remount of the product fiber on `bootAssistantRuntime()`, and a separate official DSH profile/bundle smoke in the same file.
 

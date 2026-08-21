@@ -22,8 +22,10 @@ export interface BootOptions {
   knowledgeFixturePaths?: string[]
   memory?: MemoryPluginConfig
   safeMode?: boolean
-  /** Durable Self-Extension home. Falls back to DSH_ASSISTANT_HOME. */
+  /** Durable Self-Extension home. Falls back to TARS_NG_HOME, then DSH_ASSISTANT_HOME. */
   home?: string
+  /** When false, fixture integrations stay unavailable instead of returning realistic fake data. */
+  allowFixtures?: boolean
 }
 
 export interface BootDiagnostics {
@@ -59,6 +61,7 @@ async function bootStack(options: BootOptions = {}): Promise<AssistantControl> {
   await ctx.plugin(assistantProduct, {
     memory: options.memory,
     knowledge: { fixturePaths: options.knowledgeFixturePaths },
+    integrations: options.allowFixtures === undefined ? undefined : { allowFixtures: options.allowFixtures },
     safeMode,
     jobs: safeMode ? { autoTickMs: null } : undefined,
     registry: durable === undefined ? undefined : { persistence: durable.authority },

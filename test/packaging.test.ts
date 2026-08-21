@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import { execFileSync } from 'node:child_process'
-import { readFileSync } from 'node:fs'
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, it } from 'node:test'
 import { Context } from '@deepseek-ai/cordis'
@@ -40,12 +41,16 @@ describe('product package and profile', () => {
       engines: { node: string }
       dsh: { bundle: { patch: string } }
       files: string[]
+      bin?: Record<string, string>
+      tarsNg?: { dsh: string }
       dependencies: Record<string, string>
     }
     assert.equal(pkg.version, '0.2.0')
     assert.equal(pkg.private, true)
     assert.equal(pkg.engines.node, '>=22')
     assert.equal(pkg.dsh.bundle.patch, './cordis.patch.yml')
+    assert.equal(pkg.bin?.['tars-ng'], './dist/product/bin.js')
+    assert.equal(pkg.tarsNg?.dsh, '0.1.0-rc.8')
     assert.deepEqual(pkg.files, ['dist', 'cordis.patch.yml'])
     assert.equal(pkg.dependencies['@deepseek-ai/dsh-agent-loop'], '0.1.0-rc.8')
     assert.match(readFileSync(join(root, 'cordis.patch.yml'), 'utf8'), /id: dsh-assistant/)
@@ -201,5 +206,61 @@ describe('product package and profile', () => {
       || path.includes('credentials')
     ))
     assert.deepEqual(forbidden, [])
+  })
+
+  it('installs the packed artifact and runs tars-ng without src or tsx', { timeout: 120_000 }, () => {
+    execFileSync('npm', ['run', 'build'], { cwd: root, encoding: 'utf8' })
+    const packDir = mkdtempSync(join(tmpdir(), 'tars-ng-pack-'))
+    const packedName = execFileSync('npm', ['pack', '--pack-destination', packDir], { cwd: root, encoding: 'utf8' }).trim().split('\n').at(-1)
+    assert.ok(packedName)
+    const tarball = packedName.startsWith('/') ? packedName : join(packDir, packedName)
+    assert.equal(existsSync(tarball), true)
+
+    const installDir = mkdtempSync(join(tmpdir(), 'tars-ng-install-'))
+    execFileSync('npm', ['init', '-y'], { cwd: installDir, encoding: 'utf8' })
+    execFileSync('npm', ['install', tarball, '--omit=dev'], {
+      cwd: installDir,
+      encoding: 'utf8',
+      timeout: 90_000,
+    })
+    const pkgRoot = join(installDir, 'node_modules', 'dsh-assistant')
+    assert.equal(existsSync(join(pkgRoot, 'src')), false)
+    assert.equal(existsSync(join(pkgRoot, 'dist', 'product', 'bin.js')), true)
+    const binSource = readFileSync(join(pkgRoot, 'dist', 'product', 'bin.js'), 'utf8')
+    assert.match(binSource, /^#!\/usr\/bin\/env node/m)
+    assert.doesNotMatch(binSource, /\btsx\b/)
+
+    const userHome = mkdtempSync(join(tmpdir(), 'tars-ng-user-'))
+    const productHome = mkdtempSync(join(tmpdir(), 'tars-ng-home-'))
+    mkdirSync(join(productHome, 'config'), { recursive: true })
+    writeFileSync(join(productHome, 'config', 'env'), 'DSH_ASSISTANT_GOOGLE_CALENDAR_ACCESS_TOKEN=ya29.installed-secret\n', { mode: 0o600 })
+    chmodSync(join(productHome, 'config', 'env'), 0o600)
+    assert.equal(productHome.startsWith(pkgRoot), false)
+
+    const bin = join(installDir, 'node_modules', '.bin', 'tars-ng')
+    const env: NodeJS.ProcessEnv = {
+      ...process.env,
+      HOME: userHome,
+      XDG_CONFIG_HOME: join(userHome, '.config'),
+      XDG_DATA_HOME: join(userHome, '.local', 'share'),
+      TARS_NG_HOME: productHome,
+      DSH_ASSISTANT_HOME: productHome,
+    }
+    delete env.DSH_ASSISTANT_GOOGLE_CALENDAR_ACCESS_TOKEN
+    delete env.GOOGLE_SEARCH_API_KEY
+    delete env.GOOGLE_SEARCH_ENGINE_ID
+    delete env.TARS_NG_ALLOW_FIXTURES
+
+    const doctor = execFileSync(bin, ['doctor', '--home', productHome], { encoding: 'utf8', env })
+    const started = execFileSync(bin, ['start', '--once', '--home', productHome], { encoding: 'utf8', env })
+    const combined = `${doctor}\n${started}`
+    assert.match(combined, /TARS-NG/)
+    assert.match(combined, new RegExp(productHome.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')))
+    assert.match(combined, /DSH_ASSISTANT_GOOGLE_CALENDAR_ACCESS_TOKEN: present/)
+    assert.match(combined, /GOOGLE_SEARCH_API_KEY: missing/)
+    assert.doesNotMatch(combined, /ya29\.installed-secret/)
+    assert.doesNotMatch(combined, /\btsx\b/)
+    assert.doesNotMatch(combined, /Team standup/)
+    assert.match(combined, /calendar: unavailable|calendar: live/)
   })
 })

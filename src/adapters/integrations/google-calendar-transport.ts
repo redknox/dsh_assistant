@@ -75,6 +75,9 @@ export function createLiveGoogleCalendarTransport(options: LiveGoogleCalendarTra
       const path = assertGoogleCalendarPath(input.path)
       if (signal?.aborted) throw timeoutError()
       const token = options.getAccessToken?.()
+      if (options.getAccessToken && (typeof token !== 'string' || token === '')) {
+        throw new IntegrationError('calendar', 'unavailable', 'DSH_ASSISTANT_GOOGLE_CALENDAR_ACCESS_TOKEN is missing')
+      }
       const headers: Record<string, string> = { Accept: 'application/json' }
       if (typeof token === 'string' && token !== '') headers.Authorization = `Bearer ${token}`
       if (input.body !== undefined) headers['Content-Type'] = 'application/json'

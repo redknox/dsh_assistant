@@ -17,6 +17,13 @@
     "dist",
     "cordis.patch.yml"
   ],
+  "bin": {
+    "tars-ng": "./dist/product/bin.js"
+  },
+  "tarsNg": {
+    "dsh": "0.1.0-rc.8",
+    "home": ["TARS_NG_HOME", "DSH_ASSISTANT_HOME"]
+  },
   "dsh": {
     "bundle": {
       "patch": "./cordis.patch.yml"
@@ -26,10 +33,11 @@
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "tsx --test test/**/*.test.ts",
-    "boot": "tsx src/runtime/boot-cli.ts",
+    "boot": "node dist/product/bin.js start --once",
     "ui": "tsx src/ui/cli.ts",
     "slice": "tsx src/runtime/slice-cli.ts",
     "self-extension": "tsx src/runtime/self-extension-cli.ts",
+    "tars-ng": "node dist/product/bin.js",
     "verify:v0.2": "tsx --test test/v0.2-regression.test.ts",
     "pack:inspect": "npm pack --dry-run --json"
   },

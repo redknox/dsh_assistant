@@ -1,4 +1,9 @@
 export { apply, inject, name, PRODUCT_TOOL_NAMES, SAFE_MODE_TOOL_NAMES, type AssistantBundleConfig } from './product/bundle.js'
+export { runProductCli, parseProductArgv } from './product/cli.js'
+export { inspectCompatibility, readProductVersion } from './product/compatibility.js'
+export { collectStaticDoctor, formatDoctorReport } from './product/doctor.js'
+export { ensureProductHome, resolveProductHome } from './product/home.js'
+export { SUPPORTED_DSH_RELEASE } from './product/constants.js'
 
 export { bootAssistantControl, bootAssistantRuntime, bootSafeModeRuntime, createAssistantAgent } from './runtime/boot.js'
 export { RecoveryRoot } from './domain/governance/root.js'
