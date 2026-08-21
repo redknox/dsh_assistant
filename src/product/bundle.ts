@@ -15,6 +15,7 @@ import * as resolutionPlugin from '../plugins/resolution-plugin.js'
 import * as candidatePlugin from '../plugins/candidate-plugin.js'
 import type { CandidatePluginConfig } from '../plugins/candidate-plugin.js'
 import * as governancePlugin from '../plugins/governance-plugin.js'
+import type { GovernancePluginConfig } from '../plugins/governance-plugin.js'
 
 export const name = 'dsh-assistant'
 export const inject = ['systemPrompt', 'agents']
@@ -27,6 +28,9 @@ export interface AssistantBundleConfig {
   readonly knowledge?: KnowledgePluginConfig
   readonly policy?: PolicyPluginConfig
   readonly jobs?: JobsPluginConfig
+  /** When true, skip optional/generated product plugins and boot the recovery core only. */
+  readonly safeMode?: boolean
+  readonly governance?: GovernancePluginConfig
 }
 
 /** Bundle entry: compose product plugins through public Cordis lifecycle. */
@@ -34,7 +38,8 @@ export async function apply(ctx: Context, config: AssistantBundleConfig = {}) {
   await ctx.plugin(registryPlugin, config.registry)
   await ctx.plugin(resolutionPlugin)
   await ctx.plugin(candidatePlugin, config.candidate)
-  await ctx.plugin(governancePlugin)
+  await ctx.plugin(governancePlugin, config.governance)
+  if (config.safeMode) return
   await ctx.plugin(memoryPlugin, config.memory)
   await ctx.plugin(knowledgePlugin, config.knowledge)
   await ctx.plugin(integrationsPlugin)
@@ -42,6 +47,14 @@ export async function apply(ctx: Context, config: AssistantBundleConfig = {}) {
   await ctx.plugin(jobsPlugin, config.jobs)
   await ctx.plugin(assistantPlugin)
 }
+
+export const SAFE_MODE_TOOL_NAMES = [
+  'list_capabilities',
+  'lookup_capability',
+  'review_capability_resolution',
+  'inspect_extension_governance',
+  'request_extension_approval',
+] as const
 
 export const PRODUCT_TOOL_NAMES = [
   'list_capabilities',

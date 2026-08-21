@@ -1,11 +1,18 @@
 import type { ActivationSnapshot } from './types.js'
 
+export interface ActivationPrepareContext {
+  readonly workspaceRoot: string
+  readonly tools: readonly string[]
+  readonly services: readonly string[]
+  readonly providers: readonly string[]
+}
+
 export interface ActivationRuntime {
   snapshot(generation: number, owners: ActivationSnapshot['owners']): ActivationSnapshot
-  prepare(candidateId: string): { ok: boolean; diagnostics?: string }
-  verifyHealth(candidateId: string, expectedSeams: readonly string[]): { ok: boolean; diagnostics?: string }
-  commit(candidateId: string): void
-  restore(snapshot: ActivationSnapshot): void
+  prepare(candidateId: string, context?: ActivationPrepareContext): Promise<{ ok: boolean; diagnostics?: string }>
+  verifyHealth(candidateId: string, expectedSeams: readonly string[]): Promise<{ ok: boolean; diagnostics?: string }>
+  commit(candidateId: string): Promise<void>
+  restore(snapshot: ActivationSnapshot): Promise<void>
   mounted(): readonly string[]
 }
 
@@ -24,21 +31,21 @@ export class InMemoryActivationRuntime implements ActivationRuntime {
     }
   }
 
-  prepare(_candidateId: string): { ok: boolean; diagnostics?: string } {
+  async prepare(_candidateId: string): Promise<{ ok: boolean; diagnostics?: string }> {
     if (this.failPrepare) return { ok: false, diagnostics: 'prepare/mount failed' }
     return { ok: true }
   }
 
-  verifyHealth(_candidateId: string, _expectedSeams: readonly string[]): { ok: boolean; diagnostics?: string } {
+  async verifyHealth(_candidateId: string, _expectedSeams: readonly string[]): Promise<{ ok: boolean; diagnostics?: string }> {
     if (this.failHealth) return { ok: false, diagnostics: 'post-activation health verification failed' }
     return { ok: true }
   }
 
-  commit(candidateId: string): void {
+  async commit(candidateId: string): Promise<void> {
     if (!this.currentMounted.includes(candidateId)) this.currentMounted = [...this.currentMounted, candidateId]
   }
 
-  restore(snapshot: ActivationSnapshot): void {
+  async restore(snapshot: ActivationSnapshot): Promise<void> {
     this.currentMounted = [...snapshot.mounted]
   }
 

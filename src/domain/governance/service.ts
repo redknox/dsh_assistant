@@ -9,7 +9,6 @@ import type {
   ActivationSnapshot,
   ActivationState,
   ActivationStatus,
-  ApprovalAuthority,
   ApprovalRecord,
   ApprovalSummary,
   EligibilityDenial,
@@ -32,7 +31,6 @@ function ownersFromRegistry(registry: CapabilityRegistry): ActivationSnapshot['o
 }
 
 export class GovernanceService implements ExtensionGovernance, ExtensionActivation, ExtensionRecovery {
-  private readonly rootId = Symbol('recovery-root')
   private readonly approvals = new Map<string, ApprovalRecord>()
   private nextApproval = 1
   private generation = 0
@@ -47,6 +45,7 @@ export class GovernanceService implements ExtensionGovernance, ExtensionActivati
     private readonly registry: CapabilityRegistry,
     private readonly workspace: CandidateWorkspace,
     readonly runtime: ActivationRuntime = new InMemoryActivationRuntime(),
+    private readonly rootId: symbol = Symbol('unbound-governance'),
   ) {
     this.current = this.captureSnapshot()
     this.lastKnownGood = this.current
@@ -113,13 +112,6 @@ export class GovernanceService implements ExtensionGovernance, ExtensionActivati
     return this.status()
   }
 
-  issueAuthority(authority: ApprovalAuthority): AuthorityCredential {
-    if (authority.kind !== 'human-control') {
-      throw new GovernanceAuthorityError('only human-control authority may be issued by the recovery root')
-    }
-    return new AuthorityCredential(this.rootId, authority)
-  }
-
   recordApproval(credential: TrustedAuthorityCredential, input: TrustedApprovalInput): ApprovalRecord {
     this.assertCredential(credential)
     const { fingerprint, record, diff } = this.facts(input.candidateId)
@@ -143,7 +135,7 @@ export class GovernanceService implements ExtensionGovernance, ExtensionActivati
     return created
   }
 
-  activate(candidateId: string, credential: TrustedAuthorityCredential): ActivationStatus {
+  async activate(candidateId: string, credential: TrustedAuthorityCredential): Promise<ActivationStatus> {
     this.assertCredential(credential)
     const gate = this.eligibility(candidateId)
     if (!gate.ok) throw new ActivationDeniedError(gate.denials)
@@ -155,21 +147,30 @@ export class GovernanceService implements ExtensionGovernance, ExtensionActivati
     try {
       this.state = 'activating'
       phase = 'prepare'
-      const prepared = this.runtime.prepare(candidateId)
+      const prepared = await this.runtime.prepare(candidateId, {
+        workspaceRoot: record.workspaceRoot,
+        tools: record.manifest.tools,
+        services: record.manifest.services,
+        providers: record.manifest.providers,
+      })
       if (!prepared.ok) throw new Error(prepared.diagnostics ?? 'prepare failed')
       phase = 'health'
-      const health = this.runtime.verifyHealth(candidateId, record.manifest.runtimeSeams)
+      const health = await this.runtime.verifyHealth(candidateId, [
+        ...record.manifest.runtimeSeams,
+        ...record.manifest.tools,
+        ...record.manifest.services,
+      ])
       if (!health.ok) throw new Error(health.diagnostics ?? 'health failed')
       phase = 'commit'
       this.commitRegistry(record)
-      this.runtime.commit(candidateId)
+      await this.runtime.commit(candidateId)
       this.current = this.captureSnapshot()
       this.lastKnownGood = this.current
       this.state = 'active'
       this.lastFailure = undefined
       return this.status()
     } catch (error) {
-      const restored = this.restoreSnapshot(previousGood)
+      const restored = await this.restoreSnapshot(previousGood)
       this.current = this.captureSnapshot()
       this.lastKnownGood = previousGood
       this.state = 'activation-failed'
@@ -189,12 +190,11 @@ export class GovernanceService implements ExtensionGovernance, ExtensionActivati
     }
   }
 
-  rollback(credential: TrustedAuthorityCredential): ActivationStatus {
+  async rollback(credential: TrustedAuthorityCredential): Promise<ActivationStatus> {
     this.assertCredential(credential)
     const target = this.rollbackTarget ?? this.lastKnownGood
     if (target === undefined) throw new GovernanceContractError('no last-known-good snapshot to restore')
-    const restored = this.restoreSnapshot(target)
-    this.runtime.restore(target)
+    const restored = await this.restoreSnapshot(target)
     this.current = this.captureSnapshot()
     this.lastKnownGood = target
     this.state = restored ? 'rolled-back' : 'activation-failed'
@@ -317,9 +317,9 @@ export class GovernanceService implements ExtensionGovernance, ExtensionActivati
     }
   }
 
-  private restoreSnapshot(snapshot: ActivationSnapshot): boolean {
+  private async restoreSnapshot(snapshot: ActivationSnapshot): Promise<boolean> {
     try {
-      this.runtime.restore(snapshot)
+      await this.runtime.restore(snapshot)
       for (const current of this.registry.list({ status: 'active' })) {
         const wanted = snapshot.owners.some((item) => item.owner === current.owner && item.version === current.version)
         if (!wanted) this.registry.transitionStatus(current.owner, current.version, 'disabled')

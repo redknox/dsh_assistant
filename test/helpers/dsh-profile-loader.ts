@@ -31,6 +31,16 @@ const SMOKE_PROFILE_PATCH = `- id: hmr
       autoTickMs: null
 `
 
+/** Safe Mode overlay: exclude optional integrations/jobs before they load. */
+export const SAFE_MODE_PROFILE_PATCH = `- id: hmr
+  disabled: true
+- id: dsh-assistant
+  config:
+    safeMode: true
+    jobs:
+      autoTickMs: null
+`
+
 function ensurePublishedEntry() {
   const dist = join(root, 'dist/index.js')
   const source = join(root, 'src/index.ts')
@@ -56,24 +66,26 @@ export async function withDshAssistantProfile<T>(
     composedIds: string[]
     bootProfile: () => Promise<Context>
   }) => Promise<T>,
+  options: { profileName?: string; patch?: string } = {},
 ): Promise<T> {
   ensurePublishedEntry()
   ensureHostPackageLink()
+  const profileName = options.profileName ?? 'assistant'
   const home = await mkdtemp(join(tmpdir(), 'dsh-assistant-profile-'))
   const previousHome = process.env.DSH_HOME
   process.env.DSH_HOME = home
   try {
-    const dir = resolveProfileDir('assistant', home)
+    const dir = resolveProfileDir(profileName, home)
     initProfile(dir, ['@deepseek-ai/dsh-base', 'dsh-assistant'])
     writeFileSync(join(dir, 'cordis.yml'), PROFILE_ROOT)
-    writeFileSync(join(dir, 'cordis.patch.yml'), SMOKE_PROFILE_PATCH)
+    writeFileSync(join(dir, 'cordis.patch.yml'), options.patch ?? SMOKE_PROFILE_PATCH)
     mkdirSync(join(dir, 'node_modules'), { recursive: true })
     const profileLink = join(dir, 'node_modules', 'dsh-assistant')
     if (!existsSync(profileLink)) symlinkSync(root, profileLink)
 
     const installAnchor = fileURLToPath(import.meta.resolve('@deepseek-ai/dsh-base/package.json'))
     healProfilesModuleFallback(installAnchor, home)
-    const profile = loadProfile('dsh', 'assistant', installAnchor, home)
+    const profile = loadProfile('dsh', profileName, installAnchor, home)
     const dump = renderConfigDump(
       'dsh',
       join(dir, 'cordis.yml'),

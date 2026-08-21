@@ -1,10 +1,7 @@
 import { Service, type Context } from '@deepseek-ai/cordis'
-import { GovernanceService } from '../domain/governance/index.js'
-import type {
-  ExtensionActivation,
-  ExtensionGovernance,
-  ExtensionRecovery,
-} from '../domain/governance/index.js'
+import { RecoveryRoot } from '../domain/governance/root.js'
+import { CordisActivationRuntime } from '../adapters/activation/cordis-runtime.js'
+import type { ExtensionActivation, ExtensionGovernance, ExtensionRecovery } from '../domain/governance/index.js'
 import { registerGovernanceTools } from './governance-tools.js'
 
 declare module '@deepseek-ai/cordis' {
@@ -36,7 +33,6 @@ export class ExtensionActivationService extends Service implements ExtensionActi
   }
 
   status() { return this.store.status() }
-  activate(...args: Parameters<ExtensionActivation['activate']>) { return this.store.activate(...args) }
 }
 
 export class ExtensionRecoveryService extends Service implements ExtensionRecovery {
@@ -44,36 +40,33 @@ export class ExtensionRecoveryService extends Service implements ExtensionRecove
     super(ctx, 'extensionRecovery')
   }
 
-  issueAuthority(...args: Parameters<ExtensionRecovery['issueAuthority']>) { return this.store.issueAuthority(...args) }
   inspect() { return this.store.inspect() }
-  recordApproval(...args: Parameters<ExtensionRecovery['recordApproval']>) { return this.store.recordApproval(...args) }
-  rollback(...args: Parameters<ExtensionRecovery['rollback']>) { return this.store.rollback(...args) }
-  enterSafeMode(...args: Parameters<ExtensionRecovery['enterSafeMode']>) { return this.store.enterSafeMode(...args) }
-  disable(...args: Parameters<ExtensionRecovery['disable']>) { return this.store.disable(...args) }
+}
+
+export interface GovernancePluginConfig {
+  /** Bootstrap-only callback. Ordinary plugins must not receive this. */
+  readonly attachRecoveryRoot?: (root: RecoveryRoot) => void
 }
 
 export const name = 'dsh-assistant-governance'
 export const inject = ['capabilityRegistry', 'candidateWorkspace', 'tools']
 
-/** Governance, activation, and recovery. Approval/activation require the recovery-root credential. */
-export async function apply(ctx: Context) {
-  const store = new GovernanceService(ctx.capabilityRegistry, ctx.candidateWorkspace)
-  const governance: ExtensionGovernance = {
-    requestApproval: (id) => store.requestApproval(id),
-    inspectApproval: (id) => store.inspectApproval(id),
-    inspectSummary: (id) => store.inspectSummary(id),
-    eligibility: (id) => store.eligibility(id),
-    recordUntrustedApproval: (input) => store.recordUntrustedApproval(input),
-    rewriteRecoveryRoot: () => store.rewriteRecoveryRoot(),
-  }
+/** Inspect/request only on ctx. Trusted minting stays on the bootstrap RecoveryRoot. */
+export async function apply(ctx: Context, config: GovernancePluginConfig = {}) {
+  const root = new RecoveryRoot(
+    ctx.capabilityRegistry,
+    ctx.candidateWorkspace,
+    new CordisActivationRuntime(ctx),
+  )
+  config.attachRecoveryRoot?.(root)
   await ctx.plugin(class extends ExtensionGovernanceService {
-    constructor(scope: Context) { super(scope, store) }
+    constructor(scope: Context) { super(scope, root.governance()) }
   })
   await ctx.plugin(class extends ExtensionActivationService {
-    constructor(scope: Context) { super(scope, store) }
+    constructor(scope: Context) { super(scope, root.activation()) }
   })
   await ctx.plugin(class extends ExtensionRecoveryService {
-    constructor(scope: Context) { super(scope, store) }
+    constructor(scope: Context) { super(scope, root.recovery()) }
   })
-  ctx.effect(() => registerGovernanceTools(ctx.tools, governance))
+  ctx.effect(() => registerGovernanceTools(ctx.tools, root.governance()))
 }

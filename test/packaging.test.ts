@@ -15,7 +15,7 @@ import ToolRuntime from '@deepseek-ai/dsh-tools'
 import * as assistantProduct from '../src/product/bundle.js'
 import { PRODUCT_TOOL_NAMES } from '../src/product/bundle.js'
 import { bootAssistantRuntime, createAssistantAgent } from '../src/runtime/boot.js'
-import { withDshAssistantProfile } from './helpers/dsh-profile-loader.js'
+import { SAFE_MODE_PROFILE_PATCH, withDshAssistantProfile } from './helpers/dsh-profile-loader.js'
 
 const root = join(import.meta.dirname, '..')
 
@@ -151,6 +151,23 @@ describe('product package and profile', () => {
         await second.fiber.dispose()
       }
     })
+  })
+
+  it('loads the Safe Mode profile without optional integrations or jobs', async () => {
+    await withDshAssistantProfile(async ({ bootProfile }) => {
+      const ctx = await bootProfile()
+      try {
+        assert.ok(ctx.tools.get('inspect_extension_governance'))
+        assert.ok(ctx.tools.get('list_capabilities'))
+        assert.ok(ctx.capabilityRegistry)
+        assert.ok(ctx.extensionRecovery)
+        assert.equal(ctx.tools.get('calendar_list_events'), undefined)
+        assert.equal(ctx.get('assistantJobs'), undefined)
+        assert.equal(ctx.get('personalMemory'), undefined)
+      } finally {
+        await ctx.fiber.dispose()
+      }
+    }, { profileName: 'assistant-safe', patch: SAFE_MODE_PROFILE_PATCH })
   })
 
   it('packs only the intended release files', () => {

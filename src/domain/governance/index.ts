@@ -28,5 +28,6 @@ export {
   GovernanceContractError,
 } from './errors.js'
 export { approvalFingerprint, approvalSummary, fingerprintFromCandidate } from './fingerprint.js'
-export { InMemoryActivationRuntime, type ActivationRuntime } from './runtime.js'
+export { InMemoryActivationRuntime, type ActivationPrepareContext, type ActivationRuntime } from './runtime.js'
 export { GovernanceService } from './service.js'
+export { RecoveryRoot } from './root.js'

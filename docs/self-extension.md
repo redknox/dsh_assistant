@@ -25,7 +25,7 @@ These concerns must stay separate. Do not collapse them into one “the assistan
 | --- | --- | --- |
 | **What do I have?** | Capability and ownership visibility | Capability Registry (`ctx.capabilityRegistry`) |
 | **What should change?** | Capability Resolution Review | `ctx.capabilityResolution.review` ([docs/capability-resolution.md](./capability-resolution.md)) |
-| **May I change it?** | User approval / governance | `ctx.extensionRecovery.recordApproval` + transactional activate ([docs/extension-governance.md](./extension-governance.md)) |
+| **May I change it?** | User approval / governance | Recovery Root `recordApproval` + transactional activate ([docs/extension-governance.md](./extension-governance.md)) |
 
 Visibility is not a change proposal. A change proposal is not authorization. Authorization is not a license to expand capabilities or permissions later without a new review.
 

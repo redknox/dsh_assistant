@@ -128,16 +128,10 @@ export interface ExtensionGovernance {
 
 export interface ExtensionActivation {
   status(): ActivationStatus
-  activate(candidateId: string, credential: TrustedAuthorityCredential): ActivationStatus
 }
 
 export interface ExtensionRecovery {
-  issueAuthority(authority: ApprovalAuthority): TrustedAuthorityCredential
   inspect(): ActivationStatus
-  recordApproval(credential: TrustedAuthorityCredential, input: TrustedApprovalInput): ApprovalRecord
-  rollback(credential: TrustedAuthorityCredential): ActivationStatus
-  enterSafeMode(credential: TrustedAuthorityCredential): ActivationStatus
-  disable(credential: TrustedAuthorityCredential, owner: string, version: string): void
 }
 
 export class TrustedAuthorityCredential {

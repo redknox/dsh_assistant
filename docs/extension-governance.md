@@ -74,7 +74,9 @@ Phases: verify eligibility → capture Last Known Good → prepare/mount → hea
 
 Registry commit happens only after health verification. A failed prepare/health leaves the previous owner active. There is never a final state with two active owners for the same capability.
 
-This issue activates **ownership and composition records** through public Registry/service seams. It does not implement a first autonomous generated-plugin vertical slice or a hot-loader.
+Prepare / health / commit / restore use a production `CordisActivationRuntime` that mounts and disposes a real Cordis fiber and checks public tools/services. `InMemoryActivationRuntime` remains a unit-test fake only.
+
+This issue still does not implement a first autonomous generated-plugin vertical slice.
 
 ## Last Known Good
 
@@ -84,7 +86,9 @@ This issue activates **ownership and composition records** through public Regist
 
 The Recovery Core is not a second Assistant and does not need an LLM. It can inspect current/LKG/failure state, disable a version, revert to LKG, and enter Safe Mode.
 
-Safe Mode keeps DSH/runtime, governance/recovery, Registry diagnostics, and managed bootstrap owners. It disables `generated/*` and refuses to activate new generated candidates. It must not depend on the failed extension loading.
+Safe Mode keeps DSH/runtime, governance/recovery, Registry diagnostics, and managed bootstrap owners. It disables `generated/*` and refuses to activate new generated candidates.
+
+`bootSafeModeRuntime()` and `profiles/assistant-safe` exclude optional integrations, jobs, and generated extensions **before they load**. Recovery inspect/request stay available. Safe Mode does not depend on the failed extension loading.
 
 Self-Extension has no public path to rewrite the approval/recovery root, overwrite LKG authority, or change Safe Mode policy.
 
@@ -92,8 +96,11 @@ Self-Extension has no public path to rewrite the approval/recovery root, overwri
 
 ```text
 ctx.extensionGovernance   request/inspect/eligibility (no trusted approve)
-ctx.extensionActivation   status; activate only with a recovery-root credential
-ctx.extensionRecovery     issueAuthority, recordApproval, rollback, Safe Mode, disable
+ctx.extensionActivation   status only
+ctx.extensionRecovery     inspect only
+RecoveryRoot (boot return) issueAuthority, recordApproval, activate, rollback, Safe Mode, disable
 ```
+
+`issueAuthority` is not on `ctx`. Ordinary plugins share Cordis context and have no supported public path to mint a trusted credential. `bootAssistantControl()` / `bootSafeModeRuntime()` return the Recovery Root to the bootstrap/UI caller only.
 
 Model-facing tools `inspect_extension_governance` and `request_extension_approval` are read/request only.
