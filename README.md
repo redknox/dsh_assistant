@@ -88,6 +88,7 @@ Do not call a capability **Verified** without reproducible evidence. Use:
 | Capability Resolution Review | no | **Verified** by `test/resolution.test.ts` | Answers **What should change?** only. Advisory; no install. See [docs/capability-resolution.md](./docs/capability-resolution.md) |
 | Capability Discovery | no | **Verified** by `test/discovery.test.ts` | Answers **what existing implementation may be available?** Local DSH/catalog evidence only; never installs. See [docs/capability-discovery.md](./docs/capability-discovery.md) |
 | Candidate workspace + validation | no | **Verified** by `test/candidate.test.ts` | Builds/validates an inactive artifact. `validated` is not approval. See [docs/candidate-workspace.md](./docs/candidate-workspace.md) |
+| Engineering reliability | no | **Verified** by `test/reliability.test.ts` | Risk class + Risk Model gate before `validated`. Fixture ≠ provider. See [docs/engineering-reliability.md](./docs/engineering-reliability.md) |
 | Extension governance / activation / recovery | no | **Verified** by `test/governance.test.ts` | Exact-diff approval + transactional activate + LKG/Safe Mode. See [docs/extension-governance.md](./docs/extension-governance.md) |
 | Production persistence, public npm publish | no | **Unsupported** | Package is `private` |
 

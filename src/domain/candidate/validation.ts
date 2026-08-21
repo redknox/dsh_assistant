@@ -5,6 +5,7 @@ import { digestFiles } from './digest.js'
 import { listSourceFiles } from './files.js'
 import { detectOsNetworkSandbox } from './os-sandbox.js'
 import { runRestrictedCandidateTests, runnerUnavailable } from './restricted-runner.js'
+import { evaluateReliability, reliabilitySummary } from '../reliability/index.js'
 import type { CandidateRecord, ValidationReport, ValidationStageResult, ValidationStageStatus } from './types.js'
 import { ALLOWED_VALIDATION_TASKS } from './types.js'
 
@@ -177,6 +178,13 @@ export function runValidation(record: CandidateRecord): ValidationReport {
     ))
   }
   stages.push(stage('manifest.validate', 'passed', `Manifest for ${record.owner}@${record.version} is well-formed.`))
+  const reliability = evaluateReliability(record.manifest)
+  stages.push(stage(
+    'reliability.gate',
+    reliability.passed ? 'passed' : 'failed',
+    reliabilitySummary(reliability),
+    { diagnostics: JSON.stringify({ derivedClass: reliability.derivedClass, checks: reliability.checks }) },
+  ))
   stages.push(inspectPackage(record.workspaceRoot))
   stages.push(inspectBoundary(record.workspaceRoot, files))
   stages.push(runTypecheck(record.workspaceRoot, files))
@@ -193,6 +201,7 @@ export function runValidation(record: CandidateRecord): ValidationReport {
     stages,
     unresolved,
     blocked,
+    reliability,
   }
 }
 

@@ -27,6 +27,7 @@ These concerns must stay separate. Do not collapse them into one “the assistan
 | **What existing implementation may be available?** | Capability Discovery | `ctx.capabilityDiscovery` ([docs/capability-discovery.md](./capability-discovery.md)) |
 | **What should change?** | Capability Resolution Review | `ctx.capabilityResolution.review` ([docs/capability-resolution.md](./capability-resolution.md)) |
 | **May I change it?** | User approval / governance | Recovery Root `recordApproval` + transactional activate ([docs/extension-governance.md](./extension-governance.md)) |
+| **Is the behavior reliable under real failure semantics?** | Engineering Reliability | Risk Model + `reliability.gate` ([docs/engineering-reliability.md](./engineering-reliability.md)) |
 
 Visibility is not a change proposal. A change proposal is not authorization. Authorization is not a license to expand capabilities or permissions later without a new review.
 

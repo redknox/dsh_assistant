@@ -72,6 +72,7 @@ export function normalizeManifest(
       argv: task.argv === undefined ? undefined : [...task.argv],
       script: task.script,
     })),
+    riskModel: input.riskModel,
   }
 }
 

@@ -5,6 +5,7 @@ import { join } from 'node:path'
 import { describe, it } from 'node:test'
 import { CallId } from '@deepseek-ai/dsh-llm'
 import { ActivationDeniedError } from '../src/domain/governance/index.js'
+import { googleCalendarReadRiskModel, googleCalendarWriteRiskModel } from '../src/domain/reliability/index.js'
 import { CORE_KNOWN_SEAMS } from '../src/domain/resolution/index.js'
 import { bootAssistantControl, bootSafeModeRuntime } from '../src/runtime/boot.js'
 
@@ -58,6 +59,7 @@ function readManifest() {
     configRequired: ['googleCalendarMode'],
     effects: { filesystem: [], network: [GOOGLE_ORIGIN], process: [], secrets: ['google.calendar.oauth'] },
     entryPoints: ['src/plugin.js'],
+    riskModel: googleCalendarReadRiskModel(),
   }
 }
 
@@ -230,6 +232,7 @@ describe('Calendar Self-Extension vertical slice', () => {
           ...readManifest(),
           capabilities: WRITE_CAPABILITIES,
           permissions: WRITE_PERMISSIONS,
+          riskModel: googleCalendarWriteRiskModel(),
         },
       })
       copyCandidateSources(ctx.candidateWorkspace, created.id)

@@ -1,3 +1,4 @@
+import type { ReliabilityGateResult, RiskModel } from '../reliability/types.js'
 import type { EvidenceLevel, ExtensionProvenance } from '../registry/types.js'
 import type { ResolutionKind, ResolutionReview } from '../resolution/types.js'
 
@@ -64,6 +65,7 @@ export interface CandidateManifest {
   readonly effects: OperationalEffects
   readonly entryPoints: readonly string[]
   readonly validationTasks: readonly ValidationTaskRequest[]
+  readonly riskModel?: RiskModel
 }
 
 export interface CandidateManifestInput {
@@ -78,6 +80,7 @@ export interface CandidateManifestInput {
   readonly effects?: Partial<OperationalEffects>
   readonly entryPoints?: readonly string[]
   readonly validationTasks?: readonly ValidationTaskRequest[]
+  readonly riskModel?: RiskModel
 }
 
 export interface CandidateIdentity {
@@ -138,6 +141,7 @@ export interface ValidationReport {
   readonly stages: readonly ValidationStageResult[]
   readonly unresolved: readonly string[]
   readonly blocked: readonly string[]
+  readonly reliability?: ReliabilityGateResult
 }
 
 export interface CreateCandidateInput {
