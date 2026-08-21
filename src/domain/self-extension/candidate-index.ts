@@ -20,9 +20,21 @@ export interface CandidateIndexRow {
   readonly retention: ArtifactRetention
 }
 
-interface CandidateIndexFile {
+export interface CandidateIndexFile {
   readonly schemaVersion: number
   readonly candidates: readonly CandidateIndexRow[]
+}
+
+export function parseCandidateIndexFile(parsed: unknown): CandidateIndexFile {
+  if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+    throw new PersistenceIntegrityError('candidate index must be an object')
+  }
+  const file = parsed as { schemaVersion?: unknown; candidates?: unknown }
+  if (file.schemaVersion !== SELF_EXTENSION_SCHEMA_VERSION) {
+    throw new PersistenceSchemaError(`unsupported candidate index schema ${String(file.schemaVersion)}`)
+  }
+  if (!Array.isArray(file.candidates)) throw new PersistenceIntegrityError('candidate index candidates must be an array')
+  return { schemaVersion: SELF_EXTENSION_SCHEMA_VERSION, candidates: file.candidates as CandidateIndexRow[] }
 }
 
 export function retentionFor(record: CandidateRecord, activeIds: ReadonlySet<string>): ArtifactRetention {
@@ -37,16 +49,7 @@ export class DurableCandidateIndex {
 
   constructor(private readonly home: SelfExtensionHome) {
     if (!existsSync(home.candidateIndexPath)) return
-    const parsed: unknown = JSON.parse(readFileSync(home.candidateIndexPath, 'utf8'))
-    if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
-      throw new PersistenceIntegrityError('candidate index must be an object')
-    }
-    const file = parsed as { schemaVersion?: unknown; candidates?: unknown }
-    if (file.schemaVersion !== SELF_EXTENSION_SCHEMA_VERSION) {
-      throw new PersistenceSchemaError(`unsupported candidate index schema ${String(file.schemaVersion)}`)
-    }
-    if (!Array.isArray(file.candidates)) throw new PersistenceIntegrityError('candidate index candidates must be an array')
-    this.rows = file.candidates as CandidateIndexRow[]
+    this.rows = [...parseCandidateIndexFile(JSON.parse(readFileSync(home.candidateIndexPath, 'utf8'))).candidates]
   }
 
   restore(areaRoot: string): CandidateRecord[] {

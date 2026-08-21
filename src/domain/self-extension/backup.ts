@@ -1,7 +1,10 @@
 import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, statSync } from 'node:fs'
 import path from 'node:path'
+import { digestFiles } from '../candidate/digest.js'
+import { listSourceFiles } from '../candidate/files.js'
 import { writeJsonAtomic } from '../persistence/atomic.js'
-import { parseAuthorityFile } from './authority-store.js'
+import { parseAuthorityFile, type AuthorityFile } from './authority-store.js'
+import { parseCandidateIndexFile, type CandidateIndexFile, type CandidateIndexRow } from './candidate-index.js'
 import { PersistenceIntegrityError, PersistenceSchemaError } from './errors.js'
 import { SELF_EXTENSION_SCHEMA_VERSION, selfExtensionPaths } from './home.js'
 
@@ -15,6 +18,8 @@ export const BACKUP_EXCLUDES = [
   'session-store',
   'personal-memory',
   'environment-variables',
+  'unsealed-candidate-workspaces',
+  'developing-candidate-workspaces',
 ] as const
 
 export interface SelfExtensionBackupManifest {
@@ -40,11 +45,12 @@ function listRelativeFiles(root: string): string[] {
   return out.sort()
 }
 
-function assertNotNested(dest: string, sourceRoot: string): void {
-  const resolvedDest = path.resolve(dest)
-  const resolvedSource = path.resolve(sourceRoot)
-  if (resolvedDest === resolvedSource || resolvedDest.startsWith(`${resolvedSource}${path.sep}`)) {
-    throw new PersistenceIntegrityError('backup destination must not be inside the durable Self-Extension tree')
+/** Reject same path, ancestor, or descendant in either direction. */
+export function assertDisjointPaths(left: string, right: string, message: string): void {
+  const a = path.resolve(left)
+  const b = path.resolve(right)
+  if (a === b || a.startsWith(`${b}${path.sep}`) || b.startsWith(`${a}${path.sep}`)) {
+    throw new PersistenceIntegrityError(message)
   }
 }
 
@@ -60,18 +66,82 @@ export function parseBackupManifest(parsed: unknown): SelfExtensionBackupManifes
   return parsed as SelfExtensionBackupManifest
 }
 
-/** Copy authority + sealed artifacts. Does not copy secrets, sessions, or memory. */
+function loadIndex(indexPath: string): CandidateIndexFile {
+  if (!existsSync(indexPath)) return { schemaVersion: SELF_EXTENSION_SCHEMA_VERSION, candidates: [] }
+  return parseCandidateIndexFile(JSON.parse(readFileSync(indexPath, 'utf8')))
+}
+
+function ownerKey(owner: string, version: string): string {
+  return `${owner}@${version}`
+}
+
+function snapshotOwnerKeys(authority: AuthorityFile): Set<string> {
+  const keys = new Set<string>()
+  for (const snapshot of [authority.recovery.current, authority.recovery.lastKnownGood, authority.recovery.rollbackTarget]) {
+    for (const item of snapshot?.owners ?? []) {
+      if (item.owner.startsWith('generated/') && item.status === 'active') keys.add(ownerKey(item.owner, item.version))
+    }
+  }
+  return keys
+}
+
+/** Sealed artifacts that approvals, LKG/current, or index retention still depend on. */
+export function requiredBackupRows(authority: AuthorityFile, rows: readonly CandidateIndexRow[]): CandidateIndexRow[] {
+  const approved = new Set(authority.governance.approvals.map((item) => item.candidateId))
+  const owners = snapshotOwnerKeys(authority)
+  return rows.filter((row) => {
+    if (!row.record.sealed) return false
+    const retention = row.retention === 'active' || row.retention === 'sealed' || row.retention === 'rollback-retained'
+    return retention || approved.has(row.record.id) || owners.has(ownerKey(row.record.owner, row.record.version))
+  })
+}
+
+function verifyCandidateDigest(artifactRoot: string, row: CandidateIndexRow): void {
+  if (!existsSync(artifactRoot)) {
+    throw new PersistenceIntegrityError(`missing-sealed-artifact:${row.record.id}`)
+  }
+  if (row.record.digest === undefined) {
+    throw new PersistenceIntegrityError(`missing-candidate-digest:${row.record.id}`)
+  }
+  const digest = digestFiles(artifactRoot, listSourceFiles(artifactRoot))
+  if (digest !== row.record.digest) {
+    throw new PersistenceIntegrityError(`digest-mismatch:${row.record.id}`)
+  }
+}
+
+function writeFilteredIndex(destDir: string, rows: readonly CandidateIndexRow[]): void {
+  mkdirSync(destDir, { recursive: true })
+  writeJsonAtomic(path.join(destDir, 'index.json'), {
+    schemaVersion: SELF_EXTENSION_SCHEMA_VERSION,
+    candidates: rows.map((row) => ({
+      record: { ...row.record, workspaceRoot: row.record.id },
+      retention: row.retention,
+    })),
+  })
+}
+
+function copyRequiredArtifacts(sourceArea: string, destArea: string, rows: readonly CandidateIndexRow[]): void {
+  writeFilteredIndex(destArea, rows)
+  for (const row of rows) {
+    const from = path.join(sourceArea, row.record.id)
+    verifyCandidateDigest(from, row)
+    cpSync(from, path.join(destArea, row.record.id), { recursive: true })
+  }
+}
+
+/** Copy authority + required sealed artifacts. Does not copy secrets, sessions, memory, or unsealed workspaces. */
 export function backupSelfExtension(assistantHome: string, dest: string): SelfExtensionBackupManifest {
   const home = selfExtensionPaths(assistantHome)
   if (!existsSync(home.authorityPath)) throw new PersistenceIntegrityError('no authority.json to back up')
-  parseAuthorityFile(JSON.parse(readFileSync(home.authorityPath, 'utf8')))
-  assertNotNested(dest, home.root)
+  const authority = parseAuthorityFile(JSON.parse(readFileSync(home.authorityPath, 'utf8')))
+  const index = loadIndex(home.candidateIndexPath)
+  const required = requiredBackupRows(authority, index.candidates)
+  assertDisjointPaths(dest, home.root, 'backup destination must be disjoint from the durable Self-Extension tree')
+  for (const row of required) verifyCandidateDigest(path.join(home.candidateArea, row.record.id), row)
   rmSync(dest, { recursive: true, force: true })
   mkdirSync(dest, { recursive: true })
   cpSync(home.authorityPath, path.join(dest, 'authority.json'))
-  if (existsSync(home.candidateArea)) {
-    cpSync(home.candidateArea, path.join(dest, 'candidates'), { recursive: true })
-  }
+  copyRequiredArtifacts(home.candidateArea, path.join(dest, 'candidates'), required)
   const files = listRelativeFiles(dest)
   const manifest: SelfExtensionBackupManifest = {
     kind: BACKUP_KIND,
@@ -85,31 +155,29 @@ export function backupSelfExtension(assistantHome: string, dest: string): SelfEx
   return parseBackupManifest(JSON.parse(readFileSync(path.join(dest, 'manifest.json'), 'utf8')))
 }
 
-/** Replace durable Self-Extension files. Next boot still runs schema/digest/remount checks. */
+/** Replace durable Self-Extension files only after schema and artifact-digest checks. */
 export function restoreSelfExtension(source: string, assistantHome: string): void {
   const manifestPath = path.join(source, 'manifest.json')
   if (!existsSync(manifestPath)) throw new PersistenceIntegrityError('backup is missing manifest.json')
   parseBackupManifest(JSON.parse(readFileSync(manifestPath, 'utf8')))
   const authorityPath = path.join(source, 'authority.json')
   if (!existsSync(authorityPath)) throw new PersistenceIntegrityError('backup is missing authority.json')
-  parseAuthorityFile(JSON.parse(readFileSync(authorityPath, 'utf8')))
-  const indexPath = path.join(source, 'candidates', 'index.json')
-  if (existsSync(indexPath)) {
-    const index = JSON.parse(readFileSync(indexPath, 'utf8')) as { schemaVersion?: unknown }
-    if (index.schemaVersion !== SELF_EXTENSION_SCHEMA_VERSION) {
-      throw new PersistenceSchemaError(`unsupported candidate index schema ${String(index.schemaVersion)}`)
-    }
-  }
+  const authority = parseAuthorityFile(JSON.parse(readFileSync(authorityPath, 'utf8')))
+  const sourceArea = path.join(source, 'candidates')
+  const required = requiredBackupRows(authority, loadIndex(path.join(sourceArea, 'index.json')).candidates)
+  for (const row of required) verifyCandidateDigest(path.join(sourceArea, row.record.id), row)
   const dest = selfExtensionPaths(assistantHome)
-  assertNotNested(source, dest.root)
+  assertDisjointPaths(source, dest.root, 'restore source must be disjoint from the durable Self-Extension tree')
   const staging = `${dest.root}.restore-${process.pid}`
   rmSync(staging, { recursive: true, force: true })
-  mkdirSync(staging, { recursive: true })
-  cpSync(authorityPath, path.join(staging, 'authority.json'))
-  if (existsSync(path.join(source, 'candidates'))) {
-    cpSync(path.join(source, 'candidates'), path.join(staging, 'candidates'), { recursive: true })
+  try {
+    mkdirSync(staging, { recursive: true })
+    cpSync(authorityPath, path.join(staging, 'authority.json'))
+    copyRequiredArtifacts(sourceArea, path.join(staging, 'candidates'), required)
+    mkdirSync(path.dirname(dest.root), { recursive: true })
+    rmSync(dest.root, { recursive: true, force: true })
+    renameSync(staging, dest.root)
+  } finally {
+    rmSync(staging, { recursive: true, force: true })
   }
-  mkdirSync(path.dirname(dest.root), { recursive: true })
-  rmSync(dest.root, { recursive: true, force: true })
-  renameSync(staging, dest.root)
 }

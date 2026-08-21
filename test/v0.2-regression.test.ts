@@ -1,12 +1,12 @@
 import assert from 'node:assert/strict'
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, it } from 'node:test'
 import { CallId } from '@deepseek-ai/dsh-llm'
-import { GovernanceAuthorityError, SimulatedCrashError, TrustedAuthorityCredential } from '../src/domain/governance/index.js'
+import { ActivationDeniedError, GovernanceAuthorityError, SimulatedCrashError, TrustedAuthorityCredential } from '../src/domain/governance/index.js'
 import { CORE_KNOWN_SEAMS } from '../src/domain/resolution/index.js'
-import { formatOperatorStatus, operatorStatus } from '../src/domain/self-extension/index.js'
+import { PersistenceIntegrityError, formatOperatorStatus, operatorStatus } from '../src/domain/self-extension/index.js'
 import { bootAssistantControl, type AssistantControl } from '../src/runtime/boot.js'
 
 const PLUGIN = `export const name = 'generated-v02-probe'
@@ -352,6 +352,76 @@ describe('v0.2.x release-confidence suite', () => {
       assert.equal(restored.ctx.extensionGovernance.inspectApproval(candidate.id)?.decision, 'approved-for-exact-diff')
     } finally {
       await restored.ctx.fiber.dispose()
+    }
+  })
+
+  it('restore fails closed when an approved-but-inactive artifact was tampered in the backup', async () => {
+    const home = mkdtempSync(join(tmpdir(), 'dsh-v02-tamper-src-'))
+    const backup = mkdtempSync(join(tmpdir(), 'dsh-v02-tamper-bak-'))
+    const dest = mkdtempSync(join(tmpdir(), 'dsh-v02-tamper-dst-'))
+    const { first, created, human, fingerprint } = await prepareCandidate(home, false)
+    try {
+      first.recoveryRoot.backup(human, backup)
+    } finally {
+      await first.ctx.fiber.dispose()
+    }
+    const plugin = join(backup, 'candidates', created.id, 'src', 'plugin.js')
+    writeFileSync(plugin, `${readFileSync(plugin, 'utf8')}\nexport const tampered = true\n`)
+    const empty = await bootAssistantControl({ home: dest })
+    const destHuman = empty.recoveryRoot.issueAuthority({ kind: 'human-control', source: 'operator-cli' })
+    try {
+      assert.throws(() => empty.recoveryRoot.restore(destHuman, backup), PersistenceIntegrityError)
+    } finally {
+      await empty.ctx.fiber.dispose()
+    }
+    const after = await bootAssistantControl({ home: dest })
+    try {
+      assert.equal(after.ctx.tools.get('v02_probe_ping'), undefined)
+      assert.equal(after.ctx.capabilityRegistry.get('generated/v02-probe', '0.1.0'), undefined)
+      assert.equal(after.ctx.candidateWorkspace.list().some((item) => item.id === created.id), false)
+      await assert.rejects(
+        () => after.recoveryRoot.activate(created.id, after.recoveryRoot.issueAuthority({ kind: 'human-control', source: 'operator-cli' })),
+        ActivationDeniedError,
+      )
+      void fingerprint
+    } finally {
+      await after.ctx.fiber.dispose()
+    }
+  })
+
+  it('backup copies only required sealed artifacts and rejects overlapping paths', async () => {
+    const home = mkdtempSync(join(tmpdir(), 'dsh-v02-bak-src-'))
+    const backup = mkdtempSync(join(tmpdir(), 'dsh-v02-bak-out-'))
+    const { first, created, human } = await prepareCandidate(home, true)
+    const developing = first.ctx.candidateWorkspace.create({
+      review: first.ctx.capabilityResolution.review({
+        capability: 'v02.probe.draft',
+        need: 'unsealed workspace must not enter recovery backup',
+        inventory: { complete: true, seams: CORE_KNOWN_SEAMS },
+      }),
+      owner: 'generated/v02-draft',
+      version: '0.1.0',
+      manifest: { capabilities: ['v02.probe.draft'], tools: ['v02_probe_draft'], entryPoints: ['src/plugin.js'] },
+    })
+    first.ctx.candidateWorkspace.writeFile(developing.id, 'src/plugin.js', 'export const draft = true\n')
+    const authorityBefore = readFileSync(join(home, 'self-extension', 'authority.json'), 'utf8')
+    try {
+      assert.throws(() => first.recoveryRoot.backup(human, home), PersistenceIntegrityError)
+      assert.throws(() => first.recoveryRoot.backup(human, join(home, 'self-extension')), PersistenceIntegrityError)
+      assert.throws(() => first.recoveryRoot.backup(human, join(home, 'self-extension', 'candidates')), PersistenceIntegrityError)
+      assert.equal(readFileSync(join(home, 'self-extension', 'authority.json'), 'utf8'), authorityBefore)
+      assert.ok(existsSync(join(home, 'self-extension', 'candidates', created.id)))
+      assert.ok(existsSync(join(home, 'self-extension', 'candidates', developing.id)))
+      const manifest = first.recoveryRoot.backup(human, backup)
+      assert.ok(manifest.excludes.includes('unsealed-candidate-workspaces'))
+      assert.ok(existsSync(join(backup, 'candidates', created.id, 'src', 'plugin.js')))
+      assert.equal(existsSync(join(backup, 'candidates', developing.id)), false)
+      const index = JSON.parse(readFileSync(join(backup, 'candidates', 'index.json'), 'utf8')) as {
+        candidates: { record: { id: string } }[]
+      }
+      assert.deepEqual(index.candidates.map((row) => row.record.id), [created.id])
+    } finally {
+      await first.ctx.fiber.dispose()
     }
   })
 
