@@ -206,7 +206,7 @@ export class ResolutionService implements CapabilityResolution {
     if (fileOwner === undefined) return []
     return [
       `${fileOwner.owner} already owns generic files.read / files.delete, but those capabilities are insufficient for ${capability} (vault-relative identity, frontmatter, tags, wikilinks).`,
-      'The new plugin must reuse a confined vault-root file path and must not register a second generic filesystem service or a parallel files.* owner.',
+      'The new plugin must reuse integrations.files confined-root primitives for vault IO and must not register a second generic filesystem service, a parallel files.* owner, or a raw node:fs vault path.',
     ]
   }
 

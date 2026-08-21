@@ -1,9 +1,9 @@
-import { execFileSync } from 'node:child_process'
 import { existsSync, readFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import path from 'node:path'
 import { digestFiles } from './digest.js'
 import { listSourceFiles } from './files.js'
+import { runRestrictedCandidateTests, runnerUnavailable } from './restricted-runner.js'
 import type { CandidateRecord, ValidationReport, ValidationStageResult, ValidationStageStatus } from './types.js'
 import { ALLOWED_VALIDATION_TASKS } from './types.js'
 
@@ -125,22 +125,21 @@ function runTests(root: string, files: readonly string[]): ValidationStageResult
     )
   }
   try {
-    const env = { ...process.env }
-    delete env.NODE_TEST_CONTEXT
-    delete env.NODE_OPTIONS
-    const output = execFileSync(process.execPath, ['--test', ...executable.map((file) => path.join(root, file))], {
-      cwd: root,
-      encoding: 'utf8',
-      timeout: 30_000,
-      stdio: ['ignore', 'pipe', 'pipe'],
-      env,
-    })
-    return stage('tests', 'passed', `Executed ${executable.length} candidate test file(s).`, {
+    const output = runRestrictedCandidateTests(root, executable)
+    return stage('tests', 'passed', `Executed ${executable.length} candidate test file(s) in the restricted runner.`, {
       diagnostics: output.slice(0, 2000),
     })
   } catch (error) {
-    const failed = error as { stdout?: string; stderr?: string; message?: string }
-    return stage('tests', 'failed', 'Candidate tests failed.', {
+    const failed = error as { stdout?: string; stderr?: string; message?: string; code?: string }
+    if (runnerUnavailable(failed)) {
+      return stage(
+        'tests',
+        'unresolved',
+        'Restricted validation runner is unavailable; candidate tests were not executed on the host.',
+        { diagnostics: `${failed.stderr ?? failed.message ?? ''}`.slice(0, 2000) },
+      )
+    }
+    return stage('tests', 'failed', 'Candidate tests failed in the restricted runner.', {
       diagnostics: `${failed.stdout ?? ''}\n${failed.stderr ?? failed.message ?? ''}`.slice(0, 2000),
     })
   }

@@ -1,8 +1,4 @@
-import { existsSync, readFileSync } from 'node:fs'
-import path from 'node:path'
-import { fileURLToPath } from 'node:url'
 import { createNote, loadNotes, parseNote, searchNotes } from './notes.js'
-import { readVaultFile, VaultEscapeError } from './vault.js'
 
 function textOutput() {
   return {
@@ -13,18 +9,19 @@ function textOutput() {
   }
 }
 
-function approvedRoot() {
-  if (process.env.DSH_ASSISTANT_OBSIDIAN_VAULT) return process.env.DSH_ASSISTANT_OBSIDIAN_VAULT
-  const config = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'vault.json')
-  if (!existsSync(config)) throw new Error('Obsidian vault root is not configured')
-  return JSON.parse(readFileSync(config, 'utf8')).vaultRoot
+function configuredVaultRoot() {
+  const approved = process.env.DSH_ASSISTANT_OBSIDIAN_VAULT
+  if (typeof approved !== 'string' || approved === '') {
+    throw new Error('Obsidian vault root is not configured')
+  }
+  return approved
 }
 
 function assertApprovedRoot(requested) {
-  const approved = path.resolve(approvedRoot())
+  const approved = configuredVaultRoot()
   if (requested === undefined || requested === '') return approved
-  if (path.resolve(requested) !== approved) {
-    throw new VaultEscapeError('tool vaultRoot must match the approved vault root')
+  if (requested !== approved) {
+    throw new Error('tool vaultRoot must match the approved vault root')
   }
   return approved
 }
@@ -33,10 +30,15 @@ function json(value) {
   return JSON.stringify(value)
 }
 
+function filesSeam(ctx) {
+  return ctx.integrations.hub.files()
+}
+
 export const name = 'generated-obsidian-vault'
-export const inject = ['tools']
+export const inject = ['tools', 'integrations']
 
 export function apply(ctx) {
+  const files = filesSeam(ctx)
   const disposers = [
     ctx.tools.register({
       name: 'obsidian_notes_list',
@@ -45,7 +47,7 @@ export function apply(ctx) {
       output: textOutput(),
       async execute(args) {
         const root = assertApprovedRoot(args.vaultRoot)
-        return json(loadNotes(root).map((note) => ({ id: note.id, title: note.title, tags: note.tags })))
+        return json((await loadNotes(files, root)).map((note) => ({ id: note.id, title: note.title, tags: note.tags })))
       },
     }),
     ctx.tools.register({
@@ -55,7 +57,7 @@ export function apply(ctx) {
       output: textOutput(),
       async execute(args) {
         const root = assertApprovedRoot(args.vaultRoot)
-        return json(parseNote(String(args.id), readVaultFile(root, String(args.id))))
+        return json(parseNote(String(args.id), await files.readText({ root, path: String(args.id) })))
       },
     }),
     ctx.tools.register({
@@ -72,7 +74,7 @@ export function apply(ctx) {
       output: textOutput(),
       async execute(args) {
         const root = assertApprovedRoot(args.vaultRoot)
-        return json(searchNotes(loadNotes(root), args).map((note) => ({ id: note.id, title: note.title, tags: note.tags })))
+        return json(searchNotes(await loadNotes(files, root), args).map((note) => ({ id: note.id, title: note.title, tags: note.tags })))
       },
     }),
     ctx.tools.register({
@@ -93,7 +95,7 @@ export function apply(ctx) {
         const wikilinks = args.wikilinks === undefined || args.wikilinks === ''
           ? []
           : String(args.wikilinks).split(',').map((item) => item.trim()).filter(Boolean)
-        return json(createNote(root, {
+        return json(await createNote(files, root, {
           id: String(args.id),
           title: String(args.title),
           body: args.body === undefined ? '' : String(args.body),

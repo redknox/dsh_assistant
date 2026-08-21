@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { cpSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync } from 'node:fs'
+import { cpSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, it } from 'node:test'
@@ -158,6 +158,29 @@ describe('Obsidian Self-Extension vertical slice', () => {
       const reread = await tool(ctx, 'obsidian_notes_read', { id: 'Projects/Beta.md' })
       assert.ok(reread.wikilinks.includes('Alice'))
       assert.ok(reread.wikilinks.includes('Projects/Alpha'))
+
+      const files = ctx.integrations.hub.files()
+      const accesses = files.confinedAccesses()
+      assert.ok(accesses.some((item) => item.op === 'list' && item.root === vault))
+      assert.ok(accesses.some((item) => item.op === 'read' && item.path === 'Projects/Alpha.md'))
+      assert.ok(accesses.some((item) => item.op === 'write' && item.path === 'Projects/Beta.md'))
+      for (const source of ['src/plugin.js', 'src/notes.js']) {
+        assert.doesNotMatch(readFileSync(join(candidateSource, source), 'utf8'), /node:fs/)
+      }
+
+      const outside = mkdtempSync(join(tmpdir(), 'obsidian-outside-'))
+      writeFileSync(join(outside, 'secret.md'), '---\ntitle: leaked\n---\n#leaked leaked-body\n')
+      symlinkSync(outside, join(vault, 'link'))
+      const afterLink = await tool(ctx, 'obsidian_notes_list', {})
+      assert.equal(afterLink.some((item: { id: string }) => item.id.includes('secret')), false)
+      const leaked = await tool(ctx, 'obsidian_notes_search', { tag: 'leaked' })
+      assert.equal(leaked.length, 0)
+      await assert.rejects(() => tool(ctx, 'obsidian_notes_read', { id: 'link/secret.md' }))
+      await assert.rejects(() => tool(ctx, 'obsidian_notes_create', {
+        id: 'link/nested.md',
+        title: 'nope',
+      }))
+      rmSync(outside, { recursive: true, force: true })
 
       await assert.rejects(() => tool(ctx, 'obsidian_notes_read', { id: '../outside.md' }))
       await assert.rejects(() => tool(ctx, 'obsidian_notes_create', {

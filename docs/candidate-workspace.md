@@ -74,7 +74,7 @@ Default stages, each with an explicit status (`passed` / `failed` / `blocked` / 
 2. `package.inspect` — dependencies are inspectable. Install/postinstall scripts are **not** executed and make the stage `blocked`.
 3. `source.boundary` — no DSH package-internal `src/` imports
 4. `typecheck` — offline TypeScript check when `.ts` sources exist
-5. `tests` — Node-native candidate test files (`.js` / `.mjs` / `.cjs`) are executed with `node --test`. TypeScript-only test files stay `unresolved`. A failing suite is `failed`.
+5. `tests` — Node-native candidate test files (`.js` / `.mjs` / `.cjs`) run in a restricted runner (`node --permission`, host-owned preload). The runner does not inherit host `process.env`, does not grant network or child-process authority, and allows filesystem access only inside the candidate workspace. Candidate runtime permissions are not validation-time permissions. TypeScript-only test files stay `unresolved`. If that isolation is unavailable, the stage stays `unresolved` rather than executing on the host. A failing or denied suite is `failed`.
 6. `bundle.inspect`
 7. `digest` — SHA-256 of candidate source files
 

@@ -1,3 +1,4 @@
+import { ConfinedRootFiles } from './confined-root-files.js'
 import { IntegrationHub, type IntegrationProviders } from '../../domain/integrations/hub.js'
 import {
   IntegrationError,
@@ -149,9 +150,26 @@ class FakeContacts extends FakeBase<'contacts'> implements ContactsProvider {
 
 class FakeFiles extends FakeBase<'files'> implements FilesProvider {
   readonly entries: FileEntry[] = [{ id: 'f-1', name: 'notes.md', kind: 'file' }]
+  private readonly confined = new ConfinedRootFiles()
 
   constructor(state: FakeState) {
     super('files', state)
+  }
+
+  confinedAccesses() {
+    return this.confined.confinedAccesses()
+  }
+
+  async listTextFiles(input: { root: string; prefix?: string }) {
+    return this.confined.listTextFiles(input)
+  }
+
+  async readText(input: { root: string; path: string }) {
+    return this.confined.readText(input)
+  }
+
+  async writeText(input: { root: string; path: string; content: string }) {
+    return this.confined.writeText(input)
   }
 
   async listFiles(query: { path?: string } & PageQuery): Promise<Page<FileEntry>> {

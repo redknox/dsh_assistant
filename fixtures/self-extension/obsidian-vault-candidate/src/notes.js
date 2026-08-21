@@ -1,5 +1,3 @@
-import { listMarkdown, readVaultFile, writeVaultFile } from './vault.js'
-
 const FRONTMATTER = /^---\r?\n([\s\S]*?)\r?\n---\r?\n?/
 const WIKILINK = /\[\[([^\]|#]+)(?:#[^\]|]*)?(?:\|[^\]]*)?\]\]/g
 const HASH_TAG = /(?:^|[\s])#([A-Za-z0-9_/-]+)/g
@@ -83,8 +81,9 @@ export function renderNote(input) {
   return matter.join('\n')
 }
 
-export function loadNotes(vaultRoot) {
-  return listMarkdown(vaultRoot).map((id) => parseNote(id, readVaultFile(vaultRoot, id)))
+export async function loadNotes(files, vaultRoot) {
+  const ids = await files.listTextFiles({ root: vaultRoot })
+  return Promise.all(ids.map(async (id) => parseNote(id, await files.readText({ root: vaultRoot, path: id }))))
 }
 
 export function searchNotes(notes, query = {}) {
@@ -101,9 +100,9 @@ export function searchNotes(notes, query = {}) {
   })
 }
 
-export function createNote(vaultRoot, input) {
+export async function createNote(files, vaultRoot, input) {
   const relative = input.id.endsWith('.md') ? input.id : `${input.id}.md`
   const content = renderNote(input)
-  writeVaultFile(vaultRoot, relative, content)
+  await files.writeText({ root: vaultRoot, path: relative, content })
   return parseNote(relative, content)
 }

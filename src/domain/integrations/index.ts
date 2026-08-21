@@ -16,6 +16,8 @@ export {
   type Contact,
   type ContactsProvider,
   type FileEntry,
+  type ConfinedFileAccess,
+  type ConfinedFileOp,
   type FilesProvider,
   type IntegrationProviders,
   type MailMessage,
