@@ -1,5 +1,6 @@
 import type { Context } from '@deepseek-ai/cordis'
 import * as assistantPlugin from './plugins/assistant-plugin.js'
+import * as integrationsPlugin from './plugins/integrations-plugin.js'
 import * as knowledgePlugin from './plugins/knowledge-plugin.js'
 import * as memoryPlugin from './plugins/memory-plugin.js'
 
@@ -10,6 +11,7 @@ export const inject = ['systemPrompt', 'agents']
 export function apply(ctx: Context) {
   ctx.plugin(memoryPlugin)
   ctx.plugin(knowledgePlugin)
+  ctx.plugin(integrationsPlugin)
   ctx.plugin(assistantPlugin)
 }
 
@@ -19,3 +21,5 @@ export { JsonFileMemoryPersistence } from './adapters/memory/json-file-persisten
 export { ingestLocalTextFile } from './adapters/knowledge/local-file-ingest.js'
 export * from './domain/memory/index.js'
 export * from './domain/knowledge/index.js'
+export * from './domain/integrations/index.js'
+export { FakeIntegrationSuite } from './adapters/integrations/fake-providers.js'
