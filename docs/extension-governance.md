@@ -76,7 +76,7 @@ Registry commit happens only after health verification. A failed prepare/health 
 
 Prepare / health / commit / restore use a production `CordisActivationRuntime` that resolves the sealed candidate's plugin entry from workspace / `entryPoints` / `package.json` and mounts that artifact through `ctx.plugin`. For `evolve-owner`, the prior owner fiber is disposed before the candidate mounts so old and new versions are never simultaneously authoritative; failure and rollback remount the previous owner. Health only credits tools/services/providers the candidate **produced** after that swap. `InMemoryActivationRuntime` remains a unit-test fake only.
 
-This issue still does not implement a first autonomous generated-plugin vertical slice.
+The first generated-plugin vertical slice is the governed Obsidian Vault path in [docs/obsidian-self-extension.md](./obsidian-self-extension.md).
 
 ## Last Known Good
 

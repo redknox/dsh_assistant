@@ -74,7 +74,7 @@ Default stages, each with an explicit status (`passed` / `failed` / `blocked` / 
 2. `package.inspect` — dependencies are inspectable. Install/postinstall scripts are **not** executed and make the stage `blocked`.
 3. `source.boundary` — no DSH package-internal `src/` imports
 4. `typecheck` — offline TypeScript check when `.ts` sources exist
-5. `tests` — candidate tests are listed, not executed against live services (`unresolved` if files exist)
+5. `tests` — Node-native candidate test files (`.js` / `.mjs` / `.cjs`) are executed with `node --test`. TypeScript-only test files stay `unresolved`. A failing suite is `failed`.
 6. `bundle.inspect`
 7. `digest` — SHA-256 of candidate source files
 

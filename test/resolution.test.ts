@@ -114,6 +114,28 @@ describe('capability resolution review', () => {
     assert.match(review.rationale, /1–5|1-5/)
   })
 
+  it('does not treat files.read as complete Obsidian vault support', () => {
+    const { resolver } = seededResolver()
+    const files = resolver.review({
+      capability: 'files.read',
+      need: 'list files through the existing fake files provider',
+    })
+    assert.equal(files.kind, 'reuse')
+    const review = resolver.review({
+      capability: 'obsidian.notes.read',
+      need: 'search notes, read frontmatter/tags, resolve vault-relative notes, and create a note with wikilinks',
+      behavior: 'vault-relative identity, YAML frontmatter, #tags, and [[wikilinks]]',
+      alreadySatisfied: false,
+      inventory: { complete: true, seams: CORE_KNOWN_SEAMS },
+    })
+    assert.equal(review.kind, 'new-plugin')
+    assert.notEqual(review.kind, 'reuse')
+    rejected(review, 'reuse')
+    assert.match(review.implications.join('\n'), /files\.read/)
+    assert.match(review.implications.join('\n'), /insufficient/)
+    assert.match(review.implications.join('\n'), /must not register a second generic filesystem/)
+  })
+
   it('F. treats unknown without a complete inventory as insufficient-information', () => {
     const { resolver } = seededResolver()
     const review = resolver.review({

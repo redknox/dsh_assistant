@@ -234,6 +234,44 @@ describe('candidate workspace and validation', () => {
     assert.equal(workspace.get(candidate.id).lifecycle, 'validation-incomplete')
   })
 
+  it('executes Node-native candidate tests instead of marking them unresolved', () => {
+    const { workspace } = seeded()
+    const candidate = workspace.create({
+      review: review(),
+      owner: 'managed/integrations',
+      version: '0.2.0',
+    })
+    workspace.writeFile(candidate.id, 'package.json', `${JSON.stringify({ type: 'module' })}\n`)
+    workspace.writeFile(candidate.id, 'src/ok.js', 'export const value = "ok"\n')
+    workspace.writeFile(candidate.id, 'src/ok.test.js', `import assert from 'node:assert/strict'
+import { test } from 'node:test'
+import { value } from './ok.js'
+test('runs', () => { assert.equal(value, 'ok') })
+`)
+    const report = workspace.validate(candidate.id)
+    assert.equal(report.passed, true)
+    assert.equal(report.stages.find((item) => item.name === 'tests')?.status, 'passed')
+    assert.equal(workspace.get(candidate.id).lifecycle, 'validated')
+  })
+
+  it('fails validation when executed candidate tests fail', () => {
+    const { workspace } = seeded()
+    const candidate = workspace.create({
+      review: review(),
+      owner: 'managed/integrations',
+      version: '0.2.0',
+    })
+    workspace.writeFile(candidate.id, 'package.json', `${JSON.stringify({ type: 'module' })}\n`)
+    workspace.writeFile(candidate.id, 'src/fail.test.js', `import assert from 'node:assert/strict'
+import { test } from 'node:test'
+test('fails', () => { assert.equal(1, 2) })
+`)
+    const report = workspace.validate(candidate.id)
+    assert.equal(report.passed, false)
+    assert.equal(report.stages.find((item) => item.name === 'tests')?.status, 'failed')
+    assert.equal(workspace.get(candidate.id).lifecycle, 'validation-failed')
+  })
+
   it('does not validate a candidate that only declares a postinstall script', () => {
     const { workspace } = seeded()
     const candidate = workspace.create({

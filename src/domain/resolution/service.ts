@@ -182,6 +182,7 @@ export class ResolutionService implements CapabilityResolution {
         [
           'A new plugin remains a candidate until later governance approval.',
           'This recommendation is not authorization to install or mount code.',
+          ...this.relatedFileImplications(capability, records),
         ],
       )
     }
@@ -195,6 +196,18 @@ export class ResolutionService implements CapabilityResolution {
       assumptions: [],
       unresolved: ['Need an explicit complete architecture inventory, or a known owner/seam/provider/plugin fact.'],
     })
+  }
+
+  private relatedFileImplications(capability: string, records: readonly RegistryRecord[]): string[] {
+    if (domainOf(capability) === 'files') return []
+    const fileOwner = records.find((record) => (
+      record.status === 'active' && record.capabilities.some((item) => domainOf(item.id) === 'files')
+    ))
+    if (fileOwner === undefined) return []
+    return [
+      `${fileOwner.owner} already owns generic files.read / files.delete, but those capabilities are insufficient for ${capability} (vault-relative identity, frontmatter, tags, wikilinks).`,
+      'The new plugin must reuse a confined vault-root file path and must not register a second generic filesystem service or a parallel files.* owner.',
+    ]
   }
 
   private step(option: ResolutionOption, accepted: boolean, reason: string): ResolutionStep {

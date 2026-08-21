@@ -1,3 +1,4 @@
+import { execFileSync } from 'node:child_process'
 import { existsSync, readFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import path from 'node:path'
@@ -109,13 +110,40 @@ function runTypecheck(root: string, files: readonly string[]): ValidationStageRe
   }
 }
 
-function runTests(files: readonly string[]): ValidationStageResult {
+function runTests(root: string, files: readonly string[]): ValidationStageResult {
   const tests = files.filter((file) => file.includes('.test.') || file.startsWith('test/'))
-  return tests.length === 0
-    ? stage('tests', 'not-applicable', 'No candidate tests declared. Offline validation does not invent a live suite.')
-    : stage('tests', 'unresolved', 'Candidate test files are inspectable but are not executed in this pipeline.', {
-      diagnostics: tests.join(', '),
+  if (tests.length === 0) {
+    return stage('tests', 'not-applicable', 'No candidate tests declared. Offline validation does not invent a live suite.')
+  }
+  const executable = tests.filter((file) => file.endsWith('.js') || file.endsWith('.mjs') || file.endsWith('.cjs'))
+  if (executable.length === 0) {
+    return stage(
+      'tests',
+      'unresolved',
+      'Candidate test files are inspectable but this pipeline only executes Node-native test files.',
+      { diagnostics: tests.join(', ') },
+    )
+  }
+  try {
+    const env = { ...process.env }
+    delete env.NODE_TEST_CONTEXT
+    delete env.NODE_OPTIONS
+    const output = execFileSync(process.execPath, ['--test', ...executable.map((file) => path.join(root, file))], {
+      cwd: root,
+      encoding: 'utf8',
+      timeout: 30_000,
+      stdio: ['ignore', 'pipe', 'pipe'],
+      env,
     })
+    return stage('tests', 'passed', `Executed ${executable.length} candidate test file(s).`, {
+      diagnostics: output.slice(0, 2000),
+    })
+  } catch (error) {
+    const failed = error as { stdout?: string; stderr?: string; message?: string }
+    return stage('tests', 'failed', 'Candidate tests failed.', {
+      diagnostics: `${failed.stdout ?? ''}\n${failed.stderr ?? failed.message ?? ''}`.slice(0, 2000),
+    })
+  }
 }
 
 function requestedUnsafe(record: CandidateRecord): string[] {
@@ -145,7 +173,7 @@ export function runValidation(record: CandidateRecord): ValidationReport {
   stages.push(inspectPackage(record.workspaceRoot))
   stages.push(inspectBoundary(record.workspaceRoot, files))
   stages.push(runTypecheck(record.workspaceRoot, files))
-  stages.push(runTests(files))
+  stages.push(runTests(record.workspaceRoot, files))
   stages.push(inspectBundle(record.workspaceRoot))
   const digest = digestFiles(record.workspaceRoot, files)
   stages.push(stage('digest', 'passed', `Bound validation evidence to digest ${digest.slice(0, 12)}.`))
