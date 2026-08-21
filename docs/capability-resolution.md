@@ -7,6 +7,7 @@ It consumes the Capability Registry. It does **not** answer **What do I have?** 
 ```text
 Capability Registry        → What do I have?       [implemented]
 Capability Resolution      → What should change?   [this document]
+Candidate Workspace        → Can I build it?       [implemented]
 Extension Governance       → May I change it?      [later]
 ```
 

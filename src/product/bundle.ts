@@ -12,6 +12,8 @@ import type { PolicyPluginConfig } from '../plugins/policy-plugin.js'
 import * as registryPlugin from '../plugins/registry-plugin.js'
 import type { RegistryPluginConfig } from '../plugins/registry-plugin.js'
 import * as resolutionPlugin from '../plugins/resolution-plugin.js'
+import * as candidatePlugin from '../plugins/candidate-plugin.js'
+import type { CandidatePluginConfig } from '../plugins/candidate-plugin.js'
 
 export const name = 'dsh-assistant'
 export const inject = ['systemPrompt', 'agents']
@@ -19,6 +21,7 @@ export const inject = ['systemPrompt', 'agents']
 /** Product-bundle config. Secrets never belong here; pass local paths only. */
 export interface AssistantBundleConfig {
   readonly registry?: RegistryPluginConfig
+  readonly candidate?: CandidatePluginConfig
   readonly memory?: MemoryPluginConfig
   readonly knowledge?: KnowledgePluginConfig
   readonly policy?: PolicyPluginConfig
@@ -29,6 +32,7 @@ export interface AssistantBundleConfig {
 export async function apply(ctx: Context, config: AssistantBundleConfig = {}) {
   await ctx.plugin(registryPlugin, config.registry)
   await ctx.plugin(resolutionPlugin)
+  await ctx.plugin(candidatePlugin, config.candidate)
   await ctx.plugin(memoryPlugin, config.memory)
   await ctx.plugin(knowledgePlugin, config.knowledge)
   await ctx.plugin(integrationsPlugin)

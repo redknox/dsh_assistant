@@ -1,6 +1,6 @@
 # Self-Extension architecture and governance
 
-Status: governance contract is **Designed** and remains normative. The Capability Registry (**What do I have?**) is **Verified** — see [docs/capability-registry.md](./capability-registry.md). Capability Resolution Review (**What should change?**) is **Verified** — see [docs/capability-resolution.md](./capability-resolution.md). Candidate workspace, installer, and generated-plugin runtime are still **Unsupported**.
+Status: governance contract is **Designed** and remains normative. The Capability Registry (**What do I have?**) is **Verified** — see [docs/capability-registry.md](./capability-registry.md). Capability Resolution Review (**What should change?**) is **Verified** — see [docs/capability-resolution.md](./capability-resolution.md). Candidate workspace and validation (**Can I build it safely?**) are **Verified** — see [docs/candidate-workspace.md](./candidate-workspace.md). Installer and generated-plugin runtime are still **Unsupported**.
 
 Companion documents: [ARCHITECTURE.md](../ARCHITECTURE.md) (layers and public seams), [ENGINEERING.md](../ENGINEERING.md) (normative contributor rules), [README.md](../README.md) (product boundary).
 
@@ -226,4 +226,4 @@ Capability Resolution Review:
 - First self-generated plugin vertical slice
 - Any change to DSH Agent Loop internals
 
-The Capability Registry and Capability Resolution Review are **Verified**. Next: Candidate Development Workspace + build/test/validation, still without authorizing runtime changes.
+The Capability Registry, Capability Resolution Review, and candidate workspace/validation are **Verified**. Next: Governance + Candidate Approval / Version Activation, still with recovery outside Self-Extension authority.

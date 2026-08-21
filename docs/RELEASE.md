@@ -16,10 +16,11 @@ Personal-assistant product layer on DeepSeek Harness **0.1.0-rc.8**. Not a produ
 - Official DSH 0.1.0-rc.8 profile/bundle load (`loadProfile` / `renderConfigDump` / `boot`): assistant patch applied, `remember_memory` mounted, dispose + remount keeps one copy
 - Capability Registry / ownership visibility (`ctx.capabilityRegistry`, conservative Core MVP bootstrap)
 - Capability Resolution Review (`ctx.capabilityResolution.review`): advisory reuse → configure → evolve → adopt → provider → new-plugin; unknown is not a new plugin
+- Candidate workspace + validation (`ctx.candidateWorkspace`, `ctx.candidateValidation`): inactive artifacts, digest-bound evidence; `validated` is not approval
 
 ## Designed only
 
-- Self-Extension architecture and governance ([docs/self-extension.md](./self-extension.md)): public DSH seams only; no self-authorization; reuse before new plugins. Registry and Resolution are **Verified**; install/activation remain later work.
+- Self-Extension architecture and governance ([docs/self-extension.md](./self-extension.md)): public DSH seams only; no self-authorization; reuse before new plugins. Registry, Resolution, and candidate validation are **Verified**; install/activation remain later work.
 
 ## Implemented only (not live providers)
 
