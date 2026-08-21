@@ -2,7 +2,8 @@ import { parseCapabilityId, parseOwnerId, parseVersion } from '../registry/norma
 import type { ExtensionProvenance } from '../registry/types.js'
 import type { ResolutionKind, ResolutionReview } from '../resolution/types.js'
 import { CandidateContractError } from './errors.js'
-import type { CandidateManifest, CandidateManifestInput, OperationalEffects } from './types.js'
+import type { CandidateManifest, CandidateManifestInput, OperationalEffects, RemoteSideEffect } from './types.js'
+import { REMOTE_SIDE_EFFECTS } from './types.js'
 
 const CHANGE_KINDS: readonly ResolutionKind[] = [
   'configure',
@@ -18,7 +19,16 @@ const emptyEffects = (): OperationalEffects => ({
   process: [],
   secrets: [],
   externalSystems: [],
+  remoteSideEffect: 'none',
 })
+
+function resolveRemoteSideEffect(effects: Partial<OperationalEffects>): RemoteSideEffect {
+  if (effects.remoteSideEffect !== undefined && (REMOTE_SIDE_EFFECTS as readonly string[]).includes(effects.remoteSideEffect)) {
+    return effects.remoteSideEffect
+  }
+  const external = (effects.network ?? []).length > 0 || (effects.secrets ?? []).length > 0
+  return external ? 'mutate' : 'none'
+}
 
 export function assertChangeReview(review: ResolutionReview): void {
   if (!CHANGE_KINDS.includes(review.kind)) {
@@ -65,6 +75,7 @@ export function normalizeManifest(
       process: [...(effects.process ?? [])],
       secrets: [...(effects.secrets ?? [])],
       externalSystems: [...(effects.externalSystems ?? [])],
+      remoteSideEffect: resolveRemoteSideEffect(effects),
     },
     entryPoints: [...(input.entryPoints ?? [])],
     validationTasks: (input.validationTasks ?? []).map((task) => ({

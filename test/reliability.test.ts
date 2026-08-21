@@ -51,7 +51,11 @@ function writeManifest(model?: RiskModel, extras: Record<string, unknown> = {}) 
     capabilities: ['calendar.events.create'],
     permissions: ['google.calendar.events.create'],
     secrets: ['google.calendar.oauth'],
-    effects: { network: ['https://www.googleapis.com/calendar/v3'], secrets: ['google.calendar.oauth'] },
+    effects: {
+      network: ['https://www.googleapis.com/calendar/v3'],
+      secrets: ['google.calendar.oauth'],
+      remoteSideEffect: 'mutate' as const,
+    },
     riskModel: model,
     ...extras,
   }
@@ -62,7 +66,11 @@ function readManifest(model?: RiskModel) {
     capabilities: ['calendar.events.list', 'calendar.event.read'],
     permissions: ['google.calendar.events.read'],
     secrets: ['google.calendar.oauth'],
-    effects: { network: ['https://www.googleapis.com/calendar/v3'], secrets: ['google.calendar.oauth'] },
+    effects: {
+      network: ['https://www.googleapis.com/calendar/v3'],
+      secrets: ['google.calendar.oauth'],
+      remoteSideEffect: 'read-only' as const,
+    },
     riskModel: model,
   }
 }
@@ -167,7 +175,7 @@ describe('engineering reliability gate', () => {
       providers: ['google'],
       secrets: ['google.calendar.oauth'],
       configRequired: [],
-      effects: { filesystem: [], network: ['https://www.googleapis.com/calendar/v3'], process: [], secrets: ['google.calendar.oauth'], externalSystems: [] },
+      effects: { filesystem: [], network: ['https://www.googleapis.com/calendar/v3'], process: [], secrets: ['google.calendar.oauth'], externalSystems: [], remoteSideEffect: 'mutate' },
       entryPoints: [],
       validationTasks: [],
       riskModel: googleCalendarWriteRiskModel(),
@@ -287,5 +295,73 @@ describe('engineering reliability gate', () => {
       manifest: writeManifest(model),
     })
     assert.equal(store.validate(created.id).reliability?.checks.some((item) => item.name === 'risk-class-consistent' && !item.passed), true)
+  })
+
+  it('derives R1 for credentialed networked read-only access', () => {
+    const store = workspace()
+    const created = store.create({
+      review: review({ capability: 'calendar.read', need: 'list events' }),
+      owner: 'generated/google-calendar',
+      version: '0.1.0',
+      manifest: readManifest(googleCalendarReadRiskModel()),
+    })
+    assert.equal(created.manifest.effects.remoteSideEffect, 'read-only')
+    assert.equal(deriveRiskClass(created.manifest), 'R1')
+  })
+
+  it('derives R3 for credentialed external mutation even when the verb is send or transfer', () => {
+    for (const capability of ['email.send', 'payment.transfer', 'message.publish', 'order.submit', 'calendar.book']) {
+      const store = workspace()
+      const created = store.create({
+        review: review({ kind: 'new-plugin', capability, need: 'external mutation', target: undefined }),
+        owner: 'generated/vendor-write',
+        version: '0.1.0',
+        manifest: {
+          capabilities: [capability],
+          secrets: ['vendor.token'],
+          effects: { network: ['https://vendor.example'], secrets: ['vendor.token'] },
+        },
+      })
+      assert.equal(created.manifest.effects.remoteSideEffect, 'mutate', capability)
+      assert.equal(deriveRiskClass(created.manifest), 'R3', capability)
+    }
+  })
+
+  it('does not let renaming the capability turn the same declared mutation into R1', () => {
+    const effects = {
+      network: ['https://vendor.example'],
+      secrets: ['vendor.token'],
+      remoteSideEffect: 'mutate' as const,
+    }
+    const store = workspace()
+    const send = store.create({
+      review: review({ kind: 'new-plugin', capability: 'email.send', need: 'send', target: undefined }),
+      owner: 'generated/vendor-write',
+      version: '0.1.0',
+      manifest: { capabilities: ['email.send'], secrets: ['vendor.token'], effects },
+    })
+    const renamed = store.create({
+      review: review({ kind: 'new-plugin', capability: 'email.list', need: 'list-shaped name', target: undefined }),
+      owner: 'generated/vendor-write',
+      version: '0.2.0',
+      manifest: { capabilities: ['email.list'], secrets: ['vendor.token'], effects },
+    })
+    assert.equal(deriveRiskClass(send.manifest), 'R3')
+    assert.equal(deriveRiskClass(renamed.manifest), 'R3')
+    assert.equal(send.manifest.effects.remoteSideEffect, renamed.manifest.effects.remoteSideEffect)
+  })
+
+  it('still rejects generated control-plane R4', () => {
+    const store = workspace()
+    const created = store.create({
+      review: review({ kind: 'new-plugin', capability: 'recovery.lkg.rewrite', need: 'rewrite last known good', target: undefined }),
+      owner: 'generated/control-plane-hack',
+      version: '0.1.0',
+      manifest: { capabilities: ['recovery.lkg.rewrite'] },
+    })
+    assert.equal(deriveRiskClass(created.manifest), 'R4')
+    const report = store.validate(created.id)
+    assert.equal(report.passed, false)
+    assert.equal(report.reliability?.checks.some((item) => item.name === 'control-plane-not-escalated' && !item.passed), true)
   })
 })

@@ -23,7 +23,7 @@ export {
   type SideEffectOutcome,
   type TrustBoundaries,
 } from './types.js'
-export { deriveRiskClass, isMutatingCapability, riskRank } from './classify.js'
+export { deriveRiskClass, riskRank } from './classify.js'
 export { HOST_CONTROL_BOUNDARIES, omitHighRiskScenarios, synthesizeR0, synthesizeR2 } from './defaults.js'
 export { evaluateReliability, hasRealContractEvidence, reliabilitySummary } from './gate.js'
 export { interpretTransportFailure, mayRetryWrite } from './semantics.js'

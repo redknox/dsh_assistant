@@ -17,7 +17,14 @@ A passing happy-path test is not enough. Transport failure is not remote failure
 
 ## Risk classes
 
-Derived from declared capabilities and effects. A candidate cannot self-downgrade.
+Derived from declared effects, not capability-name verbs. `effects.remoteSideEffect` is authoritative:
+
+- omitted + network/credentials → stored as `mutate` → **R3**
+- explicit `read-only` + network/credentials → **R1**
+- local filesystem mutation → **R2**
+- generated control-plane capabilities → **R4** and rejected
+
+A candidate cannot obtain a lower class by naming the capability `send`, `transfer`, `list`, or anything else. It may declare a higher class, but not a lower one.
 
 | Class | Meaning | Gate weight |
 | --- | --- | --- |

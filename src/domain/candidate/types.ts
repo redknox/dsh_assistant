@@ -38,12 +38,21 @@ export interface ValidationTaskRequest {
   readonly script?: string
 }
 
+export const REMOTE_SIDE_EFFECTS = ['none', 'read-only', 'mutate'] as const
+export type RemoteSideEffect = (typeof REMOTE_SIDE_EFFECTS)[number]
+
 export interface OperationalEffects {
   readonly filesystem: readonly string[]
   readonly network: readonly string[]
   readonly process: readonly string[]
   readonly secrets: readonly string[]
   readonly externalSystems: readonly string[]
+  /**
+   * Authoritative remote side-effect class. Capability names are not this signal.
+   * Omitted + network/credentials is stored as `mutate` (fail closed).
+   * Only an explicit `read-only` declaration yields R1.
+   */
+  readonly remoteSideEffect: RemoteSideEffect
 }
 
 export interface CandidateManifest {
