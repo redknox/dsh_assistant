@@ -10,6 +10,7 @@ import * as assistantPlugin from '../plugins/assistant-plugin.js'
 import * as integrationsPlugin from '../plugins/integrations-plugin.js'
 import * as knowledgePlugin from '../plugins/knowledge-plugin.js'
 import * as memoryPlugin from '../plugins/memory-plugin.js'
+import * as policyPlugin from '../plugins/policy-plugin.js'
 
 /**
  * Minimal public DSH plugin stack for this product layer.
@@ -31,6 +32,7 @@ export async function bootAssistantRuntime(options: BootOptions = {}): Promise<C
   await ctx.plugin(memoryPlugin)
   await ctx.plugin(knowledgePlugin, { fixturePaths: options.knowledgeFixturePaths })
   await ctx.plugin(integrationsPlugin)
+  await ctx.plugin(policyPlugin)
   await ctx.plugin(assistantPlugin)
   return ctx
 }

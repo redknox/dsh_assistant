@@ -103,6 +103,20 @@ class FakeCalendar extends FakeBase<'calendar'> implements CalendarProvider {
     const draft: CalendarEvent = { id: 'proposed-evt', title: input.title.trim(), start: input.start, end: input.end }
     return { trust: 'propose', summary: `Propose calendar event "${draft.title}"`, draft }
   }
+
+  async createEvent(input: { title: string; start: string; end: string }, signal?: AbortSignal): Promise<CalendarEvent> {
+    await this.waitIfRequested(signal)
+    this.guard(signal)
+    if (!input.title.trim()) throw new IntegrationError('calendar', 'invalid_request', 'title is required')
+    const event: CalendarEvent = {
+      id: `evt-${this.events.length + 1}`,
+      title: input.title.trim(),
+      start: input.start,
+      end: input.end,
+    }
+    this.events.push(event)
+    return event
+  }
 }
 
 class FakeMail extends FakeBase<'mail'> implements MailProvider {
@@ -134,6 +148,8 @@ class FakeContacts extends FakeBase<'contacts'> implements ContactsProvider {
 }
 
 class FakeFiles extends FakeBase<'files'> implements FilesProvider {
+  readonly entries: FileEntry[] = [{ id: 'f-1', name: 'notes.md', kind: 'file' }]
+
   constructor(state: FakeState) {
     super('files', state)
   }
@@ -141,11 +157,22 @@ class FakeFiles extends FakeBase<'files'> implements FilesProvider {
   async listFiles(query: { path?: string } & PageQuery): Promise<Page<FileEntry>> {
     await this.waitIfRequested(query.signal)
     this.guard(query.signal)
-    return pageSlice([{ id: 'f-1', name: 'notes.md', kind: 'file' }], query, 'files')
+    return pageSlice(this.entries, query, 'files')
+  }
+
+  async deleteFile(id: string, signal?: AbortSignal): Promise<{ id: string; deleted: true }> {
+    await this.waitIfRequested(signal)
+    this.guard(signal)
+    const index = this.entries.findIndex((entry) => entry.id === id)
+    if (index < 0) throw new IntegrationError('files', 'invalid_request', 'file not found')
+    this.entries.splice(index, 1)
+    return { id, deleted: true }
   }
 }
 
 class FakeTasks extends FakeBase<'tasks'> implements TasksProvider {
+  readonly items: TaskItem[] = [{ id: 't-1', title: 'Review agenda', status: 'open' }]
+
   constructor(state: FakeState) {
     super('tasks', state)
   }
@@ -153,7 +180,7 @@ class FakeTasks extends FakeBase<'tasks'> implements TasksProvider {
   async listTasks(query: PageQuery): Promise<Page<TaskItem>> {
     await this.waitIfRequested(query.signal)
     this.guard(query.signal)
-    return pageSlice([{ id: 't-1', title: 'Review agenda', status: 'open' }], query, 'tasks')
+    return pageSlice(this.items, query, 'tasks')
   }
 
   async proposeCreateTask(input: { title: string }, signal?: AbortSignal): Promise<ProposedMutation<TaskItem>> {
@@ -162,6 +189,15 @@ class FakeTasks extends FakeBase<'tasks'> implements TasksProvider {
     if (!input.title.trim()) throw new IntegrationError('tasks', 'invalid_request', 'title is required')
     const draft: TaskItem = { id: 'proposed-task', title: input.title.trim(), status: 'open' }
     return { trust: 'propose', summary: `Propose task "${draft.title}"`, draft }
+  }
+
+  async createTask(input: { title: string }, signal?: AbortSignal): Promise<TaskItem> {
+    await this.waitIfRequested(signal)
+    this.guard(signal)
+    if (!input.title.trim()) throw new IntegrationError('tasks', 'invalid_request', 'title is required')
+    const item: TaskItem = { id: `t-${this.items.length + 1}`, title: input.title.trim(), status: 'open' }
+    this.items.push(item)
+    return item
   }
 }
 
