@@ -17,14 +17,14 @@ npm pack
 Install the tarball on the machine that will run TARS-NG:
 
 ```sh
-npm install -g ./dsh-assistant-0.2.0.tgz
+npm install -g ./dsh-assistant-0.3.0.tgz
 tars-ng doctor
 ```
 
 or a local install:
 
 ```sh
-npm install ./dsh-assistant-0.2.0.tgz
+npm install ./dsh-assistant-0.3.0.tgz
 npx tars-ng doctor
 ```
 
@@ -181,7 +181,7 @@ Backups exclude secrets, credentials, personal memory, env files, and unsealed w
 
 ## Upgrade / rollback
 
-- Product version: `tars-ng doctor` / package.json `0.2.0`
+- Product version: `tars-ng doctor` / package.json `0.3.0`
 - Durable authority schema: `1` (unknown/newer fails closed into Safe Mode; it is not reinterpreted)
 - Product config schema: `1` (newer `product.json` fails clearly)
 - Package rollback: reinstall the previous tarball; home is unchanged
@@ -201,4 +201,4 @@ Backups exclude secrets, credentials, personal memory, env files, and unsealed w
 
 ## Feature freeze / soak
 
-After this product-readiness issue is accepted, TARS-NG enters feature freeze. See [soak.md](./soak.md).
+After annotated tag `v0.3.0` exists on `main`, TARS-NG enters feature freeze. See [soak.md](./soak.md). Seal record: [v0.3.0-seal.md](./v0.3.0-seal.md).

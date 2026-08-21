@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { execFileSync, spawn, spawnSync } from 'node:child_process'
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, it } from 'node:test'
@@ -45,7 +45,7 @@ describe('product package and profile', () => {
       tarsNg?: { dsh: string }
       dependencies: Record<string, string>
     }
-    assert.equal(pkg.version, '0.2.0')
+    assert.equal(pkg.version, '0.3.0')
     assert.equal(pkg.private, true)
     assert.equal(pkg.engines.node, '>=22')
     assert.equal(pkg.dsh.bundle.patch, './cordis.patch.yml')
@@ -263,7 +263,7 @@ describe('product package and profile', () => {
     delete env.DEEPSEEK_API_KEY
 
     const doctor = execFileSync(bin, ['doctor', '--home', productHome], { encoding: 'utf8', env })
-    assert.match(doctor, /TARS-NG/)
+    assert.match(doctor, /TARS-NG 0\.3\.0/)
     assert.match(doctor, new RegExp(productHome.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')))
     assert.match(doctor, /DSH_ASSISTANT_GOOGLE_CALENDAR_ACCESS_TOKEN: present/)
     assert.match(doctor, /DEEPSEEK_API_KEY: missing/)
@@ -300,10 +300,24 @@ describe('product package and profile', () => {
     const started = execFileSync(bin, ['start', '--once', '--home', productHome], { encoding: 'utf8', env })
     assert.match(started, /ai-runtime: configured/)
     assert.match(started, /llm-route: available/)
+    assert.match(started, /TARS-NG 0\.3\.0/)
     assert.doesNotMatch(started, /LLM not configured\/unavailable/)
     assert.doesNotMatch(started, /sk-offline-not-a-live-key/)
     assert.doesNotMatch(started, /Web UI:/)
     assert.equal(existsSync(pidFile), false)
+
+    mkdirSync(join(productHome, 'data'), { recursive: true })
+    writeFileSync(join(productHome, 'data', 'soak-marker'), 'keep-across-reinstall\n')
+    rmSync(pkgRoot, { recursive: true, force: true })
+    execFileSync('npm', ['install', tarball, '--omit=dev'], {
+      cwd: installDir,
+      encoding: 'utf8',
+      timeout: 90_000,
+    })
+    assert.equal(existsSync(join(pkgRoot, 'src')), false)
+    assert.equal(existsSync(join(pkgRoot, 'dist', 'web', 'index.html')), true)
+    assert.equal(existsSync(join(productHome, 'data', 'soak-marker')), true)
+    assert.match(readFileSync(join(productHome, 'data', 'soak-marker'), 'utf8'), /keep-across-reinstall/)
 
     const uiEnv = { ...env, TARS_NG_UI_PORT: '0' }
     const child = spawn(bin, ['start', '--home', productHome], { encoding: 'utf8', env: uiEnv })
@@ -336,11 +350,17 @@ describe('product package and profile', () => {
       assert.match(snapshot.webUi, /^http:\/\/127\.0\.0\.1:\d+$/)
       assert.doesNotMatch(JSON.stringify(snapshot), /sk-offline-not-a-live-key/)
       const status = execFileSync(bin, ['status', '--home', productHome], { encoding: 'utf8', env: uiEnv })
+      assert.match(status, /TARS-NG 0\.3\.0/)
       assert.match(status, /running: yes/)
       assert.match(status, /web-ui: http:\/\/127\.0\.0\.1:\d+/)
+      const stopped = execFileSync(bin, ['stop', '--home', productHome], { encoding: 'utf8', env: uiEnv })
+      assert.match(stopped, /SIGTERM/)
     } finally {
-      child.kill('SIGTERM')
-      await new Promise<void>((resolve) => child.once('exit', () => resolve()))
+      if (existsSync(pidFile) && child.exitCode === null) child.kill('SIGTERM')
+      await new Promise<void>((resolve) => {
+        child.once('exit', () => resolve())
+        if (child.exitCode !== null) resolve()
+      })
     }
     assert.equal(existsSync(pidFile), false)
   })

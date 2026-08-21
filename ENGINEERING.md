@@ -85,6 +85,6 @@ These are **Unsupported** unless a later issue explicitly promotes them:
 - Self-authorizing capability changes
 - Privileged runtime paths for assistant-generated plugins
 
-## 10. Feature freeze (M5 soak)
+## 10. Feature freeze (v0.3.x soak)
 
-After product-readiness (#51) is accepted, do not add new user-facing capabilities, providers, tool categories, or Self-Extension authority during the soak. Bug, reliability, security, packaging, diagnostics, usability, and documentation fixes remain in scope. Policy: [docs/soak.md](./docs/soak.md).
+After annotated tag `v0.3.0` exists on `main`, do not add new user-facing capabilities, providers, tool categories, or Self-Extension authority during the soak. Bug, reliability, security, packaging, diagnostics, usability, and documentation fixes remain in scope. Policy: [docs/soak.md](./docs/soak.md).

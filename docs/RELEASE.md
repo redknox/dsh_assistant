@@ -1,6 +1,6 @@
 # Release notes
 
-Personal-assistant product layer on DeepSeek Harness **0.1.0-rc.8**. Current package version: **0.2.0**. Not a production security certification. Not published to a public registry.
+Personal-assistant product layer on DeepSeek Harness **0.1.0-rc.8**. Current package version: **0.3.0**. Not a production security certification. Not published to a public registry.
 
 ## Version baseline
 
@@ -8,14 +8,44 @@ Personal-assistant product layer on DeepSeek Harness **0.1.0-rc.8**. Current pac
 | --- | --- |
 | **v0.1.0** | Assistant Core MVP baseline |
 | **v0.2.0** | Governed Self-Extension baseline |
+| **v0.3.0** | Product Soak baseline (M1–M5 + Product Readiness) |
 
-The repository package version is `0.2.0`. Creating and pushing the annotated `v0.2.0` git tag remains a separate explicit release action after review.
+The repository package version is `0.3.0`. The annotated `v0.3.0` git tag is created only on the exact `main` commit after this seal is merged. Do not move or recreate that tag; later soak fixes are `v0.3.1`, `v0.3.2`, etc.
 
 DSH dependency versions stay at **0.1.0-rc.8**. They are not changed by this product version bump.
 
+`npm run verify:v0.2` remains the regression contract for the historical Governed Self-Extension baseline. v0.3.0 must continue to pass it.
+
+Seal evidence and soak configuration: [docs/v0.3.0-seal.md](./v0.3.0-seal.md). Feature freeze: [docs/soak.md](./soak.md).
+
+## v0.3.0 Product Soak baseline
+
+This is the current release. It seals the product that already exists:
+
+```text
+M1 Governed Self-Extension
+M2 capability reuse / discovery
+M3 reliability gates
+M4 independent review / self-correction
+M5 personality / Mission-Control Workspace + local Web UI
+Product Readiness (installable tars-ng, home, secrets, default DeepSeek route)
+```
+
+Default soak LLM:
+
+```text
+provider: deepseek-official
+model: deepseek-v4-flash
+credential: DEEPSEEK_API_KEY
+```
+
+Daily soak surface: loopback Mission-Control Web UI from `tars-ng start` (`http://127.0.0.1:8787`).
+
+After `v0.3.0` is tagged, feature development is frozen. Only security, authority, data-loss, reliability, packaging, operational, usability, and documentation fixes should enter the v0.3.x soak line.
+
 ## v0.2.0 Verified (Governed Self-Extension)
 
-This is the current release. It adds a governed Self-Extension loop on top of the v0.1.0 Core MVP, without weakening those invariants:
+Historical Governed Self-Extension baseline. These remain true and are not rewritten as the current product version:
 
 ```text
 Capability Resolution
@@ -40,7 +70,6 @@ Trusted operator control
 - Safe Mode recovery: excludes generated/optional extensions; missing/mutated/corrupt state fails closed
 - Trusted operator control: `npm run self-extension` (`docs/self-extension-operations.md`); recovery authority stays outside generated and model-facing seams
 - v0.2.x stabilization: product-level regression/recovery drills, durable-state backup/restore, `npm run verify:v0.2` (`docs/v0.2-stabilization.md`)
-- M5 product-readiness: installable `tars-ng` artifact, product home, external secrets including `DEEPSEEK_API_KEY`, default `deepseek-official` / `deepseek-v4-flash`, doctor/status, fixture vs live Calendar, soak/freeze (`docs/operator.md`, `docs/soak.md`)
 
 Preserved invariants: Self-extension without self-authorization; Validation ≠ Approval; Approval ≠ Activation; exact candidate/diff binding; fail-closed artifact integrity.
 
@@ -61,14 +90,16 @@ Historical Assistant Core MVP baseline. These remain true and are not rewritten 
 
 ## Implemented only (not live providers)
 
-- `FakeReplyAdapter` and `PlanMyDayAdapter` — scripted local LLM adapters
-- `FakeIntegrationSuite` — in-process calendar/mail/tasks/files/contacts
+- `FakeReplyAdapter` and `PlanMyDayAdapter` — scripted local LLM adapters for tests/`ui`/`slice`
+- `FakeIntegrationSuite` — in-process calendar/mail/tasks/files/contacts (explicit fixtures only)
 
 ## Unsupported
 
-- Live LLM accounts and vendor OAuth
+- Multi-model routing and extra providers for optionality
 - Pixel-perfect or mobile UI
 - Vector DB, crawler, hosted production persistence
 - Durable user-level reminders (prefer a future official DSH Schedule seam)
 - Public npm publish from this repository
 - Autonomous plugin generation and automatic install/upgrade/remove
+- OAuth refresh for Google Calendar (replace the expiring access token manually)
+- New Google Search product wiring (credentials are diagnosed by name only)

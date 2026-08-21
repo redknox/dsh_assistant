@@ -10,7 +10,7 @@ Package name: `dsh-assistant` (private). Product command: **`tars-ng`**. DSH com
 npm install
 npm run build
 npm pack
-npm install -g ./dsh-assistant-0.2.0.tgz   # or: npm install ./dsh-assistant-0.2.0.tgz && npx tars-ng
+npm install -g ./dsh-assistant-0.3.0.tgz   # or: npm install ./dsh-assistant-0.3.0.tgz && npx tars-ng
 ```
 
 The tarball install pulls Cordis/DSH runtime dependencies through npm. A public registry publish is not required. `src/` and `tsx` are not part of the runtime contract.
@@ -96,7 +96,7 @@ See [ARCHITECTURE.md](./ARCHITECTURE.md) for layers. See [ENGINEERING.md](./ENGI
 | TARS-NG personality + Mission-Control workspace | no | **Verified** | [docs/tars-ng-personality.md](./docs/tars-ng-personality.md) |
 | Production persistence, public npm publish | no | **Unsupported** | Package is `private` |
 
-Known limitations: no OAuth refresh, no production security certification, no durable user-level Schedule, no mobile distribution, no public or LAN Web UI. Release status: [docs/RELEASE.md](./docs/RELEASE.md).
+Known limitations: no OAuth refresh, no production security certification, no durable user-level Schedule, no mobile distribution, no public or LAN Web UI. Release status: [docs/RELEASE.md](./docs/RELEASE.md). Soak baseline: [docs/v0.3.0-seal.md](./docs/v0.3.0-seal.md).
 
 ## Develop
 
@@ -127,4 +127,5 @@ npm run pack:inspect
 | [docs/self-extension.md](./docs/self-extension.md) | Self-Extension contract |
 | [docs/tars-ng-personality.md](./docs/tars-ng-personality.md) | Personality contract |
 | [docs/mission-control-workspace.md](./docs/mission-control-workspace.md) | Mission-Control IA |
-| [docs/RELEASE.md](./docs/RELEASE.md) | 0.2.0 status |
+| [docs/RELEASE.md](./docs/RELEASE.md) | 0.3.0 Product Soak status |
+| [docs/v0.3.0-seal.md](./docs/v0.3.0-seal.md) | Seal drill evidence and soak config |
