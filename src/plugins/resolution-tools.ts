@@ -37,6 +37,13 @@ export function registerResolutionTools(
         target: review.target,
         steps: review.steps,
         unresolved: review.unresolved,
+        discovery: review.discoveryFacts === undefined
+          ? undefined
+          : {
+            status: review.discoveryFacts.status,
+            identities: review.discoveryFacts.records.map((item) => item.identity),
+            rejected: review.discoveryFacts.rejected,
+          },
       })
     },
   }))

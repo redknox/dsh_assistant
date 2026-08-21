@@ -1,8 +1,8 @@
 # Capability Resolution Review
 
-Status: **Verified** by `test/resolution.test.ts`. This is the Self-Extension answer to **What should change?**
+Status: **Verified** by `test/resolution.test.ts` and `test/discovery.test.ts`. This is the Self-Extension answer to **What should change?**
 
-It consumes the Capability Registry. It does **not** answer **What do I have?** or **May I change it?**
+It consumes the Capability Registry and Capability Discovery. It does **not** answer **What do I have?** or **May I change it?**
 
 ```text
 Capability Registry        → What do I have?       [implemented]
@@ -62,7 +62,7 @@ A provider integration problem is not a new domain. If the product already expos
 
 A known provider option must bind the requested need with explicit `capabilities` and/or `domains`. A Google Calendar provider for `integrations.calendar` is not evidence for `matter.light.set`. A provider option with only `provider + seam` is ignored.
 
-Externally discovered plugins/providers/config options are **review inputs** supplied by the caller or tests. This resolver does not search the web or a package registry.
+Discovery evidence is consumed directly by `review()`. Caller-supplied `knownPlugins` / `knownProviders` still work. The resolver does not search the web or a package registry; it uses the local DSH-native catalog plus an optional trusted plugin catalog. See [docs/capability-discovery.md](./capability-discovery.md).
 
 ## Public seam
 

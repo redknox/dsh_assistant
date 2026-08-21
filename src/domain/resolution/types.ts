@@ -1,3 +1,4 @@
+import type { DiscoveryFacts } from '../discovery/types.js'
 import type {
   ActiveOwnerResolution,
   OwnershipConflict,
@@ -99,6 +100,7 @@ export interface ResolutionReview {
   readonly assumptions: readonly string[]
   readonly unresolved: readonly string[]
   readonly steps: readonly ResolutionStep[]
+  readonly discoveryFacts?: DiscoveryFacts
   readonly registryFacts: {
     readonly exact: ActiveOwnerResolution
     readonly domainOwners: readonly { owner: string; version: string; capabilities: readonly string[] }[]
