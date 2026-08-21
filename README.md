@@ -87,6 +87,7 @@ Do not call a capability **Verified** without reproducible evidence. Use:
 | Capability Registry / ownership | no | **Verified** by `test/registry.test.ts` | Answers **What do I have?** only. See [docs/capability-registry.md](./docs/capability-registry.md) |
 | Capability Resolution Review | no | **Verified** by `test/resolution.test.ts` | Answers **What should change?** only. Advisory; no install. See [docs/capability-resolution.md](./docs/capability-resolution.md) |
 | Candidate workspace + validation | no | **Verified** by `test/candidate.test.ts` | Builds/validates an inactive artifact. `validated` is not approval. See [docs/candidate-workspace.md](./docs/candidate-workspace.md) |
+| Extension governance / activation / recovery | no | **Verified** by `test/governance.test.ts` | Exact-diff approval + transactional activate + LKG/Safe Mode. See [docs/extension-governance.md](./docs/extension-governance.md) |
 | Production persistence, public npm publish | no | **Unsupported** | Package is `private` |
 
 Known limitations: no live provider credentials, no production security certification, no durable user-level Schedule, no mobile distribution. Release status: [docs/RELEASE.md](./docs/RELEASE.md).
@@ -125,4 +126,5 @@ Composition is replaceable: this package declares `dsh.bundle` (`cordis.patch.ym
 | [docs/capability-registry.md](./docs/capability-registry.md) | Registry: What do I have? ownership, conflicts, bootstrap |
 | [docs/capability-resolution.md](./docs/capability-resolution.md) | Resolution: What should change? ordered review, evidence |
 | [docs/candidate-workspace.md](./docs/candidate-workspace.md) | Candidate workspace + validation: Can I build it safely? |
+| [docs/extension-governance.md](./docs/extension-governance.md) | Governance: May it become active? Recovery / Safe Mode |
 | [docs/RELEASE.md](./docs/RELEASE.md) | 0.1.0 status: Verified vs Implemented vs Unsupported |

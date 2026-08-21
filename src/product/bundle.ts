@@ -14,6 +14,7 @@ import type { RegistryPluginConfig } from '../plugins/registry-plugin.js'
 import * as resolutionPlugin from '../plugins/resolution-plugin.js'
 import * as candidatePlugin from '../plugins/candidate-plugin.js'
 import type { CandidatePluginConfig } from '../plugins/candidate-plugin.js'
+import * as governancePlugin from '../plugins/governance-plugin.js'
 
 export const name = 'dsh-assistant'
 export const inject = ['systemPrompt', 'agents']
@@ -33,6 +34,7 @@ export async function apply(ctx: Context, config: AssistantBundleConfig = {}) {
   await ctx.plugin(registryPlugin, config.registry)
   await ctx.plugin(resolutionPlugin)
   await ctx.plugin(candidatePlugin, config.candidate)
+  await ctx.plugin(governancePlugin)
   await ctx.plugin(memoryPlugin, config.memory)
   await ctx.plugin(knowledgePlugin, config.knowledge)
   await ctx.plugin(integrationsPlugin)
@@ -45,6 +47,8 @@ export const PRODUCT_TOOL_NAMES = [
   'list_capabilities',
   'lookup_capability',
   'review_capability_resolution',
+  'inspect_extension_governance',
+  'request_extension_approval',
   'remember_memory',
   'forget_memory',
   'recall_memory',

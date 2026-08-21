@@ -18,7 +18,7 @@ Is this exact candidate valid?
   Build/Test/Validation     [this document]
         ↓
 May it become active?
-  Governance / Activation   [later]
+  Governance / Activation   [implemented]
 ```
 
 ## Responsibilities
