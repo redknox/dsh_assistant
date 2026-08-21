@@ -83,7 +83,8 @@ Do not call a capability **Verified** without reproducible evidence. Use:
 | Plan My Day vertical slice | no | **Verified** by `test/vertical-slice.test.ts` | Uses scripted `PlanMyDayAdapter` + fake calendar, not a live model |
 | Scripted local LLM adapters | no | **Implemented** | `FakeReplyAdapter`, `PlanMyDayAdapter`. A live LLM account is **Unsupported** |
 | DSH bundle + example profile + remount | yes (metadata) | **Verified** by `test/packaging.test.ts` | Official `loadProfile` / `boot` path, not only `bootAssistantRuntime()`. See [docs/packaging.md](./docs/packaging.md) |
-| Self-Extension governance | no | **Designed** | [docs/self-extension.md](./docs/self-extension.md). No registry, generator, or installer in this issue |
+| Self-Extension governance | no | **Designed** | [docs/self-extension.md](./docs/self-extension.md). Installer and resolution engine **Unsupported** |
+| Capability Registry / ownership | no | **Verified** by `test/registry.test.ts` | Answers **What do I have?** only. See [docs/capability-registry.md](./docs/capability-registry.md) |
 | Production persistence, public npm publish | no | **Unsupported** | Package is `private` |
 
 Known limitations: no live provider credentials, no production security certification, no durable user-level Schedule, no mobile distribution. Release status: [docs/RELEASE.md](./docs/RELEASE.md).
@@ -119,4 +120,5 @@ Composition is replaceable: this package declares `dsh.bundle` (`cordis.patch.ym
 | [docs/vertical-slice.md](./docs/vertical-slice.md) | Issue #10 Plan My Day evidence (versions, commands, fakes, observed results) |
 | [docs/packaging.md](./docs/packaging.md) | Bundle/profile, fresh install, config without secrets, remount |
 | [docs/self-extension.md](./docs/self-extension.md) | Self-Extension contract: provenance, review, approval, rollback |
+| [docs/capability-registry.md](./docs/capability-registry.md) | Registry: What do I have? ownership, conflicts, bootstrap |
 | [docs/RELEASE.md](./docs/RELEASE.md) | 0.1.0 status: Verified vs Implemented vs Unsupported |

@@ -9,6 +9,7 @@ export * from './domain/knowledge/index.js'
 export * from './domain/integrations/index.js'
 export * from './domain/policy/index.js'
 export * from './domain/jobs/index.js'
+export * from './domain/registry/index.js'
 export { FakeClock, IntervalScheduler } from './adapters/jobs/interval-scheduler.js'
 export {
   AssistantControlSurface,

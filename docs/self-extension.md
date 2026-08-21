@@ -1,6 +1,6 @@
 # Self-Extension architecture and governance
 
-Status: **Designed** (contract only). No Capability Registry, candidate workspace, installer, or generated-plugin runtime is **Implemented** in this issue.
+Status: governance contract is **Designed** and remains normative. The Capability Registry (**What do I have?**) is **Verified** — see [docs/capability-registry.md](./capability-registry.md). Candidate workspace, installer, and generated-plugin runtime are still **Unsupported**.
 
 Companion documents: [ARCHITECTURE.md](../ARCHITECTURE.md) (layers and public seams), [ENGINEERING.md](../ENGINEERING.md) (normative contributor rules), [README.md](../README.md) (product boundary).
 
@@ -23,7 +23,7 @@ These concerns must stay separate. Do not collapse them into one “the assistan
 
 | Question | Concern | Owner of the answer |
 | --- | --- | --- |
-| **What do I have?** | Capability and ownership visibility | Registry / ownership records (not implemented here) |
+| **What do I have?** | Capability and ownership visibility | Capability Registry (`ctx.capabilityRegistry`) |
 | **What should change?** | Capability Resolution Review | Design-time review evidence |
 | **May I change it?** | User approval / governance | Explicit user approval; never the assistant |
 
@@ -213,11 +213,10 @@ Capability Resolution Review:
 
 **Decision:** a new plugin is justified. It remains `generated/*` + `status: candidate` until the user approves the capability/permission diff (local network, pairing secrets, `matter.light.set` execute). Approval to install is not standing approval to power devices; L4 (or the declared execute level) still applies per action. Do not add a privileged loader for this candidate.
 
-## Non-goals (this issue)
+## Non-goals (still later)
 
-**Unsupported** here, deferred to later issues:
+**Unsupported** until a later issue:
 
-- Capability Registry / ownership store implementation
 - Autonomous plugin-writing engine
 - Runtime loader / version manager
 - Automatic install, upgrade, or remove
@@ -225,4 +224,4 @@ Capability Resolution Review:
 - First self-generated plugin vertical slice
 - Any change to DSH Agent Loop internals
 
-Follow-up direction after this contract is accepted: one issue per cycle, starting with a Capability Registry / ownership model, then resolution, candidate workspace and validation, approval/activation, then a small vertical slice.
+The Capability Registry / ownership model is now **Verified** ([docs/capability-registry.md](./capability-registry.md)). Next: Capability Resolution Review that consumes registry facts, still without authorizing runtime changes.

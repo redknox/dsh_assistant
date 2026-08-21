@@ -61,6 +61,7 @@ describe('product package and profile', () => {
       const first = await ctx.plugin(assistantProduct, { jobs: { autoTickMs: null } })
       for (const name of PRODUCT_TOOL_NAMES) assert.ok(ctx.tools.get(name), name)
       assert.ok(ctx.personalMemory)
+      assert.ok(ctx.capabilityRegistry)
       assert.ok(ctx.assistantJobs)
       const workflows = ctx.assistantJobs.service.list().map((item) => item.name).sort()
       assert.deepEqual(workflows, ['create-followup-task', 'delete-file', 'morning-brief'])
@@ -71,6 +72,7 @@ describe('product package and profile', () => {
       assert.equal(ctx.get('personalKnowledge'), undefined)
       assert.equal(ctx.get('actionPolicy'), undefined)
       assert.equal(ctx.get('assistantJobs'), undefined)
+      assert.equal(ctx.get('capabilityRegistry'), undefined)
 
       const second = await ctx.plugin(assistantProduct, { jobs: { autoTickMs: null } })
       for (const name of PRODUCT_TOOL_NAMES) assert.ok(ctx.tools.get(name), name)

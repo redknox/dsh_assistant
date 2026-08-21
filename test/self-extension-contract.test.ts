@@ -20,12 +20,12 @@ describe('self-extension contract', () => {
     assert.match(text, /User Approval/)
     assert.match(text, /Example A — evolve the existing owner/)
     assert.match(text, /Example B — a genuinely new plugin is justified/)
-    assert.match(text, /Status: \*\*Designed\*\*/)
+    assert.match(text, /\*\*Designed\*\*/)
     assert.match(text, /no privileged runtime path/i)
   })
 
-  it('does not add a registry, generator, or installer in this issue', () => {
-    const forbidden = /capability-registry|plugin-generator|self-extension-loader|autonomous-install/i
+  it('does not add a generator, installer, or privileged loader', () => {
+    const forbidden = /plugin-generator|self-extension-loader|autonomous-install/i
     const files: string[] = []
     const walk = (dir: string) => {
       for (const entry of readdirSync(dir)) {
