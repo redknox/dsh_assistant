@@ -174,9 +174,20 @@ describe('candidate workspace and validation', () => {
     workspace.writeFile(candidate.id, 'src/ok.ts', 'export const value: string = "ok"\n')
     workspace.validate(candidate.id)
     const sealed = workspace.seal(candidate.id)
-    assert.equal(sealed.lifecycle, 'sealed')
+    assert.equal(sealed.lifecycle, 'validated')
+    assert.equal(sealed.sealed, true)
     assert.throws(() => workspace.writeFile(candidate.id, 'src/ok.ts', 'no\n'), SealedCandidateError)
     assert.equal(workspace.readFile(candidate.id, 'src/ok.ts'), 'export const value: string = "ok"\n')
+    const failed = workspace.create({
+      review: review(),
+      owner: 'managed/integrations',
+      version: '0.3.0',
+    })
+    workspace.writeFile(failed.id, 'src/bad.ts', 'export const value: string = 1\n')
+    workspace.validate(failed.id)
+    const sealedFailed = workspace.seal(failed.id)
+    assert.equal(sealedFailed.lifecycle, 'validation-failed')
+    assert.equal(sealedFailed.sealed, true)
   })
 
   it('H. blocks arbitrary shell and side-effectful install-script requests', () => {
@@ -201,7 +212,43 @@ describe('candidate workspace and validation', () => {
     assert.ok(report.blocked.includes('shell.exec'))
     assert.ok(report.blocked.includes('npm.script:postinstall'))
     const inspect = report.stages.find((item) => item.name === 'package.inspect')
+    assert.equal(inspect?.status, 'blocked')
     assert.match(String(inspect?.diagnostics), /postinstall/)
+    assert.match(String(inspect?.diagnostics), /"executed":false/)
+    assert.equal(workspace.get(candidate.id).lifecycle, 'validation-failed')
+  })
+
+  it('does not treat unexecuted candidate tests as a green validation', () => {
+    const { workspace } = seeded()
+    const candidate = workspace.create({
+      review: review(),
+      owner: 'managed/integrations',
+      version: '0.2.0',
+    })
+    workspace.writeFile(candidate.id, 'src/ok.ts', 'export const value: string = "ok"\n')
+    workspace.writeFile(candidate.id, 'src/ok.test.ts', 'export const spec = "not executed"\n')
+    const report = workspace.validate(candidate.id)
+    assert.equal(report.passed, false)
+    const tests = report.stages.find((item) => item.name === 'tests')
+    assert.equal(tests?.status, 'unresolved')
+    assert.equal(workspace.get(candidate.id).lifecycle, 'validation-incomplete')
+  })
+
+  it('does not validate a candidate that only declares a postinstall script', () => {
+    const { workspace } = seeded()
+    const candidate = workspace.create({
+      review: review(),
+      owner: 'managed/integrations',
+      version: '0.2.0',
+    })
+    workspace.writeFile(candidate.id, 'package.json', JSON.stringify({
+      name: 'candidate-integrations',
+      scripts: { postinstall: 'node ./install.js' },
+    }))
+    const report = workspace.validate(candidate.id)
+    assert.equal(report.passed, false)
+    const inspect = report.stages.find((item) => item.name === 'package.inspect')
+    assert.equal(inspect?.status, 'blocked')
     assert.match(String(inspect?.diagnostics), /"executed":false/)
     assert.equal(workspace.get(candidate.id).lifecycle, 'validation-failed')
   })

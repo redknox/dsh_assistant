@@ -7,7 +7,7 @@ export const CANDIDATE_LIFECYCLES = [
   'validation-pending',
   'validated',
   'validation-failed',
-  'sealed',
+  'validation-incomplete',
 ] as const
 export type CandidateLifecycle = (typeof CANDIDATE_LIFECYCLES)[number]
 

@@ -14,7 +14,7 @@ import type {
   CreateCandidateInput,
   ValidationReport,
 } from './types.js'
-import { runValidation } from './validation.js'
+import { lifecycleFromReport, runValidation } from './validation.js'
 
 interface MutableCandidate extends CandidateRecord {
   lifecycle: CandidateRecord['lifecycle']
@@ -135,10 +135,9 @@ export class CandidateService implements CandidateWorkspace, CandidateValidation
 
   seal(id: string): CandidateRecord {
     const record = this.require(id)
-    if (record.lifecycle !== 'validated' && record.lifecycle !== 'validation-failed') {
+    if (record.lifecycle !== 'validated' && record.lifecycle !== 'validation-failed' && record.lifecycle !== 'validation-incomplete') {
       throw new CandidateContractError(`cannot seal candidate ${id} before validation`)
     }
-    record.lifecycle = 'sealed'
     record.sealed = true
     return this.snapshot(record)
   }
@@ -152,7 +151,7 @@ export class CandidateService implements CandidateWorkspace, CandidateValidation
     const report = runValidation(record)
     record.digest = report.digest
     record.validation = report
-    record.lifecycle = report.passed ? 'validated' : 'validation-failed'
+    record.lifecycle = lifecycleFromReport(report)
     return report
   }
 
@@ -163,7 +162,7 @@ export class CandidateService implements CandidateWorkspace, CandidateValidation
   }
 
   private assertMutable(record: MutableCandidate): void {
-    if (record.sealed || record.lifecycle === 'sealed') {
+    if (record.sealed) {
       throw new SealedCandidateError(`sealed candidate ${record.id} is immutable; create a new revision`)
     }
   }

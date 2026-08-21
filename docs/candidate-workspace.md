@@ -43,12 +43,14 @@ Writing candidate source is not authorization to execute or mount that source.
 Registry lifecycle (`candidate` / `active` / …) is **not** reused here.
 
 ```text
-planned → developing → validation-pending → validated | validation-failed → sealed
+planned → developing → validation-pending → validated | validation-failed | validation-incomplete
 ```
+
+`sealed` is an immutability flag, not a replacement for the validation outcome. A failed or incomplete artifact can be frozen for inspection; it does not become a Governance-ready `validated` candidate.
 
 - Evolving `managed/integrations@0.1.0` creates `managed/integrations@0.2.0` in a separate workspace. The active owner is not edited in place.
 - A source write after `validated` returns the record to `developing` and drops prior evidence.
-- After `sealed`, writes are rejected. Further work needs a new candidate/revision.
+- After `sealed: true`, writes are rejected. Further work needs a new candidate/revision.
 
 ## Workspace boundary
 
@@ -69,16 +71,16 @@ The manifest cannot authorize activation.
 Default stages, each with an explicit status (`passed` / `failed` / `blocked` / `not-applicable` / `unresolved`):
 
 1. `manifest.validate`
-2. `package.inspect` — dependencies and lifecycle scripts are inspectable; install/postinstall are **not** executed
+2. `package.inspect` — dependencies are inspectable. Install/postinstall scripts are **not** executed and make the stage `blocked`.
 3. `source.boundary` — no DSH package-internal `src/` imports
 4. `typecheck` — offline TypeScript check when `.ts` sources exist
-5. `tests` — candidate tests are listed, not executed against live services
+5. `tests` — candidate tests are listed, not executed against live services (`unresolved` if files exist)
 6. `bundle.inspect`
 7. `digest` — SHA-256 of candidate source files
 
 Only repository-owned allowlisted task names may be requested. `shell.exec`, raw argv, and `npm.script` / `postinstall` requests are **blocked**, never `exec`'d.
 
-A failed or blocked stage cannot become `validated`.
+A candidate becomes `validated` only when every required stage is `passed` or explicitly `not-applicable`. `failed`, `blocked`, and `unresolved` all prevent `report.passed`. Unresolved-only reports become `validation-incomplete`, not green.
 
 ## Public seams
 

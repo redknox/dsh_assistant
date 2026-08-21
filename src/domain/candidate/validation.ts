@@ -42,18 +42,23 @@ function inspectPackage(root: string): ValidationStageResult {
   const scripts = parsed.scripts ?? {}
   const lifecycle = Object.keys(scripts).filter((name) => LIFECYCLE_SCRIPTS.includes(name))
   const deps = { ...parsed.dependencies, ...parsed.devDependencies }
+  const diagnostics = JSON.stringify({
+    dependencies: Object.keys(deps),
+    lifecycleScripts: lifecycle.map((name) => ({ name, command: scripts[name], executed: false, risk: 'blocked' })),
+  })
+  if (lifecycle.length > 0) {
+    return stage(
+      'package.inspect',
+      'blocked',
+      `Install lifecycle scripts ${lifecycle.join(', ')} were not executed and block validation until later policy handles them.`,
+      { diagnostics },
+    )
+  }
   return stage(
     'package.inspect',
     'passed',
-    lifecycle.length === 0
-      ? `Inspected ${Object.keys(deps).length} declared dependencies; no install lifecycle scripts.`
-      : `Inspected dependencies; lifecycle scripts ${lifecycle.join(', ')} are recorded and were not executed.`,
-    {
-      diagnostics: JSON.stringify({
-        dependencies: Object.keys(deps),
-        lifecycleScripts: lifecycle.map((name) => ({ name, command: scripts[name], executed: false, risk: 'blocked' })),
-      }),
-    },
+    `Inspected ${Object.keys(deps).length} declared dependencies; no install lifecycle scripts.`,
+    { diagnostics },
   )
 }
 
@@ -144,14 +149,21 @@ export function runValidation(record: CandidateRecord): ValidationReport {
   stages.push(inspectBundle(record.workspaceRoot))
   const digest = digestFiles(record.workspaceRoot, files)
   stages.push(stage('digest', 'passed', `Bound validation evidence to digest ${digest.slice(0, 12)}.`))
-  const failed = stages.some((item) => item.status === 'failed' || item.status === 'blocked')
   const unresolved = stages.filter((item) => item.status === 'unresolved').map((item) => item.summary)
+  const complete = stages.every((item) => item.status === 'passed' || item.status === 'not-applicable')
   return {
     candidateId: record.id,
     digest,
-    passed: !failed && blocked.length === 0,
+    passed: complete && blocked.length === 0,
     stages,
     unresolved,
     blocked,
   }
+}
+
+export function lifecycleFromReport(report: ValidationReport): 'validated' | 'validation-failed' | 'validation-incomplete' {
+  if (report.passed) return 'validated'
+  const rejected = report.blocked.length > 0
+    || report.stages.some((item) => item.status === 'failed' || item.status === 'blocked')
+  return rejected ? 'validation-failed' : 'validation-incomplete'
 }
