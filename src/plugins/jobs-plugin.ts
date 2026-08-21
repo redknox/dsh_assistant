@@ -1,5 +1,5 @@
 import { Service, type Context } from '@deepseek-ai/cordis'
-import { FakeClock, IntervalScheduler, type Clock } from '../adapters/jobs/interval-scheduler.js'
+import { IntervalScheduler, type Clock } from '../adapters/jobs/interval-scheduler.js'
 import {
   AssistantJobService,
   createFollowupTaskWorkflow,
