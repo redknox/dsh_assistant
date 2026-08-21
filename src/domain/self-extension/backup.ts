@@ -4,7 +4,7 @@ import { digestFiles } from '../candidate/digest.js'
 import { listSourceFiles } from '../candidate/files.js'
 import { writeJsonAtomic } from '../persistence/atomic.js'
 import { parseAuthorityFile, type AuthorityFile } from './authority-store.js'
-import { parseCandidateIndexFile, type CandidateIndexFile, type CandidateIndexRow } from './candidate-index.js'
+import { parseCandidateIndexFile, resolveCandidateArtifactDir, type CandidateIndexFile, type CandidateIndexRow } from './candidate-index.js'
 import { PersistenceIntegrityError, PersistenceSchemaError } from './errors.js'
 import { SELF_EXTENSION_SCHEMA_VERSION, selfExtensionPaths } from './home.js'
 
@@ -96,7 +96,8 @@ export function requiredBackupRows(authority: AuthorityFile, rows: readonly Cand
   })
 }
 
-function verifyCandidateDigest(artifactRoot: string, row: CandidateIndexRow): void {
+function verifyCandidateDigest(area: string, row: CandidateIndexRow): void {
+  const artifactRoot = resolveCandidateArtifactDir(area, row.record.id)
   if (!existsSync(artifactRoot)) {
     throw new PersistenceIntegrityError(`missing-sealed-artifact:${row.record.id}`)
   }
@@ -123,9 +124,10 @@ function writeFilteredIndex(destDir: string, rows: readonly CandidateIndexRow[])
 function copyRequiredArtifacts(sourceArea: string, destArea: string, rows: readonly CandidateIndexRow[]): void {
   writeFilteredIndex(destArea, rows)
   for (const row of rows) {
-    const from = path.join(sourceArea, row.record.id)
-    verifyCandidateDigest(from, row)
-    cpSync(from, path.join(destArea, row.record.id), { recursive: true })
+    const from = resolveCandidateArtifactDir(sourceArea, row.record.id)
+    const to = resolveCandidateArtifactDir(destArea, row.record.id)
+    verifyCandidateDigest(sourceArea, row)
+    cpSync(from, to, { recursive: true })
   }
 }
 
@@ -137,7 +139,7 @@ export function backupSelfExtension(assistantHome: string, dest: string): SelfEx
   const index = loadIndex(home.candidateIndexPath)
   const required = requiredBackupRows(authority, index.candidates)
   assertDisjointPaths(dest, home.root, 'backup destination must be disjoint from the durable Self-Extension tree')
-  for (const row of required) verifyCandidateDigest(path.join(home.candidateArea, row.record.id), row)
+  for (const row of required) verifyCandidateDigest(home.candidateArea, row)
   rmSync(dest, { recursive: true, force: true })
   mkdirSync(dest, { recursive: true })
   cpSync(home.authorityPath, path.join(dest, 'authority.json'))
@@ -165,7 +167,7 @@ export function restoreSelfExtension(source: string, assistantHome: string): voi
   const authority = parseAuthorityFile(JSON.parse(readFileSync(authorityPath, 'utf8')))
   const sourceArea = path.join(source, 'candidates')
   const required = requiredBackupRows(authority, loadIndex(path.join(sourceArea, 'index.json')).candidates)
-  for (const row of required) verifyCandidateDigest(path.join(sourceArea, row.record.id), row)
+  for (const row of required) verifyCandidateDigest(sourceArea, row)
   const dest = selfExtensionPaths(assistantHome)
   assertDisjointPaths(source, dest.root, 'restore source must be disjoint from the durable Self-Extension tree')
   const staging = `${dest.root}.restore-${process.pid}`

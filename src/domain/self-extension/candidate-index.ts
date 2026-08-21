@@ -25,16 +25,73 @@ export interface CandidateIndexFile {
   readonly candidates: readonly CandidateIndexRow[]
 }
 
+function isObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+/** Resolve an artifact directory and refuse any path that leaves `area`. */
+export function resolveCandidateArtifactDir(area: string, id: string): string {
+  assertCandidateArtifactId(id)
+  const root = path.resolve(area)
+  const dest = path.resolve(root, id)
+  const rel = path.relative(root, dest)
+  if (rel === '' || rel.startsWith('..') || path.isAbsolute(rel) || rel.split(path.sep).length !== 1) {
+    throw new PersistenceIntegrityError(`candidate artifact path escapes candidate area: ${id}`)
+  }
+  return dest
+}
+
+/** Candidate artifact ids are a single path segment, never a relative or absolute path. */
+export function assertCandidateArtifactId(id: unknown): asserts id is string {
+  if (typeof id !== 'string' || id === '' || id !== id.trim()) {
+    throw new PersistenceIntegrityError('candidate id must be a non-empty identifier')
+  }
+  const unix = id.replaceAll('\\', '/')
+  if (path.isAbsolute(id) || path.isAbsolute(unix) || unix.startsWith('/') || unix.startsWith('~')) {
+    throw new PersistenceIntegrityError(`candidate id must not be an absolute path: ${id}`)
+  }
+  if (id.includes('/') || id.includes('\\') || id.includes('\0')) {
+    throw new PersistenceIntegrityError(`candidate id must be a single path segment: ${id}`)
+  }
+  if (id === '.' || id === '..' || id.includes('..')) {
+    throw new PersistenceIntegrityError(`candidate id must not contain path traversal: ${id}`)
+  }
+}
+
+function parseIndexRow(value: unknown): CandidateIndexRow {
+  if (!isObject(value)) throw new PersistenceIntegrityError('candidate index row must be an object')
+  if (!ARTIFACT_RETENTIONS.includes(value.retention as ArtifactRetention)) {
+    throw new PersistenceIntegrityError(`unsupported candidate retention ${String(value.retention)}`)
+  }
+  if (!isObject(value.record)) throw new PersistenceIntegrityError('candidate index record must be an object')
+  assertCandidateArtifactId(value.record.id)
+  if (value.record.workspaceRoot !== undefined) assertCandidateArtifactId(value.record.workspaceRoot)
+  if (typeof value.record.sealed !== 'boolean') {
+    throw new PersistenceIntegrityError('candidate index record.sealed must be a boolean')
+  }
+  return {
+    retention: value.retention as ArtifactRetention,
+    record: value.record as unknown as CandidateIndexRow['record'],
+  }
+}
+
 export function parseCandidateIndexFile(parsed: unknown): CandidateIndexFile {
-  if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
-    throw new PersistenceIntegrityError('candidate index must be an object')
+  if (!isObject(parsed)) throw new PersistenceIntegrityError('candidate index must be an object')
+  if (parsed.schemaVersion !== SELF_EXTENSION_SCHEMA_VERSION) {
+    throw new PersistenceSchemaError(`unsupported candidate index schema ${String(parsed.schemaVersion)}`)
   }
-  const file = parsed as { schemaVersion?: unknown; candidates?: unknown }
-  if (file.schemaVersion !== SELF_EXTENSION_SCHEMA_VERSION) {
-    throw new PersistenceSchemaError(`unsupported candidate index schema ${String(file.schemaVersion)}`)
+  if (!Array.isArray(parsed.candidates)) throw new PersistenceIntegrityError('candidate index candidates must be an array')
+  return {
+    schemaVersion: SELF_EXTENSION_SCHEMA_VERSION,
+    candidates: parsed.candidates.map((row, index) => {
+      try {
+        return parseIndexRow(row)
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error)
+        throw new PersistenceIntegrityError(`candidate index row ${index}: ${message}`)
+      }
+    }),
   }
-  if (!Array.isArray(file.candidates)) throw new PersistenceIntegrityError('candidate index candidates must be an array')
-  return { schemaVersion: SELF_EXTENSION_SCHEMA_VERSION, candidates: file.candidates as CandidateIndexRow[] }
 }
 
 export function retentionFor(record: CandidateRecord, activeIds: ReadonlySet<string>): ArtifactRetention {
@@ -55,7 +112,7 @@ export class DurableCandidateIndex {
   restore(areaRoot: string): CandidateRecord[] {
     return this.rows.map((row) => ({
       ...row.record,
-      workspaceRoot: path.join(areaRoot, row.record.id),
+      workspaceRoot: resolveCandidateArtifactDir(areaRoot, row.record.id),
     }))
   }
 

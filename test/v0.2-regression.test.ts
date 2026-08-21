@@ -6,7 +6,7 @@ import { describe, it } from 'node:test'
 import { CallId } from '@deepseek-ai/dsh-llm'
 import { ActivationDeniedError, GovernanceAuthorityError, SimulatedCrashError, TrustedAuthorityCredential } from '../src/domain/governance/index.js'
 import { CORE_KNOWN_SEAMS } from '../src/domain/resolution/index.js'
-import { PersistenceIntegrityError, formatOperatorStatus, operatorStatus } from '../src/domain/self-extension/index.js'
+import { PersistenceIntegrityError, formatOperatorStatus, operatorStatus, parseCandidateIndexFile } from '../src/domain/self-extension/index.js'
 import { bootAssistantControl, type AssistantControl } from '../src/runtime/boot.js'
 
 const PLUGIN = `export const name = 'generated-v02-probe'
@@ -422,6 +422,40 @@ describe('v0.2.x release-confidence suite', () => {
       assert.deepEqual(index.candidates.map((row) => row.record.id), [created.id])
     } finally {
       await first.ctx.fiber.dispose()
+    }
+  })
+
+  it('restore rejects a traversal candidate id before touching destination state', async () => {
+    const home = mkdtempSync(join(tmpdir(), 'dsh-v02-trav-src-'))
+    const backup = mkdtempSync(join(tmpdir(), 'dsh-v02-trav-bak-'))
+    const dest = mkdtempSync(join(tmpdir(), 'dsh-v02-trav-dst-'))
+    const { first, human } = await prepareCandidate(home, true)
+    try {
+      first.recoveryRoot.backup(human, backup)
+    } finally {
+      await first.ctx.fiber.dispose()
+    }
+    const indexPath = join(backup, 'candidates', 'index.json')
+    const index = JSON.parse(readFileSync(indexPath, 'utf8')) as { candidates: { record: { id: string } }[] }
+    index.candidates[0]!.record.id = '../../outside-artifact'
+    writeFileSync(indexPath, `${JSON.stringify(index, null, 2)}\n`)
+    assert.throws(() => parseCandidateIndexFile(index), PersistenceIntegrityError)
+    const seeded = await bootAssistantControl({ home: dest })
+    await seeded.ctx.fiber.dispose()
+    const authorityBefore = readFileSync(join(dest, 'self-extension', 'authority.json'), 'utf8')
+    const sentinel = join(dest, 'outside-artifact')
+    writeFileSync(sentinel, 'keep\n')
+    const empty = await bootAssistantControl({ home: dest })
+    try {
+      assert.throws(
+        () => empty.recoveryRoot.restore(empty.recoveryRoot.issueAuthority({ kind: 'human-control', source: 'operator-cli' }), backup),
+        PersistenceIntegrityError,
+      )
+      assert.equal(readFileSync(join(dest, 'self-extension', 'authority.json'), 'utf8'), authorityBefore)
+      assert.equal(readFileSync(sentinel, 'utf8'), 'keep\n')
+      assert.equal(existsSync(join(dest, 'self-extension', 'candidates', 'outside-artifact')), false)
+    } finally {
+      await empty.ctx.fiber.dispose()
     }
   })
 
