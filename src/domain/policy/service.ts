@@ -75,12 +75,17 @@ export class PolicyService {
     const decision = this.decide(request)
     if (decision.kind !== 'allow') return decision
     if (request.intent !== 'execute') return decision
+    if (decision.confirmationId) {
+      if (!this.tryClaim(decision.confirmationId)) {
+        return this.denyForTicket(decision.confirmationId)
+      }
+      return this.runClaimed(decision.confirmationId, request.signal)
+    }
     const executor = this.executors.get(executorKey(request.capability, request.operation))
     if (!executor) {
       return this.deny(request, 'unavailable', `no executor registered for ${request.capability}.${request.operation}`, decision.level)
     }
     const result = await executor(request.payload, request.signal)
-    if (decision.confirmationId) this.consume(decision.confirmationId, request)
     return { ...decision, result }
   }
 
@@ -95,8 +100,14 @@ export class PolicyService {
       )
     }
     if (signal?.aborted) {
-      this.updateTicket(ticket.id, 'cancelled')
-      return this.deny(ticketRequest(ticket), 'cancelled', 'confirmation was cancelled', ticket.level)
+      if (ticket.status === 'pending') this.updateTicket(ticket.id, 'cancelled')
+      return this.deny(ticketRequest(ticket), 'cancelled', 'confirmation was cancelled', ticket.level, ticket.id)
+    }
+    if (ticket.status === 'executing') {
+      return this.deny(ticketRequest(ticket), 'in_flight', 'confirmation is already executing', ticket.level, ticket.id)
+    }
+    if (ticket.status === 'failed') {
+      return this.deny(ticketRequest(ticket), 'failed', 'confirmation already failed and cannot be retried', ticket.level, ticket.id)
     }
     if (ticket.status === 'consumed') {
       return this.deny(ticketRequest(ticket), 'replay', 'confirmation was already consumed', ticket.level, ticket.id)
@@ -108,7 +119,7 @@ export class PolicyService {
       return this.deny(ticketRequest(ticket), 'cancelled', 'confirmation was cancelled', ticket.level, ticket.id)
     }
     if (decision === 'deny') {
-      this.updateTicket(ticket.id, 'denied')
+      if (!this.tryClose(ticket.id, 'denied')) return this.denyForTicket(ticket.id)
       this.record({
         verdict: 'deny',
         level: ticket.level,
@@ -121,7 +132,7 @@ export class PolicyService {
       return { kind: 'deny', level: ticket.level, reason: 'confirmation was denied', code: 'denied', confirmationId: ticket.id }
     }
     if (decision === 'cancel') {
-      this.updateTicket(ticket.id, 'cancelled')
+      if (!this.tryClose(ticket.id, 'cancelled')) return this.denyForTicket(ticket.id)
       this.record({
         verdict: 'cancelled',
         level: ticket.level,
@@ -133,24 +144,8 @@ export class PolicyService {
       })
       return { kind: 'deny', level: ticket.level, reason: 'confirmation was cancelled', code: 'cancelled', confirmationId: ticket.id }
     }
-    this.updateTicket(ticket.id, 'approved')
-    this.record({
-      verdict: 'approved',
-      level: ticket.level,
-      capability: ticket.capability,
-      operation: ticket.operation,
-      confirmationId: ticket.id,
-      fingerprint: ticket.fingerprint,
-      reason: 'confirmation approved; executing bound action once',
-    })
-    return this.apply({
-      capability: ticket.capability,
-      operation: ticket.operation,
-      intent: 'execute',
-      payload: ticket.payload,
-      confirmationId: ticket.id,
-      signal,
-    })
+    if (!this.tryClaim(ticket.id)) return this.denyForTicket(ticket.id)
+    return this.runClaimed(ticket.id, signal)
   }
 
   private decideExisting(request: ActionRequest, level: TrustLevel, fingerprint: string): PolicyOutcome {
@@ -162,6 +157,8 @@ export class PolicyService {
     if (ticket.status === 'denied') return this.deny(request, 'denied', 'confirmation was denied', level, ticket.id)
     if (ticket.status === 'cancelled') return this.deny(request, 'cancelled', 'confirmation was cancelled', level, ticket.id)
     if (ticket.status === 'consumed') return this.deny(request, 'replay', 'confirmation was already consumed', level, ticket.id)
+    if (ticket.status === 'executing') return this.deny(request, 'in_flight', 'confirmation is already executing', level, ticket.id)
+    if (ticket.status === 'failed') return this.deny(request, 'failed', 'confirmation already failed and cannot be retried', level, ticket.id)
     if (ticket.status === 'approved') {
       return this.allow(request, level, 'confirmation matches the bound action', fingerprint, ticket.id)
     }
@@ -187,6 +184,87 @@ export class PolicyService {
     }
     this.tickets.set(ticket.id, ticket)
     return ticket
+  }
+
+  /** Claim the ticket before any await so a concurrent approve cannot enter the executor. */
+  private tryClaim(confirmationId: string): boolean {
+    const ticket = this.tickets.get(confirmationId)
+    if (!ticket) return false
+    if (ticket.status !== 'pending' && ticket.status !== 'approved') return false
+    this.updateTicket(confirmationId, 'executing')
+    return true
+  }
+
+  private tryClose(confirmationId: string, status: 'denied' | 'cancelled'): boolean {
+    const ticket = this.tickets.get(confirmationId)
+    if (!ticket || (ticket.status !== 'pending' && ticket.status !== 'approved')) return false
+    this.updateTicket(confirmationId, status)
+    return true
+  }
+
+  private async runClaimed(confirmationId: string, signal?: AbortSignal): Promise<PolicyOutcome> {
+    const ticket = this.tickets.get(confirmationId)
+    if (!ticket) {
+      return this.deny({ capability: 'policy', operation: 'execute' }, 'unavailable', 'confirmation id is unknown', 'L2')
+    }
+    this.record({
+      verdict: 'approved',
+      level: ticket.level,
+      capability: ticket.capability,
+      operation: ticket.operation,
+      confirmationId: ticket.id,
+      fingerprint: ticket.fingerprint,
+      reason: 'confirmation claimed; executing bound action once',
+    })
+    const request = ticketRequest(ticket)
+    const executor = this.executors.get(executorKey(ticket.capability, ticket.operation))
+    if (!executor) {
+      this.updateTicket(ticket.id, 'failed')
+      return this.deny(request, 'unavailable', `no executor registered for ${ticket.capability}.${ticket.operation}`, ticket.level, ticket.id)
+    }
+    try {
+      const result = await executor(ticket.payload, signal)
+      this.consume(ticket.id, request)
+      return {
+        kind: 'allow',
+        level: ticket.level,
+        reason: 'approved action executed once',
+        confirmationId: ticket.id,
+        result,
+      }
+    } catch {
+      this.updateTicket(ticket.id, 'failed')
+      return this.deny(
+        request,
+        'failed',
+        'executor failed after the confirmation was claimed; retry is not allowed',
+        ticket.level,
+        ticket.id,
+      )
+    }
+  }
+
+  private denyForTicket(confirmationId: string): Extract<PolicyOutcome, { kind: 'deny' }> {
+    const ticket = this.tickets.get(confirmationId)
+    if (!ticket) {
+      return this.deny({ capability: 'policy', operation: 'resolve' }, 'unavailable', 'confirmation id is unknown', 'L2')
+    }
+    if (ticket.status === 'executing') {
+      return this.deny(ticketRequest(ticket), 'in_flight', 'confirmation is already executing', ticket.level, ticket.id)
+    }
+    if (ticket.status === 'failed') {
+      return this.deny(ticketRequest(ticket), 'failed', 'confirmation already failed and cannot be retried', ticket.level, ticket.id)
+    }
+    if (ticket.status === 'consumed') {
+      return this.deny(ticketRequest(ticket), 'replay', 'confirmation was already consumed', ticket.level, ticket.id)
+    }
+    if (ticket.status === 'denied') {
+      return this.deny(ticketRequest(ticket), 'denied', 'confirmation was denied', ticket.level, ticket.id)
+    }
+    if (ticket.status === 'cancelled') {
+      return this.deny(ticketRequest(ticket), 'cancelled', 'confirmation was cancelled', ticket.level, ticket.id)
+    }
+    return this.deny(ticketRequest(ticket), 'replay', 'confirmation is not available to execute', ticket.level, ticket.id)
   }
 
   private consume(confirmationId: string, request: ActionRequest): void {

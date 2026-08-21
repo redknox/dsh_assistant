@@ -3,9 +3,9 @@ export type TrustLevel = (typeof TRUST_LEVELS)[number]
 
 export type ActionIntent = 'read' | 'propose' | 'execute'
 
-export type ConfirmationStatus = 'pending' | 'approved' | 'denied' | 'cancelled' | 'consumed'
+export type ConfirmationStatus = 'pending' | 'approved' | 'executing' | 'denied' | 'cancelled' | 'consumed' | 'failed'
 
-export type PolicyDenyCode = 'denied' | 'cancelled' | 'replay' | 'mismatch' | 'unavailable'
+export type PolicyDenyCode = 'denied' | 'cancelled' | 'replay' | 'mismatch' | 'unavailable' | 'in_flight' | 'failed'
 
 export interface PolicyRule {
   readonly capability: string

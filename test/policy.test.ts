@@ -161,6 +161,55 @@ describe('action policy', () => {
     assert.equal(dump.includes('Secret meeting'), false)
     assert.ok(policy.auditTrail().every((entry) => entry.fingerprint && entry.reason))
   })
+
+  it('executes exactly once when two approvals race', async () => {
+    let executed = 0
+    const policy = new PolicyService(EXAMPLE_PERSONAL_POLICY)
+    policy.registerExecutor('calendar', 'create_event', async () => {
+      executed += 1
+      return { id: 'evt' }
+    })
+    const pending = await policy.apply({
+      capability: 'calendar',
+      operation: 'create_event',
+      intent: 'execute',
+      payload: EVENT,
+    })
+    if (pending.kind !== 'pending_confirmation') throw new Error('expected pending')
+    const outcomes = await Promise.all([
+      policy.resolve(pending.confirmationId, 'approve'),
+      policy.resolve(pending.confirmationId, 'approve'),
+    ])
+    assert.equal(executed, 1)
+    assert.equal(outcomes.filter((outcome) => outcome.kind === 'allow').length, 1)
+    assert.equal(outcomes.some((outcome) => outcome.kind === 'deny' && (outcome.code === 'in_flight' || outcome.code === 'replay')), true)
+  })
+
+  it('does not retry an action after the executor records a side effect and throws', async () => {
+    let executed = 0
+    const policy = new PolicyService(EXAMPLE_PERSONAL_POLICY)
+    policy.registerExecutor('calendar', 'create_event', async () => {
+      executed += 1
+      throw new Error('provider failed after write')
+    })
+    const pending = await policy.apply({
+      capability: 'calendar',
+      operation: 'create_event',
+      intent: 'execute',
+      payload: EVENT,
+    })
+    if (pending.kind !== 'pending_confirmation') throw new Error('expected pending')
+    const first = await policy.resolve(pending.confirmationId, 'approve')
+    assert.equal(first.kind, 'deny')
+    if (first.kind !== 'deny') throw new Error('expected deny')
+    assert.equal(first.code, 'failed')
+    assert.equal(executed, 1)
+    const retry = await policy.resolve(pending.confirmationId, 'approve')
+    assert.equal(retry.kind, 'deny')
+    if (retry.kind !== 'deny') throw new Error('expected deny')
+    assert.equal(retry.code, 'failed')
+    assert.equal(executed, 1)
+  })
 })
 
 describe('policy through DSH tools', () => {
