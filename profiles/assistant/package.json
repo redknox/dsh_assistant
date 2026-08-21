@@ -1,0 +1,13 @@
+{
+  "name": "dsh-assistant-profile",
+  "private": true,
+  "description": "Example DSH profile composition: base Harness bundle plus this assistant product bundle. Replaceable through profile bundle order.",
+  "dsh": {
+    "profile": {
+      "bundles": [
+        "@deepseek-ai/dsh-base",
+        "dsh-assistant"
+      ]
+    }
+  }
+}
