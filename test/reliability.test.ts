@@ -57,6 +57,16 @@ function writeManifest(model?: RiskModel, extras: Record<string, unknown> = {}) 
   }
 }
 
+function readManifest(model?: RiskModel) {
+  return {
+    capabilities: ['calendar.events.list', 'calendar.event.read'],
+    permissions: ['google.calendar.events.read'],
+    secrets: ['google.calendar.oauth'],
+    effects: { network: ['https://www.googleapis.com/calendar/v3'], secrets: ['google.calendar.oauth'] },
+    riskModel: model,
+  }
+}
+
 describe('engineering reliability gate', () => {
   it('A. lets a low-risk capability pass with a synthesized R0 model', () => {
     const store = workspace()
@@ -86,6 +96,38 @@ describe('engineering reliability gate', () => {
     assert.equal(report.reliability?.derivedClass, 'R3')
     assert.equal(store.get(created.id).lifecycle, 'validation-failed')
     assert.match(report.stages.find((item) => item.name === 'reliability.gate')?.summary ?? '', /Risk Model/)
+  })
+
+  it('rejects an R1 external read that only has fixture/test-double evidence', () => {
+    const model: RiskModel = {
+      ...googleCalendarReadRiskModel(),
+      idempotency: { strategy: 'fixture-only', contractKind: 'test-double', evidence: 'in-memory list de-duplicates GETs' },
+    }
+    const store = workspace()
+    const created = store.create({
+      review: review({ capability: 'calendar.read', need: 'list events' }),
+      owner: 'generated/google-calendar',
+      version: '0.1.0',
+      manifest: readManifest(model),
+    })
+    const report = store.validate(created.id)
+    assert.equal(report.reliability?.derivedClass, 'R1')
+    assert.equal(report.passed, false)
+    assert.equal(report.reliability?.checks.some((item) => item.name === 'real-contract-evidence-present' && !item.passed), true)
+  })
+
+  it('accepts an R1 external read with real provider/runtime contract evidence', () => {
+    const store = workspace()
+    const created = store.create({
+      review: review({ capability: 'calendar.read', need: 'list events' }),
+      owner: 'generated/google-calendar',
+      version: '0.1.0',
+      manifest: readManifest(googleCalendarReadRiskModel()),
+    })
+    const report = store.validate(created.id)
+    assert.equal(report.reliability?.derivedClass, 'R1')
+    assert.equal(report.passed, true, report.stages.find((item) => item.name === 'reliability.gate')?.summary)
+    assert.equal(report.reliability?.checks.some((item) => item.name === 'real-contract-evidence-present' && item.passed), true)
   })
 
   it('C. keeps an unknown transport outcome unknown', () => {

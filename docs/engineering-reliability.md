@@ -49,7 +49,7 @@ Mutating actions classify outcomes as `not-applied` / `applied` / `unknown` / `r
 
 ## Provider contract vs fixture
 
-A test double may simulate a provider. It may not define the provider. Claimed idempotency/timeout/error behavior must cite a real provider/runtime contract or remain unknown.
+A test double may simulate a provider. It may not define the provider. R1 external reads and R3 writes both require `real-contract-evidence-present`: `contractKind` must be `real-provider-contract`, `strategy` must not be `fixture-only`, and evidence must be non-empty. R0/local R2 do not take this check.
 
 ## Trust boundaries
 

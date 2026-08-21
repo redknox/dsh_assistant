@@ -40,6 +40,13 @@ function check(name: ReliabilityCheckName, passed: boolean, detail: string): Rel
   return { name, passed, detail }
 }
 
+/** A fake may simulate a provider. It may not define provider semantics. */
+export function hasRealContractEvidence(model: RiskModel): boolean {
+  return model.idempotency.contractKind === 'real-provider-contract'
+    && model.idempotency.strategy !== 'fixture-only'
+    && model.idempotency.evidence.trim() !== ''
+}
+
 function requiredFor(risk: RiskClass): readonly ReliabilityCheckName[] {
   const base: ReliabilityCheckName[] = ['risk-model-present', 'risk-class-consistent', 'control-plane-not-escalated', 'retry-policy-valid']
   if (risk === 'R0') return base
@@ -101,13 +108,10 @@ function evaluateChecks(manifest: CandidateManifest, derived: RiskClass, model: 
       missingFailures.length > 0
         ? `Missing mandatory failure modes: ${missingFailures.join(', ')}.`
         : 'Required failure modes are declared.'),
-    check('real-contract-evidence-present', derived < 'R3' || (
-      model.idempotency.contractKind === 'real-provider-contract'
-      && model.idempotency.strategy !== 'fixture-only'
-      && model.idempotency.evidence !== ''
-    ), model.idempotency.strategy === 'fixture-only' || model.idempotency.contractKind === 'test-double'
-      ? 'Fixture-only or test-double de-duplication is not provider-contract evidence.'
-      : 'Provider/runtime contract evidence is present.'),
+    check('real-contract-evidence-present', hasRealContractEvidence(model),
+      hasRealContractEvidence(model)
+        ? 'Provider/runtime contract evidence is present.'
+        : 'Fixture-only or test-double behavior is not provider-contract evidence.'),
     check('retry-policy-valid', model.retryPolicy.writes !== 'blind-on-timeout',
       model.retryPolicy.writes === 'blind-on-timeout'
         ? 'Blind write retry after timeout is rejected for non-idempotent/uncertain writes.'
