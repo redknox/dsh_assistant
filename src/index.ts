@@ -11,6 +11,7 @@ export * from './domain/policy/index.js'
 export * from './domain/jobs/index.js'
 export * from './domain/registry/index.js'
 export * from './domain/resolution/index.js'
+export * from './domain/candidate/index.js'
 export { FakeClock, IntervalScheduler } from './adapters/jobs/interval-scheduler.js'
 export {
   AssistantControlSurface,
