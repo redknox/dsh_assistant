@@ -77,6 +77,7 @@ Current status of this repository:
 | Personal memory service + replaceable local persistence | **Implemented**; CRUD/conflict/delete, JSON adapter, and malformed-snapshot rejection **Verified** by `npm test` |
 | Personal knowledge/retrieval (local lexical index) | **Implemented**; ingest/citation/no-match/malformed **Verified** by `npm test` |
 | Personal integration seams (fake providers) | **Implemented**; read vs propose and structured errors **Verified** by `npm test` |
+| Trust/policy (L0–L4, confirmation, audit) | **Implemented**; read/propose/confirm/deny/cancel/replay **Verified** by `npm test` |
 | UI, real vendor accounts, vector DB, production persistence | **Unsupported** / not started |
 
 ## Develop

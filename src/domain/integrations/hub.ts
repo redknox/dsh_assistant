@@ -44,6 +44,7 @@ export interface CalendarProvider {
   availability(): Availability
   listEvents(query: { from: string; to: string } & PageQuery): Promise<Page<CalendarEvent>>
   proposeCreateEvent(input: { title: string; start: string; end: string }, signal?: AbortSignal): Promise<ProposedMutation<CalendarEvent>>
+  createEvent(input: { title: string; start: string; end: string }, signal?: AbortSignal): Promise<CalendarEvent>
 }
 
 export interface MailProvider {
@@ -62,6 +63,7 @@ export interface FilesProvider {
   readonly capability: 'files'
   availability(): Availability
   listFiles(query: { path?: string } & PageQuery): Promise<Page<FileEntry>>
+  deleteFile(id: string, signal?: AbortSignal): Promise<{ id: string; deleted: true }>
 }
 
 export interface TasksProvider {
@@ -69,6 +71,7 @@ export interface TasksProvider {
   availability(): Availability
   listTasks(query: PageQuery): Promise<Page<TaskItem>>
   proposeCreateTask(input: { title: string }, signal?: AbortSignal): Promise<ProposedMutation<TaskItem>>
+  createTask(input: { title: string }, signal?: AbortSignal): Promise<TaskItem>
 }
 
 export interface IntegrationProviders {

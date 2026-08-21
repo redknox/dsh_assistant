@@ -69,6 +69,8 @@ describe('runtime smoke', () => {
     assert.ok(ctx.tools.get('remember_memory'))
     assert.ok(ctx.tools.get('retrieve_knowledge'))
     assert.ok(ctx.tools.get('calendar_list_events'))
+    assert.ok(ctx.tools.get('confirm_action'))
+    assert.ok(ctx.actionPolicy)
     await handle.dispose()
     assert.equal(ctx.agents.get(handle.agent.id), undefined)
     await ctx.fiber.dispose()
