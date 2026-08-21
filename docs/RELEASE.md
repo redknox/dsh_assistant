@@ -17,10 +17,11 @@ Personal-assistant product layer on DeepSeek Harness **0.1.0-rc.8**. Not a produ
 - Capability Registry / ownership visibility (`ctx.capabilityRegistry`, conservative Core MVP bootstrap)
 - Capability Resolution Review (`ctx.capabilityResolution.review`): advisory reuse → configure → evolve → adopt → provider → new-plugin; unknown is not a new plugin
 - Candidate workspace + validation (`ctx.candidateWorkspace`, `ctx.candidateValidation`): inactive artifacts, digest-bound evidence; `validated` is not approval
+- Extension governance / activation / recovery: exact-diff approval, transactional Registry switch, LKG, Safe Mode; no self-authorization
 
 ## Designed only
 
-- Self-Extension architecture and governance ([docs/self-extension.md](./self-extension.md)): public DSH seams only; no self-authorization; reuse before new plugins. Registry, Resolution, and candidate validation are **Verified**; install/activation remain later work.
+- Self-Extension architecture and governance ([docs/self-extension.md](./self-extension.md)): public DSH seams only; no self-authorization. Registry, Resolution, validation, and governed activation/recovery are **Verified**; a first generated vertical slice remains later work.
 
 ## Implemented only (not live providers)
 

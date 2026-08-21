@@ -69,7 +69,7 @@ Normative. Details: [docs/self-extension.md](./docs/self-extension.md).
 3. Generated and managed plugins share the same public DSH plugin/runtime model. Provenance is metadata, not a privileged loader.
 4. Active plugin code is immutable. Modifications produce a new candidate version.
 5. Writing code is not authorization to execute or mount that code.
-6. The Capability Registry is descriptive only. Capability Resolution Review is advisory only. Candidate validation is evidence only. None of these may install, approve, or mount anything. Do not implement a generated-plugin installer unless a later issue asks for it.
+6. The Capability Registry is descriptive only. Resolution is advisory. Validation is evidence. Approval is a trusted-control record for an exact digest/diff. Activation is transactional. The assistant must not approve itself or rewrite the recovery root.
 
 ## 9. Non-goals (engineering)
 

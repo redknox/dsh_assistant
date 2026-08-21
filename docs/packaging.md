@@ -86,5 +86,6 @@ Observed in `test/packaging.test.ts` (isolated `$DSH_HOME`, DSH 0.1.0-rc.8):
 - `composeEntries` contains exactly one `dsh-assistant` row, plus base rows `agent` and `system-prompt`.
 - `boot` mounts `remember_memory` and `personalMemory`.
 - Dispose drops those registrations; a second `boot` restores one copy of each (three unique assistant jobs).
+- `profiles/assistant-safe` sets `safeMode: true` so optional integrations/jobs never load; recovery/governance inspect tools remain.
 
 The smoke overlay disables the base `hmr` row (Loader internals are not exposed under `tsx --test`) and sets `jobs.autoTickMs: null`. That overlay is test-only; the shipped example `profiles/assistant/cordis.patch.yml` stays `[]`.

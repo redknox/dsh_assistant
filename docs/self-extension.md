@@ -1,6 +1,6 @@
 # Self-Extension architecture and governance
 
-Status: governance contract is **Designed** and remains normative. The Capability Registry (**What do I have?**) is **Verified** — see [docs/capability-registry.md](./capability-registry.md). Capability Resolution Review (**What should change?**) is **Verified** — see [docs/capability-resolution.md](./capability-resolution.md). Candidate workspace and validation (**Can I build it safely?**) are **Verified** — see [docs/candidate-workspace.md](./candidate-workspace.md). Installer and generated-plugin runtime are still **Unsupported**.
+Status: governance contract is **Designed** and remains normative. The Capability Registry, Resolution Review, candidate workspace/validation, and governed activation/recovery are **Verified**. See [docs/capability-registry.md](./capability-registry.md), [docs/capability-resolution.md](./capability-resolution.md), [docs/candidate-workspace.md](./candidate-workspace.md), and [docs/extension-governance.md](./extension-governance.md). A first generated-plugin vertical slice is still **Unsupported**.
 
 Companion documents: [ARCHITECTURE.md](../ARCHITECTURE.md) (layers and public seams), [ENGINEERING.md](../ENGINEERING.md) (normative contributor rules), [README.md](../README.md) (product boundary).
 
@@ -25,7 +25,7 @@ These concerns must stay separate. Do not collapse them into one “the assistan
 | --- | --- | --- |
 | **What do I have?** | Capability and ownership visibility | Capability Registry (`ctx.capabilityRegistry`) |
 | **What should change?** | Capability Resolution Review | `ctx.capabilityResolution.review` ([docs/capability-resolution.md](./capability-resolution.md)) |
-| **May I change it?** | User approval / governance | Explicit user approval; never the assistant |
+| **May I change it?** | User approval / governance | Recovery Root `recordApproval` + transactional activate ([docs/extension-governance.md](./extension-governance.md)) |
 
 Visibility is not a change proposal. A change proposal is not authorization. Authorization is not a license to expand capabilities or permissions later without a new review.
 
@@ -226,4 +226,4 @@ Capability Resolution Review:
 - First self-generated plugin vertical slice
 - Any change to DSH Agent Loop internals
 
-The Capability Registry, Capability Resolution Review, and candidate workspace/validation are **Verified**. Next: Governance + Candidate Approval / Version Activation, still with recovery outside Self-Extension authority.
+Registry, Resolution, candidate validation, and governed activation/recovery are **Verified**. Next: the first Self-Extension end-to-end vertical slice (real need → review → candidate → approval → activate → rollback).

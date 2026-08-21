@@ -1,6 +1,8 @@
-export { apply, inject, name, PRODUCT_TOOL_NAMES, type AssistantBundleConfig } from './product/bundle.js'
+export { apply, inject, name, PRODUCT_TOOL_NAMES, SAFE_MODE_TOOL_NAMES, type AssistantBundleConfig } from './product/bundle.js'
 
-export { bootAssistantRuntime, createAssistantAgent } from './runtime/boot.js'
+export { bootAssistantControl, bootAssistantRuntime, bootSafeModeRuntime, createAssistantAgent } from './runtime/boot.js'
+export { RecoveryRoot } from './domain/governance/root.js'
+export { CordisActivationRuntime, resolveCandidateEntry } from './adapters/activation/cordis-runtime.js'
 export { ASSISTANT_PERSONA } from './product/persona.js'
 export { JsonFileMemoryPersistence } from './adapters/memory/json-file-persistence.js'
 export { ingestLocalTextFile } from './adapters/knowledge/local-file-ingest.js'
@@ -12,6 +14,7 @@ export * from './domain/jobs/index.js'
 export * from './domain/registry/index.js'
 export * from './domain/resolution/index.js'
 export * from './domain/candidate/index.js'
+export * from './domain/governance/index.js'
 export { FakeClock, IntervalScheduler } from './adapters/jobs/interval-scheduler.js'
 export {
   AssistantControlSurface,

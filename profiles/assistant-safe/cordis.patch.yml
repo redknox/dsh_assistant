@@ -1,0 +1,6 @@
+# Safe Mode overlay: keep recovery/governance, skip optional product plugins.
+- id: dsh-assistant
+  config:
+    safeMode: true
+    jobs:
+      autoTickMs: null

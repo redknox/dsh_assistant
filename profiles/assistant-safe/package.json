@@ -1,0 +1,13 @@
+{
+  "name": "dsh-assistant-safe-profile",
+  "private": true,
+  "description": "Safe Mode example profile: DSH base plus the assistant bundle with optional/generated extensions excluded before load.",
+  "dsh": {
+    "profile": {
+      "bundles": [
+        "@deepseek-ai/dsh-base",
+        "dsh-assistant"
+      ]
+    }
+  }
+}
