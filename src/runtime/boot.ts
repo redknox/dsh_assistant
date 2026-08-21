@@ -2,6 +2,7 @@ import { Context } from '@deepseek-ai/cordis'
 import AgentRegistry from '@deepseek-ai/dsh-agent'
 import AgentLoop from '@deepseek-ai/dsh-agent-loop'
 import InvariantRegistry from '@deepseek-ai/dsh-invariants'
+import LocalJobRegistry from '@deepseek-ai/dsh-jobs-local'
 import LlmRuntime from '@deepseek-ai/dsh-llm'
 import SessionStore, { SessionId } from '@deepseek-ai/dsh-session'
 import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
@@ -10,6 +11,7 @@ import * as assistantPlugin from '../plugins/assistant-plugin.js'
 import * as integrationsPlugin from '../plugins/integrations-plugin.js'
 import * as knowledgePlugin from '../plugins/knowledge-plugin.js'
 import * as memoryPlugin from '../plugins/memory-plugin.js'
+import * as jobsPlugin from '../plugins/jobs-plugin.js'
 import * as policyPlugin from '../plugins/policy-plugin.js'
 
 /**
@@ -28,11 +30,13 @@ export async function bootAssistantRuntime(options: BootOptions = {}): Promise<C
   await ctx.plugin(LlmRuntime)
   await ctx.plugin(SystemPrompt, {})
   await ctx.plugin(ToolRuntime)
+  await ctx.plugin(LocalJobRegistry)
   await ctx.plugin(AgentLoop, { agents: [] })
   await ctx.plugin(memoryPlugin)
   await ctx.plugin(knowledgePlugin, { fixturePaths: options.knowledgeFixturePaths })
   await ctx.plugin(integrationsPlugin)
   await ctx.plugin(policyPlugin)
+  await ctx.plugin(jobsPlugin)
   await ctx.plugin(assistantPlugin)
   return ctx
 }

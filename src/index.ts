@@ -3,6 +3,7 @@ import * as assistantPlugin from './plugins/assistant-plugin.js'
 import * as integrationsPlugin from './plugins/integrations-plugin.js'
 import * as knowledgePlugin from './plugins/knowledge-plugin.js'
 import * as memoryPlugin from './plugins/memory-plugin.js'
+import * as jobsPlugin from './plugins/jobs-plugin.js'
 import * as policyPlugin from './plugins/policy-plugin.js'
 
 export const name = 'dsh-assistant'
@@ -14,6 +15,7 @@ export function apply(ctx: Context) {
   ctx.plugin(knowledgePlugin)
   ctx.plugin(integrationsPlugin)
   ctx.plugin(policyPlugin)
+  ctx.plugin(jobsPlugin)
   ctx.plugin(assistantPlugin)
 }
 
@@ -25,4 +27,6 @@ export * from './domain/memory/index.js'
 export * from './domain/knowledge/index.js'
 export * from './domain/integrations/index.js'
 export * from './domain/policy/index.js'
+export * from './domain/jobs/index.js'
+export { FakeClock, IntervalScheduler } from './adapters/jobs/interval-scheduler.js'
 export { FakeIntegrationSuite } from './adapters/integrations/fake-providers.js'

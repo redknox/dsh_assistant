@@ -71,6 +71,8 @@ describe('runtime smoke', () => {
     assert.ok(ctx.tools.get('calendar_list_events'))
     assert.ok(ctx.tools.get('confirm_action'))
     assert.ok(ctx.actionPolicy)
+    assert.ok(ctx.assistantJobs)
+    assert.ok(ctx.jobs)
     await handle.dispose()
     assert.equal(ctx.agents.get(handle.agent.id), undefined)
     await ctx.fiber.dispose()
