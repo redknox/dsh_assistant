@@ -26,7 +26,9 @@ Write expansion                     events.create invalidates the prior approval
         ↓
 Proposal ≠ execution                propose is side-effect free
         ↓
-Idempotent create                   same key does not duplicate
+Host-managed Google transport       origin/path bound + credential injection
+        ↓
+Reconciled create                   deterministic event id recovers timeout-after-success
         ↓
 Restart / rollback / Safe Mode      committed authority only
 ```
@@ -37,7 +39,13 @@ Restart / rollback / Safe Mode      committed authority only
 
 The generated owner is `generated/google-calendar`. It does **not** register a second `calendar_list_events` tool. It calls `IntegrationHub.replaceCalendar()` so the existing model-facing tools (`calendar_list_events`, `calendar_get_event`, `calendar_freebusy`, `calendar_propose_event`, `calendar_create_event`) keep their provider-neutral shapes.
 
-Google HTTP objects stay in the adapter. Model-facing events are `{ id, title, start, end, timeZone, calendarId, attendees, allDay, description }`.
+The generated provider maps provider-neutral events to the real Google Calendar v3 resource shape (`summary`, `start.dateTime` / `start.date`, `attendees[].email`). It does **not** call `fetch` or receive a generic HTTP client. Outbound calls go through a host-managed transport on `ctx.integrations.googleCalendarTransport` that:
+
+- only accepts `https://www.googleapis.com` + `/calendar/v3/...`;
+- injects `Authorization` at that boundary;
+- never returns the token to candidate/model output.
+
+Offline tests substitute `createFakeGoogleCalendarTransport()`, which speaks the same v3 contract. Set `DSH_ASSISTANT_GOOGLE_CALENDAR_MODE=live` to use `createLiveGoogleCalendarTransport()`. Construction of the live transport does not require a fixture and does not throw merely because a token is absent.
 
 ## Action-level authority
 
@@ -53,15 +61,25 @@ A read-only approval does not authorize create. Adding create is a new exact-can
 
 - Secret **identifier** `google.calendar.oauth` may appear in the manifest / approval summary.
 - Secret **values** are never stored in candidate files, Registry, diagnostics, backups, or tool output.
-- Validation and offline tests use `DSH_ASSISTANT_GOOGLE_CALENDAR_MODE=fixture` and never call Google.
+- Validation and offline tests never call Google. They inject a v3-shaped fake transport. `MODE=fixture` is accepted; the default host wiring is also fake unless `MODE=live`.
 - Approved network effect is only `https://www.googleapis.com/calendar/v3`.
 - Provider errors redact Bearer tokens, `ya29.*`, `access_token`, `refresh_token`, and `client_secret`.
 
-Runtime injection, when used, is host-supplied `DSH_ASSISTANT_GOOGLE_CALENDAR_ACCESS_TOKEN`. The candidate does not mint or persist it.
+Runtime injection, when used, is host-supplied `DSH_ASSISTANT_GOOGLE_CALENDAR_ACCESS_TOKEN` at the transport boundary. The candidate does not read, mint, or persist the value.
 
-## Idempotency
+## Idempotency / uncertain success
 
-`createEvent` accepts `idempotencyKey`. The fixture transport returns the first created event for a repeated key. If a live Google call times out after remote success, retry with the same key; the adapter treats a matching key as the same operation rather than a second create.
+Google Calendar does not treat an application `idempotencyKey` as a first-class header. This slice derives a deterministic Google event `id` from the approved operation identity (`sha256` hex, valid base32hex) and sends that id on insert.
+
+```text
+create with derived id
+→ Google may have created the event
+→ client times out before seeing success
+→ GET calendars/{id}/events/{derivedId} recovers the event
+→ retry insert is 409 conflict or GET-before-insert; still one logical event
+```
+
+A timeout-after-success transport regression covers this path. The in-memory fake store is only a Google v3 double; it is not the idempotency strategy.
 
 ## Control plane
 

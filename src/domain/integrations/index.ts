@@ -29,3 +29,10 @@ export {
 } from './hub.js'
 export { assertCalendarRange, eventToDraft } from './calendar-time.js'
 export { sanitizeProviderError } from './sanitize.js'
+export {
+  GOOGLE_CALENDAR_API_ORIGIN,
+  GOOGLE_CALENDAR_ORIGIN,
+  assertGoogleCalendarPath,
+  eventIdFromOperation,
+  type BoundedGoogleCalendarTransport,
+} from './google-api.js'

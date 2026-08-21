@@ -1,12 +1,18 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
-import { createFixtureTransport, createGoogleCalendarProvider } from '../src/provider.js'
+import { eventIdFromOperation } from '../src/google-event.js'
+import { createGoogleCalendarProvider } from '../src/provider.js'
 import { sanitizeProviderError } from '../src/sanitize.js'
 import { assertCalendarRange } from '../src/time.js'
+import { createFakeGoogleCalendarTransport } from './fake-transport.js'
 
 describe('google calendar candidate', () => {
-  it('proposes without mutating the fixture', async () => {
-    const transport = createFixtureTransport()
+  it('requires a host-managed transport and does not default to a private HTTP client', () => {
+    assert.throws(() => createGoogleCalendarProvider({ allowCreate: false }), /host-managed Google Calendar transport is required/)
+  })
+
+  it('proposes without mutating the Google store', async () => {
+    const transport = createFakeGoogleCalendarTransport()
     const provider = createGoogleCalendarProvider({ transport, allowCreate: false })
     const before = transport.events.length
     const proposal = await provider.proposeCreateEvent({
@@ -22,7 +28,7 @@ describe('google calendar candidate', () => {
   })
 
   it('denies create on the read-only candidate', async () => {
-    const provider = createGoogleCalendarProvider({ allowCreate: false })
+    const provider = createGoogleCalendarProvider({ transport: createFakeGoogleCalendarTransport(), allowCreate: false })
     await assert.rejects(() => provider.createEvent({
       title: 'Focus',
       start: '2026-08-22T14:00:00.000Z',
@@ -31,8 +37,8 @@ describe('google calendar candidate', () => {
     }), /not authorized/)
   })
 
-  it('reuses an idempotency key instead of duplicating', async () => {
-    const transport = createFixtureTransport()
+  it('reconciles a timeout after remote create using the deterministic event id', async () => {
+    const transport = createFakeGoogleCalendarTransport({ seed: [], failNextCreate: 'timeout-after-success' })
     const provider = createGoogleCalendarProvider({ transport, allowCreate: true })
     const input = {
       title: 'Focus',
@@ -43,12 +49,13 @@ describe('google calendar candidate', () => {
     }
     const first = await provider.createEvent(input)
     const second = await provider.createEvent(input)
+    assert.equal(first.id, eventIdFromOperation('op-focus-1'))
     assert.equal(first.id, second.id)
-    assert.equal(transport.events.filter((event) => event.title === 'Focus').length, 1)
+    assert.equal(transport.events.filter((event) => event.summary === 'Focus').length, 1)
   })
 
   it('sanitizes credential-bearing provider errors', async () => {
-    const provider = createGoogleCalendarProvider()
+    const provider = createGoogleCalendarProvider({ transport: createFakeGoogleCalendarTransport() })
     await assert.rejects(async () => {
       await provider.getEvent('unauthorized')
     }, (error) => {
@@ -67,5 +74,6 @@ describe('google calendar candidate', () => {
       end: '2026-03-08T07:30:00.000Z',
       timeZone: 'America/New_York',
     })
+    assert.match(sanitizeProviderError('Authorization: Bearer ya29.secret-token'), /redacted/)
   })
 })

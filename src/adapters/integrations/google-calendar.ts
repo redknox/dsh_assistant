@@ -1,80 +1,29 @@
 import { eventToDraft } from '../../domain/integrations/calendar-time.js'
+import {
+  calendarEventPath,
+  calendarEventsPath,
+  eventIdFromOperation,
+  freeBusyPath,
+  fromGoogleEvent,
+  fromGoogleFreeBusy,
+  isUncertainCreateError,
+  toGoogleEvent,
+  type BoundedGoogleCalendarTransport,
+} from '../../domain/integrations/google-api.js'
 import type { CalendarCreateInput, CalendarEvent, CalendarProvider, FreeBusyWindow } from '../../domain/integrations/hub.js'
 import { IntegrationError, type Availability, type Page, type PageQuery, type ProposedMutation } from '../../domain/integrations/types.js'
 import { sanitizeProviderError } from '../../domain/integrations/sanitize.js'
 
-export const GOOGLE_CALENDAR_API_ORIGIN = 'https://www.googleapis.com/calendar/v3'
-
-export interface GoogleCalendarTransport {
-  request(input: { method: string; path: string; body?: unknown; token?: string }): Promise<{ status: number; body: unknown }>
-}
+export { GOOGLE_CALENDAR_API_ORIGIN } from '../../domain/integrations/google-api.js'
+export {
+  createFakeGoogleCalendarTransport,
+  createHostGoogleCalendarTransport,
+  createLiveGoogleCalendarTransport,
+} from './google-calendar-transport.js'
 
 export interface GoogleCalendarOptions {
   readonly allowCreate?: boolean
-  readonly transport?: GoogleCalendarTransport
-  readonly getAccessToken?: () => string | undefined
-}
-
-interface FixtureEvent extends CalendarEvent {
-  readonly idempotencyKey?: string
-}
-
-export function createFixtureTransport(seed: CalendarEvent[] = []): GoogleCalendarTransport {
-  const events = [...seed]
-  const byKey = new Map<string, CalendarEvent>()
-  return {
-    async request(input) {
-      if (input.path.includes('unauthorized')) return { status: 401, body: { error: { message: 'Bearer leaked-credential' } } }
-      if (input.path.includes('forbidden')) return { status: 403, body: { error: { message: 'insufficient scope' } } }
-      if (input.path.includes('rate-limit')) return { status: 429, body: { error: { message: 'rate limited' } } }
-      if (input.path.includes('unavailable')) return { status: 503, body: { error: { message: 'backend unavailable' } } }
-      if (input.method === 'GET' && input.path.startsWith('/events/')) {
-        const id = input.path.slice('/events/'.length)
-        const found = events.find((event) => event.id === id)
-        return found === undefined ? { status: 404, body: { error: { message: 'not found' } } } : { status: 200, body: found }
-      }
-      if (input.method === 'GET' && input.path.startsWith('/events')) {
-        return { status: 200, body: { items: events } }
-      }
-      if (input.method === 'POST' && input.path === '/freeBusy') {
-        const query = input.body as { from: string; to: string }
-        return {
-          status: 200,
-          body: {
-            items: events
-              .filter((event) => event.start < query.to && event.end > query.from)
-              .map((event) => ({ start: event.start, end: event.end, busy: true })),
-          },
-        }
-      }
-      if (input.method === 'POST' && input.path === '/events') {
-        const body = input.body as CalendarCreateInput
-        if (body.idempotencyKey !== undefined && byKey.has(body.idempotencyKey)) {
-          return { status: 200, body: byKey.get(body.idempotencyKey) }
-        }
-        const created: FixtureEvent = { ...eventToDraft(body), id: `gcal-${events.length + 1}`, idempotencyKey: body.idempotencyKey }
-        events.push(created)
-        if (body.idempotencyKey !== undefined) byKey.set(body.idempotencyKey, created)
-        return { status: 200, body: created }
-      }
-      return { status: 500, body: { error: { message: 'unknown fixture route' } } }
-    },
-  }
-}
-
-function asEvent(body: unknown): CalendarEvent {
-  const value = body as CalendarEvent
-  return {
-    id: String(value.id),
-    title: String(value.title),
-    start: String(value.start),
-    end: String(value.end),
-    timeZone: value.timeZone,
-    calendarId: value.calendarId ?? 'primary',
-    description: value.description,
-    attendees: value.attendees,
-    allDay: value.allDay,
-  }
+  readonly transport: BoundedGoogleCalendarTransport
 }
 
 function fail(status: number, body: unknown): never {
@@ -87,15 +36,19 @@ function fail(status: number, body: unknown): never {
   throw new IntegrationError('calendar', 'provider_failure', message)
 }
 
-/** Provider-neutral CalendarProvider backed by a Google Calendar transport. Live tokens stay out of this module. */
-export function createGoogleCalendarProvider(options: GoogleCalendarOptions = {}): CalendarProvider {
-  const transport = options.transport ?? createFixtureTransport()
+/** Provider-neutral CalendarProvider. Talks Google Calendar v3 only through a host-bounded transport. */
+export function createGoogleCalendarProvider(options: GoogleCalendarOptions): CalendarProvider {
   const allowCreate = options.allowCreate === true
-  const call = async (input: { method: string; path: string; body?: unknown }) => {
-    const token = options.getAccessToken?.()
-    const response = await transport.request({ ...input, token })
+  const call = async (input: { method: 'GET' | 'POST'; path: string; body?: unknown }, signal?: AbortSignal) => {
+    const response = await options.transport.request(input, signal)
     if (response.status >= 400) fail(response.status, response.body)
     return response.body
+  }
+  const tryGet = async (calendarId: string, eventId: string, signal?: AbortSignal): Promise<CalendarEvent | undefined> => {
+    const response = await options.transport.request({ method: 'GET', path: calendarEventPath(calendarId, eventId) }, signal)
+    if (response.status === 404) return undefined
+    if (response.status >= 400) fail(response.status, response.body)
+    return fromGoogleEvent(response.body, calendarId)
   }
   return {
     capability: 'calendar',
@@ -103,18 +56,32 @@ export function createGoogleCalendarProvider(options: GoogleCalendarOptions = {}
       return { available: true }
     },
     async listEvents(query: { from: string; to: string } & PageQuery): Promise<Page<CalendarEvent>> {
-      const body = await call({ method: 'GET', path: `/events?from=${encodeURIComponent(query.from)}&to=${encodeURIComponent(query.to)}` }) as { items?: CalendarEvent[] }
-      const items = (body.items ?? []).filter((event) => event.start >= query.from && event.start <= query.to)
-      return { items }
+      const calendarId = 'primary'
+      const body = await call({
+        method: 'GET',
+        path: calendarEventsPath(calendarId, { timeMin: query.from, timeMax: query.to }),
+      }, query.signal) as { items?: unknown[] }
+      return { items: (body.items ?? []).map((item) => fromGoogleEvent(item, calendarId)) }
     },
-    async getEvent(id: string): Promise<CalendarEvent> {
-      return asEvent(await call({ method: 'GET', path: `/events/${id}` }))
+    async getEvent(id: string, signal?: AbortSignal): Promise<CalendarEvent> {
+      return fromGoogleEvent(await call({ method: 'GET', path: calendarEventPath('primary', id) }, signal), 'primary')
     },
     async freeBusy(query: { from: string; to: string; timeZone?: string } & PageQuery): Promise<Page<FreeBusyWindow>> {
-      const body = await call({ method: 'POST', path: '/freeBusy', body: query }) as { items?: FreeBusyWindow[] }
-      return { items: body.items ?? [] }
+      const calendarId = 'primary'
+      const body = await call({
+        method: 'POST',
+        path: freeBusyPath(),
+        body: {
+          timeMin: query.from,
+          timeMax: query.to,
+          timeZone: query.timeZone,
+          items: [{ id: calendarId }],
+        },
+      }, query.signal)
+      return { items: fromGoogleFreeBusy(body, calendarId) }
     },
-    async proposeCreateEvent(input: CalendarCreateInput): Promise<ProposedMutation<CalendarEvent>> {
+    async proposeCreateEvent(input: CalendarCreateInput, signal?: AbortSignal): Promise<ProposedMutation<CalendarEvent>> {
+      void signal
       const draft = eventToDraft(input)
       return {
         trust: 'propose',
@@ -122,9 +89,33 @@ export function createGoogleCalendarProvider(options: GoogleCalendarOptions = {}
         draft,
       }
     },
-    async createEvent(input: CalendarCreateInput): Promise<CalendarEvent> {
+    async createEvent(input: CalendarCreateInput, signal?: AbortSignal): Promise<CalendarEvent> {
       if (!allowCreate) throw new IntegrationError('calendar', 'unavailable', 'calendar.events.create is not authorized on this candidate')
-      return asEvent(await call({ method: 'POST', path: '/events', body: input }))
+      const calendarId = input.calendarId ?? 'primary'
+      const eventId = input.idempotencyKey === undefined ? undefined : eventIdFromOperation(input.idempotencyKey)
+      if (eventId !== undefined) {
+        const existing = await tryGet(calendarId, eventId, signal)
+        if (existing !== undefined) return existing
+      }
+      try {
+        const response = await options.transport.request({
+          method: 'POST',
+          path: calendarEventsPath(calendarId),
+          body: toGoogleEvent(input, eventId),
+        }, signal)
+        if (response.status === 409 && eventId !== undefined) {
+          const recovered = await tryGet(calendarId, eventId, signal)
+          if (recovered !== undefined) return recovered
+        }
+        if (response.status >= 400) fail(response.status, response.body)
+        return fromGoogleEvent(response.body, calendarId)
+      } catch (error) {
+        if (eventId !== undefined && isUncertainCreateError(error)) {
+          const recovered = await tryGet(calendarId, eventId, signal)
+          if (recovered !== undefined) return recovered
+        }
+        throw error
+      }
     },
   }
 }

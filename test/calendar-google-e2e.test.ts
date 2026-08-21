@@ -142,6 +142,7 @@ describe('Calendar Self-Extension vertical slice', () => {
       const identity = await tool(ctx, 'google_calendar_provider', {})
       assert.equal(identity.provider, 'google')
       assert.equal(identity.seam, 'integrations.calendar')
+      assert.equal(identity.transport, 'host-managed')
       assert.equal(identity.allowCreate, false)
       assert.equal(identity.credential, 'injected')
       assert.equal(Object.hasOwn(identity, 'token'), false)
@@ -189,8 +190,11 @@ describe('Calendar Self-Extension vertical slice', () => {
 
       const durableText = JSON.stringify(ctx.capabilityRegistry.get('generated/google-calendar', '0.1.0'))
       assertNoSecretValue(durableText)
-      assertNoSecretValue(readFileSync(join(candidateSource, 'src/plugin.js'), 'utf8'))
-      assert.doesNotMatch(readFileSync(join(candidateSource, 'src/provider.js'), 'utf8'), /ya29\.|access_token=|refresh_token=|client_secret=/)
+      for (const source of ['src/plugin.js', 'src/provider.js', 'src/google-event.js']) {
+        const text = readFileSync(join(candidateSource, source), 'utf8')
+        assertNoSecretValue(text)
+        assert.doesNotMatch(text, /\bfetch\s*\(|node:http|node:https|https\.request/)
+      }
 
       const rolled = await recoveryRoot.rollback(human)
       assert.equal(rolled.state, 'rolled-back')

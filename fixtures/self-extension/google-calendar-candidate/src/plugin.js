@@ -1,4 +1,4 @@
-import { createFixtureTransport, createGoogleCalendarProvider, GOOGLE_CALENDAR_API_ORIGIN } from './provider.js'
+import { createGoogleCalendarProvider, GOOGLE_CALENDAR_API_ORIGIN } from './provider.js'
 
 function textOutput() {
   return {
@@ -9,11 +9,6 @@ function textOutput() {
   }
 }
 
-function accessToken() {
-  const value = process.env.DSH_ASSISTANT_GOOGLE_CALENDAR_ACCESS_TOKEN
-  return typeof value === 'string' && value !== '' ? value : undefined
-}
-
 export const name = 'generated-google-calendar'
 export const inject = ['tools', 'integrations']
 
@@ -21,15 +16,11 @@ const ALLOW_CREATE = false
 
 export function apply(ctx) {
   const allowCreate = ALLOW_CREATE === true
-  const mode = process.env.DSH_ASSISTANT_GOOGLE_CALENDAR_MODE ?? 'fixture'
-  if (mode !== 'fixture') {
-    throw new Error('live Google Calendar credentials are not available during candidate validation or offline tests')
+  const transport = ctx.integrations.googleCalendarTransport
+  if (transport === undefined || typeof transport.request !== 'function') {
+    throw new Error('host-managed Google Calendar transport is required')
   }
-  const provider = createGoogleCalendarProvider({
-    allowCreate,
-    transport: createFixtureTransport(),
-    getAccessToken: accessToken,
-  })
+  const provider = createGoogleCalendarProvider({ allowCreate, transport })
   const restore = ctx.integrations.hub.replaceCalendar(provider)
   const dispose = ctx.tools.register({
     name: 'google_calendar_provider',
@@ -37,12 +28,14 @@ export function apply(ctx) {
     parameters: {},
     output: textOutput(),
     async execute() {
+      const credential = typeof transport.credentialState === 'function' ? transport.credentialState() : 'absent'
       return JSON.stringify({
         provider: 'google',
         seam: 'integrations.calendar',
         origin: GOOGLE_CALENDAR_API_ORIGIN,
+        transport: 'host-managed',
         allowCreate,
-        credential: accessToken() === undefined ? 'absent' : 'injected',
+        credential,
       })
     },
   })
