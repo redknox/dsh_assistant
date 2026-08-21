@@ -55,3 +55,11 @@ export async function inspectLlmRuntime(ctx?: Context): Promise<LlmDiagnosis> {
         : `Set ${DEFAULT_LLM_CREDENTIAL} in the env file (chmod 600). Product start is not a usable AI runtime until the key is present.`,
   }
 }
+
+export function formatUnusableLlmError(llm: LlmDiagnosis): string {
+  const lines = ['LLM not configured/unavailable']
+  if (!llm.credentialPresent) lines.push(`missing ${llm.credential}`)
+  if (!llm.routeAvailable) lines.push(`route ${llm.provider}/${llm.model} unavailable`)
+  lines.push(llm.note)
+  return lines.join('\n')
+}

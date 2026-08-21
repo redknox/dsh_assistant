@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { chmodSync, mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { describe, it } from 'node:test'
@@ -160,6 +160,87 @@ describe('TARS-NG product runtime', () => {
       if (previous === undefined) delete process.env.DEEPSEEK_API_KEY
       else process.env.DEEPSEEK_API_KEY = previous
       await ctx.fiber.dispose()
+    }
+  })
+
+  it('fails start without DEEPSEEK_API_KEY and does not write a pid', async () => {
+    const home = isolatedHome()
+    const userHome = isolatedHome()
+    const previous = {
+      deepseek: process.env.DEEPSEEK_API_KEY,
+      home: process.env.HOME,
+      xdgConfig: process.env.XDG_CONFIG_HOME,
+      tarsHome: process.env.TARS_NG_HOME,
+    }
+    delete process.env.DEEPSEEK_API_KEY
+    process.env.HOME = userHome
+    process.env.XDG_CONFIG_HOME = path.join(userHome, '.config')
+    const layout = ensureProductHome(home)
+    const lines: string[] = []
+    try {
+      const once = await runProductCli(['start', '--once', '--home', home], {
+        log: (text) => lines.push(text),
+        error: (text) => lines.push(text),
+      })
+      const running = await runProductCli(['start', '--home', home], {
+        log: (text) => lines.push(text),
+        error: (text) => lines.push(text),
+      })
+      const text = lines.join('\n')
+      assert.equal(once, 1)
+      assert.equal(running, 1)
+      assert.equal(existsSync(layout.pidFile), false)
+      assert.match(text, /LLM not configured\/unavailable/)
+      assert.match(text, /missing DEEPSEEK_API_KEY/)
+      assert.doesNotMatch(text, /TARS-NG is running/)
+    } finally {
+      if (previous.deepseek === undefined) delete process.env.DEEPSEEK_API_KEY
+      else process.env.DEEPSEEK_API_KEY = previous.deepseek
+      if (previous.home === undefined) delete process.env.HOME
+      else process.env.HOME = previous.home
+      if (previous.xdgConfig === undefined) delete process.env.XDG_CONFIG_HOME
+      else process.env.XDG_CONFIG_HOME = previous.xdgConfig
+      if (previous.tarsHome === undefined) delete process.env.TARS_NG_HOME
+      else process.env.TARS_NG_HOME = previous.tarsHome
+    }
+  })
+
+  it('starts when an injected DEEPSEEK_API_KEY is present and the default route resolves', async () => {
+    const home = isolatedHome()
+    const userHome = isolatedHome()
+    const layout = ensureProductHome(home)
+    writeFileSync(layout.envFile, 'DEEPSEEK_API_KEY=sk-offline-not-a-live-key\n', { mode: 0o600 })
+    const previous = {
+      deepseek: process.env.DEEPSEEK_API_KEY,
+      home: process.env.HOME,
+      xdgConfig: process.env.XDG_CONFIG_HOME,
+      tarsHome: process.env.TARS_NG_HOME,
+    }
+    delete process.env.DEEPSEEK_API_KEY
+    process.env.HOME = userHome
+    process.env.XDG_CONFIG_HOME = path.join(userHome, '.config')
+    const lines: string[] = []
+    try {
+      const code = await runProductCli(['start', '--once', '--home', home], {
+        log: (text) => lines.push(text),
+        error: (text) => lines.push(text),
+      })
+      const text = lines.join('\n')
+      assert.equal(code, 0)
+      assert.equal(existsSync(layout.pidFile), false)
+      assert.match(text, /ai-runtime: configured/)
+      assert.match(text, /llm-route: available/)
+      assert.doesNotMatch(text, /sk-offline-not-a-live-key/)
+      assert.doesNotMatch(text, /LLM not configured\/unavailable/)
+    } finally {
+      if (previous.deepseek === undefined) delete process.env.DEEPSEEK_API_KEY
+      else process.env.DEEPSEEK_API_KEY = previous.deepseek
+      if (previous.home === undefined) delete process.env.HOME
+      else process.env.HOME = previous.home
+      if (previous.xdgConfig === undefined) delete process.env.XDG_CONFIG_HOME
+      else process.env.XDG_CONFIG_HOME = previous.xdgConfig
+      if (previous.tarsHome === undefined) delete process.env.TARS_NG_HOME
+      else process.env.TARS_NG_HOME = previous.tarsHome
     }
   })
 })

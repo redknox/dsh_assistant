@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { execFileSync } from 'node:child_process'
+import { execFileSync, spawnSync } from 'node:child_process'
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -257,21 +257,31 @@ describe('product package and profile', () => {
     delete env.DEEPSEEK_API_KEY
 
     const doctor = execFileSync(bin, ['doctor', '--home', productHome], { encoding: 'utf8', env })
-    const started = execFileSync(bin, ['start', '--once', '--home', productHome], { encoding: 'utf8', env })
-    const combined = `${doctor}\n${started}`
-    assert.match(combined, /TARS-NG/)
-    assert.match(combined, new RegExp(productHome.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')))
-    assert.match(combined, /DSH_ASSISTANT_GOOGLE_CALENDAR_ACCESS_TOKEN: present/)
-    assert.match(combined, /DEEPSEEK_API_KEY: missing/)
-    assert.match(combined, /GOOGLE_SEARCH_API_KEY: missing/)
-    assert.match(combined, /llm-provider: deepseek-official/)
-    assert.match(combined, /llm-model: deepseek-v4-flash/)
-    assert.match(combined, /llm-route: available/)
-    assert.match(combined, /ai-runtime: LLM not configured\/unavailable/)
-    assert.doesNotMatch(combined, /ya29\.installed-secret/)
-    assert.doesNotMatch(combined, /\btsx\b/)
-    assert.doesNotMatch(combined, /Team standup/)
-    assert.match(combined, /calendar: unavailable|calendar: live/)
+    assert.match(doctor, /TARS-NG/)
+    assert.match(doctor, new RegExp(productHome.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')))
+    assert.match(doctor, /DSH_ASSISTANT_GOOGLE_CALENDAR_ACCESS_TOKEN: present/)
+    assert.match(doctor, /DEEPSEEK_API_KEY: missing/)
+    assert.match(doctor, /GOOGLE_SEARCH_API_KEY: missing/)
+    assert.match(doctor, /llm-provider: deepseek-official/)
+    assert.match(doctor, /llm-model: deepseek-v4-flash/)
+    assert.match(doctor, /llm-route: available/)
+    assert.match(doctor, /ai-runtime: LLM not configured\/unavailable/)
+    assert.doesNotMatch(doctor, /ya29\.installed-secret/)
+    assert.doesNotMatch(doctor, /\btsx\b/)
+    assert.doesNotMatch(doctor, /Team standup/)
+    assert.match(doctor, /calendar: unavailable|calendar: live/)
+
+    const pidFile = join(productHome, 'state', 'tars-ng.pid')
+    const failedOnce = spawnSync(bin, ['start', '--once', '--home', productHome], { encoding: 'utf8', env })
+    const failedStart = spawnSync(bin, ['start', '--home', productHome], { encoding: 'utf8', env })
+    const failedText = `${failedOnce.stdout}\n${failedOnce.stderr}\n${failedStart.stdout}\n${failedStart.stderr}`
+    assert.notEqual(failedOnce.status, 0)
+    assert.notEqual(failedStart.status, 0)
+    assert.equal(existsSync(pidFile), false)
+    assert.match(failedText, /LLM not configured\/unavailable/)
+    assert.match(failedText, /missing DEEPSEEK_API_KEY/)
+    assert.doesNotMatch(failedText, /TARS-NG is running/)
+    assert.doesNotMatch(failedText, /ya29\.installed-secret/)
 
     writeFileSync(join(productHome, 'config', 'env'), 'DEEPSEEK_API_KEY=sk-offline-not-a-live-key\n', { mode: 0o600 })
     chmodSync(join(productHome, 'config', 'env'), 0o600)
@@ -280,5 +290,12 @@ describe('product package and profile', () => {
     assert.match(withKey, /llm-route: available/)
     assert.match(withKey, /ai-runtime: configured/)
     assert.doesNotMatch(withKey, /sk-offline-not-a-live-key/)
+
+    const started = execFileSync(bin, ['start', '--once', '--home', productHome], { encoding: 'utf8', env })
+    assert.match(started, /ai-runtime: configured/)
+    assert.match(started, /llm-route: available/)
+    assert.doesNotMatch(started, /LLM not configured\/unavailable/)
+    assert.doesNotMatch(started, /sk-offline-not-a-live-key/)
+    assert.equal(existsSync(pidFile), false)
   })
 })

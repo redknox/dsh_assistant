@@ -42,7 +42,7 @@ tars-ng doctor
 tars-ng stop
 ```
 
-Missing optional Google credentials do not block core start. Missing `DEEPSEEK_API_KEY` also does not prevent start, but `doctor` reports `ai-runtime: LLM not configured/unavailable`. Missing Node/DSH, or corrupt/unsupported durable authority, fails closed.
+Missing optional Google credentials do not block core start. Missing `DEEPSEEK_API_KEY`, or an unresolved default model route, makes `tars-ng start` fail with `LLM not configured/unavailable`. `doctor` and `status` still run and report the problem. Missing Node/DSH, or corrupt/unsupported durable authority, fails closed.
 
 Soak LLM baseline (shipped with the product, not assembled by the operator):
 
@@ -101,7 +101,7 @@ Do not invent an internal plaintext vault.
 
 The packed runtime mounts `@deepseek-ai/dsh-llm-deepseek` and sets the Agent default to `deepseek-official` / `deepseek-v4-flash`. Operators do not wire DSH provider internals.
 
-`DEEPSEEK_API_KEY` is required for a usable AI runtime. `tars-ng start` without it still boots the product, but `doctor` reports `ai-runtime: LLM not configured/unavailable`. Product start is not equivalent to a usable AI runtime.
+`DEEPSEEK_API_KEY` is required for a usable AI runtime. `tars-ng doctor` and `tars-ng status` may run without it. `tars-ng start` fails fast with `LLM not configured/unavailable`, names `DEEPSEEK_API_KEY` if missing, and does not write a pid or enter the long-running state. Product start is not equivalent to a usable AI runtime.
 
 `tars-ng doctor` prints provider, model, whether the credential name is present, and whether the model route is available. It never prints the key.
 
@@ -129,8 +129,8 @@ A generated Google Calendar provider still requires the existing M1–M4 approva
 
 | Command | Behavior |
 | --- | --- |
-| `tars-ng start` | Ensures home, loads env, checks Node/DSH, boots, prints first-run + doctor facts, waits for SIGINT/SIGTERM |
-| `tars-ng start --once` | Same boot, then exits (packaging/smoke) |
+| `tars-ng start` | Ensures home, loads env, checks Node/DSH and default LLM, boots, prints first-run + doctor facts, waits for SIGINT/SIGTERM. Fails without writing a pid when the default LLM is unusable |
+| `tars-ng start --once` | Same checks and boot, then exits (packaging/smoke). Non-zero when the default LLM is unusable |
 | `tars-ng status` | Version, running pid, home, DSH compatibility — no secret values |
 | `tars-ng doctor` | Version, Node, DSH packages, home, env-file safety, credential **names**, LLM provider/model/route, `ai-runtime`, integration mode, Safe Mode/recovery |
 | `tars-ng stop` | SIGTERM to the pid recorded by `start` |
@@ -183,7 +183,7 @@ Backups exclude secrets, credentials, personal memory, env files, and unsealed w
 
 | Symptom | What to do |
 | --- | --- |
-| `ai-runtime: LLM not configured/unavailable` | Set `DEEPSEEK_API_KEY`; start is not a usable AI runtime until it is present |
+| `ai-runtime: LLM not configured/unavailable` | Set `DEEPSEEK_API_KEY`; `tars-ng start` fails until the default LLM is usable |
 | `… is outside the supported DSH release` | Reinstall this tarball; do not mix newer RCs |
 | Calendar fixture events in daily use | Unset `TARS_NG_ALLOW_FIXTURES`; do not pass `--allow-fixtures` |
 | Calendar unavailable after live mode | Replace `DSH_ASSISTANT_GOOGLE_CALENDAR_ACCESS_TOKEN`; it expires |

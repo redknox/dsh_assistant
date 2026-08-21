@@ -6,7 +6,7 @@ import { inspectCompatibility } from './compatibility.js'
 import { DEFAULT_LLM_MODEL, DEFAULT_LLM_PROVIDER, PRODUCT_COMMAND, PRODUCT_NAME } from './constants.js'
 import { attachRuntimeDoctor, collectStaticDoctor, formatDoctorReport } from './doctor.js'
 import { inspectEnvFile, type EnvFileLoad } from './env.js'
-import { inspectLlmRuntime } from './llm.js'
+import { inspectLlmRuntime, formatUnusableLlmError } from './llm.js'
 import {
   ensureProductHome,
   readLastStatus,
@@ -230,13 +230,18 @@ export async function runProductCli(argv: readonly string[], io: { log: (text: s
         llm: { provider: llm.provider, model: llm.model, routeAvailable: llm.routeAvailable, usable: llm.usable },
       }
       writeLastStatus(layout, snapshot)
-      appendProductLog(layout.logFile, `lifecycle ${parsed.command} persistence=${report.persistence} safeMode=${report.safeMode}`)
+      appendProductLog(layout.logFile, `lifecycle ${parsed.command} persistence=${report.persistence} safeMode=${report.safeMode} llm=${llm.state}`)
       if (parsed.command === 'doctor') {
         io.log(formatDoctorReport(report))
         return compatibility.ok ? 0 : 1
       }
       if (first) io.log(firstRunText(layout, allowFixtures))
       io.log(formatDoctorReport(report))
+      if (!llm.usable) {
+        io.error(formatUnusableLlmError(llm))
+        appendProductLog(layout.logFile, 'lifecycle start failed LLM not configured/unavailable')
+        return 1
+      }
       if (parsed.once) return compatibility.ok ? 0 : 1
       writeFileSync(layout.pidFile, `${process.pid}\n`, { mode: 0o600 })
       io.log(`TARS-NG is running. Home ${layout.root}. Ctrl-C to stop.`)

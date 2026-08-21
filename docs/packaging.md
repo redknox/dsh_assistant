@@ -41,7 +41,7 @@ npm run pack:inspect
 
 Intended pack contents: `package.json`, `README.md`, `cordis.patch.yml`, and `dist/**` (including `dist/product/bin.js`). Not shipped: `src/`, `test/`, `fixtures/`, `docs/`, `profiles/`, `.env*`, credentials, user home state.
 
-`test/packaging.test.ts` installs that tarball into a clean directory and runs `tars-ng doctor` / `start --once` with an isolated product home.
+`test/packaging.test.ts` installs that tarball into a clean directory and runs `tars-ng doctor` / `start --once` with an isolated product home. Missing `DEEPSEEK_API_KEY` must make `start` exit non-zero without a pid; an injected test key plus a resolvable default route must make `start --once` succeed.
 
 ## Configuration (no secrets in git)
 
