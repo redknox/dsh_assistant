@@ -15,6 +15,10 @@ Pending approval / objective / jobs / degradation
 
 Visual language: industrial / instrument-grade. Restrained type, semantic status, no copyrighted TARS likeness, no fake scanlines, no “AI is thinking” theater.
 
+The packed product serves a React Mission-Control Web UI from `tars-ng start` on loopback. The framework-independent HTML/text renderer remains a contract/test surface; the browser does not infer agent, approval, Safe Mode, or recovery state.
+
+Approvals in the Web UI call `AssistantControlSurface.approve` / `deny` (and Recovery Root for Self-Extension using **candidate id + exact fingerprint**, not the approval record id). Activity shows operational facts only — never hidden reasoning. Recovery labels match trusted operations (`Diagnostics`, `Rollback`, `Exit Safe Mode`); Exit Safe Mode does not clear an unresolved integrity failure. After a verified rollback, historical failure diagnostics remain, and Exit Safe Mode can complete the recovery loop.
+
 ## Surfaces
 
 | Region | Product concept | Not |

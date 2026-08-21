@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { execFileSync, spawnSync } from 'node:child_process'
+import { execFileSync, spawn, spawnSync } from 'node:child_process'
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -197,6 +197,7 @@ describe('product package and profile', () => {
     assert.ok(paths.some((path) => path === 'dist/index.js' || path.startsWith('dist/')))
     const forbidden = paths.filter((path) => (
       path.startsWith('src/')
+      || path.startsWith('web/')
       || path.startsWith('test/')
       || path.startsWith('fixtures/')
       || path.startsWith('docs/')
@@ -210,7 +211,7 @@ describe('product package and profile', () => {
     assert.deepEqual(forbidden, [])
   })
 
-  it('installs the packed artifact and runs tars-ng without src or tsx', { timeout: 120_000 }, () => {
+  it('installs the packed artifact and runs tars-ng without src or tsx', { timeout: 180_000 }, async () => {
     execFileSync('npm', ['run', 'build'], { cwd: root, encoding: 'utf8' })
     const packDir = mkdtempSync(join(tmpdir(), 'tars-ng-pack-'))
     const packedName = execFileSync('npm', ['pack', '--pack-destination', packDir], { cwd: root, encoding: 'utf8' }).trim().split('\n').at(-1)
@@ -227,7 +228,12 @@ describe('product package and profile', () => {
     })
     const pkgRoot = join(installDir, 'node_modules', 'dsh-assistant')
     assert.equal(existsSync(join(pkgRoot, 'src')), false)
+    assert.equal(existsSync(join(pkgRoot, 'web')), false)
     assert.equal(existsSync(join(pkgRoot, 'dist', 'product', 'bin.js')), true)
+    assert.equal(existsSync(join(pkgRoot, 'dist', 'web', 'index.html')), true)
+    const uiIndex = readFileSync(join(pkgRoot, 'dist', 'web', 'index.html'), 'utf8')
+    assert.doesNotMatch(uiIndex, /\btsx\b/)
+    assert.doesNotMatch(uiIndex, /@vitejs\/plugin-react/)
     assert.equal(existsSync(join(installDir, 'node_modules', '@deepseek-ai', 'dsh-llm-deepseek')), true)
     assert.equal(existsSync(join(installDir, 'node_modules', '@deepseek-ai', 'dsh-agent-default-model')), true)
     const binSource = readFileSync(join(pkgRoot, 'dist', 'product', 'bin.js'), 'utf8')
@@ -296,6 +302,46 @@ describe('product package and profile', () => {
     assert.match(started, /llm-route: available/)
     assert.doesNotMatch(started, /LLM not configured\/unavailable/)
     assert.doesNotMatch(started, /sk-offline-not-a-live-key/)
+    assert.doesNotMatch(started, /Web UI:/)
+    assert.equal(existsSync(pidFile), false)
+
+    const uiEnv = { ...env, TARS_NG_UI_PORT: '0' }
+    const child = spawn(bin, ['start', '--home', productHome], { encoding: 'utf8', env: uiEnv })
+    const uiUrl = await new Promise<string>((resolve, reject) => {
+      let buf = ''
+      const timer = setTimeout(() => {
+        child.kill('SIGTERM')
+        reject(new Error(`start did not report Web UI\n${buf}`))
+      }, 25_000)
+      const onData = (chunk: string) => {
+        buf += chunk
+        const match = buf.match(/Web UI: (http:\/\/127\.0\.0\.1:\d+)/)
+        if (match?.[1]) {
+          clearTimeout(timer)
+          resolve(match[1])
+        }
+      }
+      child.stdout?.on('data', onData)
+      child.stderr?.on('data', onData)
+      child.on('error', reject)
+    })
+    try {
+      const page = await fetch(uiUrl)
+      assert.equal(page.status, 200)
+      const html = await page.text()
+      assert.match(html, /TARS-NG|root/)
+      assert.doesNotMatch(html, /\bsrc\/product\b/)
+      const snapshot = await fetch(`${uiUrl}/api/view`).then((res) => res.json()) as { view: { identity: string }; webUi: string }
+      assert.equal(snapshot.view.identity, 'TARS-NG')
+      assert.match(snapshot.webUi, /^http:\/\/127\.0\.0\.1:\d+$/)
+      assert.doesNotMatch(JSON.stringify(snapshot), /sk-offline-not-a-live-key/)
+      const status = execFileSync(bin, ['status', '--home', productHome], { encoding: 'utf8', env: uiEnv })
+      assert.match(status, /running: yes/)
+      assert.match(status, /web-ui: http:\/\/127\.0\.0\.1:\d+/)
+    } finally {
+      child.kill('SIGTERM')
+      await new Promise<void>((resolve) => child.once('exit', () => resolve()))
+    }
     assert.equal(existsSync(pidFile), false)
   })
 })

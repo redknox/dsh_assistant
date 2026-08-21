@@ -24,7 +24,7 @@ describe('OS network sandbox', () => {
       assert.match(wrapped.args[1] ?? '', /network\.sb$/)
     } else {
       assert.equal(wrapped.file, '/usr/bin/unshare')
-      assert.deepEqual(wrapped.args.slice(0, 2), ['--net', '--'])
+      assert.deepEqual(wrapped.args.slice(0, 4), ['--user', '--map-root-user', '--net', '--'])
     }
     assert.ok(wrapped.args.includes(process.execPath))
   })

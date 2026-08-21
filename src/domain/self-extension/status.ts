@@ -57,7 +57,7 @@ export function operatorStatus(input: {
     lkgGeneration: input.activation.lastKnownGood?.generation,
     lkgOwners: input.activation.lastKnownGood?.owners.map((item) => `${item.owner}@${item.version}`) ?? [],
     lastFailure: input.activation.lastFailure?.diagnostics,
-    restartRecoveryRequired: pending || Boolean(input.activation.lastFailure?.safeModeRequired) || input.activation.safeMode || reasons.some((item) => (
+    restartRecoveryRequired: pending || input.activation.recoveryRequired || input.activation.safeMode || reasons.some((item) => (
       item.includes('missing-active-artifact')
       || item.includes('digest-mismatch')
       || item.includes('inconsistent-active-owner')

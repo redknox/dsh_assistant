@@ -18,14 +18,20 @@ export function gatherWorkspaceSnapshot(input: GatherWorkspaceInput): WorkspaceS
   const { ctx, sessionId } = input
   const personality = readPersonality(ctx)
   const agent = ctx.agents.get(SessionId(sessionId))
-  const recovery = ctx.get('extensionRecovery') as { inspect(): { safeMode: boolean; lastFailure?: { diagnostics: string } } } | undefined
+  const recovery = ctx.get('extensionRecovery') as {
+    inspect(): {
+      safeMode: boolean
+      recoveryRequired?: boolean
+      lastFailure?: { diagnostics: string }
+    }
+  } | undefined
   const activation = recovery?.inspect()
   const safeMode = Boolean(activation?.safeMode)
   const lastFailure = activation?.lastFailure?.diagnostics
   return {
     agentStatus: agent?.status,
     safeMode,
-    recoveryRequired: Boolean(lastFailure) || safeMode,
+    recoveryRequired: Boolean(activation?.recoveryRequired),
     ...(lastFailure ? { recoveryWhy: lastFailure } : safeMode ? { recoveryWhy: 'Generated capabilities are disabled. Trusted core is available.' } : {}),
     pendingConfirmations: (ctx.get('actionPolicy') as { policy: { confirmations(): WorkspaceSnapshotInput['pendingConfirmations'] } } | undefined)
       ?.policy.confirmations() ?? [],
@@ -115,6 +121,7 @@ function conversationWithoutReasoning(events: readonly SessionEvent[]): Workspac
   const items: WorkspaceSnapshotInput['conversation'][number][] = []
   for (const event of events) {
     if (event.type === 'user/message' && isAppendSurfaceEvent(event)) {
+      if (!isHumanUserMessage(event.data)) continue
       items.push({ kind: 'user', text: visibleText(event.data.content) })
     }
     if (event.type === 'assistant/message' && isAppendSurfaceEvent(event)) {
@@ -128,6 +135,15 @@ function conversationWithoutReasoning(events: readonly SessionEvent[]): Workspac
     }
   }
   return items
+}
+
+function isHumanUserMessage(message: { readonly source: { readonly kind: string; readonly form?: string }; readonly content: readonly ContentBlock[] }): boolean {
+  const source = message.source
+  if (source.kind === 'plugin') return false
+  if (source.form === 'snapshot' || source.form === 'instructions' || source.form === 'catalog') return false
+  const text = visibleText(message.content)
+  if (text.startsWith('Current runtime context')) return false
+  return source.kind === 'user'
 }
 
 function toolEventsFromSession(events: readonly SessionEvent[]): WorkspaceSnapshotInput['toolEvents'] {
@@ -168,6 +184,7 @@ function extensionApprovals(ctx: Context): WorkspaceSnapshotInput['extensionAppr
   if (!governance?.inspectApproval || !workspace) return []
   const out: Array<{
     readonly id: string
+    readonly candidateId: string
     readonly fingerprint: string
     readonly decision: string
     readonly owner: string
@@ -186,6 +203,7 @@ function extensionApprovals(ctx: Context): WorkspaceSnapshotInput['extensionAppr
     if (!summary) continue
     out.push({
       id: record.id,
+      candidateId: candidate.id,
       fingerprint: record.fingerprint,
       decision: record.decision,
       owner: summary.owner,

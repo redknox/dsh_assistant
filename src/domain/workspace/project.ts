@@ -2,6 +2,7 @@ import { humorSuppressed } from '../personality/effective.js'
 import { projectActivity } from './activity.js'
 import { projectApprovalCards } from './approvals.js'
 import { projectUserCapabilities } from './capabilities.js'
+import { sanitizeMissionControlView } from './redact.js'
 import { deriveSystemState } from './state.js'
 import type { MissionControlView, WorkObjectKind, WorkspaceSnapshotInput } from './types.js'
 
@@ -10,7 +11,7 @@ export function projectMissionControl(input: WorkspaceSnapshotInput): MissionCon
   const approvals = projectApprovalCards(input)
   const jobsRunning = input.jobs.filter((job) => job.lastRunStatus === 'running' || job.lastRunStatus === 'pending').length
   const degraded = input.integrationStatus.filter((item) => !item.available).map((item) => item.capability)
-  return {
+  return sanitizeMissionControlView({
     identity: 'TARS-NG',
     systemState,
     ...(input.objective ? { objective: input.objective } : {}),
@@ -28,7 +29,7 @@ export function projectMissionControl(input: WorkspaceSnapshotInput): MissionCon
           recovery: {
             why: input.recoveryWhy ?? 'Trusted core is available; generated capabilities are disabled.',
             disabled: generatedDisabled(input),
-            actions: ['Diagnostics', 'Disable candidate', 'Rollback', 'Restore backup'],
+            actions: ['Diagnostics', 'Rollback', 'Exit Safe Mode', 'Disable candidate', 'Restore backup'],
           },
         }
       : {}),
@@ -44,7 +45,7 @@ export function projectMissionControl(input: WorkspaceSnapshotInput): MissionCon
       humorSuppressed: humorSuppressed({ kind: systemState === 'SAFE_MODE' || systemState === 'RECOVERY' ? 'safety' : 'normal', systemState }),
     },
     developmentControlPlaneSeparated: true,
-  }
+  })
 }
 
 function workKind(kind: 'user' | 'assistant' | 'tool_call' | 'tool_result'): WorkObjectKind {

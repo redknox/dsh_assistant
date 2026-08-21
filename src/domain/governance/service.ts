@@ -38,6 +38,7 @@ export interface GovernanceHydrate {
   readonly rollbackTarget?: ActivationSnapshot
   readonly lastFailure?: ActivationFailure
   readonly safeMode: boolean
+  readonly integrityVerified?: boolean
 }
 
 export class SimulatedCrashError extends Error {
@@ -67,6 +68,7 @@ export class GovernanceService implements ExtensionGovernance, ExtensionActivati
   private rollbackTarget?: ActivationSnapshot
   private lastFailure?: ActivationFailure
   private safeMode = false
+  private integrityVerified = false
   private phase?: ActivationPhase
   private pendingCandidateId?: string
   interruptAfter?: ActivationInterrupt
@@ -111,6 +113,7 @@ export class GovernanceService implements ExtensionGovernance, ExtensionActivati
       rollbackTarget: this.rollbackTarget,
       lastFailure: this.lastFailure,
       safeMode: this.safeMode,
+      integrityVerified: this.integrityVerified,
     }
   }
 
@@ -169,6 +172,8 @@ export class GovernanceService implements ExtensionGovernance, ExtensionActivati
       rollbackTarget: this.rollbackTarget,
       lastFailure: this.lastFailure,
       safeMode: this.safeMode,
+      recoveryRequired: this.isRecoveryRequired(),
+      integrityVerified: this.integrityVerified,
     }
   }
 
@@ -248,6 +253,7 @@ export class GovernanceService implements ExtensionGovernance, ExtensionActivati
       this.pendingCandidateId = undefined
       this.phase = undefined
       this.lastFailure = undefined
+      this.integrityVerified = true
       this.flush()
       this.finishAuthorityCommit?.()
       await this.maybeInterrupt('commit')
@@ -302,6 +308,9 @@ export class GovernanceService implements ExtensionGovernance, ExtensionActivati
 
   exitSafeMode(credential: TrustedAuthorityCredential): ActivationStatus {
     this.assertCredential(credential)
+    if (this.isRecoveryRequired()) {
+      throw new GovernanceContractError('cannot exit Safe Mode while recovery is still required')
+    }
     this.safeMode = false
     this.state = this.lastKnownGood === undefined ? 'idle' : 'active'
     this.current = this.captureSnapshot()
@@ -389,6 +398,7 @@ export class GovernanceService implements ExtensionGovernance, ExtensionActivati
     }
     this.safeMode = true
     this.state = 'safe-mode'
+    this.integrityVerified = false
     this.current = this.captureSnapshot()
     this.lastFailure = {
       candidateId: this.pendingCandidateId ?? 'restart',
@@ -442,8 +452,34 @@ export class GovernanceService implements ExtensionGovernance, ExtensionActivati
     this.safeMode = this.safeMode || !restored
     this.pendingCandidateId = undefined
     this.phase = undefined
+    this.integrityVerified = restored && this.verifyRestoredIntegrity(target)
     this.flush()
     return this.status()
+  }
+
+  private isRecoveryRequired(): boolean {
+    if (this.state === 'rollback-pending') return true
+    if (this.safeMode && this.lastFailure?.safeModeRequired === true && !this.integrityVerified) return true
+    if (this.state === 'activation-failed' && this.lastFailure?.rollbackSucceeded !== true && !this.integrityVerified) return true
+    return false
+  }
+
+  private verifyRestoredIntegrity(snapshot: ActivationSnapshot): boolean {
+    const wanted = new Set(snapshot.owners.map((item) => `${item.owner}@${item.version}`))
+    const active = this.registry.list({ status: 'active' }).map((item) => `${item.owner}@${item.version}`)
+    if (wanted.size !== active.length) return false
+    for (const key of active) {
+      if (!wanted.has(key)) return false
+    }
+    for (const owner of snapshot.owners) {
+      const record = this.registry.get(owner.owner, owner.version)
+      if (record === undefined || record.status !== 'active') return false
+      if (!owner.owner.startsWith('generated/')) continue
+      const candidate = this.workspace.list().find((item) => item.owner === owner.owner && item.version === owner.version)
+      if (candidate === undefined) return false
+      if (this.verifySealedArtifact(candidate) !== undefined) return false
+    }
+    return this.lastKnownGood !== undefined && this.current !== undefined
   }
 
   private verifySealedArtifact(record: CandidateRecord): string | undefined {
@@ -467,6 +503,7 @@ export class GovernanceService implements ExtensionGovernance, ExtensionActivati
     this.rollbackTarget = hydrate.rollbackTarget
     this.lastFailure = hydrate.lastFailure
     this.safeMode = hydrate.safeMode
+    this.integrityVerified = hydrate.integrityVerified === true
   }
 
   private flush(): void {

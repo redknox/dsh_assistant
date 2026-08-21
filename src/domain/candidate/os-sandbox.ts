@@ -47,7 +47,7 @@ export function wrapWithOsNetworkSandbox(
   if (sandbox.kind === 'sandbox-exec') {
     return { file: sandbox.file, args: ['-f', writeSeatbeltProfile(workspace), ...argv] }
   }
-  return { file: sandbox.file, args: ['--net', '--', ...argv] }
+  return { file: sandbox.file, args: ['--user', '--map-root-user', '--net', '--', ...argv] }
 }
 
 export function sandboxStartupUnavailable(error: {

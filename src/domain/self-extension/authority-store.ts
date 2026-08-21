@@ -19,6 +19,7 @@ export interface DurableRecoverySection {
   readonly rollbackTarget?: ActivationSnapshot
   readonly lastFailure?: ActivationFailure
   readonly safeMode: boolean
+  readonly integrityVerified?: boolean
   readonly diagnostics: readonly string[]
 }
 

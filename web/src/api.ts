@@ -1,0 +1,92 @@
+import type { ApprovalCard, MissionControlView, WorkObjectKind } from '../../src/domain/workspace/types'
+
+export interface UiEnvelope {
+  readonly view: MissionControlView
+  readonly webUi: string
+}
+
+const include: RequestInit = { credentials: 'include', cache: 'no-store' }
+
+async function parseEnvelope(response: Response): Promise<UiEnvelope> {
+  const body = await response.json() as UiEnvelope & { error?: string }
+  if (!response.ok) throw new Error(body.error ?? `request failed (${response.status})`)
+  return body
+}
+
+export async function establishSession(): Promise<void> {
+  await fetch('/api/session', include)
+}
+
+export async function fetchView(): Promise<UiEnvelope> {
+  return parseEnvelope(await fetch('/api/view', include))
+}
+
+export async function sendMessage(text: string): Promise<UiEnvelope> {
+  return parseEnvelope(await fetch('/api/message', {
+    ...include,
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ text }),
+  }))
+}
+
+export async function decideApproval(card: ApprovalCard, decision: 'approve' | 'deny' | 'cancel'): Promise<UiEnvelope> {
+  return parseEnvelope(await fetch(`/api/${decision}`, {
+    ...include,
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({
+      id: card.id,
+      fingerprint: card.fingerprint,
+      ...(card.candidateId ? { candidateId: card.candidateId } : {}),
+      ...(card.digest ? { digest: card.digest } : {}),
+    }),
+  }))
+}
+
+export async function runRecovery(action: 'diagnostics' | 'rollback' | 'exit-safe-mode', confirm = false): Promise<UiEnvelope> {
+  return parseEnvelope(await fetch('/api/recovery', {
+    ...include,
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ action, confirm }),
+  }))
+}
+
+export function openViewStream(onView: (envelope: UiEnvelope) => void, onStatus: (connected: boolean) => void): () => void {
+  const source = new EventSource('/api/events')
+  source.addEventListener('open', () => onStatus(true))
+  source.addEventListener('view', (event) => {
+    onStatus(true)
+    onView(JSON.parse((event as MessageEvent).data) as UiEnvelope)
+  })
+  source.addEventListener('error', () => onStatus(false))
+  return () => source.close()
+}
+
+export function workTone(kind: WorkObjectKind): string {
+  if (kind === 'approval-request') return 'approval'
+  if (kind === 'failure' || kind === 'warning') return 'alert'
+  if (kind === 'recovery') return 'recovery'
+  return 'message'
+}
+
+export function formatMarkdownLite(text: string): string {
+  return text
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;')
+    .replaceAll(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+    .replaceAll(/`([^`]+)`/g, '<code>$1</code>')
+}
+
+export function approvalLabel(card: ApprovalCard): string {
+  return `${card.title} · ${card.status}`
+}
+
+export function recoveryActionId(label: string): 'diagnostics' | 'rollback' | 'exit-safe-mode' | undefined {
+  if (label === 'Diagnostics') return 'diagnostics'
+  if (label === 'Rollback') return 'rollback'
+  if (label === 'Exit Safe Mode') return 'exit-safe-mode'
+  return undefined
+}

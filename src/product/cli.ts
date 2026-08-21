@@ -1,9 +1,9 @@
 import { existsSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs'
 import { operatorStatus } from '../domain/self-extension/status.js'
 import { runSelfExtensionCli } from '../runtime/self-extension-cli.js'
-import { bootAssistantControl } from '../runtime/boot.js'
+import { bootAssistantControl, createAssistantAgent } from '../runtime/boot.js'
 import { inspectCompatibility } from './compatibility.js'
-import { DEFAULT_LLM_MODEL, DEFAULT_LLM_PROVIDER, PRODUCT_COMMAND, PRODUCT_NAME } from './constants.js'
+import { DEFAULT_LLM_MODEL, DEFAULT_LLM_PROVIDER, PRODUCT_COMMAND, PRODUCT_NAME, PRODUCT_UI_SESSION_ID } from './constants.js'
 import { attachRuntimeDoctor, collectStaticDoctor, formatDoctorReport } from './doctor.js'
 import { inspectEnvFile, type EnvFileLoad } from './env.js'
 import { inspectLlmRuntime, formatUnusableLlmError } from './llm.js'
@@ -17,6 +17,8 @@ import {
   type ProductHomeLayout,
 } from './home.js'
 import { appendProductLog } from './log.js'
+import { AssistantControlSurface } from '../ui/controller.js'
+import { attachWebUiBroadcast, startWebUiServer } from './web-ui-server.js'
 
 export interface ProductCliOptions {
   readonly command: string
@@ -36,7 +38,8 @@ function usage(): string {
   self-extension <subcommand>
 
 TARS-NG home defaults to $TARS_NG_HOME, then $DSH_ASSISTANT_HOME, then ~/.local/share/tars-ng.
-Secrets belong in $TARS_NG_HOME/config/env or ~/.config/tars-ng/env (chmod 600).`
+Secrets belong in $TARS_NG_HOME/config/env or ~/.config/tars-ng/env (chmod 600).
+start prints a loopback Web UI URL (default http://127.0.0.1:8787).`
 }
 
 export function parseProductArgv(argv: readonly string[]): ProductCliOptions {
@@ -133,12 +136,21 @@ async function operatorFromBoot(booted: Awaited<ReturnType<typeof bootAssistantC
   })
 }
 
+function webUiFromLast(last: unknown): string | undefined {
+  if (last !== null && typeof last === 'object' && 'webUi' in last) {
+    const url = (last as { webUi?: unknown }).webUi
+    return typeof url === 'string' ? url : undefined
+  }
+  return undefined
+}
+
 function firstRunText(layout: ProductHomeLayout, allowFixtures: boolean): string {
   return [
     `${PRODUCT_NAME} first run`,
     `Home: ${layout.root} (reinstalling package code does not delete this directory)`,
     'Required: Node >=22; DSH 0.1.0-rc.8 arrives via npm, not a DSH clone.',
     'Required for AI: DEEPSEEK_API_KEY (deepseek-official / deepseek-v4-flash). Product start is not a usable AI runtime until this key is present.',
+    'Open the local Web UI URL printed by tars-ng start (loopback only).',
     'Optional: Google Calendar live token (DSH_ASSISTANT_GOOGLE_CALENDAR_ACCESS_TOKEN) and MODE=live.',
     'Optional: GOOGLE_SEARCH_API_KEY / GOOGLE_SEARCH_ENGINE_ID are diagnosed but Search is not shipped.',
     allowFixtures
@@ -188,6 +200,7 @@ export async function runProductCli(argv: readonly string[], io: { log: (text: s
     const pid = readPid(layout)
     const running = pid !== undefined && processAlive(pid)
     const last = readLastStatus(layout)
+    const webUi = running ? webUiFromLast(last) : undefined
     io.log([
       `${PRODUCT_NAME} ${compatibility.productVersion}`,
       `running: ${running ? `yes (pid ${pid})` : 'no'}`,
@@ -195,6 +208,7 @@ export async function runProductCli(argv: readonly string[], io: { log: (text: s
       `dsh: ${compatibility.dshSupported}`,
       `node: ${compatibility.nodeVersion}`,
       `llm: ${DEFAULT_LLM_PROVIDER} / ${DEFAULT_LLM_MODEL}`,
+      webUi ? `web-ui: ${webUi}` : 'web-ui: not-running',
       last === undefined ? 'last-start: none' : `last-start: recorded`,
     ].join('\n'))
     return 0
@@ -243,13 +257,37 @@ export async function runProductCli(argv: readonly string[], io: { log: (text: s
         return 1
       }
       if (parsed.once) return compatibility.ok ? 0 : 1
+      const handle = await createAssistantAgent(booted.ctx, PRODUCT_UI_SESSION_ID)
+      const surface = new AssistantControlSurface(booted.ctx, PRODUCT_UI_SESSION_ID)
+      let web
+      try {
+        web = await startWebUiServer({
+          surface,
+          recoveryRoot: booted.recoveryRoot,
+          diagnostics: { persistence: booted.diagnostics.persistence, reasons: booted.diagnostics.reasons },
+        })
+      } catch (error) {
+        await handle.dispose()
+        const message = error instanceof Error ? error.message : 'Web UI failed to bind'
+        io.error(message)
+        appendProductLog(layout.logFile, `lifecycle start failed web-ui ${message}`)
+        return 1
+      }
+      const detach = attachWebUiBroadcast(booted.ctx, () => web.notify())
+      writeLastStatus(layout, { ...snapshot, webUi: web.url })
       writeFileSync(layout.pidFile, `${process.pid}\n`, { mode: 0o600 })
-      io.log(`TARS-NG is running. Home ${layout.root}. Ctrl-C to stop.`)
-      await new Promise<void>((resolve) => {
-        const stop = () => resolve()
-        process.once('SIGINT', stop)
-        process.once('SIGTERM', stop)
-      })
+      io.log(`TARS-NG is running.\nWeb UI: ${web.url}\nHome: ${layout.root}`)
+      try {
+        await new Promise<void>((resolve) => {
+          const stop = () => resolve()
+          process.once('SIGINT', stop)
+          process.once('SIGTERM', stop)
+        })
+      } finally {
+        detach()
+        await web.close()
+        await handle.dispose()
+      }
       try {
         unlinkSync(layout.pidFile)
       } catch {

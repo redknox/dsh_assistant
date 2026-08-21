@@ -60,6 +60,8 @@ export interface ApprovalCard {
   readonly details: readonly string[]
   readonly fingerprint: string
   readonly status: string
+  readonly candidateId?: string
+  readonly digest?: string
 }
 
 export interface UserCapabilityView {
@@ -156,6 +158,7 @@ export interface WorkspaceSnapshotInput {
   }[]
   readonly extensionApprovals?: readonly {
     readonly id: string
+    readonly candidateId: string
     readonly fingerprint: string
     readonly decision: string
     readonly owner: string

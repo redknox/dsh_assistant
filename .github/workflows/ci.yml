@@ -1,0 +1,30 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - name: Enable unprivileged Linux network namespaces
+        run: |
+          set -euo pipefail
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_unconfined=0 || true
+          test -x /usr/bin/unshare
+          /usr/bin/unshare --user --map-root-user --net -- /usr/bin/true
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm test
+      - run: npm run verify:v0.2
+      - run: npm run build
+      - run: npm pack

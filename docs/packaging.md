@@ -39,9 +39,9 @@ Inspect the ship list without publishing:
 npm run pack:inspect
 ```
 
-Intended pack contents: `package.json`, `README.md`, `cordis.patch.yml`, and `dist/**` (including `dist/product/bin.js`). Not shipped: `src/`, `test/`, `fixtures/`, `docs/`, `profiles/`, `.env*`, credentials, user home state.
+Intended pack contents: `package.json`, `README.md`, `cordis.patch.yml`, and `dist/**` (including `dist/product/bin.js` and `dist/web/` UI assets). Not shipped: `src/`, `web/` source, `test/`, `fixtures/`, `docs/`, `profiles/`, `.env*`, credentials, user home state.
 
-`test/packaging.test.ts` installs that tarball into a clean directory and runs `tars-ng doctor` / `start --once` with an isolated product home. Missing `DEEPSEEK_API_KEY` must make `start` exit non-zero without a pid; an injected test key plus a resolvable default route must make `start --once` succeed.
+`test/packaging.test.ts` installs that tarball into a clean directory and runs `tars-ng doctor` / `start --once` with an isolated product home. Missing `DEEPSEEK_API_KEY` must make `start` exit non-zero without a pid; an injected test key plus a resolvable default route must make `start --once` succeed. A subsequent `tars-ng start` must serve the packed Web UI from `dist/web` without Vite, `tsx`, or `src/`.
 
 ## Configuration (no secrets in git)
 
@@ -51,7 +51,8 @@ Precedence: CLI flag → environment → env file → `product.json` → default
 | --- | --- | --- |
 | `TARS_NG_HOME` | no | Product home (default `~/.local/share/tars-ng`) |
 | `DSH_ASSISTANT_HOME` | no | Compatibility alias for the same home |
-| `TARS_NG_ALLOW_FIXTURES` | no | `1` enables explicit fixture integrations (not live data) |
+| `TARS_NG_UI_PORT` | no | Loopback Web UI port (default `8787`; `0` selects an ephemeral port) |
+| `TARS_NG_UI_HOST` | no | Must be loopback (`127.0.0.1` / `localhost` / `::1`) |
 | `DEEPSEEK_API_KEY` | yes (for AI) | Secret. Official DeepSeek adapter; never commit |
 | `DSH_ASSISTANT_GOOGLE_CALENDAR_MODE` | no | `live` selects the host-bounded Google Calendar transport |
 | `DSH_ASSISTANT_GOOGLE_CALENDAR_ACCESS_TOKEN` | no | Secret. OAuth access token; expires; never commit |
@@ -75,7 +76,7 @@ Optional capability providers (replaceable, not required to boot):
 
 Product plugins register tools/services through Cordis effects. Disposing the product fiber (or the whole context) must drop `personalMemory`, `personalKnowledge`, `actionPolicy`, `assistantJobs`, and the product tools. Loading the bundle again on the same DSH stack must restore one copy of each name, not duplicates.
 
-`tars-ng start` writes `$TARS_NG_HOME/state/tars-ng.pid`. `tars-ng stop` sends SIGTERM. Uninstalling the npm package does not delete `$TARS_NG_HOME`.
+`tars-ng start` writes `$TARS_NG_HOME/state/tars-ng.pid`, serves packed Web UI assets from `dist/web` on loopback, and records the URL in last-status. `tars-ng stop` sends SIGTERM. Uninstalling the npm package does not delete `$TARS_NG_HOME`. Production runtime does not depend on Vite or `tsx`.
 
 `npm test` covers unload + remount of the product fiber on `bootAssistantRuntime()`, and a separate official DSH profile/bundle smoke in the same file.
 
