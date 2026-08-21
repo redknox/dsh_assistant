@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { mkdtempSync, rmSync } from 'node:fs'
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, it } from 'node:test'
@@ -68,6 +68,17 @@ describe('replaceable persistence', () => {
       assert.equal(active.records.length, 1)
       assert.equal(active.records[0]?.statement, 'Prefers water')
       assert.equal(reloaded.query({ topicKey: 'drink', includeDeleted: true, includeSuperseded: true }).records.length, 3)
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  it('rejects malformed JSON snapshots instead of casting them into domain records', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'dsh-memory-bad-'))
+    const filePath = join(dir, 'memory.json')
+    try {
+      writeFileSync(filePath, JSON.stringify({ version: 1, records: [{ id: 12, statement: true }] }))
+      assert.throws(() => new JsonFileMemoryPersistence(filePath).load())
     } finally {
       rmSync(dir, { recursive: true, force: true })
     }
