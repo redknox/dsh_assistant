@@ -11,10 +11,25 @@ export interface OperatorStatus {
   readonly approval: readonly string[]
   readonly activationState: string
   readonly currentDigest?: string
+  readonly currentFingerprint?: string
   readonly lkgGeneration?: number
   readonly lkgOwners: readonly string[]
   readonly lastFailure?: string
   readonly restartRecoveryRequired: boolean
+  readonly persistence?: string
+  readonly reasons: readonly string[]
+}
+
+function generatedActive(input: {
+  readonly registry: readonly RegistryRecord[]
+  readonly candidates: readonly CandidateRecord[]
+}): CandidateRecord | undefined {
+  return input.candidates.find((candidate) => input.registry.some((record) => (
+    record.owner === candidate.owner
+    && record.version === candidate.version
+    && record.status === 'active'
+    && record.owner.startsWith('generated/')
+  )))
 }
 
 export function operatorStatus(input: {
@@ -22,8 +37,13 @@ export function operatorStatus(input: {
   readonly registry: readonly RegistryRecord[]
   readonly candidates: readonly CandidateRecord[]
   readonly approvals?: ReadonlyMap<string, string>
+  readonly fingerprints?: ReadonlyMap<string, string>
+  readonly persistence?: string
+  readonly reasons?: readonly string[]
 }): OperatorStatus {
   const pending = input.activation.state === 'activation-pending' || input.activation.state === 'activating' || input.activation.state === 'rollback-pending'
+  const reasons = input.reasons ?? []
+  const activeGenerated = generatedActive(input)
   return {
     mode: input.activation.safeMode ? 'safe-mode' : 'normal',
     registryGeneration: input.activation.current?.generation ?? 0,
@@ -32,11 +52,19 @@ export function operatorStatus(input: {
     validation: input.candidates.map((record) => `${record.id}:${record.lifecycle}`),
     approval: input.candidates.map((record) => `${record.id}:${input.approvals?.get(record.id) ?? 'unreviewed'}`),
     activationState: input.activation.state,
-    currentDigest: undefined,
+    currentDigest: activeGenerated?.digest,
+    currentFingerprint: activeGenerated === undefined ? undefined : input.fingerprints?.get(activeGenerated.id),
     lkgGeneration: input.activation.lastKnownGood?.generation,
     lkgOwners: input.activation.lastKnownGood?.owners.map((item) => `${item.owner}@${item.version}`) ?? [],
     lastFailure: input.activation.lastFailure?.diagnostics,
-    restartRecoveryRequired: pending || Boolean(input.activation.lastFailure?.safeModeRequired),
+    restartRecoveryRequired: pending || Boolean(input.activation.lastFailure?.safeModeRequired) || input.activation.safeMode || reasons.some((item) => (
+      item.includes('missing-active-artifact')
+      || item.includes('digest-mismatch')
+      || item.includes('inconsistent-active-owner')
+      || item.includes('unsupported')
+    )),
+    persistence: input.persistence,
+    reasons,
   }
 }
 
@@ -48,9 +76,13 @@ export function formatOperatorStatus(status: OperatorStatus): string {
     `active: ${status.active.join(', ') || '(none)'}`,
     `pending-candidates: ${status.pendingCandidates.join(', ') || '(none)'}`,
     `validation: ${status.validation.join(', ') || '(none)'}`,
+    `current-digest: ${status.currentDigest ?? '(none)'}`,
+    `current-fingerprint: ${status.currentFingerprint ?? '(none)'}`,
     `lkg-generation: ${status.lkgGeneration ?? '(none)'}`,
     `lkg: ${status.lkgOwners.join(', ') || '(none)'}`,
     `last-failure: ${status.lastFailure ?? '(none)'}`,
+    `persistence: ${status.persistence ?? '(none)'}`,
+    `reasons: ${status.reasons.join('; ') || '(none)'}`,
     `restart-recovery-required: ${status.restartRecoveryRequired}`,
   ].join('\n')
 }

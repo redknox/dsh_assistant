@@ -50,6 +50,7 @@ export interface GovernancePluginConfig {
   readonly hydrate?: import('../domain/governance/service.js').GovernanceHydrate
   readonly beginAuthorityCommit?: () => void
   readonly finishAuthorityCommit?: () => void
+  readonly durableHome?: string
 }
 
 export const name = 'dsh-assistant-governance'
@@ -66,6 +67,7 @@ export async function apply(ctx: Context, config: GovernancePluginConfig = {}) {
       hydrate: config.hydrate,
       beginAuthorityCommit: config.beginAuthorityCommit,
       finishAuthorityCommit: config.finishAuthorityCommit,
+      durableHome: config.durableHome,
     },
   )
   config.attachRecoveryRoot?.(root)

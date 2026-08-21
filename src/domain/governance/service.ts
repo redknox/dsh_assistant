@@ -323,6 +323,12 @@ export class GovernanceService implements ExtensionGovernance, ExtensionActivati
     const targets = (snapshot?.owners ?? []).filter(
       (item) => item.owner.startsWith('generated/') && item.status === 'active',
     )
+    const committed = new Set(targets.map((item) => `${item.owner}@${item.version}`))
+    for (const record of this.registry.list({ status: 'active' })) {
+      if (!record.owner.startsWith('generated/')) continue
+      const key = `${record.owner}@${record.version}`
+      if (!committed.has(key)) diagnostics.push(`inconsistent-active-owner:${key}`)
+    }
     const verified: CandidateRecord[] = []
     for (const target of targets) {
       const candidate = this.workspace.list().find((item) => item.owner === target.owner && item.version === target.version)

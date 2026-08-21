@@ -5,7 +5,8 @@ function usage(): string {
   return `self-extension <command>
   status | candidates | inspect <id> | diff <id> | request-approval <id>
   approve <id> <fingerprint> | activate <id> | rollback | disable <owner> <version>
-  lkg | diagnostics | safe-mode status|enter|exit`
+  lkg | diagnostics | safe-mode status|enter|exit
+  backup <dir> | restore <dir>`
 }
 
 async function main(argv: string[]): Promise<void> {
@@ -25,11 +26,18 @@ async function main(argv: string[]): Promise<void> {
         item.id,
         ctx.extensionGovernance.inspectApproval(item.id)?.decision ?? 'unreviewed',
       ]))
+      const fingerprints = new Map(ctx.candidateWorkspace.list().flatMap((item) => {
+        const fingerprint = ctx.extensionGovernance.inspectApproval(item.id)?.fingerprint
+        return fingerprint === undefined ? [] : [[item.id, fingerprint] as const]
+      }))
       console.log(formatOperatorStatus(operatorStatus({
         activation: recoveryRoot.inspect(),
         registry: [...ctx.capabilityRegistry.list()],
         candidates: [...ctx.candidateWorkspace.list()],
         approvals,
+        fingerprints,
+        persistence: diagnostics.persistence,
+        reasons: diagnostics.reasons,
       })))
       return
     }
@@ -76,6 +84,15 @@ async function main(argv: string[]): Promise<void> {
     }
     if (command === 'diagnostics') {
       console.log(JSON.stringify({ boot: diagnostics, activation: recoveryRoot.inspect().lastFailure ?? null }, null, 2))
+      return
+    }
+    if (command === 'backup') {
+      console.log(JSON.stringify(recoveryRoot.backup(human, String(rest[0])), null, 2))
+      return
+    }
+    if (command === 'restore') {
+      recoveryRoot.restore(human, String(rest[0]))
+      console.log(`restored ${rest[0]}`)
       return
     }
     if (command === 'safe-mode') {

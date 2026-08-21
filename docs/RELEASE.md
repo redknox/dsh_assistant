@@ -39,6 +39,7 @@ Trusted operator control
 - Durable restart reconstruction (`$DSH_ASSISTANT_HOME/self-extension`): one atomic `authority.json` snapshot; remount only generated owners in the committed activation snapshot after a full artifact/digest preflight
 - Safe Mode recovery: excludes generated/optional extensions; missing/mutated/corrupt state fails closed
 - Trusted operator control: `npm run self-extension` (`docs/self-extension-operations.md`); recovery authority stays outside generated and model-facing seams
+- v0.2.x stabilization: product-level regression/recovery drills, durable-state backup/restore, `npm run verify:v0.2` (`docs/v0.2-stabilization.md`)
 
 Preserved invariants: Self-extension without self-authorization; Validation ≠ Approval; Approval ≠ Activation; exact candidate/diff binding; fail-closed artifact integrity.
 
