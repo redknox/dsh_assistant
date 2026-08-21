@@ -48,10 +48,6 @@ export class CapabilityRegistryService extends Service implements CapabilityRegi
   transitionStatus(owner: string, version: string, status: Parameters<CapabilityRegistry['transitionStatus']>[2]) {
     return this.store.transitionStatus(owner, version, status)
   }
-
-  transitionApproval(owner: string, version: string, approval: Parameters<CapabilityRegistry['transitionApproval']>[2]) {
-    return this.store.transitionApproval(owner, version, approval)
-  }
 }
 
 export interface RegistryPluginConfig {

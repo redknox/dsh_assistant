@@ -115,7 +115,6 @@ describe('capability registry', () => {
       version: '1.0.0',
       provenance: { kind: 'managed', origin: 'human' },
       status: 'active',
-      approval: 'approved-for-this-diff',
       capabilities: [{ id: 'calendar.read', permissions: ['local.fake.calendar.read'] }],
       runtimeSeams: ['integrations.calendar'],
     }))
@@ -132,7 +131,7 @@ describe('capability registry', () => {
     assert.equal(store.get('managed/integrations', '1.0.0')?.status, 'active')
     assert.equal(store.get('managed/integrations', '1.1.0')?.status, 'candidate')
     assert.equal(store.get('managed/integrations', '1.1.0')?.approval, 'unreviewed')
-    assert.equal(store.get('managed/integrations', '1.0.0')?.approval, 'approved-for-this-diff')
+    assert.equal(store.get('managed/integrations', '1.0.0')?.approval, 'unreviewed')
     assert.equal(store.resolveActiveOwner('calendar.read').kind, 'owner')
     const write = store.resolveActiveOwner('calendar.write')
     assert.equal(write.kind, 'inactive')
@@ -145,7 +144,6 @@ describe('capability registry', () => {
       version: '1.0.0',
       provenance: { kind: 'managed', origin: 'human' },
       status: 'active',
-      approval: 'approved-for-this-diff',
       capabilities: [{ id: 'calendar.read', permissions: ['local.fake.calendar.read'] }],
       runtimeSeams: ['integrations.calendar'],
     }))
@@ -160,7 +158,17 @@ describe('capability registry', () => {
       runtimeSeams: ['integrations.calendar'],
     }))
     assert.equal(next.approval, 'unreviewed')
-    assert.equal(store.get('managed/integrations', '1.0.0')?.approval, 'approved-for-this-diff')
+    assert.equal(store.get('managed/integrations', '1.0.0')?.approval, 'unreviewed')
+  })
+
+  it('cannot manufacture approved-for-this-diff through register', () => {
+    const store = registry()
+    const recorded = store.register({
+      ...candidate(),
+      approval: 'approved-for-this-diff',
+    } as RegistryRegisterInput & { approval: 'approved-for-this-diff' })
+    assert.equal(recorded.approval, 'unreviewed')
+    assert.equal(store.get('generated/matter-home', '0.1.0')?.approval, 'unreviewed')
   })
 
   it('round-trips through a replaceable in-memory persistence adapter', () => {
@@ -169,9 +177,72 @@ describe('capability registry', () => {
     first.register(candidate({ status: 'candidate' }))
     const second = registry(persistence)
     assert.equal(second.get('generated/matter-home', '0.1.0')?.evidence, 'Implemented')
-    second.transitionApproval('generated/matter-home', '0.1.0', 'rejected')
+    second.transitionStatus('generated/matter-home', '0.1.0', 'disabled')
     const third = registry(persistence)
-    assert.equal(third.get('generated/matter-home', '0.1.0')?.approval, 'rejected')
+    assert.equal(third.get('generated/matter-home', '0.1.0')?.status, 'disabled')
+    assert.equal(third.get('generated/matter-home', '0.1.0')?.approval, 'unreviewed')
+  })
+
+  it('rejects malformed persisted snapshots instead of promoting them to domain records', () => {
+    assert.throws(
+      () => new RegistryService(new InMemoryRegistryPersistence([{ owner: 'managed/integrations', capabilities: [{ id: 'Calendar.Read' }] }])),
+      RegistryContractError,
+    )
+  })
+
+  it('rejects conflicting active owners in persisted data', () => {
+    const row = {
+      owner: 'managed/integrations',
+      version: '1.0.0',
+      provenance: { kind: 'managed', origin: 'human' },
+      status: 'active',
+      evidence: 'Verified',
+      approval: 'unreviewed',
+      capabilities: [{ id: 'calendar.read', permissions: [] }],
+      permissions: [],
+      runtimeSeams: ['integrations.calendar'],
+      tools: [],
+      services: [],
+      providers: [],
+    }
+    assert.throws(
+      () => new RegistryService(new InMemoryRegistryPersistence([
+        row,
+        { ...row, owner: 'generated/calendar-v2', provenance: { kind: 'generated', origin: 'assistant' } },
+      ])),
+      OwnershipConflictError,
+    )
+  })
+
+  it('records stored approval evidence without letting register copy it onto a successor', () => {
+    const persistence = new InMemoryRegistryPersistence([{
+      owner: 'managed/integrations',
+      version: '1.0.0',
+      provenance: { kind: 'managed', origin: 'human' },
+      status: 'active',
+      evidence: 'Verified',
+      approval: 'approved-for-this-diff',
+      capabilities: [{ id: 'calendar.read', permissions: ['local.fake.calendar.read'] }],
+      permissions: [],
+      runtimeSeams: ['integrations.calendar'],
+      tools: [],
+      services: [],
+      providers: [],
+    }])
+    const store = registry(persistence)
+    assert.equal(store.get('managed/integrations', '1.0.0')?.approval, 'approved-for-this-diff')
+    const next = store.register(candidate({
+      owner: 'managed/integrations',
+      version: '1.1.0',
+      provenance: { kind: 'managed', origin: 'human' },
+      capabilities: [{
+        id: 'calendar.read',
+        permissions: ['local.fake.calendar.read', 'local.fake.calendar.write'],
+      }],
+      runtimeSeams: ['integrations.calendar'],
+    }))
+    assert.equal(next.approval, 'unreviewed')
+    assert.equal(store.get('managed/integrations', '1.0.0')?.approval, 'approved-for-this-diff')
   })
 
   it('bootstraps a conservative Core MVP inventory without live vendors', () => {

@@ -31,6 +31,7 @@ export {
   parseVersion,
   recordKey,
 } from './normalize.js'
+export { parseRegistryRecord, toRegistrySnapshot, type RegistryRecordSnapshot } from './snapshot.js'
 export { InMemoryRegistryPersistence, type RegistryPersistence } from './persistence.js'
 export { RegistryService } from './service.js'
 export { CORE_BOOTSTRAP_INVENTORY, bootstrapCoreInventory } from './bootstrap.js'

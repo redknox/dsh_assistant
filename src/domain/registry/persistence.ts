@@ -1,23 +1,22 @@
-import { cloneRecord } from './normalize.js'
-import type { RegistryRecord } from './types.js'
+import type { RegistryRecordSnapshot } from './snapshot.js'
 
 /**
- * Replaceable persistence port. Storage adapters keep snapshots;
- * they are not the domain model.
+ * Replaceable persistence port. Adapters store {@link RegistryRecordSnapshot}
+ * DTOs only. Domain {@link import('./types.js').RegistryRecord} is decoded by the service.
  */
 export interface RegistryPersistence {
-  load(): RegistryRecord[]
-  save(records: readonly RegistryRecord[]): void
+  load(): readonly unknown[]
+  save(records: readonly RegistryRecordSnapshot[]): void
 }
 
 export class InMemoryRegistryPersistence implements RegistryPersistence {
-  private snapshot: RegistryRecord[] = []
+  constructor(private snapshot: unknown[] = []) {}
 
-  load(): RegistryRecord[] {
-    return this.snapshot.map(cloneRecord)
+  load(): unknown[] {
+    return this.snapshot.map((row) => structuredClone(row))
   }
 
-  save(records: readonly RegistryRecord[]): void {
-    this.snapshot = records.map(cloneRecord)
+  save(records: readonly RegistryRecordSnapshot[]): void {
+    this.snapshot = records.map((row) => structuredClone(row))
   }
 }

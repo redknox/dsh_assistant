@@ -76,7 +76,6 @@ export interface RegistryRegisterInput {
   readonly provenance: ExtensionProvenance
   readonly status?: LifecycleStatus
   readonly evidence: EvidenceLevel
-  readonly approval?: ApprovalState
   readonly capabilities: readonly CapabilityClaim[]
   readonly permissions?: readonly string[]
   readonly runtimeSeams: readonly string[]
@@ -94,5 +93,4 @@ export interface CapabilityRegistry {
   listCapabilities(owner: string, version: string): readonly string[]
   conflicts(): readonly OwnershipConflict[]
   transitionStatus(owner: string, version: string, status: LifecycleStatus): RegistryRecord
-  transitionApproval(owner: string, version: string, approval: ApprovalState): RegistryRecord
 }

@@ -9,9 +9,9 @@ import {
   recordKey,
 } from './normalize.js'
 import type { RegistryPersistence } from './persistence.js'
+import { parseRegistryRecord, toRegistrySnapshot } from './snapshot.js'
 import type {
   ActiveOwnerResolution,
-  ApprovalState,
   CapabilityRegistry,
   LifecycleStatus,
   OwnershipConflict,
@@ -24,12 +24,35 @@ function claimsCapability(record: RegistryRecord, capability: string): boolean {
   return record.capabilities.some((item) => item.id === capability)
 }
 
+function activeConflicts(records: readonly RegistryRecord[]): OwnershipConflict[] {
+  const byCapability = new Map<string, RegistryRecord[]>()
+  for (const record of records) {
+    if (record.status !== 'active') continue
+    for (const claim of record.capabilities) {
+      const current = byCapability.get(claim.id) ?? []
+      current.push(record)
+      byCapability.set(claim.id, current)
+    }
+  }
+  return [...byCapability.entries()]
+    .filter(([, items]) => items.length > 1)
+    .map(([capability, items]) => ({ capability, records: items }))
+}
+
 export class RegistryService implements CapabilityRegistry {
   private records = new Map<string, RegistryRecord>()
 
   constructor(private readonly persistence: RegistryPersistence) {
-    for (const record of persistence.load()) {
-      this.records.set(recordKey(record.owner, record.version), cloneRecord(record))
+    const decoded = persistence.load().map((row) => parseRegistryRecord(row))
+    const conflicts = activeConflicts(decoded)
+    if (conflicts[0]) {
+      throw new OwnershipConflictError(
+        conflicts[0].capability,
+        conflicts[0].records.map((item) => ({ owner: item.owner, version: item.version })),
+      )
+    }
+    for (const record of decoded) {
+      this.records.set(recordKey(record.owner, record.version), record)
     }
   }
 
@@ -87,19 +110,10 @@ export class RegistryService implements CapabilityRegistry {
   }
 
   conflicts(): readonly OwnershipConflict[] {
-    const byCapability = new Map<string, RegistryRecord[]>()
-    for (const record of this.records.values()) {
-      if (record.status !== 'active') continue
-      for (const claim of record.capabilities) {
-        const current = byCapability.get(claim.id) ?? []
-        current.push(record)
-        byCapability.set(claim.id, current)
-      }
-    }
-    return [...byCapability.entries()]
-      .filter(([, records]) => records.length > 1)
-      .map(([capability, records]) => ({ capability, records: records.map(cloneRecord) }))
-      .sort((left, right) => left.capability.localeCompare(right.capability))
+    return activeConflicts([...this.records.values()]).map((item) => ({
+      capability: item.capability,
+      records: item.records.map(cloneRecord),
+    })).sort((left, right) => left.capability.localeCompare(right.capability))
   }
 
   transitionStatus(owner: string, version: string, status: LifecycleStatus): RegistryRecord {
@@ -108,16 +122,6 @@ export class RegistryService implements CapabilityRegistry {
     if (current === undefined) throw new RegistryContractError(`unknown record: ${key}`)
     const next = { ...cloneRecord(current), status }
     if (status === 'active') this.assertNoActiveConflict(next, key)
-    this.records.set(key, next)
-    this.persist()
-    return cloneRecord(next)
-  }
-
-  transitionApproval(owner: string, version: string, approval: ApprovalState): RegistryRecord {
-    const key = recordKey(parseOwnerId(owner), parseVersion(version))
-    const current = this.records.get(key)
-    if (current === undefined) throw new RegistryContractError(`unknown record: ${key}`)
-    const next = { ...cloneRecord(current), approval }
     this.records.set(key, next)
     this.persist()
     return cloneRecord(next)
@@ -141,6 +145,6 @@ export class RegistryService implements CapabilityRegistry {
   }
 
   private persist(): void {
-    this.persistence.save([...this.records.values()].map(cloneRecord))
+    this.persistence.save([...this.records.values()].map(toRegistrySnapshot))
   }
 }

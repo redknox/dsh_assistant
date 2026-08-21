@@ -16,6 +16,7 @@ It does **not** answer **What should change?** (Capability Resolution Review) or
 - User approval of install, upgrade, remove, or switch.
 - Mounting, unmounting, or generating plugins.
 - Inferring approval from a previous version or a larger permission set.
+- Manufacturing `approved-for-this-diff`. `register()` always records `unreviewed`. Stored snapshots may carry prior approval evidence; the registry does not create it.
 
 A `status: active` registry row is metadata. It does not cause DSH to load that plugin.
 
@@ -56,11 +57,13 @@ Disabled or retired owners are not resolved as active.
 | `status` | `candidate` / `active` / `disabled` / `retired` — registry lifecycle only |
 | `approval` | `unreviewed` / `rejected` / `approved-for-this-diff` — governance evidence |
 
-Registering a successor version defaults to `unreviewed`. Approval of version N does not apply to version N+1, including when N+1 only adds permissions.
+`register()` always writes `unreviewed`. There is no public `transitionApproval`. Approval of version N does not apply to version N+1. A later Governance issue may record an external approval decision; this registry only decodes stored evidence.
+
+Persistence stores `RegistryRecordSnapshot` DTOs, not domain records. Load decodes and validates each snapshot. Malformed rows and conflicting active owners in storage are rejected; they never become silent domain state.
 
 ## Bootstrap inventory
 
-`CORE_BOOTSTRAP_INVENTORY` lists the current Assistant Core MVP as explicit records: memory, knowledge, fake integrations, trust/policy, jobs, and the UI control surface. Integration ownership uses `provider: fake`. Live vendor accounts (Google and others) are not claimed.
+`CORE_BOOTSTRAP_INVENTORY` lists the current Assistant Core MVP as explicit records: memory, knowledge, fake integrations, trust/policy, jobs, and the UI control surface. Integration ownership uses `provider: fake`. Live vendor accounts (Google and others) are not claimed. Bootstrap `status: active` is inventory of what the product already ships, not Self-Extension approval (`approval` stays `unreviewed`).
 
 ## Public seam
 
