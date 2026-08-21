@@ -29,4 +29,21 @@ export * from './domain/integrations/index.js'
 export * from './domain/policy/index.js'
 export * from './domain/jobs/index.js'
 export { FakeClock, IntervalScheduler } from './adapters/jobs/interval-scheduler.js'
+export {
+  AssistantControlSurface,
+  projectAssistantView,
+  renderAssistantViewAsHtml,
+  renderAssistantViewAsText,
+} from './ui/index.js'
+export type {
+  AssistantView,
+  CapabilityStatusDto,
+  ConfirmationDto,
+  ConversationItemDto,
+  JobViewDto,
+  KnowledgeHitDto,
+  KnowledgeSourceDto,
+  MemoryEntryDto,
+} from './ui/index.js'
 export { FakeIntegrationSuite } from './adapters/integrations/fake-providers.js'
+export { FakeReplyAdapter } from './adapters/llm/fake-reply-adapter.js'

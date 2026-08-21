@@ -29,6 +29,10 @@ export class PersonalKnowledgeService extends Service implements PersonalKnowled
   getDocument(id: string) {
     return this.store.getDocument(id)
   }
+
+  listDocuments() {
+    return this.store.listDocuments()
+  }
 }
 
 export interface KnowledgePluginConfig {

@@ -1,5 +1,5 @@
 import { Context } from '@deepseek-ai/cordis'
-import AgentRegistry from '@deepseek-ai/dsh-agent'
+import AgentRegistry, { type AgentOptions } from '@deepseek-ai/dsh-agent'
 import AgentLoop from '@deepseek-ai/dsh-agent-loop'
 import InvariantRegistry from '@deepseek-ai/dsh-invariants'
 import LocalJobRegistry from '@deepseek-ai/dsh-jobs-local'
@@ -41,8 +41,13 @@ export async function bootAssistantRuntime(options: BootOptions = {}): Promise<C
   return ctx
 }
 
-export async function createAssistantAgent(ctx: Context, sessionId = 'dsh-assistant') {
+export async function createAssistantAgent(
+  ctx: Context,
+  sessionId = 'dsh-assistant',
+  agentOptions?: AgentOptions,
+) {
   return ctx.agents.create({
     sessionId: SessionId(sessionId),
+    ...(agentOptions ? { agentOptions } : {}),
   })
 }

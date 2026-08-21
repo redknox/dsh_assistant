@@ -5,6 +5,7 @@ export interface KnowledgeIndex {
   upsert(document: KnowledgeDocument, chunks: readonly KnowledgeChunk[]): void
   search(query: KnowledgeQuery, limit: number): KnowledgeHit[]
   getDocument(id: string): KnowledgeDocument | undefined
+  listDocuments(): readonly KnowledgeDocument[]
 }
 
 /** Lexical overlap index. Vector/embedding backends can replace this adapter. */
@@ -19,6 +20,10 @@ export class InMemoryKeywordIndex implements KnowledgeIndex {
 
   getDocument(id: string): KnowledgeDocument | undefined {
     return this.documents.get(id)
+  }
+
+  listDocuments(): readonly KnowledgeDocument[] {
+    return [...this.documents.values()]
   }
 
   search(query: KnowledgeQuery, limit: number): KnowledgeHit[] {

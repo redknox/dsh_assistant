@@ -65,4 +65,5 @@ export interface PersonalKnowledge {
   ingest(input: KnowledgeIngestInput): KnowledgeDocument
   retrieve(query: KnowledgeQuery): KnowledgeRetrieval
   getDocument(id: string): KnowledgeDocument | undefined
+  listDocuments(): readonly KnowledgeDocument[]
 }

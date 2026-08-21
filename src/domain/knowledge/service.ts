@@ -77,4 +77,8 @@ export class KnowledgeService implements PersonalKnowledge {
   getDocument(id: string): KnowledgeDocument | undefined {
     return this.index.getDocument(id)
   }
+
+  listDocuments(): readonly KnowledgeDocument[] {
+    return this.index.listDocuments()
+  }
 }
