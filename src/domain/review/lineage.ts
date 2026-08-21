@@ -1,7 +1,64 @@
+import { finding } from './finding.js'
 import { REVIEW_POLICY_VERSION, type ReviewFinding, type ReviewPackage } from './types.js'
 
 function openBlockersFrom(findings: readonly ReviewFinding[]): readonly ReviewFinding[] {
   return findings.filter((item) => item.blocking && item.status === 'open')
+}
+
+export interface HostParentReport {
+  readonly candidateId: string
+  readonly digest: string
+  readonly findings: readonly ReviewFinding[]
+}
+
+export interface HostParentLookup {
+  previousForCandidate(id: string): HostParentReport | undefined
+  reportForDigest(digest: string): HostParentReport | undefined
+}
+
+export function invalidParentFinding(pkg: ReviewPackage, evidence: string): ReviewFinding {
+  return finding({
+    reviewedDigest: pkg.candidate.digest,
+    severity: 'BLOCKER',
+    category: 'lineage',
+    claim: 'invalid-parent-revision',
+    location: 'candidate.parentRevision',
+    evidence,
+    whyItMatters: 'Parent revision identity is host-owned; a fake parent cannot drop unresolved BLOCKERs.',
+    requiredRemediation: 'Use the host-known parent digest, or omit parentRevision so the service derives it.',
+    status: 'open',
+  })
+}
+
+/** Derive parent from host report history. Unknown or mismatched parentRevision fails closed. */
+export function resolveHostParent(
+  pkg: ReviewPackage,
+  lookup: HostParentLookup,
+): { readonly report?: HostParentReport; readonly invalidParent?: ReviewFinding } {
+  const previous = lookup.previousForCandidate(pkg.candidate.id)
+  const sameLineage = previous && previous.digest !== pkg.candidate.digest ? previous : undefined
+  const claimedDigest = pkg.candidate.parentRevision
+  const claimed = claimedDigest === undefined ? undefined : lookup.reportForDigest(claimedDigest)
+
+  if (claimedDigest !== undefined && claimed === undefined) {
+    return {
+      report: sameLineage,
+      invalidParent: invalidParentFinding(pkg, `Unknown parentRevision ${claimedDigest}.`),
+    }
+  }
+  if (sameLineage) {
+    if (claimed && claimed.digest !== sameLineage.digest) {
+      return {
+        report: sameLineage,
+        invalidParent: invalidParentFinding(
+          pkg,
+          `parentRevision ${claimedDigest} is not the host parent ${sameLineage.digest} for ${pkg.candidate.id}.`,
+        ),
+      }
+    }
+    return { report: sameLineage }
+  }
+  return { report: claimed }
 }
 
 /** Host parent report is lineage authority. Package priorFindings cannot rewrite open → resolved. */

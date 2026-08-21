@@ -141,7 +141,7 @@ Prior open BLOCKERs are inherited from the host-owned parent `ReviewReport`, not
 - the Reviewer returns the same finding with `status: resolved` and `reviewedDigest` equal to the new digest; or
 - a deterministic host-owned check for that invariant succeeds on the current package.
 
-`priorFindings` is trace/context. It cannot rewrite an inherited BLOCKER from `open` to `resolved`. Reviewer silence is not resolution. Stale resolution evidence bound to an older digest cannot close a newer revision. Builder text that says “fixed” is not proof. A BLOCKER omitted from `priorFindings` while the parent report still has it open also produces a lineage BLOCKER.
+`priorFindings` is trace/context. It cannot rewrite an inherited BLOCKER from `open` to `resolved`. `parentRevision` is also a caller hint: the service derives the parent from host report history for the same candidate, and an unknown or mismatched parent digest fails closed instead of dropping lineage. Reviewer silence is not resolution. Stale resolution evidence bound to an older digest cannot close a newer revision. Builder text that says “fixed” is not proof. A BLOCKER omitted from `priorFindings` while the parent report still has it open also produces a lineage BLOCKER.
 
 New findings may appear during re-review.
 

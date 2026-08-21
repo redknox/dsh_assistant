@@ -81,6 +81,7 @@ export interface ReviewCandidateRef {
   readonly version: string
   readonly digest: string
   readonly sealed: boolean
+  /** Caller hint only. Host report history validates or derives the parent. */
   readonly parentRevision?: string
 }
 

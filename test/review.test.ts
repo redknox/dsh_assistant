@@ -314,7 +314,6 @@ describe('independent review', () => {
     const prior = trustFinding('rev-a', 'open')
     const report = new ReviewService(new PermissiveReviewerProvider()).review(r3({
       digest: 'rev-b',
-      parentRevision: 'rev-a',
       priorFindings: [prior],
     }))
     assert.equal(report.state, 'changes-required')
@@ -377,6 +376,23 @@ describe('independent review', () => {
     const carried = second.findings.find((item) => item.claim === 'forged-discovery-trust')
     assert.equal(carried?.status, 'open')
     assert.equal(carried?.reviewedDigest, 'rev-b')
+  })
+
+  it('does not let a fake parentRevision drop inherited BLOCKERs', () => {
+    const provider = new PolicyReviewerProvider((input) => (
+      input.candidate.digest === 'rev-a' ? [trustFinding('rev-a', 'open')] : []
+    ))
+    const service = new ReviewService(provider)
+    const first = service.review(r3({ digest: 'rev-a' }))
+    assert.equal(first.state, 'changes-required')
+    const second = service.review(r3({
+      digest: 'rev-b',
+      parentRevision: 'not-a-real-digest',
+      priorFindings: [],
+    }))
+    assert.equal(second.state, 'changes-required')
+    assert.ok(second.findings.some((item) => item.claim === 'forged-discovery-trust' && item.status === 'open'))
+    assert.ok(second.findings.some((item) => item.claim === 'invalid-parent-revision' && item.status === 'open'))
   })
 
   it('M. review depth follows risk class', () => {
