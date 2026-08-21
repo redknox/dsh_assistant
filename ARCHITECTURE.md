@@ -1,6 +1,6 @@
 # Architecture
 
-Target architecture for the personal assistant product layer on DeepSeek Harness (DSH). Runtime scaffold and memory contracts in this repository are **Implemented**; UI remains **Designed**.
+Target architecture for the personal assistant product layer on DeepSeek Harness (DSH). Runtime scaffold, personal services, and the UI projection/control surface in this repository are **Implemented**.
 
 Normative contributor rules: [ENGINEERING.md](./ENGINEERING.md). Product boundary: [README.md](./README.md).
 
@@ -85,8 +85,8 @@ Do not inject unsigned or unowned blobs into the model context.
 
 **MVP:** compose on DSH public seams; keep domain independent of model/UI; separate memory, knowledge, tools, and policy; distinguish read / propose / execute; smallest useful product loop. Runtime scaffold and memory contracts are **Implemented** in this repo.
 
-**Out of scope unless a later issue says otherwise (Unsupported here):** custom Agent Loop; speculative multi-agent framework; forced production database; full UI; credentials or real personal data in the repo.
+**Out of scope unless a later issue says otherwise (Unsupported here):** custom Agent Loop; speculative multi-agent framework; forced production database; pixel-perfect or mobile UI; credentials or real personal data in the repo.
 
 ## Evidence
 
-This document is **Implemented** as a contract. Runtime boot and memory domain behavior are **Verified** by `npm test`. UI, RAG, and production persistence remain **Designed** or **Unsupported**.
+This document is **Implemented** as a contract. Runtime boot, personal services, and the UI projection/control surface are **Verified** by `npm test`. Pixel-perfect UI, RAG, and production persistence remain **Designed** or **Unsupported**.

@@ -49,7 +49,7 @@ MVP does **not** include a custom runtime, a custom Agent Loop, a speculative mu
 ## Non-goals
 
 - Runtime implementation in issue #1 (contracts only). Later issues may add a DSH-native scaffold.
-- UI implementation.
+- Pixel-perfect UI or mobile apps.
 - Forcing a database unless a later issue requires it.
 - Custom Agent Loop or patching DSH internals.
 - Speculative multi-agent framework.
@@ -79,7 +79,8 @@ Current status of this repository:
 | Personal integration seams (fake providers) | **Implemented**; read vs propose and structured errors **Verified** by `npm test` |
 | Trust/policy (L0–L4, confirmation, audit) | **Implemented**; read/propose/confirm/deny/cancel/replay **Verified** by `npm test` |
 | Proactive jobs / scheduled workflows | **Implemented** on public `ctx.jobs` plus a process-local interval scheduler; morning brief recurrence and policy-gated mutations **Verified** by `npm test`. Cross-restart durability is **Unsupported**. |
-| UI, real vendor accounts, vector DB, production persistence | **Unsupported** / not started |
+| UI projection + control surface (text/HTML, no framework) | **Implemented**; conversation/jobs/confirmations/memory/knowledge/capabilities **Verified** by `npm test`. Pixel design and mobile apps are **Unsupported**. |
+| Real vendor accounts, vector DB, production persistence | **Unsupported** / not started |
 
 ## Develop
 
@@ -89,9 +90,12 @@ npm run typecheck
 npm run test
 npm run build
 npm run boot
+npm run ui
 ```
 
 `npm run boot` starts a headless Cordis composition using public DSH services (`ctx.agents`, `ctx.systemPrompt`, …), creates one assistant session, then disposes it. It does not call a live LLM.
+
+`npm run ui` boots the same stack and prints a text control-surface snapshot (queued message, memory, knowledge, jobs, pending confirmation). It also does not call a live LLM.
 
 Composition is replaceable: this package declares `dsh.bundle` (`cordis.patch.yml`). An example profile lives in `profiles/assistant/`.
 

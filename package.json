@@ -26,7 +26,8 @@
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "tsx --test test/**/*.test.ts",
-    "boot": "tsx src/runtime/boot-cli.ts"
+    "boot": "tsx src/runtime/boot-cli.ts",
+    "ui": "tsx src/ui/cli.ts"
   },
   "engines": {
     "node": ">=22"
