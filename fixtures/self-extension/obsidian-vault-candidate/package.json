@@ -1,0 +1,5 @@
+{
+  "name": "dsh-generated-obsidian-vault",
+  "type": "module",
+  "main": "src/plugin.js"
+}

@@ -3,6 +3,8 @@ import { createRequire } from 'node:module'
 import path from 'node:path'
 import { digestFiles } from './digest.js'
 import { listSourceFiles } from './files.js'
+import { detectOsNetworkSandbox } from './os-sandbox.js'
+import { runRestrictedCandidateTests, runnerUnavailable } from './restricted-runner.js'
 import type { CandidateRecord, ValidationReport, ValidationStageResult, ValidationStageStatus } from './types.js'
 import { ALLOWED_VALIDATION_TASKS } from './types.js'
 
@@ -109,13 +111,46 @@ function runTypecheck(root: string, files: readonly string[]): ValidationStageRe
   }
 }
 
-function runTests(files: readonly string[]): ValidationStageResult {
+function runTests(root: string, files: readonly string[]): ValidationStageResult {
   const tests = files.filter((file) => file.includes('.test.') || file.startsWith('test/'))
-  return tests.length === 0
-    ? stage('tests', 'not-applicable', 'No candidate tests declared. Offline validation does not invent a live suite.')
-    : stage('tests', 'unresolved', 'Candidate test files are inspectable but are not executed in this pipeline.', {
-      diagnostics: tests.join(', '),
+  if (tests.length === 0) {
+    return stage('tests', 'not-applicable', 'No candidate tests declared. Offline validation does not invent a live suite.')
+  }
+  const executable = tests.filter((file) => file.endsWith('.js') || file.endsWith('.mjs') || file.endsWith('.cjs'))
+  if (executable.length === 0) {
+    return stage(
+      'tests',
+      'unresolved',
+      'Candidate test files are inspectable but this pipeline only executes Node-native test files.',
+      { diagnostics: tests.join(', ') },
+    )
+  }
+  if (detectOsNetworkSandbox() === undefined) {
+    return stage(
+      'tests',
+      'unresolved',
+      'No OS/container network sandbox; candidate tests were not executed on the host.',
+    )
+  }
+  try {
+    const output = runRestrictedCandidateTests(root, executable)
+    return stage('tests', 'passed', `Executed ${executable.length} candidate test file(s) inside an OS network sandbox.`, {
+      diagnostics: output.slice(0, 2000),
     })
+  } catch (error) {
+    const failed = error as { stdout?: string; stderr?: string; message?: string; code?: string }
+    if (runnerUnavailable(failed)) {
+      return stage(
+        'tests',
+        'unresolved',
+        'Restricted validation runner is unavailable; candidate tests were not executed on the host.',
+        { diagnostics: `${failed.stderr ?? failed.message ?? ''}`.slice(0, 2000) },
+      )
+    }
+    return stage('tests', 'failed', 'Candidate tests failed in the restricted runner.', {
+      diagnostics: `${failed.stdout ?? ''}\n${failed.stderr ?? failed.message ?? ''}`.slice(0, 2000),
+    })
+  }
 }
 
 function requestedUnsafe(record: CandidateRecord): string[] {
@@ -145,7 +180,7 @@ export function runValidation(record: CandidateRecord): ValidationReport {
   stages.push(inspectPackage(record.workspaceRoot))
   stages.push(inspectBoundary(record.workspaceRoot, files))
   stages.push(runTypecheck(record.workspaceRoot, files))
-  stages.push(runTests(files))
+  stages.push(runTests(record.workspaceRoot, files))
   stages.push(inspectBundle(record.workspaceRoot))
   const digest = digestFiles(record.workspaceRoot, files)
   stages.push(stage('digest', 'passed', `Bound validation evidence to digest ${digest.slice(0, 12)}.`))

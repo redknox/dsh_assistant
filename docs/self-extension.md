@@ -1,6 +1,6 @@
 # Self-Extension architecture and governance
 
-Status: governance contract is **Designed** and remains normative. The Capability Registry, Resolution Review, candidate workspace/validation, and governed activation/recovery are **Verified**. See [docs/capability-registry.md](./capability-registry.md), [docs/capability-resolution.md](./capability-resolution.md), [docs/candidate-workspace.md](./candidate-workspace.md), and [docs/extension-governance.md](./extension-governance.md). A first generated-plugin vertical slice is still **Unsupported**.
+Status: governance contract is **Designed** and remains normative. The Capability Registry, Resolution Review, candidate workspace/validation, governed activation/recovery, and the first Obsidian Vault generated-plugin slice are **Verified**. See [docs/capability-registry.md](./capability-registry.md), [docs/capability-resolution.md](./capability-resolution.md), [docs/candidate-workspace.md](./candidate-workspace.md), [docs/extension-governance.md](./extension-governance.md), and [docs/obsidian-self-extension.md](./obsidian-self-extension.md).
 
 Companion documents: [ARCHITECTURE.md](../ARCHITECTURE.md) (layers and public seams), [ENGINEERING.md](../ENGINEERING.md) (normative contributor rules), [README.md](../README.md) (product boundary).
 
@@ -217,13 +217,12 @@ Capability Resolution Review:
 
 ## Non-goals (still later)
 
-**Unsupported** until a later issue:
+**Verified** by the Obsidian Vault slice (`test/obsidian-e2e.test.ts`, [docs/obsidian-self-extension.md](./obsidian-self-extension.md)). Still **Unsupported**:
 
 - Autonomous plugin-writing engine
 - Runtime loader / version manager
 - Automatic install, upgrade, or remove
 - Sandbox or container execution framework
-- First self-generated plugin vertical slice
 - Any change to DSH Agent Loop internals
 
-Registry, Resolution, candidate validation, and governed activation/recovery are **Verified**. Next: the first Self-Extension end-to-end vertical slice (real need → review → candidate → approval → activate → rollback).
+Registry, Resolution, candidate validation, governed activation/recovery, and the first Obsidian Vault generated-plugin slice are **Verified**.

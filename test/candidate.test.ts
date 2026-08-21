@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { existsSync, mkdtempSync } from 'node:fs'
+import { existsSync, mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { describe, it } from 'node:test'
@@ -232,6 +232,126 @@ describe('candidate workspace and validation', () => {
     const tests = report.stages.find((item) => item.name === 'tests')
     assert.equal(tests?.status, 'unresolved')
     assert.equal(workspace.get(candidate.id).lifecycle, 'validation-incomplete')
+  })
+
+  it('executes Node-native candidate tests instead of marking them unresolved', () => {
+    const { workspace } = seeded()
+    const candidate = workspace.create({
+      review: review(),
+      owner: 'managed/integrations',
+      version: '0.2.0',
+    })
+    workspace.writeFile(candidate.id, 'package.json', `${JSON.stringify({ type: 'module' })}\n`)
+    workspace.writeFile(candidate.id, 'src/ok.js', 'export const value = "ok"\n')
+    workspace.writeFile(candidate.id, 'src/ok.test.js', `import assert from 'node:assert/strict'
+import { test } from 'node:test'
+import { value } from './ok.js'
+test('runs', () => { assert.equal(value, 'ok') })
+`)
+    const report = workspace.validate(candidate.id)
+    assert.equal(report.passed, true)
+    assert.equal(report.stages.find((item) => item.name === 'tests')?.status, 'passed')
+    assert.equal(workspace.get(candidate.id).lifecycle, 'validated')
+  })
+
+  it('proves the OS sandbox started and denied outbound network', () => {
+    const { workspace } = seeded()
+    const candidate = workspace.create({
+      review: review(),
+      owner: 'managed/integrations',
+      version: '0.2.0',
+    })
+    workspace.writeFile(candidate.id, 'package.json', `${JSON.stringify({ type: 'module' })}\n`)
+    workspace.writeFile(candidate.id, 'src/network-deny.test.js', `import assert from 'node:assert/strict'
+import http2 from 'node:http2'
+import { test } from 'node:test'
+test('outbound http2 is denied after the sandboxed process starts', async () => {
+  const error = await new Promise((resolve, reject) => {
+    const client = http2.connect('https://example.com')
+    const finish = (err) => {
+      try { client.close() } catch {}
+      if (err) resolve(err)
+      else reject(new Error('http2 connected; OS sandbox did not deny network'))
+    }
+    client.on('connect', () => finish())
+    client.on('error', finish)
+  })
+  assert.ok(error.code || error.message)
+  assert.match(String(error.code ?? error.message), /ENOTFOUND|ENETUNREACH|EHOSTUNREACH|ECONNREFUSED|EAI_AGAIN|EPERM|EACCES|denied|unreachable|refused|not found/i)
+})
+`)
+    const report = workspace.validate(candidate.id)
+    assert.equal(report.stages.find((item) => item.name === 'tests')?.status, 'passed', report.stages.find((item) => item.name === 'tests')?.diagnostics)
+    assert.equal(report.passed, true)
+    assert.equal(workspace.get(candidate.id).lifecycle, 'validated')
+  })
+
+  it('does not inherit host secrets or grant host filesystem/network/process authority', () => {
+    const previous = process.env.DSH_VALIDATION_SECRET
+    process.env.DSH_VALIDATION_SECRET = 's3cret'
+    try {
+      const outside = mkdtempSync(path.join(tmpdir(), 'validation-outside-'))
+      const secretFile = path.join(outside, 'secret.txt')
+      writeFileSync(secretFile, 'TOPSECRET\n')
+      const { workspace } = seeded()
+      const candidate = workspace.create({
+        review: review(),
+        owner: 'managed/integrations',
+        version: '0.2.0',
+      })
+      workspace.writeFile(candidate.id, 'package.json', `${JSON.stringify({ type: 'module' })}\n`)
+      workspace.writeFile(candidate.id, 'src/steal-env.test.js', `import assert from 'node:assert/strict'
+import { test } from 'node:test'
+test('reads host secret env', () => { assert.equal(process.env.DSH_VALIDATION_SECRET, 's3cret') })
+`)
+      const envReport = workspace.validate(candidate.id)
+      assert.equal(envReport.passed, false)
+      assert.equal(envReport.stages.find((item) => item.name === 'tests')?.status, 'failed')
+
+      workspace.writeFile(candidate.id, 'src/steal-env.test.js', 'export const retired = true\n')
+      workspace.writeFile(candidate.id, 'src/steal-fs.test.js', `import assert from 'node:assert/strict'
+import { readFileSync } from 'node:fs'
+import { test } from 'node:test'
+test('reads outside file', () => { assert.equal(readFileSync(${JSON.stringify(secretFile)}, 'utf8'), 'TOPSECRET\\n') })
+`)
+      const fsReport = workspace.validate(candidate.id)
+      assert.equal(fsReport.passed, false)
+      assert.equal(fsReport.stages.find((item) => item.name === 'tests')?.status, 'failed')
+
+      workspace.writeFile(candidate.id, 'src/steal-fs.test.js', 'export const retired = true\n')
+      workspace.writeFile(candidate.id, 'src/steal-child.test.js', `import assert from 'node:assert/strict'
+import { spawnSync } from 'node:child_process'
+import { test } from 'node:test'
+test('spawns a child', () => {
+  const result = spawnSync(process.execPath, ['-e', 'console.log(1)'], { encoding: 'utf8' })
+  assert.equal(result.status, 0)
+})
+`)
+      const childReport = workspace.validate(candidate.id)
+      assert.equal(childReport.passed, false)
+      assert.equal(childReport.stages.find((item) => item.name === 'tests')?.status, 'failed')
+    } finally {
+      if (previous === undefined) delete process.env.DSH_VALIDATION_SECRET
+      else process.env.DSH_VALIDATION_SECRET = previous
+    }
+  })
+
+  it('fails validation when executed candidate tests fail', () => {
+    const { workspace } = seeded()
+    const candidate = workspace.create({
+      review: review(),
+      owner: 'managed/integrations',
+      version: '0.2.0',
+    })
+    workspace.writeFile(candidate.id, 'package.json', `${JSON.stringify({ type: 'module' })}\n`)
+    workspace.writeFile(candidate.id, 'src/fail.test.js', `import assert from 'node:assert/strict'
+import { test } from 'node:test'
+test('fails', () => { assert.equal(1, 2) })
+`)
+    const report = workspace.validate(candidate.id)
+    assert.equal(report.passed, false)
+    assert.equal(report.stages.find((item) => item.name === 'tests')?.status, 'failed')
+    assert.equal(workspace.get(candidate.id).lifecycle, 'validation-failed')
   })
 
   it('does not validate a candidate that only declares a postinstall script', () => {

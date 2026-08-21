@@ -59,7 +59,20 @@ export interface ContactsProvider {
   listContacts(query: PageQuery): Promise<Page<Contact>>
 }
 
-export interface FilesProvider {
+export interface ConfinedFileOp {
+  readonly op: 'list' | 'read' | 'write'
+  readonly root: string
+  readonly path?: string
+}
+
+export interface ConfinedFileAccess {
+  listTextFiles(input: { root: string; prefix?: string }): Promise<readonly string[]>
+  readText(input: { root: string; path: string }): Promise<string>
+  writeText(input: { root: string; path: string; content: string }): Promise<void>
+  confinedAccesses(): readonly ConfinedFileOp[]
+}
+
+export interface FilesProvider extends ConfinedFileAccess {
   readonly capability: 'files'
   availability(): Availability
   listFiles(query: { path?: string } & PageQuery): Promise<Page<FileEntry>>
