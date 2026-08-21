@@ -35,12 +35,14 @@ async function bootHarness() {
 describe('product package and profile', () => {
   it('declares a DSH bundle and example profile for 0.1.0-rc.8', () => {
     const pkg = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8')) as {
+      version: string
       private: boolean
       engines: { node: string }
       dsh: { bundle: { patch: string } }
       files: string[]
       dependencies: Record<string, string>
     }
+    assert.equal(pkg.version, '0.2.0')
     assert.equal(pkg.private, true)
     assert.equal(pkg.engines.node, '>=22')
     assert.equal(pkg.dsh.bundle.patch, './cordis.patch.yml')
@@ -187,6 +189,9 @@ describe('product package and profile', () => {
       || path.startsWith('fixtures/')
       || path.startsWith('docs/')
       || path.startsWith('profiles/')
+      || path.startsWith('self-extension/')
+      || path.includes('authority.json')
+      || path.includes('candidates/')
       || path.startsWith('.env')
       || path.includes('credentials')
     ))
