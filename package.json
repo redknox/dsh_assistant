@@ -30,6 +30,7 @@
     "ui": "tsx src/ui/cli.ts",
     "slice": "tsx src/runtime/slice-cli.ts",
     "self-extension": "tsx src/runtime/self-extension-cli.ts",
+    "verify:v0.2": "tsx --test test/v0.2-regression.test.ts",
     "pack:inspect": "npm pack --dry-run --json"
   },
   "engines": {

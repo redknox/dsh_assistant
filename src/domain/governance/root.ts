@@ -1,6 +1,7 @@
 import type { CapabilityRegistry } from '../registry/types.js'
 import type { CandidateWorkspace } from '../candidate/types.js'
-import { GovernanceAuthorityError } from './errors.js'
+import { backupSelfExtension, restoreSelfExtension, type SelfExtensionBackupManifest } from '../self-extension/backup.js'
+import { GovernanceAuthorityError, GovernanceContractError } from './errors.js'
 import { InMemoryActivationRuntime, type ActivationRuntime } from './runtime.js'
 import { GovernanceService, type ActivationInterrupt, type GovernanceHydrate } from './service.js'
 import type {
@@ -19,6 +20,7 @@ import { TrustedAuthorityCredential } from './types.js'
 export class RecoveryRoot {
   readonly service: GovernanceService
   private readonly rootId = Symbol('recovery-root')
+  private readonly durableHome?: string
 
   constructor(
     registry: CapabilityRegistry,
@@ -29,9 +31,11 @@ export class RecoveryRoot {
       hydrate?: GovernanceHydrate
       beginAuthorityCommit?: () => void
       finishAuthorityCommit?: () => void
+      durableHome?: string
     } = {},
   ) {
     this.service = new GovernanceService(registry, workspace, runtime, this.rootId, options)
+    this.durableHome = options.durableHome
   }
 
   issueAuthority(authority: ApprovalAuthority): TrustedAuthorityCredential {
@@ -79,6 +83,28 @@ export class RecoveryRoot {
 
   disable(credential: TrustedAuthorityCredential, owner: string, version: string) {
     return this.service.disable(credential, owner, version)
+  }
+
+  backup(credential: TrustedAuthorityCredential, dest: string): SelfExtensionBackupManifest {
+    this.assertCredential(credential)
+    if (this.durableHome === undefined || this.durableHome === '') {
+      throw new GovernanceContractError('backup requires a durable assistant home')
+    }
+    return backupSelfExtension(this.durableHome, dest)
+  }
+
+  restore(credential: TrustedAuthorityCredential, source: string): void {
+    this.assertCredential(credential)
+    if (this.durableHome === undefined || this.durableHome === '') {
+      throw new GovernanceContractError('restore requires a durable assistant home')
+    }
+    restoreSelfExtension(source, this.durableHome)
+  }
+
+  private assertCredential(credential: TrustedAuthorityCredential): void {
+    if (!(credential instanceof TrustedAuthorityCredential) || !credential.issuedBy(this.rootId)) {
+      throw new GovernanceAuthorityError('backup/restore requires a credential issued by the recovery root')
+    }
   }
 
   inspect() {

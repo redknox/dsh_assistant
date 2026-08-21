@@ -102,6 +102,7 @@ npm run build
 npm run boot
 npm run ui
 npm run slice
+npm run verify:v0.2
 npm run pack:inspect
 ```
 
@@ -110,6 +111,8 @@ npm run pack:inspect
 `npm run ui` boots the same stack, sends one message through the public agent followup seam (fake local LLM adapter), and prints a text control-surface snapshot. It does not call a live LLM.
 
 `npm run slice` replays the Plan My Day vertical slice (scripted local LLM, fake calendar/tasks). See [docs/vertical-slice.md](./docs/vertical-slice.md).
+
+`npm run verify:v0.2` reruns the offline v0.2.x release-confidence suite (recovery drills + backup/restore). See [docs/v0.2-stabilization.md](./docs/v0.2-stabilization.md). It is not a production security certification.
 
 Composition is replaceable: this package declares `dsh.bundle` (`cordis.patch.yml`). An example profile lives in `profiles/assistant/`. Fresh-environment install, config, and secret-injection rules: [docs/packaging.md](./docs/packaging.md).
 
@@ -127,4 +130,5 @@ Composition is replaceable: this package declares `dsh.bundle` (`cordis.patch.ym
 | [docs/capability-resolution.md](./docs/capability-resolution.md) | Resolution: What should change? ordered review, evidence |
 | [docs/candidate-workspace.md](./docs/candidate-workspace.md) | Candidate workspace + validation: Can I build it safely? |
 | [docs/extension-governance.md](./docs/extension-governance.md) | Governance: May it become active? Recovery / Safe Mode |
+| [docs/v0.2-stabilization.md](./docs/v0.2-stabilization.md) | v0.2.x regression, recovery drills, backup/restore |
 | [docs/RELEASE.md](./docs/RELEASE.md) | 0.2.0 status: Verified vs Implemented vs Unsupported; v0.1.0 remains the historical Core MVP |

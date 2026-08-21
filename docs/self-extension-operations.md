@@ -14,7 +14,7 @@ Inspect registry, request a Capability Resolution Review, write/validate/seal a 
 
 ## What only a trusted operator can do
 
-Approve an exact fingerprint, activate, rollback, disable, enter/exit Safe Mode, rewrite LKG indirectly via those actions.
+Approve an exact fingerprint, activate, rollback, disable, enter/exit Safe Mode, backup/restore durable Self-Extension state, rewrite LKG indirectly via those actions.
 
 ## Normal lifecycle
 
@@ -34,7 +34,11 @@ self-extension disable <owner> <version>
 self-extension safe-mode enter|status|exit
 self-extension diagnostics
 self-extension lkg
+self-extension backup <dir>
+self-extension restore <dir>
 ```
+
+Backup/restore procedures and the v0.2.x release-confidence command: [docs/v0.2-stabilization.md](./v0.2-stabilization.md).
 
 ## Recovery
 

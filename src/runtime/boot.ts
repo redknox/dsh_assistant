@@ -9,6 +9,7 @@ import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
 import ToolRuntime from '@deepseek-ai/dsh-tools'
 import type { RecoveryRoot } from '../domain/governance/root.js'
 import { persistCandidates, persistGovernance, openDurableSelfExtension, hydrateFromAuthority } from '../domain/self-extension/durable.js'
+import { resolveAssistantHome } from '../domain/self-extension/home.js'
 import { reconstructCommittedExtensions } from '../domain/self-extension/reconstruct.js'
 import * as assistantProduct from '../product/bundle.js'
 import type { MemoryPluginConfig } from '../plugins/memory-plugin.js'
@@ -73,6 +74,7 @@ async function bootStack(options: BootOptions = {}): Promise<AssistantControl> {
       },
       beginAuthorityCommit: durable === undefined ? undefined : () => durable.authority.beginDeferredWrites(),
       finishAuthorityCommit: durable === undefined ? undefined : () => durable.authority.endDeferredWrites(),
+      durableHome: durable === undefined ? undefined : resolveAssistantHome(options.home),
       attachRecoveryRoot: (root) => {
         holder.root = root
         recoveryRoot = root

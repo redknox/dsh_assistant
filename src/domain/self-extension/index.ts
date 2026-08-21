@@ -6,3 +6,12 @@ export { DurableCandidateIndex, ARTIFACT_RETENTIONS, type ArtifactRetention } fr
 export { openDurableSelfExtension, hydrateFromAuthority, persistGovernance } from './durable.js'
 export { reconstructCommittedExtensions } from './reconstruct.js'
 export { operatorStatus, formatOperatorStatus, type OperatorStatus } from './status.js'
+export {
+  BACKUP_KIND,
+  BACKUP_SCHEMA_VERSION,
+  BACKUP_EXCLUDES,
+  backupSelfExtension,
+  restoreSelfExtension,
+  parseBackupManifest,
+  type SelfExtensionBackupManifest,
+} from './backup.js'
