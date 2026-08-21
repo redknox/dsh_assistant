@@ -29,6 +29,7 @@
     "boot": "tsx src/runtime/boot-cli.ts",
     "ui": "tsx src/ui/cli.ts",
     "slice": "tsx src/runtime/slice-cli.ts",
+    "self-extension": "tsx src/runtime/self-extension-cli.ts",
     "pack:inspect": "npm pack --dry-run --json"
   },
   "engines": {

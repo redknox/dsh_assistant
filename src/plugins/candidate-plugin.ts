@@ -46,6 +46,8 @@ export class CandidateValidationService extends Service implements CandidateVali
 
 export interface CandidatePluginConfig {
   readonly workspaceRoot?: string
+  readonly restore?: import('../domain/candidate/types.js').CandidateRecord[]
+  readonly persist?: (records: readonly import('../domain/candidate/types.js').CandidateRecord[]) => void
 }
 
 export const name = 'dsh-assistant-candidate'
@@ -54,7 +56,10 @@ export const inject = ['capabilityRegistry']
 /** Candidate workspace + validation. Never installs, approves, or mounts plugins. */
 export async function apply(ctx: Context, config: CandidatePluginConfig = {}) {
   const areaRoot = config.workspaceRoot ?? mkdtempSync(path.join(tmpdir(), 'dsh-assistant-candidates-'))
-  const store = new CandidateService(ctx.capabilityRegistry, areaRoot)
+  const store = new CandidateService(ctx.capabilityRegistry, areaRoot, {
+    restore: config.restore,
+    persist: config.persist,
+  })
   await ctx.plugin(class extends CandidateWorkspaceService {
     constructor(scope: Context) {
       super(scope, store)

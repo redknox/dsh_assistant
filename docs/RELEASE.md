@@ -1,8 +1,27 @@
-# Release notes — 0.1.0
+# Release notes
 
 Personal-assistant product layer on DeepSeek Harness **0.1.0-rc.8**. Not a production security certification. Not published to a public registry.
 
-## Verified
+## Version baseline
+
+| Version | Meaning |
+| --- | --- |
+| **v0.1.0** | Assistant Core MVP baseline |
+| **v0.2.0** | Governed Self-Extension baseline (resolution, restricted validation, exact approval, transactional activation, generated capability, rollback/LKG, **durable restart reconstruction**, Safe Mode recovery, operator control) |
+
+This repository does not create or push the `v0.2.0` git tag in this change. Tagging is a separate release step.
+
+## v0.2.0 Verified (Self-Extension durability)
+
+- Durable `$DSH_ASSISTANT_HOME/self-extension` authority file (schema v1, atomic write) with explicit Registry / Governance / Activation / Recovery sections
+- Candidate artifacts + index survive restart; directory presence is not activation
+- Fresh boot remounts only generated owners in the committed activation snapshot, after a full artifact/digest preflight
+- Interrupted pre-commit activation (including after a tentative Registry update) keeps prior LKG; post-commit crash remounts the new version
+- Any remount preflight failure enters Safe Mode with zero generated mounts
+- Safe Mode, missing/mutated artifact, and corrupt schema fail closed with recovery control still available
+- Operator CLI: `npm run self-extension` (`docs/self-extension-operations.md`)
+
+## v0.1.0 Verified
 
 - DSH-native boot on public plugins (no custom Agent Loop)
 - Personal memory (CRUD, conflicts, JSON persistence, malformed snapshot rejection)
