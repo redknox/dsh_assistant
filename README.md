@@ -127,4 +127,4 @@ Composition is replaceable: this package declares `dsh.bundle` (`cordis.patch.ym
 | [docs/capability-resolution.md](./docs/capability-resolution.md) | Resolution: What should change? ordered review, evidence |
 | [docs/candidate-workspace.md](./docs/candidate-workspace.md) | Candidate workspace + validation: Can I build it safely? |
 | [docs/extension-governance.md](./docs/extension-governance.md) | Governance: May it become active? Recovery / Safe Mode |
-| [docs/RELEASE.md](./docs/RELEASE.md) | 0.1.0 status: Verified vs Implemented vs Unsupported |
+| [docs/RELEASE.md](./docs/RELEASE.md) | 0.2.0 status: Verified vs Implemented vs Unsupported; v0.1.0 remains the historical Core MVP |

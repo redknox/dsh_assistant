@@ -19,7 +19,7 @@ Required:
 
 - Node `>=22`
 - npm
-- This repository (or a packed `dsh-assistant-0.1.0.tgz` plus the same DSH 0.1.0-rc.8 dependencies)
+- This repository (or a packed `dsh-assistant-0.2.0.tgz` plus the same DSH 0.1.0-rc.8 dependencies)
 
 ```sh
 npm install
