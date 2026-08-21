@@ -1,4 +1,4 @@
-export type IntegrationCapability = 'mail' | 'calendar' | 'contacts' | 'files' | 'tasks' | 'web_search'
+export type IntegrationCapability = 'mail' | 'calendar' | 'contacts' | 'files' | 'tasks'
 
 export type IntegrationTrust = 'read' | 'propose' | 'execute'
 

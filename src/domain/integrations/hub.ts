@@ -39,12 +39,6 @@ export interface TaskItem {
   readonly status: 'open' | 'done'
 }
 
-export interface WebSearchHit {
-  readonly title: string
-  readonly url: string
-  readonly snippet: string
-}
-
 export interface CalendarProvider {
   readonly capability: 'calendar'
   availability(): Availability
@@ -77,19 +71,12 @@ export interface TasksProvider {
   proposeCreateTask(input: { title: string }, signal?: AbortSignal): Promise<ProposedMutation<TaskItem>>
 }
 
-export interface WebSearchProvider {
-  readonly capability: 'web_search'
-  availability(): Availability
-  search(query: { text: string } & PageQuery): Promise<Page<WebSearchHit>>
-}
-
 export interface IntegrationProviders {
   readonly calendar: CalendarProvider
   readonly mail: MailProvider
   readonly contacts: ContactsProvider
   readonly files: FilesProvider
   readonly tasks: TasksProvider
-  readonly webSearch: WebSearchProvider
 }
 
 /** Owns provider selection. Tools call the hub, never a concrete vendor SDK. */
@@ -103,7 +90,6 @@ export class IntegrationHub {
       contacts: this.providers.contacts.availability(),
       files: this.providers.files.availability(),
       tasks: this.providers.tasks.availability(),
-      web_search: this.providers.webSearch.availability(),
     }
   }
 
@@ -125,10 +111,6 @@ export class IntegrationHub {
 
   tasks(): TasksProvider {
     return requireAvailable(this.providers.tasks)
-  }
-
-  webSearch(): WebSearchProvider {
-    return requireAvailable(this.providers.webSearch)
   }
 }
 

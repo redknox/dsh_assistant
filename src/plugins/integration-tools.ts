@@ -32,10 +32,17 @@ export function registerIntegrationTools(tools: Pick<ToolRuntime, 'register'>, h
         from: { type: 'string', required: true },
         to: { type: 'string', required: true },
         limit: { type: 'integer' },
+        cursor: { type: 'string' },
       },
       output: textOutput(),
-      async execute(args) {
-        return runJson(() => hub.calendar().listEvents({ from: args.from, to: args.to, limit: args.limit }))
+      async execute(args, exec) {
+        return runJson(() => hub.calendar().listEvents({
+          from: args.from,
+          to: args.to,
+          limit: args.limit,
+          cursor: args.cursor,
+          signal: exec.signal,
+        }))
       },
     })),
     tools.register(defineTool({
@@ -47,8 +54,11 @@ export function registerIntegrationTools(tools: Pick<ToolRuntime, 'register'>, h
         end: { type: 'string', required: true },
       },
       output: textOutput(),
-      async execute(args) {
-        return runJson(() => hub.calendar().proposeCreateEvent({ title: args.title, start: args.start, end: args.end }))
+      async execute(args, exec) {
+        return runJson(() => hub.calendar().proposeCreateEvent(
+          { title: args.title, start: args.start, end: args.end },
+          exec.signal,
+        ))
       },
     })),
     tools.register(defineTool({
@@ -57,10 +67,16 @@ export function registerIntegrationTools(tools: Pick<ToolRuntime, 'register'>, h
       parameters: {
         query: { type: 'string' },
         limit: { type: 'integer' },
+        cursor: { type: 'string' },
       },
       output: textOutput(),
-      async execute(args) {
-        return runJson(() => hub.mail().listMessages({ query: args.query, limit: args.limit }))
+      async execute(args, exec) {
+        return runJson(() => hub.mail().listMessages({
+          query: args.query,
+          limit: args.limit,
+          cursor: args.cursor,
+          signal: exec.signal,
+        }))
       },
     })),
     tools.register(defineTool({
@@ -70,8 +86,8 @@ export function registerIntegrationTools(tools: Pick<ToolRuntime, 'register'>, h
         title: { type: 'string', required: true },
       },
       output: textOutput(),
-      async execute(args) {
-        return runJson(() => hub.tasks().proposeCreateTask({ title: args.title }))
+      async execute(args, exec) {
+        return runJson(() => hub.tasks().proposeCreateTask({ title: args.title }, exec.signal))
       },
     })),
     tools.register(defineTool({
@@ -79,7 +95,8 @@ export function registerIntegrationTools(tools: Pick<ToolRuntime, 'register'>, h
       description: 'Read-only: report availability of personal integration capabilities.',
       parameters: {},
       output: textOutput(),
-      async execute() {
+      async execute(_args, exec) {
+        exec.signal.throwIfAborted()
         return JSON.stringify({ trust: 'read', status: hub.status() })
       },
     })),

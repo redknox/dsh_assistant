@@ -22,6 +22,4 @@ export {
   type MailProvider,
   type TaskItem,
   type TasksProvider,
-  type WebSearchHit,
-  type WebSearchProvider,
 } from './hub.js'
