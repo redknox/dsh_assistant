@@ -44,7 +44,7 @@ export class AssistantControlSurface {
       content: [{ type: 'text', text }],
       source: { kind: 'user' },
     })
-    agent.send(message, 'next-turn', false)
+    agent.followup(message)
   }
 
   approve(confirmationId: string): Promise<PolicyOutcome> {

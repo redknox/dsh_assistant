@@ -95,7 +95,7 @@ npm run ui
 
 `npm run boot` starts a headless Cordis composition using public DSH services (`ctx.agents`, `ctx.systemPrompt`, …), creates one assistant session, then disposes it. It does not call a live LLM.
 
-`npm run ui` boots the same stack and prints a text control-surface snapshot (queued message, memory, knowledge, jobs, pending confirmation). It also does not call a live LLM.
+`npm run ui` boots the same stack, sends one message through the public agent followup seam (fake local LLM adapter), and prints a text control-surface snapshot. It does not call a live LLM.
 
 Composition is replaceable: this package declares `dsh.bundle` (`cordis.patch.yml`). An example profile lives in `profiles/assistant/`.
 

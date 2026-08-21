@@ -3,6 +3,7 @@ import { join } from 'node:path'
 import { describe, it } from 'node:test'
 import { CallId, createAssistantMessage, createToolResultMessage, createUserMessage } from '@deepseek-ai/dsh-llm'
 import { Session, SessionId } from '@deepseek-ai/dsh-session'
+import { FakeReplyAdapter } from '../src/adapters/llm/fake-reply-adapter.js'
 import { bootAssistantRuntime, createAssistantAgent } from '../src/runtime/boot.js'
 import { AssistantControlSurface } from '../src/ui/controller.js'
 import { projectConversationFromEvents } from '../src/ui/projection.js'
@@ -53,16 +54,39 @@ describe('assistant UI projection and control surface', () => {
     assert.match(conversation[0]?.text ?? '', /print rules/)
   })
 
+  it('wakes an idle agent and consumes sendMessage through followup', async () => {
+    const ctx = await bootAssistantRuntime()
+    ctx.llm.registerAdapter(['fake'], new FakeReplyAdapter('ack'))
+    const handle = await createAssistantAgent(ctx, 'ui-wake', { provider: 'fake', model: 'fake-echo' })
+    const ui = new AssistantControlSurface(ctx, 'ui-wake')
+    const agent = ctx.agents.get(SessionId('ui-wake'))
+    assert.ok(agent)
+    assert.equal(agent.status, 'idle')
+    const statuses: string[] = []
+    ctx.on('agent/status', (payload) => {
+      if (payload.agent.id === agent.id) statuses.push(payload.status)
+    })
+    try {
+      ui.sendMessage('Hello from the control surface')
+      assert.equal(statuses.includes('running'), true)
+      await agent.whenIdle()
+      assert.equal(agent.status, 'idle')
+      assert.equal(agent.inbox.hasPending, false)
+      const view = ui.snapshot()
+      assert.equal(view.conversation.some((item) => item.kind === 'queued'), false)
+      assert.equal(view.conversation.some((item) => item.kind === 'user' && item.text.includes('Hello from the control surface')), true)
+      assert.equal(view.conversation.some((item) => item.kind === 'assistant' && item.text.includes('ack')), true)
+    } finally {
+      await handle.dispose()
+      await ctx.fiber.dispose()
+    }
+  })
+
   it('drives confirm, memory, knowledge, and jobs through the control surface', async () => {
     const ctx = await bootAssistantRuntime({ knowledgeFixturePaths: [fixture] })
     const handle = await createAssistantAgent(ctx, 'ui-e2e')
     const ui = new AssistantControlSurface(ctx, 'ui-e2e')
     try {
-      ui.sendMessage('Also remind me tomorrow')
-      const queuedView = ui.snapshot()
-      assert.equal(queuedView.conversation.some((item) => item.kind === 'queued' && item.text.includes('remind me')), true)
-      assert.match(renderAssistantViewAsText(queuedView), /\[queued\] Also remind me tomorrow/)
-      assert.match(renderAssistantViewAsHtml(queuedView), /data-kind="queued"/)
       const remembered = ui.remember({
         category: 'preference',
         topicKey: 'briefing',

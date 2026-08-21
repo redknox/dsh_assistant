@@ -46,3 +46,4 @@ export type {
   MemoryEntryDto,
 } from './ui/index.js'
 export { FakeIntegrationSuite } from './adapters/integrations/fake-providers.js'
+export { FakeReplyAdapter } from './adapters/llm/fake-reply-adapter.js'
