@@ -2,7 +2,7 @@
 
 Trusted control lives on `RecoveryRoot` / `npm run self-extension`. The model may inspect and request approval only.
 
-Set `DSH_ASSISTANT_HOME` (or pass `bootAssistantControl({ home })`).
+Set `TARS_NG_HOME` (preferred) or `DSH_ASSISTANT_HOME`, or pass `bootAssistantControl({ home })`. Product CLI: `tars-ng self-extension <command>`.
 
 ## What survives restart
 

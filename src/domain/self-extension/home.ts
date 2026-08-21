@@ -13,8 +13,10 @@ export interface SelfExtensionHome {
 
 export function resolveAssistantHome(explicit?: string): string | undefined {
   if (explicit !== undefined && explicit !== '') return path.resolve(explicit)
-  const env = process.env.DSH_ASSISTANT_HOME
-  if (typeof env === 'string' && env !== '') return path.resolve(env)
+  for (const name of ['TARS_NG_HOME', 'DSH_ASSISTANT_HOME'] as const) {
+    const env = process.env[name]
+    if (typeof env === 'string' && env !== '') return path.resolve(env)
+  }
   return undefined
 }
 

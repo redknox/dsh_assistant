@@ -21,11 +21,23 @@ export class IntegrationsService extends Service {
   }
 }
 
+export interface IntegrationsPluginConfig {
+  /** Default true for tests. Product CLI sets false so fixture data is not presented as live. */
+  readonly allowFixtures?: boolean
+}
+
 export const name = 'dsh-assistant-integrations'
 export const inject = ['systemPrompt', 'tools']
 
-export async function apply(ctx: Context) {
+const FIXTURE_CAPABILITIES = ['calendar', 'mail', 'contacts', 'files', 'tasks'] as const
+
+export async function apply(ctx: Context, config: IntegrationsPluginConfig = {}) {
   const fakes = new FakeIntegrationSuite()
+  if (config.allowFixtures === false) {
+    for (const capability of FIXTURE_CAPABILITIES) {
+      fakes.state.unavailable[capability] = `${capability} is not configured`
+    }
+  }
   const googleCalendarTransport = createHostGoogleCalendarTransport()
   await ctx.plugin(class extends IntegrationsService {
     constructor(scope: Context) {

@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
-import { execFileSync } from 'node:child_process'
-import { readFileSync } from 'node:fs'
+import { execFileSync, spawnSync } from 'node:child_process'
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, it } from 'node:test'
 import { Context } from '@deepseek-ai/cordis'
@@ -40,14 +41,20 @@ describe('product package and profile', () => {
       engines: { node: string }
       dsh: { bundle: { patch: string } }
       files: string[]
+      bin?: Record<string, string>
+      tarsNg?: { dsh: string }
       dependencies: Record<string, string>
     }
     assert.equal(pkg.version, '0.2.0')
     assert.equal(pkg.private, true)
     assert.equal(pkg.engines.node, '>=22')
     assert.equal(pkg.dsh.bundle.patch, './cordis.patch.yml')
+    assert.equal(pkg.bin?.['tars-ng'], './dist/product/bin.js')
+    assert.equal(pkg.tarsNg?.dsh, '0.1.0-rc.8')
     assert.deepEqual(pkg.files, ['dist', 'cordis.patch.yml'])
     assert.equal(pkg.dependencies['@deepseek-ai/dsh-agent-loop'], '0.1.0-rc.8')
+    assert.equal(pkg.dependencies['@deepseek-ai/dsh-llm-deepseek'], '0.1.0-rc.8')
+    assert.equal(pkg.dependencies['@deepseek-ai/dsh-agent-default-model'], '0.1.0-rc.8')
     assert.match(readFileSync(join(root, 'cordis.patch.yml'), 'utf8'), /id: dsh-assistant/)
 
     const profile = JSON.parse(readFileSync(join(root, 'profiles/assistant/package.json'), 'utf8')) as {
@@ -201,5 +208,94 @@ describe('product package and profile', () => {
       || path.includes('credentials')
     ))
     assert.deepEqual(forbidden, [])
+  })
+
+  it('installs the packed artifact and runs tars-ng without src or tsx', { timeout: 120_000 }, () => {
+    execFileSync('npm', ['run', 'build'], { cwd: root, encoding: 'utf8' })
+    const packDir = mkdtempSync(join(tmpdir(), 'tars-ng-pack-'))
+    const packedName = execFileSync('npm', ['pack', '--pack-destination', packDir], { cwd: root, encoding: 'utf8' }).trim().split('\n').at(-1)
+    assert.ok(packedName)
+    const tarball = packedName.startsWith('/') ? packedName : join(packDir, packedName)
+    assert.equal(existsSync(tarball), true)
+
+    const installDir = mkdtempSync(join(tmpdir(), 'tars-ng-install-'))
+    execFileSync('npm', ['init', '-y'], { cwd: installDir, encoding: 'utf8' })
+    execFileSync('npm', ['install', tarball, '--omit=dev'], {
+      cwd: installDir,
+      encoding: 'utf8',
+      timeout: 90_000,
+    })
+    const pkgRoot = join(installDir, 'node_modules', 'dsh-assistant')
+    assert.equal(existsSync(join(pkgRoot, 'src')), false)
+    assert.equal(existsSync(join(pkgRoot, 'dist', 'product', 'bin.js')), true)
+    assert.equal(existsSync(join(installDir, 'node_modules', '@deepseek-ai', 'dsh-llm-deepseek')), true)
+    assert.equal(existsSync(join(installDir, 'node_modules', '@deepseek-ai', 'dsh-agent-default-model')), true)
+    const binSource = readFileSync(join(pkgRoot, 'dist', 'product', 'bin.js'), 'utf8')
+    assert.match(binSource, /^#!\/usr\/bin\/env node/m)
+    assert.doesNotMatch(binSource, /\btsx\b/)
+
+    const userHome = mkdtempSync(join(tmpdir(), 'tars-ng-user-'))
+    const productHome = mkdtempSync(join(tmpdir(), 'tars-ng-home-'))
+    mkdirSync(join(productHome, 'config'), { recursive: true })
+    writeFileSync(join(productHome, 'config', 'env'), 'DSH_ASSISTANT_GOOGLE_CALENDAR_ACCESS_TOKEN=ya29.installed-secret\n', { mode: 0o600 })
+    chmodSync(join(productHome, 'config', 'env'), 0o600)
+    assert.equal(productHome.startsWith(pkgRoot), false)
+
+    const bin = join(installDir, 'node_modules', '.bin', 'tars-ng')
+    const env: NodeJS.ProcessEnv = {
+      ...process.env,
+      HOME: userHome,
+      XDG_CONFIG_HOME: join(userHome, '.config'),
+      XDG_DATA_HOME: join(userHome, '.local', 'share'),
+      TARS_NG_HOME: productHome,
+      DSH_ASSISTANT_HOME: productHome,
+    }
+    delete env.DSH_ASSISTANT_GOOGLE_CALENDAR_ACCESS_TOKEN
+    delete env.GOOGLE_SEARCH_API_KEY
+    delete env.GOOGLE_SEARCH_ENGINE_ID
+    delete env.TARS_NG_ALLOW_FIXTURES
+    delete env.DEEPSEEK_API_KEY
+
+    const doctor = execFileSync(bin, ['doctor', '--home', productHome], { encoding: 'utf8', env })
+    assert.match(doctor, /TARS-NG/)
+    assert.match(doctor, new RegExp(productHome.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')))
+    assert.match(doctor, /DSH_ASSISTANT_GOOGLE_CALENDAR_ACCESS_TOKEN: present/)
+    assert.match(doctor, /DEEPSEEK_API_KEY: missing/)
+    assert.match(doctor, /GOOGLE_SEARCH_API_KEY: missing/)
+    assert.match(doctor, /llm-provider: deepseek-official/)
+    assert.match(doctor, /llm-model: deepseek-v4-flash/)
+    assert.match(doctor, /llm-route: available/)
+    assert.match(doctor, /ai-runtime: LLM not configured\/unavailable/)
+    assert.doesNotMatch(doctor, /ya29\.installed-secret/)
+    assert.doesNotMatch(doctor, /\btsx\b/)
+    assert.doesNotMatch(doctor, /Team standup/)
+    assert.match(doctor, /calendar: unavailable|calendar: live/)
+
+    const pidFile = join(productHome, 'state', 'tars-ng.pid')
+    const failedOnce = spawnSync(bin, ['start', '--once', '--home', productHome], { encoding: 'utf8', env })
+    const failedStart = spawnSync(bin, ['start', '--home', productHome], { encoding: 'utf8', env })
+    const failedText = `${failedOnce.stdout}\n${failedOnce.stderr}\n${failedStart.stdout}\n${failedStart.stderr}`
+    assert.notEqual(failedOnce.status, 0)
+    assert.notEqual(failedStart.status, 0)
+    assert.equal(existsSync(pidFile), false)
+    assert.match(failedText, /LLM not configured\/unavailable/)
+    assert.match(failedText, /missing DEEPSEEK_API_KEY/)
+    assert.doesNotMatch(failedText, /TARS-NG is running/)
+    assert.doesNotMatch(failedText, /ya29\.installed-secret/)
+
+    writeFileSync(join(productHome, 'config', 'env'), 'DEEPSEEK_API_KEY=sk-offline-not-a-live-key\n', { mode: 0o600 })
+    chmodSync(join(productHome, 'config', 'env'), 0o600)
+    const withKey = execFileSync(bin, ['doctor', '--home', productHome], { encoding: 'utf8', env })
+    assert.match(withKey, /DEEPSEEK_API_KEY: present/)
+    assert.match(withKey, /llm-route: available/)
+    assert.match(withKey, /ai-runtime: configured/)
+    assert.doesNotMatch(withKey, /sk-offline-not-a-live-key/)
+
+    const started = execFileSync(bin, ['start', '--once', '--home', productHome], { encoding: 'utf8', env })
+    assert.match(started, /ai-runtime: configured/)
+    assert.match(started, /llm-route: available/)
+    assert.doesNotMatch(started, /LLM not configured\/unavailable/)
+    assert.doesNotMatch(started, /sk-offline-not-a-live-key/)
+    assert.equal(existsSync(pidFile), false)
   })
 })

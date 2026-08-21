@@ -84,3 +84,7 @@ These are **Unsupported** unless a later issue explicitly promotes them:
 - Forcing a database choice ahead of a storage issue
 - Self-authorizing capability changes
 - Privileged runtime paths for assistant-generated plugins
+
+## 10. Feature freeze (M5 soak)
+
+After product-readiness (#51) is accepted, do not add new user-facing capabilities, providers, tool categories, or Self-Extension authority during the soak. Bug, reliability, security, packaging, diagnostics, usability, and documentation fixes remain in scope. Policy: [docs/soak.md](./docs/soak.md).

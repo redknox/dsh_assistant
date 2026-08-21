@@ -32,7 +32,13 @@ function fail(status: number, body: unknown): never {
     ? String((body as { error?: { message?: string } }).error?.message ?? status)
     : `google calendar HTTP ${status}`
   const message = sanitizeProviderError(raw)
-  if (status === 401 || status === 403) throw new IntegrationError('calendar', 'unavailable', message)
+  if (status === 401 || status === 403) {
+    throw new IntegrationError(
+      'calendar',
+      'unavailable',
+      'Calendar access token expired or invalid; replace DSH_ASSISTANT_GOOGLE_CALENDAR_ACCESS_TOKEN',
+    )
+  }
   if (status === 400 || status === 404) throw new IntegrationError('calendar', 'invalid_request', message)
   throw new IntegrationError('calendar', 'provider_failure', message)
 }

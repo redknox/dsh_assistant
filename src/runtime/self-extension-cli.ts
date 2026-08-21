@@ -1,3 +1,5 @@
+import path from 'node:path'
+import { pathToFileURL } from 'node:url'
 import { bootAssistantControl, bootSafeModeRuntime } from './boot.js'
 import { formatOperatorStatus, operatorStatus } from '../domain/self-extension/status.js'
 
@@ -9,7 +11,7 @@ function usage(): string {
   backup <dir> | restore <dir>`
 }
 
-async function main(argv: string[]): Promise<void> {
+export async function runSelfExtensionCli(argv: string[]): Promise<void> {
   const [command, ...rest] = argv
   if (command === undefined || command === 'help' || command === '-h') {
     console.log(usage())
@@ -109,4 +111,5 @@ async function main(argv: string[]): Promise<void> {
   }
 }
 
-await main(process.argv.slice(2))
+const invoked = process.argv[1] !== undefined && import.meta.url === pathToFileURL(path.resolve(process.argv[1])).href
+if (invoked) await runSelfExtensionCli(process.argv.slice(2))
