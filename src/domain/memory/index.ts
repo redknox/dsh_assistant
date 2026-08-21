@@ -31,3 +31,4 @@ export {
   polarityIsKnownFalse,
   polarityIsUnknown,
 } from './normalize.js'
+export { parseMemoryRecord } from './record.js'

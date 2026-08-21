@@ -2,11 +2,13 @@ import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
 import { dirname } from 'node:path'
 import { MemoryContractError } from '../../domain/memory/normalize.js'
 import type { MemoryPersistence } from '../../domain/memory/persistence.js'
+import { parseMemoryRecord } from '../../domain/memory/record.js'
 import type { MemoryRecord } from '../../domain/memory/types.js'
 
-interface JsonMemoryFile {
+/** File-format DTO. Must be decoded into domain records; it is not the domain model. */
+interface JsonMemoryFileDto {
   version: 1
-  records: MemoryRecord[]
+  records: unknown[]
 }
 
 /** Local JSON snapshot adapter for development/testing. Not a production database. */
@@ -26,7 +28,7 @@ export class JsonFileMemoryPersistence implements MemoryPersistence {
 
   save(records: readonly MemoryRecord[]): void {
     mkdirSync(dirname(this.filePath), { recursive: true })
-    const payload: JsonMemoryFile = { version: 1, records: [...records] }
+    const payload: JsonMemoryFileDto = { version: 1, records: records.map(encodeRecord) }
     const tempPath = `${this.filePath}.${process.pid}.tmp`
     writeFileSync(tempPath, `${JSON.stringify(payload, null, 2)}\n`, 'utf8')
     renameSync(tempPath, this.filePath)
@@ -48,5 +50,30 @@ function decodeFile(parsed: unknown): MemoryRecord[] {
   if (!Array.isArray(file.records)) {
     throw new MemoryContractError('json memory file records must be an array')
   }
-  return file.records as MemoryRecord[]
+  return file.records.map((record, index) => {
+    try {
+      return parseMemoryRecord(record)
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      throw new MemoryContractError(`json memory record ${index}: ${message}`)
+    }
+  })
+}
+
+function encodeRecord(record: MemoryRecord): Record<string, unknown> {
+  return {
+    id: record.id,
+    category: record.category,
+    topicKey: record.topicKey,
+    statement: record.statement,
+    polarity: record.polarity,
+    confidence: record.confidence,
+    provenance: record.provenance,
+    createdAt: record.createdAt,
+    updatedAt: record.updatedAt,
+    status: record.status,
+    visibility: record.visibility,
+    ...(record.supersededBy ? { supersededBy: record.supersededBy } : {}),
+    ...(record.deletedAt ? { deletedAt: record.deletedAt } : {}),
+  }
 }

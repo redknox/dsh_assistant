@@ -1,8 +1,10 @@
 import assert from 'node:assert/strict'
+import { join } from 'node:path'
 import { describe, it } from 'node:test'
 import { Context } from '@deepseek-ai/cordis'
 import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
 import ToolRuntime from '@deepseek-ai/dsh-tools'
+import * as knowledgePlugin from '../src/plugins/knowledge-plugin.js'
 import * as memoryPlugin from '../src/plugins/memory-plugin.js'
 import { bootAssistantRuntime, createAssistantAgent } from '../src/runtime/boot.js'
 
@@ -41,12 +43,30 @@ describe('runtime smoke', () => {
     assert.equal(ctx.tools.get('remember_memory'), undefined)
   })
 
+  it('loads and unloads the knowledge plugin without leaking retrieval tools', async () => {
+    const ctx = new Context()
+    await ctx.plugin(SystemPrompt, {})
+    await ctx.plugin(ToolRuntime)
+    const fixture = join(import.meta.dirname, '..', 'fixtures', 'knowledge', 'office-hours.md')
+    const fiber = ctx.plugin(knowledgePlugin, { fixturePaths: [fixture] })
+    await fiber
+    assert.ok(ctx.personalKnowledge)
+    assert.ok(ctx.tools.get('retrieve_knowledge'))
+    const result = ctx.personalKnowledge.retrieve({ text: 'print confirmation' })
+    assert.ok(result.hits[0]?.citation.sourceUri.includes('office-hours.md'))
+    await fiber.dispose()
+    assert.equal(ctx.get('personalKnowledge'), undefined)
+    assert.equal(ctx.tools.get('retrieve_knowledge'), undefined)
+  })
+
   it('boots public DSH composition and creates one assistant agent without a custom loop', async () => {
     const ctx = await bootAssistantRuntime()
     const handle = await createAssistantAgent(ctx, 'smoke-assistant')
     assert.equal(ctx.agents.get(handle.agent.id)?.id, handle.agent.id)
     assert.ok(ctx.personalMemory)
+    assert.ok(ctx.personalKnowledge)
     assert.ok(ctx.tools.get('remember_memory'))
+    assert.ok(ctx.tools.get('retrieve_knowledge'))
     await handle.dispose()
     assert.equal(ctx.agents.get(handle.agent.id), undefined)
     await ctx.fiber.dispose()
