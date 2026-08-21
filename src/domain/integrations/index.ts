@@ -11,8 +11,10 @@ export {
 } from './types.js'
 export {
   IntegrationHub,
+  type CalendarCreateInput,
   type CalendarEvent,
   type CalendarProvider,
+  type FreeBusyWindow,
   type Contact,
   type ContactsProvider,
   type FileEntry,
@@ -25,3 +27,13 @@ export {
   type TaskItem,
   type TasksProvider,
 } from './hub.js'
+export { assertCalendarRange, eventToDraft } from './calendar-time.js'
+export { sanitizeProviderError } from './sanitize.js'
+export {
+  GOOGLE_CALENDAR_API_ORIGIN,
+  GOOGLE_CALENDAR_ORIGIN,
+  assertGoogleCalendarPath,
+  eventIdFromOperation,
+  reconciliationSignal,
+  type BoundedGoogleCalendarTransport,
+} from './google-api.js'

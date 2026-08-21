@@ -23,13 +23,25 @@ export const TOOL_ACTIONS: Record<string, ToolActionSpec> = {
     capability: 'calendar',
     operation: 'propose_event',
     intent: 'propose',
-    payload: (args) => pick(args, ['title', 'start', 'end']),
+    payload: (args) => pick(args, ['title', 'start', 'end', 'timeZone', 'calendarId', 'description', 'attendees', 'allDay']),
+  },
+  calendar_get_event: {
+    capability: 'calendar',
+    operation: 'get_event',
+    intent: 'read',
+    payload: (args) => pick(args, ['id']),
+  },
+  calendar_freebusy: {
+    capability: 'calendar',
+    operation: 'freebusy',
+    intent: 'read',
+    payload: (args) => pick(args, ['from', 'to', 'timeZone', 'limit', 'cursor']),
   },
   calendar_create_event: {
     capability: 'calendar',
     operation: 'create_event',
     intent: 'execute',
-    payload: (args) => pick(args, ['title', 'start', 'end']),
+    payload: (args) => pick(args, ['title', 'start', 'end', 'timeZone', 'calendarId', 'description', 'attendees', 'allDay', 'idempotencyKey']),
   },
   mail_list_messages: {
     capability: 'mail',

@@ -28,6 +28,12 @@ export async function apply(ctx: Context, config: PolicyPluginConfig = {}) {
     title: String(payload.title ?? ''),
     start: String(payload.start ?? ''),
     end: String(payload.end ?? ''),
+    timeZone: typeof payload.timeZone === 'string' ? payload.timeZone : undefined,
+    calendarId: typeof payload.calendarId === 'string' ? payload.calendarId : undefined,
+    description: typeof payload.description === 'string' ? payload.description : undefined,
+    attendees: Array.isArray(payload.attendees) ? payload.attendees.map((item) => String(item)) : undefined,
+    allDay: payload.allDay === true,
+    idempotencyKey: typeof payload.idempotencyKey === 'string' ? payload.idempotencyKey : undefined,
   }, signal))
   policy.registerExecutor('tasks', 'create', (payload, signal) => hub.tasks().createTask({
     title: String(payload.title ?? ''),

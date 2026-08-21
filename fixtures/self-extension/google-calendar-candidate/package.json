@@ -1,0 +1,5 @@
+{
+  "name": "dsh-candidate-google-calendar",
+  "type": "module",
+  "main": "src/plugin.js"
+}

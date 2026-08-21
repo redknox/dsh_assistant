@@ -1,5 +1,6 @@
 import { ConfinedRootFiles } from './confined-root-files.js'
-import { IntegrationHub, type IntegrationProviders } from '../../domain/integrations/hub.js'
+import { eventToDraft } from '../../domain/integrations/calendar-time.js'
+import { IntegrationHub, type CalendarCreateInput, type FreeBusyWindow, type IntegrationProviders } from '../../domain/integrations/hub.js'
 import {
   IntegrationError,
   throwIfAborted,
@@ -78,10 +79,11 @@ class FakeBase<C extends IntegrationCapability> {
 
 class FakeCalendar extends FakeBase<'calendar'> implements CalendarProvider {
   readonly events: CalendarEvent[] = [
-    { id: 'evt-1', title: 'Team standup', start: '2026-08-21T01:00:00.000Z', end: '2026-08-21T01:15:00.000Z' },
-    { id: 'evt-2', title: 'Office hours', start: '2026-08-21T03:00:00.000Z', end: '2026-08-21T04:00:00.000Z' },
-    { id: 'evt-3', title: 'Retro', start: '2026-08-21T06:00:00.000Z', end: '2026-08-21T07:00:00.000Z' },
+    { id: 'evt-1', title: 'Team standup', start: '2026-08-21T01:00:00.000Z', end: '2026-08-21T01:15:00.000Z', timeZone: 'UTC', calendarId: 'primary' },
+    { id: 'evt-2', title: 'Office hours', start: '2026-08-21T03:00:00.000Z', end: '2026-08-21T04:00:00.000Z', timeZone: 'UTC', calendarId: 'primary' },
+    { id: 'evt-3', title: 'Retro', start: '2026-08-21T06:00:00.000Z', end: '2026-08-21T07:00:00.000Z', timeZone: 'UTC', calendarId: 'primary' },
   ]
+  private readonly idempotent = new Map<string, CalendarEvent>()
 
   constructor(state: FakeState) {
     super('calendar', state)
@@ -97,25 +99,42 @@ class FakeCalendar extends FakeBase<'calendar'> implements CalendarProvider {
     return pageSlice(items, query, 'calendar')
   }
 
-  async proposeCreateEvent(input: { title: string; start: string; end: string }, signal?: AbortSignal): Promise<ProposedMutation<CalendarEvent>> {
+  async getEvent(id: string, signal?: AbortSignal): Promise<CalendarEvent> {
     await this.waitIfRequested(signal)
     this.guard(signal)
-    if (!input.title.trim()) throw new IntegrationError('calendar', 'invalid_request', 'title is required')
-    const draft: CalendarEvent = { id: 'proposed-evt', title: input.title.trim(), start: input.start, end: input.end }
-    return { trust: 'propose', summary: `Propose calendar event "${draft.title}"`, draft }
+    const found = this.events.find((event) => event.id === id)
+    if (found === undefined) throw new IntegrationError('calendar', 'invalid_request', 'event not found')
+    return found
   }
 
-  async createEvent(input: { title: string; start: string; end: string }, signal?: AbortSignal): Promise<CalendarEvent> {
+  async freeBusy(query: { from: string; to: string; timeZone?: string } & PageQuery): Promise<Page<FreeBusyWindow>> {
+    await this.waitIfRequested(query.signal)
+    this.guard(query.signal)
+    if (!query.from || !query.to) throw new IntegrationError('calendar', 'invalid_request', 'from and to are required')
+    const windows: FreeBusyWindow[] = this.events
+      .filter((event) => event.start < query.to && event.end > query.from)
+      .map((event) => ({ start: event.start, end: event.end, busy: true }))
+    return pageSlice(windows, query, 'calendar')
+  }
+
+  async proposeCreateEvent(input: CalendarCreateInput, signal?: AbortSignal): Promise<ProposedMutation<CalendarEvent>> {
     await this.waitIfRequested(signal)
     this.guard(signal)
     if (!input.title.trim()) throw new IntegrationError('calendar', 'invalid_request', 'title is required')
-    const event: CalendarEvent = {
-      id: `evt-${this.events.length + 1}`,
-      title: input.title.trim(),
-      start: input.start,
-      end: input.end,
+    const draft = eventToDraft(input)
+    return { trust: 'propose', summary: `Propose calendar event "${draft.title}" on ${draft.calendarId ?? 'primary'} ${draft.start}/${draft.end} ${draft.timeZone ?? ''}`.trim(), draft }
+  }
+
+  async createEvent(input: CalendarCreateInput, signal?: AbortSignal): Promise<CalendarEvent> {
+    await this.waitIfRequested(signal)
+    this.guard(signal)
+    if (!input.title.trim()) throw new IntegrationError('calendar', 'invalid_request', 'title is required')
+    if (input.idempotencyKey !== undefined && this.idempotent.has(input.idempotencyKey)) {
+      return this.idempotent.get(input.idempotencyKey)!
     }
+    const event: CalendarEvent = { ...eventToDraft(input), id: `evt-${this.events.length + 1}` }
     this.events.push(event)
+    if (input.idempotencyKey !== undefined) this.idempotent.set(input.idempotencyKey, event)
     return event
   }
 }

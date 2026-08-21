@@ -1,6 +1,6 @@
 # Self-Extension architecture and governance
 
-Status: governance contract is **Designed** and remains normative. The Capability Registry, Resolution Review, candidate workspace/validation, governed activation/recovery, and the first Obsidian Vault generated-plugin slice are **Verified**. See [docs/capability-registry.md](./capability-registry.md), [docs/capability-resolution.md](./capability-resolution.md), [docs/candidate-workspace.md](./candidate-workspace.md), [docs/extension-governance.md](./extension-governance.md), and [docs/obsidian-self-extension.md](./obsidian-self-extension.md).
+Status: governance contract is **Designed** and remains normative. The Capability Registry, Resolution Review, candidate workspace/validation, governed activation/recovery, and the Obsidian Vault plus Calendar generated slices are **Verified**. See [docs/capability-registry.md](./capability-registry.md), [docs/capability-resolution.md](./capability-resolution.md), [docs/candidate-workspace.md](./candidate-workspace.md), [docs/extension-governance.md](./extension-governance.md), [docs/obsidian-self-extension.md](./obsidian-self-extension.md), and [docs/calendar-self-extension.md](./calendar-self-extension.md).
 
 Companion documents: [ARCHITECTURE.md](../ARCHITECTURE.md) (layers and public seams), [ENGINEERING.md](../ENGINEERING.md) (normative contributor rules), [README.md](../README.md) (product boundary).
 

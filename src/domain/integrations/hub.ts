@@ -12,6 +12,29 @@ export interface CalendarEvent {
   readonly title: string
   readonly start: string
   readonly end: string
+  readonly timeZone?: string
+  readonly calendarId?: string
+  readonly description?: string
+  readonly attendees?: readonly string[]
+  readonly allDay?: boolean
+}
+
+export interface CalendarCreateInput {
+  readonly title: string
+  readonly start: string
+  readonly end: string
+  readonly timeZone?: string
+  readonly calendarId?: string
+  readonly description?: string
+  readonly attendees?: readonly string[]
+  readonly allDay?: boolean
+  readonly idempotencyKey?: string
+}
+
+export interface FreeBusyWindow {
+  readonly start: string
+  readonly end: string
+  readonly busy: boolean
 }
 
 export interface MailMessage {
@@ -43,8 +66,10 @@ export interface CalendarProvider {
   readonly capability: 'calendar'
   availability(): Availability
   listEvents(query: { from: string; to: string } & PageQuery): Promise<Page<CalendarEvent>>
-  proposeCreateEvent(input: { title: string; start: string; end: string }, signal?: AbortSignal): Promise<ProposedMutation<CalendarEvent>>
-  createEvent(input: { title: string; start: string; end: string }, signal?: AbortSignal): Promise<CalendarEvent>
+  getEvent(id: string, signal?: AbortSignal): Promise<CalendarEvent>
+  freeBusy(query: { from: string; to: string; timeZone?: string } & PageQuery): Promise<Page<FreeBusyWindow>>
+  proposeCreateEvent(input: CalendarCreateInput, signal?: AbortSignal): Promise<ProposedMutation<CalendarEvent>>
+  createEvent(input: CalendarCreateInput, signal?: AbortSignal): Promise<CalendarEvent>
 }
 
 export interface MailProvider {
@@ -97,7 +122,15 @@ export interface IntegrationProviders {
 
 /** Owns provider selection. Tools call the hub, never a concrete vendor SDK. */
 export class IntegrationHub {
-  constructor(private readonly providers: IntegrationProviders) {}
+  constructor(private providers: IntegrationProviders) {}
+
+  replaceCalendar(provider: CalendarProvider): () => void {
+    const previous = this.providers.calendar
+    this.providers = { ...this.providers, calendar: provider }
+    return () => {
+      this.providers = { ...this.providers, calendar: previous }
+    }
+  }
 
   status(): Record<IntegrationCapability, Availability> {
     return {
