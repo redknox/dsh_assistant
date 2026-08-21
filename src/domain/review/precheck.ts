@@ -83,22 +83,6 @@ export function lineageOmissions(
     }))
 }
 
-export function resolveCarriedFindings(
-  declared: readonly ReviewFinding[],
-  current: readonly ReviewFinding[],
-  digest: string,
-): readonly ReviewFinding[] {
-  const currentIds = new Set(current.map((item) => item.id))
-  return declared
-    .filter((item) => item.severity === 'BLOCKER' && item.status === 'open' && !currentIds.has(item.id))
-    .map((item) => ({
-      ...item,
-      reviewedDigest: digest,
-      status: 'resolved' as const,
-      evidence: `${item.evidence} Current revision did not re-open this invariant.`,
-    }))
-}
-
 function gate(digest: string, claim: string, location: string, evidence: string, remediation: string): ReviewFinding {
   return finding({
     reviewedDigest: digest,

@@ -87,6 +87,22 @@ function r3(overrides: Partial<ReviewPackage> & { digest?: string; id?: string; 
   })
 }
 
+function trustFinding(digest: string, status: 'open' | 'resolved') {
+  return finding({
+    reviewedDigest: digest,
+    severity: 'BLOCKER',
+    category: 'trust-boundary',
+    claim: 'forged-discovery-trust',
+    location: 'discovery.provenance',
+    evidence: status === 'resolved'
+      ? `Trust is host-stamped on ${digest}.`
+      : 'Trust stamp can be self-asserted from candidate metadata.',
+    whyItMatters: 'A trust boundary must come from the host provider, not raw metadata.',
+    requiredRemediation: 'Stamp trust from the discovery provider.',
+    status,
+  })
+}
+
 describe('independent review', () => {
   it('A. ignores builder self-certification as authority', () => {
     const service = new ReviewService()
@@ -154,6 +170,8 @@ describe('independent review', () => {
     assert.equal(second.digest, 'rev-b')
     assert.notEqual(second.digest, first.digest)
     assert.equal(second.state, 'review-complete')
+    assert.ok(second.findings.some((item) => item.claim === 'cancelled-context-reuse' && item.status === 'resolved'))
+    assert.match(second.findings.find((item) => item.claim === 'cancelled-context-reuse')?.evidence ?? '', /Host check/)
     assert.equal(service.status({ id: 'generated-calendar-0.2.0', digest: 'rev-a' }), 'stale')
     assert.equal(second.approvalStatus, 'NOT APPROVED')
   })
@@ -288,7 +306,58 @@ describe('independent review', () => {
     }))
     assert.equal(second.state, 'changes-required')
     assert.ok(second.findings.some((item) => item.claim === 'cancelled-context-reuse' && item.status === 'resolved'))
+    assert.match(second.findings.find((item) => item.claim === 'cancelled-context-reuse')?.evidence ?? '', /Host check/)
     assert.ok(second.findings.some((item) => item.claim === 'forged-discovery-trust' && item.status === 'open'))
+  })
+
+  it('does not treat a permissive reviewer silence as BLOCKER resolution', () => {
+    const prior = trustFinding('rev-a', 'open')
+    const report = new ReviewService(new PermissiveReviewerProvider()).review(r3({
+      digest: 'rev-b',
+      parentRevision: 'rev-a',
+      priorFindings: [prior],
+    }))
+    assert.equal(report.state, 'changes-required')
+    const carried = report.findings.find((item) => item.claim === 'forged-discovery-trust')
+    assert.equal(carried?.status, 'open')
+    assert.equal(carried?.reviewedDigest, 'rev-b')
+  })
+
+  it('resolves a prior BLOCKER only with evidence bound to the current digest', () => {
+    const provider = new PolicyReviewerProvider((input) => [
+      trustFinding(input.candidate.digest, input.candidate.digest === 'rev-b' ? 'resolved' : 'open'),
+    ])
+    const service = new ReviewService(provider)
+    const first = service.review(r3({ digest: 'rev-a' }))
+    assert.equal(first.state, 'changes-required')
+    const second = service.review(r3({
+      digest: 'rev-b',
+      parentRevision: 'rev-a',
+      priorFindings: first.findings.filter((item) => item.blocking),
+    }))
+    const resolved = second.findings.find((item) => item.claim === 'forged-discovery-trust')
+    assert.equal(resolved?.status, 'resolved')
+    assert.equal(resolved?.reviewedDigest, 'rev-b')
+    assert.equal(second.state, 'review-complete')
+  })
+
+  it('rejects stale resolution evidence on a newer revision', () => {
+    const provider = new PolicyReviewerProvider((input) => {
+      if (input.candidate.digest === 'rev-a') return [trustFinding('rev-a', 'open')]
+      return [trustFinding('rev-a', 'resolved')]
+    })
+    const service = new ReviewService(provider)
+    const first = service.review(r3({ digest: 'rev-a' }))
+    const second = service.review(r3({
+      digest: 'rev-c',
+      parentRevision: 'rev-a',
+      priorFindings: first.findings.filter((item) => item.blocking),
+    }))
+    assert.equal(second.state, 'changes-required')
+    const item = second.findings.find((entry) => entry.claim === 'forged-discovery-trust')
+    assert.equal(item?.status, 'open')
+    assert.equal(item?.reviewedDigest, 'rev-c')
+    assert.match(item?.evidence ?? '', /Stale resolution/)
   })
 
   it('M. review depth follows risk class', () => {

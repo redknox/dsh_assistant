@@ -136,7 +136,12 @@ Review N on candidate A
 
 Repairing one finding does not authorize unrelated edits. Resolved findings stay in the report. A BLOCKER that is simply dropped from `priorFindings` while the parent review still has it open becomes a lineage BLOCKER.
 
-The Reviewer inspects the current revision. Builder text that says “fixed” does not close a finding if the invariant still fails.
+Prior open BLOCKERs remain open on the child revision by default. They may become resolved only when current-revision evidence proves the invariant:
+
+- the Reviewer returns the same finding with `status: resolved` and `reviewedDigest` equal to the new digest; or
+- a deterministic host-owned check for that invariant succeeds on the current package.
+
+Reviewer silence is not resolution. Stale resolution evidence bound to an older digest cannot close a newer revision. Builder text that says “fixed” is not proof.
 
 New findings may appear during re-review.
 
@@ -158,7 +163,7 @@ New findings may appear during re-review.
 
 ### Failed review + repair + re-review
 
-An R3 candidate that reuses a cancelled reconciliation context receives a `cancelled-context-reuse` BLOCKER (`changes-required`). Repair produces a new digest with `cancelledContextReuse: false` and carries the prior finding. Re-review verifies the current artifacts, marks the old blocker resolved, and may still emit a new BLOCKER if another invariant fails. Completing review still does not approve or activate.
+An R3 candidate that reuses a cancelled reconciliation context receives a `cancelled-context-reuse` BLOCKER (`changes-required`). Repair produces a new digest with `cancelledContextReuse: false` and carries the prior finding. Re-review may mark it resolved only because a host check proves the invariant on the new digest, not because the Reviewer stayed silent. A new BLOCKER may still appear. Completing review still does not approve or activate.
 
 ## Non-goals
 
