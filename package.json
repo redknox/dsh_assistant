@@ -28,7 +28,8 @@
     "test": "tsx --test test/**/*.test.ts",
     "boot": "tsx src/runtime/boot-cli.ts",
     "ui": "tsx src/ui/cli.ts",
-    "slice": "tsx src/runtime/slice-cli.ts"
+    "slice": "tsx src/runtime/slice-cli.ts",
+    "pack:inspect": "npm pack --dry-run --json"
   },
   "engines": {
     "node": ">=22"

@@ -68,20 +68,24 @@ Do not call a capability **Verified** without reproducible evidence. Use:
 | **Unknown** | Not assessed. |
 | **Unsupported** | Out of scope or explicitly not offered. |
 
-Current status of this repository:
+## Capability / evidence matrix
 
-| Area | Evidence |
-| --- | --- |
-| Product/engineering/architecture contracts | **Implemented** |
-| DSH-native runtime scaffold (public plugin boot + one agent) | **Implemented**; boot/lifecycle **Verified** by `npm test` |
-| Personal memory service + replaceable local persistence | **Implemented**; CRUD/conflict/delete, JSON adapter, and malformed-snapshot rejection **Verified** by `npm test` |
-| Personal knowledge/retrieval (local lexical index) | **Implemented**; ingest/citation/no-match/malformed **Verified** by `npm test` |
-| Personal integration seams (fake providers) | **Implemented**; read vs propose and structured errors **Verified** by `npm test` |
-| Trust/policy (L0–L4, confirmation, audit) | **Implemented**; read/propose/confirm/deny/cancel/replay **Verified** by `npm test` |
-| Proactive jobs / scheduled workflows | **Implemented** on public `ctx.jobs` plus a process-local interval scheduler; morning brief recurrence and policy-gated mutations **Verified** by `npm test`. Cross-restart durability is **Unsupported**. |
-| UI projection + control surface (text/HTML, no framework) | **Implemented**; conversation/jobs/confirmations/memory/knowledge/capabilities **Verified** by `npm test`. Pixel design and mobile apps are **Unsupported**. |
-| Plan My Day vertical slice (user input → DSH loop → memory/knowledge/tools/policy/jobs/UI) | **Verified** by `npm test` / `test/vertical-slice.test.ts`; reproduction notes in [docs/vertical-slice.md](./docs/vertical-slice.md). Live LLM and vendor integrations remain **Implemented** only (scripted `PlanMyDayAdapter` + `FakeIntegrationSuite`). |
-| Real vendor accounts, vector DB, production persistence | **Unsupported** / not started |
+| Capability | Required to boot? | Evidence | Notes |
+| --- | --- | --- | --- |
+| Product/engineering/architecture contracts | yes (docs) | **Implemented** | README, ENGINEERING, ARCHITECTURE |
+| DSH public plugin boot + one agent | yes | **Verified** by `npm test` | No custom Agent Loop |
+| Personal memory + local JSON adapter | no (in-memory default) | **Verified** by `npm test` | Hosted DB **Unsupported** |
+| Personal knowledge (local lexical index) | no | **Verified** by `npm test` | Vector DB / crawler **Unsupported** |
+| Integration seams | yes (fake suite) | **Verified** (fake providers) | `FakeIntegrationSuite` is **Implemented**. Live vendor accounts are **Unsupported** |
+| Trust/policy L0–L4 | yes | **Verified** by `npm test` | Confirmation binds fingerprint |
+| Process-local jobs / morning brief | yes | **Verified** by `npm test` | Cross-restart durability **Unsupported** |
+| UI projection + control surface | no | **Verified** by `npm test` | Pixel/mobile UI **Unsupported** |
+| Plan My Day vertical slice | no | **Verified** by `test/vertical-slice.test.ts` | Uses scripted `PlanMyDayAdapter` + fake calendar, not a live model |
+| Scripted local LLM adapters | no | **Implemented** | `FakeReplyAdapter`, `PlanMyDayAdapter`. A live LLM account is **Unsupported** |
+| DSH bundle + example profile + remount | yes (metadata) | **Verified** by `test/packaging.test.ts` | See [docs/packaging.md](./docs/packaging.md) |
+| Production persistence, public npm publish | no | **Unsupported** | Package is `private` |
+
+Known limitations: no live provider credentials, no production security certification, no durable user-level Schedule, no mobile distribution. Release status: [docs/RELEASE.md](./docs/RELEASE.md).
 
 ## Develop
 
@@ -93,6 +97,7 @@ npm run build
 npm run boot
 npm run ui
 npm run slice
+npm run pack:inspect
 ```
 
 `npm run boot` starts a headless Cordis composition using public DSH services (`ctx.agents`, `ctx.systemPrompt`, …), creates one assistant session, then disposes it. It does not call a live LLM.
@@ -101,7 +106,7 @@ npm run slice
 
 `npm run slice` replays the Plan My Day vertical slice (scripted local LLM, fake calendar/tasks). See [docs/vertical-slice.md](./docs/vertical-slice.md).
 
-Composition is replaceable: this package declares `dsh.bundle` (`cordis.patch.yml`). An example profile lives in `profiles/assistant/`.
+Composition is replaceable: this package declares `dsh.bundle` (`cordis.patch.yml`). An example profile lives in `profiles/assistant/`. Fresh-environment install, config, and secret-injection rules: [docs/packaging.md](./docs/packaging.md).
 
 ## Documents
 
@@ -111,3 +116,5 @@ Composition is replaceable: this package declares `dsh.bundle` (`cordis.patch.ym
 | [ENGINEERING.md](./ENGINEERING.md) | Normative rules for humans and AI contributors |
 | [ARCHITECTURE.md](./ARCHITECTURE.md) | Layers, ownership, dependency direction, extension seams |
 | [docs/vertical-slice.md](./docs/vertical-slice.md) | Issue #10 Plan My Day evidence (versions, commands, fakes, observed results) |
+| [docs/packaging.md](./docs/packaging.md) | Bundle/profile, fresh install, config without secrets, remount |
+| [docs/RELEASE.md](./docs/RELEASE.md) | 0.1.0 status: Verified vs Implemented vs Unsupported |
