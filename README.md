@@ -48,8 +48,8 @@ MVP does **not** include a custom runtime, a custom Agent Loop, a speculative mu
 
 ## Non-goals
 
-- Runtime implementation in this issue (contracts only).
-- UI implementation in this issue.
+- Runtime implementation in issue #1 (contracts only). Later issues may add a DSH-native scaffold.
+- UI implementation.
 - Forcing a database unless a later issue requires it.
 - Custom Agent Loop or patching DSH internals.
 - Speculative multi-agent framework.
@@ -68,7 +68,28 @@ Do not call a capability **Verified** without reproducible evidence. Use:
 | **Unknown** | Not assessed. |
 | **Unsupported** | Out of scope or explicitly not offered. |
 
-Current status of this repository: product/engineering/architecture contracts are **Implemented** as documents; runtime and UI remain **Designed** / not started.
+Current status of this repository:
+
+| Area | Evidence |
+| --- | --- |
+| Product/engineering/architecture contracts | **Implemented** |
+| DSH-native runtime scaffold (public plugin boot + one agent) | **Implemented**; boot/lifecycle **Verified** by `npm test` |
+| Personal memory domain contracts + in-memory adapter | **Implemented**; normalization/update/delete/conflict **Verified** by `npm test` |
+| UI, integrations, RAG, production persistence | **Unsupported** / not started |
+
+## Develop
+
+```sh
+npm install
+npm run typecheck
+npm run test
+npm run build
+npm run boot
+```
+
+`npm run boot` starts a headless Cordis composition using public DSH services (`ctx.agents`, `ctx.systemPrompt`, …), creates one assistant session, then disposes it. It does not call a live LLM.
+
+Composition is replaceable: this package declares `dsh.bundle` (`cordis.patch.yml`). An example profile lives in `profiles/assistant/`.
 
 ## Documents
 

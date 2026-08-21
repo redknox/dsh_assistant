@@ -51,7 +51,7 @@ Claims about capabilities, compatibility, or completeness must use this vocabula
 ## 6. Minimal-diff and scope
 
 1. Change only what the issue or request requires. No drive-by refactors, formatting sweeps, or unrelated files.
-2. No runtime, UI, or database implementation unless a later issue asks for it.
+2. Do not add UI, production persistence, or integrations unless a later issue asks for it.
 3. No custom Agent Loop, no speculative multi-agent framework.
 4. If a task needs a new abstraction, show a current caller. If there is no caller, do not add the abstraction.
 
