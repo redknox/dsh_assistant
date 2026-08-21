@@ -19,10 +19,16 @@ The tarball install pulls Cordis/DSH runtime dependencies through npm. A public 
 
 ```sh
 export TARS_NG_HOME="$HOME/.local/share/tars-ng"   # optional; this is the default
-tars-ng start --once
 tars-ng doctor
-tars-ng start                                      # Ctrl-C or tars-ng stop
+tars-ng start
+# Open the printed loopback URL, for example http://127.0.0.1:8787
+tars-ng status
+tars-ng stop
 ```
+
+Daily use is the local Mission-Control **Web UI**. The CLI remains the operator path for install, doctor, status, stop, and recovery when the browser is unavailable. `tars-ng start --once` still boots and exits without waiting for a browser.
+
+The Web UI binds **loopback only** (`127.0.0.1`, default port `8787`, override with `TARS_NG_UI_PORT`). It does not listen on public interfaces. Browser reconnect reloads a fresh authoritative snapshot; the browser does not own approval, Safe Mode, or recovery state.
 
 Home is `$TARS_NG_HOME`, else `$DSH_ASSISTANT_HOME`, else `~/.local/share/tars-ng`. Reinstalling package code does not delete it.
 
@@ -80,7 +86,8 @@ See [ARCHITECTURE.md](./ARCHITECTURE.md) for layers. See [ENGINEERING.md](./ENGI
 | Integration seams | product default: unavailable | **Verified** (fake providers in tests; product CLI disables fixtures) | Live vendor OAuth refresh **Unsupported** |
 | Trust/policy L0–L4 | yes | **Verified** by `npm test` | Confirmation binds fingerprint |
 | Process-local jobs / morning brief | yes | **Verified** by `npm test` | Cross-restart durability **Unsupported** |
-| UI projection + control surface | no | **Verified** by `npm test` | Pixel/mobile UI **Unsupported** |
+| UI projection + control surface | no | **Verified** by `npm test` | Framework-independent DTOs remain |
+| Local Mission-Control Web UI | no | **Verified** by `test/web-ui.test.ts` and packaging | Loopback-only; pixel/mobile **Unsupported** |
 | Plan My Day vertical slice | no | **Verified** by `test/vertical-slice.test.ts` | Scripted adapter + fake calendar |
 | DSH bundle + example profile + remount | yes (metadata) | **Verified** by `test/packaging.test.ts` | See [docs/packaging.md](./docs/packaging.md) |
 | Self-Extension governance | no | **Verified** | Operator: `tars-ng self-extension` / [docs/self-extension-operations.md](./docs/self-extension-operations.md) |
@@ -89,7 +96,7 @@ See [ARCHITECTURE.md](./ARCHITECTURE.md) for layers. See [ENGINEERING.md](./ENGI
 | TARS-NG personality + Mission-Control workspace | no | **Verified** | [docs/tars-ng-personality.md](./docs/tars-ng-personality.md) |
 | Production persistence, public npm publish | no | **Unsupported** | Package is `private` |
 
-Known limitations: no live LLM account, no OAuth refresh, no production security certification, no durable user-level Schedule, no mobile distribution. Release status: [docs/RELEASE.md](./docs/RELEASE.md).
+Known limitations: no OAuth refresh, no production security certification, no durable user-level Schedule, no mobile distribution, no public or LAN Web UI. Release status: [docs/RELEASE.md](./docs/RELEASE.md).
 
 ## Develop
 

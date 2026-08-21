@@ -31,7 +31,7 @@ LLMs / storage / external systems
 
 | Layer | Responsibility |
 | --- | --- |
-| **UI / Channels** | Surfaces (chat, later other channels). Presentation and channel adapters only. No home for domain rules. |
+| **UI / Channels** | Local Mission-Control Web UI plus CLI. Presentation and channel adapters only. No home for domain rules. |
 | **Personal Assistant Product Layer** | Product orchestration: persona, turn-level product behavior, which personal services participate. Independent of any one UI. |
 | **Personal Services** | Durable capabilities: memory, knowledge, policy, personal tool facades, integrations. Usable without a model and without a UI. |
 | **DSH public APIs** | Plugin composition, public services/providers, tools, events, jobs, session APIs. The **only** allowed coupling to Harness. |

@@ -8,6 +8,9 @@ export const DEFAULT_HOME_DIRNAME = 'tars-ng'
 export const DEFAULT_LLM_PROVIDER = 'deepseek-official'
 export const DEFAULT_LLM_MODEL = 'deepseek-v4-flash'
 export const DEFAULT_LLM_CREDENTIAL = 'DEEPSEEK_API_KEY'
+export const PRODUCT_UI_SESSION_ID = 'tars-ng'
+export const DEFAULT_UI_HOST = '127.0.0.1'
+export const DEFAULT_UI_PORT = 8787
 
 /** Environment names that may hold secrets. Never log or print their values. */
 export const SECRET_ENV_NAMES = [

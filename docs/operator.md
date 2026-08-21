@@ -35,12 +35,20 @@ Installing the package pulls Cordis/DSH runtime dependencies through npm. Do not
 ## Quick start
 
 ```sh
-tars-ng start --once    # first-run summary, then exit
-tars-ng start           # stay in the foreground until Ctrl-C
+tars-ng start --once    # first-run summary, then exit (no browser wait)
+tars-ng start           # boot runtime + local Web UI; stay until Ctrl-C
 tars-ng status
 tars-ng doctor
 tars-ng stop
 ```
+
+`tars-ng start` prints a loopback URL (default `http://127.0.0.1:8787`). Open that address for daily conversation, Activity, approvals, capabilities, and Safe Mode/recovery. Override the port with `TARS_NG_UI_PORT`. The server binds loopback only; unsupported `Origin` headers are rejected; there is no wildcard CORS and no login in this release.
+
+`tars-ng status` reports whether the product is running and, when it is, the Web UI address. `tars-ng stop` terminates the runtime and the local Web server.
+
+If the browser disconnects, reconnect; the UI reloads a fresh `MissionControlView`. Do not treat browser-local state as approval, activation, or recovery authority.
+
+CLI remains authoritative for installation, `doctor`, `status`, `stop`, and recovery when the Web UI itself is unavailable.
 
 Missing optional Google credentials do not block core start. Missing `DEEPSEEK_API_KEY`, or an unresolved default model route, makes `tars-ng start` fail with `LLM not configured/unavailable`. `doctor` and `status` still run and report the problem. Missing Node/DSH, or corrupt/unsupported durable authority, fails closed.
 
@@ -129,11 +137,11 @@ A generated Google Calendar provider still requires the existing M1–M4 approva
 
 | Command | Behavior |
 | --- | --- |
-| `tars-ng start` | Ensures home, loads env, checks Node/DSH and default LLM, boots, prints first-run + doctor facts, waits for SIGINT/SIGTERM. Fails without writing a pid when the default LLM is unusable |
-| `tars-ng start --once` | Same checks and boot, then exits (packaging/smoke). Non-zero when the default LLM is unusable |
-| `tars-ng status` | Version, running pid, home, DSH compatibility — no secret values |
+| `tars-ng start` | Ensures home, loads env, checks Node/DSH and default LLM, boots, starts the loopback Web UI, prints the URL, waits for SIGINT/SIGTERM. Fails without writing a pid when the default LLM is unusable or the Web UI cannot bind |
+| `tars-ng start --once` | Same checks and boot, then exits without serving the Web UI (packaging/smoke). Non-zero when the default LLM is unusable |
+| `tars-ng status` | Version, running pid, home, Web UI URL when running, DSH compatibility — no secret values |
 | `tars-ng doctor` | Version, Node, DSH packages, home, env-file safety, credential **names**, LLM provider/model/route, `ai-runtime`, integration mode, Safe Mode/recovery |
-| `tars-ng stop` | SIGTERM to the pid recorded by `start` |
+| `tars-ng stop` | SIGTERM to the pid recorded by `start` (runtime and Web UI) |
 | `tars-ng self-extension …` | Existing Recovery Root operator commands (approve/activate/rollback/backup/…) |
 
 Doctor never prints Authorization headers, token values, credential-bearing URLs, or chain-of-thought.
@@ -187,7 +195,8 @@ Backups exclude secrets, credentials, personal memory, env files, and unsealed w
 | `… is outside the supported DSH release` | Reinstall this tarball; do not mix newer RCs |
 | Calendar fixture events in daily use | Unset `TARS_NG_ALLOW_FIXTURES`; do not pass `--allow-fixtures` |
 | Calendar unavailable after live mode | Replace `DSH_ASSISTANT_GOOGLE_CALENDAR_ACCESS_TOKEN`; it expires |
-| Safe Mode | `tars-ng doctor` then Recovery Root runbook; do not mint approval from the model |
+| Safe Mode | Web UI recovery controls or `tars-ng doctor` then Recovery Root runbook; do not mint approval from the model |
+| Web UI will not bind | Another process owns the port, or `TARS_NG_UI_HOST` is not loopback; start fails clearly |
 | Env file insecure | `chmod 600` the file |
 
 ## Feature freeze / soak

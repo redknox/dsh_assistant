@@ -28,7 +28,7 @@ export function projectMissionControl(input: WorkspaceSnapshotInput): MissionCon
           recovery: {
             why: input.recoveryWhy ?? 'Trusted core is available; generated capabilities are disabled.',
             disabled: generatedDisabled(input),
-            actions: ['Diagnostics', 'Disable candidate', 'Rollback', 'Restore backup'],
+            actions: ['Diagnostics', 'Rollback', 'Restart normally', 'Disable candidate', 'Restore backup'],
           },
         }
       : {}),
