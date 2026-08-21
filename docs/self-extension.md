@@ -24,6 +24,7 @@ These concerns must stay separate. Do not collapse them into one “the assistan
 | Question | Concern | Owner of the answer |
 | --- | --- | --- |
 | **What do I have?** | Capability and ownership visibility | Capability Registry (`ctx.capabilityRegistry`) |
+| **What existing implementation may be available?** | Capability Discovery | `ctx.capabilityDiscovery` ([docs/capability-discovery.md](./capability-discovery.md)) |
 | **What should change?** | Capability Resolution Review | `ctx.capabilityResolution.review` ([docs/capability-resolution.md](./capability-resolution.md)) |
 | **May I change it?** | User approval / governance | Recovery Root `recordApproval` + transactional activate ([docs/extension-governance.md](./extension-governance.md)) |
 
@@ -69,7 +70,7 @@ status: active
 
 ## Capability Resolution Review
 
-The executable review lives at `ctx.capabilityResolution.review`. Details: [docs/capability-resolution.md](./capability-resolution.md). It is advisory only.
+The executable review lives at `ctx.capabilityResolution.review`. Details: [docs/capability-resolution.md](./capability-resolution.md). It consumes Registry facts and Discovery evidence. It is advisory only. Discovery never installs or executes packages.
 
 Before proposing a **new** plugin, the assistant must produce a Capability Resolution Review. The review is mandatory evidence, not optional commentary.
 

@@ -15,3 +15,4 @@ export type {
 export { RESOLUTION_KINDS, RESOLUTION_OPTIONS } from './types.js'
 export { ResolutionService } from './service.js'
 export { CORE_KNOWN_SEAMS, DEFAULT_RESOLUTION_INVENTORY } from './inventory.js'
+export type { DiscoveryFacts } from '../discovery/types.js'

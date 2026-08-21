@@ -1,7 +1,10 @@
+import { isEligible, type CapabilityDiscovery } from '../discovery/index.js'
+import type { DiscoveryFacts } from '../discovery/types.js'
 import { parseCapabilityId } from '../registry/normalize.js'
 import type { RegistryRecord } from '../registry/types.js'
 import type {
   CapabilityResolution,
+  KnownPluginOption,
   KnownProviderOption,
   RegistryReadModel,
   ResolutionKind,
@@ -25,8 +28,12 @@ function providerCompatibleWithNeed(option: KnownProviderOption, capability: str
     || option.domains?.includes(domainOf(capability)) === true
 }
 
-function wantsProviderSwap(request: ResolutionRequest, owner: RegistryRecord, capability: string): KnownProviderMatch | undefined {
-  return request.knownProviders?.find((item) => (
+function wantsProviderSwap(
+  providers: readonly KnownProviderOption[] | undefined,
+  owner: RegistryRecord,
+  capability: string,
+): KnownProviderMatch | undefined {
+  return providers?.find((item) => (
     providerCompatibleWithNeed(item, capability)
     && owner.runtimeSeams.includes(item.seam)
     && item.provider !== owner.provider
@@ -39,7 +46,10 @@ interface KnownProviderMatch {
 }
 
 export class ResolutionService implements CapabilityResolution {
-  constructor(private readonly registry: RegistryReadModel) {}
+  constructor(
+    private readonly registry: RegistryReadModel,
+    private readonly discovery?: CapabilityDiscovery,
+  ) {}
 
   review(request: ResolutionRequest): ResolutionReview {
     const capability = parseCapabilityId(request.capability)
@@ -54,9 +64,40 @@ export class ResolutionService implements CapabilityResolution {
         version: record.version,
         capabilities: capabilitiesOf(record),
       }))
+    const discovered = this.discovery?.search({ capability, need: request.need })
+    const discoveryFacts: DiscoveryFacts = discovered === undefined
+      ? { status: 'not-queried', records: [], rejected: [], diagnostics: [] }
+      : {
+        status: discovered.status,
+        records: discovered.records,
+        rejected: discovered.records
+          .filter((item) => item.eligibility === 'rejected' || item.rejectionReason !== undefined)
+          .map((item) => ({ identity: item.identity, reason: item.rejectionReason ?? item.eligibility })),
+        diagnostics: discovered.diagnostics,
+      }
+    const eligible = discovered?.records.filter(isEligible) ?? []
+    const discoveredProviders: KnownProviderOption[] = eligible
+      .filter((item) => item.provider !== undefined && item.seams.length > 0)
+      .flatMap((item) => item.seams.map((seam) => ({
+        provider: item.provider!,
+        seam,
+        capabilities: item.capabilities,
+        domains: [...new Set(item.capabilities.map((id) => domainOf(id)).filter((id) => id !== ''))],
+      })))
+    const discoveredPlugins: KnownPluginOption[] = eligible
+      .filter((item) => item.provider === undefined)
+      .map((item) => ({
+        owner: item.identity,
+        version: item.version,
+        capabilities: item.capabilities,
+      }))
+    const knownProviders = [...(request.knownProviders ?? []), ...discoveredProviders]
+    const knownPlugins = [...(request.knownPlugins ?? []), ...discoveredPlugins]
+    const discoveredSeams = eligible.flatMap((item) => item.seams)
 
     if (exact.kind === 'conflict' || conflicts.length > 0) {
       return this.finish(request, capability, 'conflict', {
+        discoveryFacts,
         registryFacts: {
           exact,
           domainOwners,
@@ -65,7 +106,7 @@ export class ResolutionService implements CapabilityResolution {
         steps: [],
         recommendation: 'Resolve the active ownership conflict before changing anything.',
         rationale: 'Conflicting active owners are inspectable facts. Resolution does not pick a winner.',
-        implications: [],
+        implications: this.discoveryImplications(discoveryFacts),
         assumptions: [],
         unresolved: ['Active ownership conflict must be resolved by a human before reuse, evolve, or new-plugin.'],
       })
@@ -75,18 +116,24 @@ export class ResolutionService implements CapabilityResolution {
     const domainOwner = exactOwner ?? records.find((record) => (
       record.status === 'active' && record.capabilities.some((item) => domainOf(item.id) === domain)
     ))
-    const providerSwap = exactOwner === undefined ? undefined : wantsProviderSwap(request, exactOwner, capability)
+    const explicitProviderSwap = exactOwner === undefined
+      ? undefined
+      : wantsProviderSwap(request.knownProviders, exactOwner, capability)
+    const providerSwap = exactOwner === undefined
+      ? undefined
+      : wantsProviderSwap(knownProviders, exactOwner, capability)
     const configure = request.permissionOptions?.find((item) => item.satisfiesNeed && (
       item.owner === exactOwner?.owner || item.owner === domainOwner?.owner
     ))
-    const adoptableKnown = request.knownPlugins?.find((item) => item.capabilities.includes(capability))
+    const adoptableKnown = knownPlugins.find((item) => item.capabilities.includes(capability))
     const inactiveAdopt = exact.kind === 'inactive'
       ? exact.records.find((record) => record.status === 'candidate' || record.status === 'disabled')
       : undefined
-    const providerOnSeam = request.knownProviders?.find((item) => {
+    const providerOnSeam = knownProviders.find((item) => {
       if (!providerCompatibleWithNeed(item, capability)) return false
       const knownSeams = new Set([
         ...(request.inventory?.seams ?? []),
+        ...discoveredSeams,
         ...records.flatMap((record) => record.runtimeSeams),
       ])
       return knownSeams.has(item.seam)
@@ -97,14 +144,14 @@ export class ResolutionService implements CapabilityResolution {
     const reuseAccepted = exactOwner !== undefined
       && request.alreadySatisfied !== false
       && request.behavior === undefined
-      && providerSwap === undefined
+      && explicitProviderSwap === undefined
       && configure === undefined
     steps.push(this.step('reuse', reuseAccepted, reuseAccepted
       ? `${exactOwner!.owner}@${exactOwner!.version} already owns ${capability}.`
       : exactOwner === undefined
         ? 'No active owner for this exact capability.'
-        : providerSwap !== undefined
-          ? `Active owner uses provider ${exactOwner.provider ?? 'none'}, not ${providerSwap.provider}.`
+        : explicitProviderSwap !== undefined
+          ? `Active owner uses provider ${exactOwner.provider ?? 'none'}, not ${explicitProviderSwap.provider}.`
           : configure !== undefined
             ? 'Need is a known permission/config change, not reuse of the current set.'
             : 'Requested behavior is not already satisfied by the active owner.'))
@@ -114,7 +161,7 @@ export class ResolutionService implements CapabilityResolution {
         version: exactOwner.version,
         seam: exactOwner.runtimeSeams[0],
         provider: exactOwner.provider,
-      }, `Reuse ${exactOwner.owner}@${exactOwner.version}.`, 'An active owner already exposes the requested capability.')
+      }, `Reuse ${exactOwner.owner}@${exactOwner.version}.`, 'An active owner already exposes the requested capability.', discoveryFacts)
     }
 
     const configureAccepted = configure !== undefined
@@ -127,7 +174,7 @@ export class ResolutionService implements CapabilityResolution {
         version: exactOwner?.version ?? domainOwner?.version,
         permission: configure.permission,
         seam: exactOwner?.runtimeSeams[0] ?? domainOwner?.runtimeSeams[0],
-      }, `Change configuration/permissions on ${configure.owner}.`, 'The existing owner can satisfy the need if a known permission or config is enabled.')
+      }, `Change configuration/permissions on ${configure.owner}.`, 'The existing owner can satisfy the need if a known permission or config is enabled.', discoveryFacts)
     }
 
     const evolveAccepted = domainOwner !== undefined && providerSwap === undefined
@@ -140,7 +187,7 @@ export class ResolutionService implements CapabilityResolution {
         version: domainOwner.version,
         seam: domainOwner.runtimeSeams[0],
         provider: domainOwner.provider,
-      }, `Produce a new candidate version of ${domainOwner.owner}.`, 'An existing owner already covers this domain. The smallest change is a new candidate version, not a helper/v2 plugin.')
+      }, `Produce a new candidate version of ${domainOwner.owner}.`, 'An existing owner already covers this domain. The smallest change is a new candidate version, not a helper/v2 plugin.', discoveryFacts)
     }
 
     const adoptTarget = inactiveAdopt !== undefined
@@ -150,35 +197,41 @@ export class ResolutionService implements CapabilityResolution {
         : undefined
     steps.push(this.step('adopt-existing', adoptTarget !== undefined, adoptTarget !== undefined
       ? `${adoptTarget.owner}@${adoptTarget.version} already describes this capability and can be adopted instead of creating a duplicate.`
-      : 'No inactive candidate or supplied existing plugin provides this capability.'))
+      : 'No inactive candidate, DSH-native capability, or eligible plugin provides this capability.'))
     if (adoptTarget !== undefined) {
       return this.recommend(request, capability, 'adopt-existing', steps, exact, domainOwners, conflicts, adoptTarget,
         `Adopt existing ${adoptTarget.owner}@${adoptTarget.version}.`,
-        'A known candidate or plugin already provides the capability.')
+        'A known candidate, DSH-native capability, or eligible plugin already provides the capability.', discoveryFacts)
     }
 
     const providerAccepted = providerSwap !== undefined || providerOnSeam !== undefined
     const provider = providerSwap ?? providerOnSeam
     steps.push(this.step('implement-provider', providerAccepted, providerAccepted
       ? `Implement ${provider!.provider} behind existing seam ${provider!.seam}.`
-      : 'No supplied provider is compatible with a known application/DSH seam.'))
+      : 'No supplied or discovered provider is compatible with a known application/DSH seam.'))
     if (providerAccepted && provider) {
       return this.recommend(request, capability, 'implement-provider', steps, exact, domainOwners, conflicts, {
         owner: exactOwner?.owner ?? domainOwner?.owner,
         version: exactOwner?.version ?? domainOwner?.version,
         seam: provider.seam,
         provider: provider.provider,
-      }, `Implement provider ${provider.provider} on ${provider.seam}.`, 'The application already has a public seam. Prefer a provider/adapter over a parallel capability domain or duplicate tool.')
+      }, `Implement provider ${provider.provider} on ${provider.seam}.`, 'The application already has a public seam. Prefer a provider/adapter over a parallel capability domain or duplicate tool.', discoveryFacts)
     }
 
-    const newPluginAccepted = request.inventory?.complete === true
-    steps.push(this.step('new-plugin', newPluginAccepted, newPluginAccepted
-      ? 'Caller-supplied complete inventory has no owner, seam, or adoptable provider/plugin.'
-      : 'Inventory is incomplete; absence of a record is not proof the capability is new.'))
+    const discoveryStatus = discovered?.status
+    const discoveryComplete = discoveryStatus === 'ok'
+    const newPluginAccepted = request.inventory?.complete === true || discoveryComplete
+    const newPluginReason = newPluginAccepted
+      ? 'Registry, DSH-native seams, and the trusted catalog have no owner, seam, or adoptable provider/plugin.'
+      : discoveryStatus === 'unavailable' || discoveryStatus === 'incomplete'
+        ? `Discovery is ${discoveryStatus}; unknown is not proof the capability is new.`
+        : 'Inventory is incomplete; absence of a record is not proof the capability is new.'
+    steps.push(this.step('new-plugin', newPluginAccepted, newPluginReason))
     if (newPluginAccepted) {
       return this.recommend(request, capability, 'new-plugin', steps, exact, domainOwners, conflicts, undefined,
         'Create a genuinely new candidate plugin.',
         'Options 1–5 do not satisfy the need against an explicit complete inventory.',
+        discoveryFacts,
         [
           'A new plugin remains a candidate until later governance approval.',
           'This recommendation is not authorization to install or mount code.',
@@ -188,14 +241,26 @@ export class ResolutionService implements CapabilityResolution {
     }
 
     return this.finish(request, capability, 'insufficient-information', {
+      discoveryFacts,
       registryFacts: { exact, domainOwners, conflicts },
       steps,
-      recommendation: 'Gather more ownership, seam, or provider facts before deciding.',
+      recommendation: 'Gather more ownership, seam, provider, or trusted-catalog facts before deciding.',
       rationale: 'unknown is not absent. Without a complete inventory, the resolver will not treat a missing record as a new plugin.',
-      implications: [],
+      implications: this.discoveryImplications(discoveryFacts),
       assumptions: [],
-      unresolved: ['Need an explicit complete architecture inventory, or a known owner/seam/provider/plugin fact.'],
+      unresolved: ['Need an explicit complete architecture inventory, complete trusted-catalog discovery, or a known owner/seam/provider/plugin fact.'],
     })
+  }
+
+  private discoveryImplications(facts: DiscoveryFacts): string[] {
+    if (facts.status === 'not-queried') return []
+    const lines = [`Discovery status: ${facts.status}.`]
+    if (facts.records.length > 0) {
+      lines.push(`Checked ${facts.records.map((item) => `${item.identity} (${item.provenance}/${item.eligibility})`).join(', ')}.`)
+    }
+    for (const item of facts.rejected) lines.push(`Rejected ${item.identity}: ${item.reason}.`)
+    lines.push('Discovery does not install, import, execute, approve, or activate plugin code.')
+    return lines
   }
 
   private relatedFileImplications(capability: string, records: readonly RegistryRecord[]): string[] {
@@ -225,15 +290,17 @@ export class ResolutionService implements CapabilityResolution {
     target: ResolutionTarget | undefined,
     recommendation: string,
     rationale: string,
+    discoveryFacts: DiscoveryFacts,
     implications: readonly string[] = ['This is a proposal only. It does not approve, install, or mount anything.'],
   ): ResolutionReview {
     return this.finish(request, capability, kind, {
+      discoveryFacts,
       registryFacts: { exact, domainOwners, conflicts },
       steps,
       target,
       recommendation,
       rationale,
-      implications,
+      implications: [...this.discoveryImplications(discoveryFacts), ...implications],
       assumptions: [],
       unresolved: [],
     })
