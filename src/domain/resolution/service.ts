@@ -2,6 +2,7 @@ import { parseCapabilityId } from '../registry/normalize.js'
 import type { RegistryRecord } from '../registry/types.js'
 import type {
   CapabilityResolution,
+  KnownProviderOption,
   RegistryReadModel,
   ResolutionKind,
   ResolutionOption,
@@ -19,9 +20,16 @@ function capabilitiesOf(record: RegistryRecord): readonly string[] {
   return record.capabilities.map((item) => item.id)
 }
 
-function wantsProviderSwap(request: ResolutionRequest, owner: RegistryRecord): KnownProviderMatch | undefined {
+function providerCompatibleWithNeed(option: KnownProviderOption, capability: string): boolean {
+  return option.capabilities?.includes(capability) === true
+    || option.domains?.includes(domainOf(capability)) === true
+}
+
+function wantsProviderSwap(request: ResolutionRequest, owner: RegistryRecord, capability: string): KnownProviderMatch | undefined {
   return request.knownProviders?.find((item) => (
-    owner.runtimeSeams.includes(item.seam) && item.provider !== owner.provider
+    providerCompatibleWithNeed(item, capability)
+    && owner.runtimeSeams.includes(item.seam)
+    && item.provider !== owner.provider
   ))
 }
 
@@ -67,7 +75,7 @@ export class ResolutionService implements CapabilityResolution {
     const domainOwner = exactOwner ?? records.find((record) => (
       record.status === 'active' && record.capabilities.some((item) => domainOf(item.id) === domain)
     ))
-    const providerSwap = exactOwner === undefined ? undefined : wantsProviderSwap(request, exactOwner)
+    const providerSwap = exactOwner === undefined ? undefined : wantsProviderSwap(request, exactOwner, capability)
     const configure = request.permissionOptions?.find((item) => item.satisfiesNeed && (
       item.owner === exactOwner?.owner || item.owner === domainOwner?.owner
     ))
@@ -76,6 +84,7 @@ export class ResolutionService implements CapabilityResolution {
       ? exact.records.find((record) => record.status === 'candidate' || record.status === 'disabled')
       : undefined
     const providerOnSeam = request.knownProviders?.find((item) => {
+      if (!providerCompatibleWithNeed(item, capability)) return false
       const knownSeams = new Set([
         ...(request.inventory?.seams ?? []),
         ...records.flatMap((record) => record.runtimeSeams),

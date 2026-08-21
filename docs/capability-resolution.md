@@ -59,6 +59,8 @@ Examples:
 
 A provider integration problem is not a new domain. If the product already exposes a public seam, prefer an adapter behind that seam over a competing capability model or a duplicate model-facing tool.
 
+A known provider option must bind the requested need with explicit `capabilities` and/or `domains`. A Google Calendar provider for `integrations.calendar` is not evidence for `matter.light.set`. A provider option with only `provider + seam` is ignored.
+
 Externally discovered plugins/providers/config options are **review inputs** supplied by the caller or tests. This resolver does not search the web or a package registry.
 
 ## Public seam
@@ -67,4 +69,6 @@ Externally discovered plugins/providers/config options are **review inputs** sup
 
 The optional model-facing tool `review_capability_resolution` is a thin **read/advisory-only** adapter. It does not register approval, write files, install packages, mutate profile/bundle config, mount plugins, or change Registry lifecycle.
 
-The plugin supplies a default inventory of Core MVP seams with `complete: false`. Callers who can prove absence must pass `inventory.complete: true`.
+The tool does **not** accept `inventoryComplete` or any other model argument that could claim the architecture inventory is complete. Model/tool arguments are untrusted. A complete inventory is a trusted application/orchestrator fact on `ctx.capabilityResolution.review({ inventory: { complete: true, … } })`. Without that trusted fact, unknown capabilities stay `insufficient-information`.
+
+The plugin supplies a default inventory of Core MVP seams with `complete: false`. Only a trusted caller may pass `inventory.complete: true`.

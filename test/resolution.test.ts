@@ -83,7 +83,12 @@ describe('capability resolution review', () => {
     const review = resolver.review({
       capability: 'calendar.read',
       need: 'replace fake calendar with Google while keeping the application seam',
-      knownProviders: [{ provider: 'google', seam: 'integrations.calendar' }],
+      knownProviders: [{
+        provider: 'google',
+        seam: 'integrations.calendar',
+        capabilities: ['calendar.read'],
+        domains: ['calendar'],
+      }],
     })
     assert.equal(review.kind, 'implement-provider')
     assert.equal(review.target?.seam, 'integrations.calendar')
@@ -175,6 +180,35 @@ describe('capability resolution review', () => {
     rejected(review, 'evolve-owner')
   })
 
+  it('does not treat an unrelated calendar provider as evidence for another domain', () => {
+    const { resolver } = seededResolver()
+    const review = resolver.review({
+      capability: 'matter.light.set',
+      need: 'control Matter home devices',
+      knownProviders: [{
+        provider: 'google',
+        seam: 'integrations.calendar',
+        capabilities: ['calendar.read'],
+        domains: ['calendar'],
+      }],
+      inventory: { complete: true, seams: CORE_KNOWN_SEAMS },
+    })
+    assert.equal(review.kind, 'new-plugin')
+    rejected(review, 'implement-provider')
+  })
+
+  it('ignores a provider option that does not bind a capability or domain', () => {
+    const { resolver } = seededResolver()
+    const review = resolver.review({
+      capability: 'matter.light.set',
+      need: 'control Matter home devices',
+      knownProviders: [{ provider: 'google', seam: 'integrations.calendar' }],
+      inventory: { complete: true, seams: CORE_KNOWN_SEAMS },
+    })
+    assert.equal(review.kind, 'new-plugin')
+    rejected(review, 'implement-provider')
+  })
+
   it('does not mutate registry state', () => {
     const { registry, resolver } = seededResolver()
     const before = registry.list().length
@@ -219,6 +253,34 @@ describe('capability resolution plugin', () => {
       })
       assert.equal(result.isError, false)
       assert.match(String(result.value), /"kind":"insufficient-information"/)
+    } finally {
+      await ctx.fiber.dispose()
+    }
+  })
+
+  it('cannot promote an unknown capability to new-plugin via a model-declared completeness flag', async () => {
+    const ctx = new Context()
+    await ctx.plugin(SystemPrompt, {})
+    await ctx.plugin(ToolRuntime)
+    await ctx.plugin(registryPlugin)
+    await ctx.plugin(resolutionPlugin)
+    try {
+      const tool = ctx.tools.get('review_capability_resolution')
+      assert.ok(tool)
+      assert.equal(JSON.stringify(tool).includes('inventoryComplete'), false)
+      const result = await ctx.tools.execute({
+        callId: CallId('test-review-cannot-self-assert-complete'),
+        name: 'review_capability_resolution',
+        arguments: {
+          capability: 'unknown.widget.sync',
+          need: 'sync widgets',
+          inventoryComplete: true,
+        },
+        signal: AbortSignal.timeout(5000),
+      })
+      assert.equal(result.isError, false)
+      const payload = JSON.parse(String(result.value)) as { kind: string }
+      assert.equal(payload.kind, 'insufficient-information')
     } finally {
       await ctx.fiber.dispose()
     }

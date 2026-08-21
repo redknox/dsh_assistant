@@ -49,6 +49,10 @@ export interface KnownPluginOption {
 export interface KnownProviderOption {
   readonly provider: string
   readonly seam: string
+  /** Exact capability ids this provider can satisfy. Required unless `domains` is set. */
+  readonly capabilities?: readonly string[]
+  /** Capability domain prefixes this provider can satisfy (e.g. `calendar`). */
+  readonly domains?: readonly string[]
 }
 
 export interface ArchitectureInventory {
