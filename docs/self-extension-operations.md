@@ -41,6 +41,8 @@ self-extension lkg
 - Missing or mutated active artifact: boot fails closed into Safe Mode with `missing-active-artifact` / `digest-mismatch`. Recovery root remains available.
 - Corrupt / unknown `authority.json` schema: no auto-activation; Safe Mode / recovery control still boots.
 - Interrupted activation before commit: prior LKG stays authoritative.
+- Interrupted activation after a tentative Registry update and before the authority commit: prior LKG remains authoritative.
 - Interrupted activation after commit: restart remounts the committed version.
+- One committed generated artifact missing or mutated: Safe Mode, no generated extension remounts.
 - Interrupted rollback: restart completes rollback or enters Safe Mode.
 - Exit Safe Mode is a trusted operator action. It does not remount a failed generated plugin by itself.

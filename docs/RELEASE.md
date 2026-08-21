@@ -15,8 +15,9 @@ This repository does not create or push the `v0.2.0` git tag in this change. Tag
 
 - Durable `$DSH_ASSISTANT_HOME/self-extension` authority file (schema v1, atomic write) with explicit Registry / Governance / Activation / Recovery sections
 - Candidate artifacts + index survive restart; directory presence is not activation
-- Fresh boot remounts only committed generated actives after digest verification
-- Interrupted pre-commit activation keeps prior LKG; post-commit crash remounts the new version
+- Fresh boot remounts only generated owners in the committed activation snapshot, after a full artifact/digest preflight
+- Interrupted pre-commit activation (including after a tentative Registry update) keeps prior LKG; post-commit crash remounts the new version
+- Any remount preflight failure enters Safe Mode with zero generated mounts
 - Safe Mode, missing/mutated artifact, and corrupt schema fail closed with recovery control still available
 - Operator CLI: `npm run self-extension` (`docs/self-extension-operations.md`)
 

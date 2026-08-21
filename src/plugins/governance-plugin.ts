@@ -48,6 +48,8 @@ export interface GovernancePluginConfig {
   readonly attachRecoveryRoot?: (root: RecoveryRoot) => void
   readonly persist?: () => void
   readonly hydrate?: import('../domain/governance/service.js').GovernanceHydrate
+  readonly beginAuthorityCommit?: () => void
+  readonly finishAuthorityCommit?: () => void
 }
 
 export const name = 'dsh-assistant-governance'
@@ -59,7 +61,12 @@ export async function apply(ctx: Context, config: GovernancePluginConfig = {}) {
     ctx.capabilityRegistry,
     ctx.candidateWorkspace,
     new CordisActivationRuntime(ctx),
-    { persist: config.persist, hydrate: config.hydrate },
+    {
+      persist: config.persist,
+      hydrate: config.hydrate,
+      beginAuthorityCommit: config.beginAuthorityCommit,
+      finishAuthorityCommit: config.finishAuthorityCommit,
+    },
   )
   config.attachRecoveryRoot?.(root)
   await ctx.plugin(class extends ExtensionGovernanceService {

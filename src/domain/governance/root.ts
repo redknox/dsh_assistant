@@ -24,7 +24,12 @@ export class RecoveryRoot {
     registry: CapabilityRegistry,
     workspace: CandidateWorkspace,
     runtime: ActivationRuntime = new InMemoryActivationRuntime(),
-    options: { persist?: () => void; hydrate?: GovernanceHydrate } = {},
+    options: {
+      persist?: () => void
+      hydrate?: GovernanceHydrate
+      beginAuthorityCommit?: () => void
+      finishAuthorityCommit?: () => void
+    } = {},
   ) {
     this.service = new GovernanceService(registry, workspace, runtime, this.rootId, options)
   }

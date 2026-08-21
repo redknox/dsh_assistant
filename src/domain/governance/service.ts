@@ -24,7 +24,7 @@ import type {
 } from './types.js'
 import { TrustedAuthorityCredential as AuthorityCredential } from './types.js'
 
-export type ActivationInterrupt = 'activation-pending' | 'prepare' | 'commit' | 'rollback-pending'
+export type ActivationInterrupt = 'activation-pending' | 'prepare' | 'registry-commit' | 'commit' | 'rollback-pending'
 
 export interface GovernanceHydrate {
   readonly approvals: readonly ApprovalRecord[]
@@ -71,15 +71,24 @@ export class GovernanceService implements ExtensionGovernance, ExtensionActivati
   private pendingCandidateId?: string
   interruptAfter?: ActivationInterrupt
   private readonly persistHook?: () => void
+  private readonly beginAuthorityCommit?: () => void
+  private readonly finishAuthorityCommit?: () => void
 
   constructor(
     private readonly registry: CapabilityRegistry,
     private readonly workspace: CandidateWorkspace,
     readonly runtime: ActivationRuntime = new InMemoryActivationRuntime(),
     private readonly rootId: symbol = Symbol('unbound-governance'),
-    options: { persist?: () => void; hydrate?: GovernanceHydrate } = {},
+    options: {
+      persist?: () => void
+      hydrate?: GovernanceHydrate
+      beginAuthorityCommit?: () => void
+      finishAuthorityCommit?: () => void
+    } = {},
   ) {
     this.persistHook = options.persist
+    this.beginAuthorityCommit = options.beginAuthorityCommit
+    this.finishAuthorityCommit = options.finishAuthorityCommit
     if (options.hydrate && (options.hydrate.generation > 0 || options.hydrate.current !== undefined)) {
       this.applyHydrate(options.hydrate)
     } else {
@@ -229,7 +238,9 @@ export class GovernanceService implements ExtensionGovernance, ExtensionActivati
       ])
       if (!health.ok) throw new Error(health.diagnostics ?? 'health failed')
       phase = 'commit'
+      this.beginAuthorityCommit?.()
       this.commitRegistry(record)
+      await this.maybeInterrupt('registry-commit')
       await this.runtime.commit(candidateId)
       this.current = this.captureSnapshot()
       this.lastKnownGood = this.current
@@ -238,6 +249,7 @@ export class GovernanceService implements ExtensionGovernance, ExtensionActivati
       this.phase = undefined
       this.lastFailure = undefined
       this.flush()
+      this.finishAuthorityCommit?.()
       await this.maybeInterrupt('commit')
       return this.status()
     } catch (error) {
@@ -259,6 +271,7 @@ export class GovernanceService implements ExtensionGovernance, ExtensionActivati
       }
       if (!restored) this.safeMode = true
       this.flush()
+      this.finishAuthorityCommit?.()
       return this.status()
     }
   }
@@ -306,11 +319,15 @@ export class GovernanceService implements ExtensionGovernance, ExtensionActivati
   async remountCommittedGenerated(): Promise<string[]> {
     const diagnostics: string[] = []
     if (this.safeMode) return diagnostics
-    for (const record of this.registry.list({ status: 'active' })) {
-      if (!record.owner.startsWith('generated/')) continue
-      const candidate = this.workspace.list().find((item) => item.owner === record.owner && item.version === record.version)
+    const snapshot = this.committedActivationSnapshot()
+    const targets = (snapshot?.owners ?? []).filter(
+      (item) => item.owner.startsWith('generated/') && item.status === 'active',
+    )
+    const verified: CandidateRecord[] = []
+    for (const target of targets) {
+      const candidate = this.workspace.list().find((item) => item.owner === target.owner && item.version === target.version)
       if (candidate === undefined) {
-        diagnostics.push(`missing-active-artifact:${record.owner}@${record.version}`)
+        diagnostics.push(`missing-active-artifact:${target.owner}@${target.version}`)
         continue
       }
       const integrity = this.verifySealedArtifact(candidate)
@@ -318,6 +335,13 @@ export class GovernanceService implements ExtensionGovernance, ExtensionActivati
         diagnostics.push(integrity)
         continue
       }
+      verified.push(candidate)
+    }
+    if (diagnostics.length > 0) {
+      await this.failClosedSafeMode(diagnostics)
+      return diagnostics
+    }
+    for (const candidate of verified) {
       const prepared = await this.runtime.prepare(candidate.id, {
         workspaceRoot: candidate.workspaceRoot,
         entryPoints: candidate.manifest.entryPoints,
@@ -331,26 +355,46 @@ export class GovernanceService implements ExtensionGovernance, ExtensionActivati
       })
       if (!prepared.ok) {
         diagnostics.push(prepared.diagnostics ?? `prepare-failed:${candidate.id}`)
-        continue
+        await this.runtime.restore({
+          generation: snapshot?.generation ?? 0,
+          capturedAt: new Date().toISOString(),
+          owners: snapshot?.owners ?? [],
+          profileIdentity: snapshot?.profileIdentity ?? 'assistant-core',
+          mounted: [],
+        })
+        await this.failClosedSafeMode(diagnostics)
+        return diagnostics
       }
       await this.runtime.commit(candidate.id)
     }
-    if (diagnostics.length > 0) {
-      this.safeMode = true
-      this.state = 'safe-mode'
-      this.lastFailure = {
-        candidateId: this.pendingCandidateId ?? 'restart',
-        version: '',
-        digest: '',
-        phase: 'prepare',
-        diagnostics: diagnostics.join('; '),
-        rollbackAttempted: false,
-        rollbackSucceeded: false,
-        safeModeRequired: true,
-      }
-      this.flush()
-    }
     return diagnostics
+  }
+
+  private committedActivationSnapshot(): ActivationSnapshot | undefined {
+    if (this.state === 'active' || this.state === 'rolled-back') return this.current ?? this.lastKnownGood
+    return this.lastKnownGood
+  }
+
+  private async failClosedSafeMode(diagnostics: readonly string[]): Promise<void> {
+    for (const record of this.registry.list({ status: 'active' })) {
+      if (record.owner.startsWith('generated/')) {
+        this.registry.transitionStatus(record.owner, record.version, 'disabled')
+      }
+    }
+    this.safeMode = true
+    this.state = 'safe-mode'
+    this.current = this.captureSnapshot()
+    this.lastFailure = {
+      candidateId: this.pendingCandidateId ?? 'restart',
+      version: '',
+      digest: '',
+      phase: 'prepare',
+      diagnostics: diagnostics.join('; '),
+      rollbackAttempted: false,
+      rollbackSucceeded: false,
+      safeModeRequired: true,
+    }
+    this.flush()
   }
 
   completeInterruptedActivation(): void {

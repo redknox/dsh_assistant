@@ -71,6 +71,8 @@ async function bootStack(options: BootOptions = {}): Promise<AssistantControl> {
       persist: durable === undefined ? undefined : () => {
         if (holder.root) persistGovernance(durable.authority, holder.root.service.exportHydrate())
       },
+      beginAuthorityCommit: durable === undefined ? undefined : () => durable.authority.beginDeferredWrites(),
+      finishAuthorityCommit: durable === undefined ? undefined : () => durable.authority.endDeferredWrites(),
       attachRecoveryRoot: (root) => {
         holder.root = root
         recoveryRoot = root

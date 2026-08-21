@@ -23,6 +23,20 @@ export function apply(ctx) {
 }
 `
 
+const PLUGIN_B = `export const name = 'generated-restart-probe-b'
+export const inject = ['tools']
+export function apply(ctx) {
+  const dispose = ctx.tools.register({
+    name: 'restart_probe_alt',
+    description: 'Second restart durability probe',
+    parameters: {},
+    output: { schema: { type: 'string' }, render(_args, value) { return [{ type: 'text', text: String(value) }] } },
+    async execute() { return 'alt' },
+  })
+  ctx.effect(() => dispose)
+}
+`
+
 function review(): ResolutionReview {
   return {
     kind: 'new-plugin',
@@ -65,6 +79,38 @@ async function prepareCandidate(home: string) {
   const fingerprint = first.ctx.extensionGovernance.requestApproval(created.id).fingerprint
   first.recoveryRoot.recordApproval(human, { candidateId: created.id, fingerprint, decision: 'approved-for-exact-diff' })
   return { first, created, human, fingerprint }
+}
+
+function reviewB(): ResolutionReview {
+  return {
+    kind: 'new-plugin',
+    capability: 'restart.probe.alt',
+    need: 'prove multi-extension remount preflight',
+    recommendation: 'new plugin',
+    rationale: 'no owner',
+    implications: [],
+    assumptions: [],
+    unresolved: [],
+    steps: [],
+    registryFacts: { exact: { kind: 'unknown', capability: 'restart.probe.alt' }, domainOwners: [], conflicts: [] },
+  }
+}
+
+async function prepareSecondCandidate(booted: Awaited<ReturnType<typeof bootAssistantControl>>) {
+  const created = booted.ctx.candidateWorkspace.create({
+    review: reviewB(),
+    owner: 'generated/restart-probe-b',
+    version: '0.1.0',
+    manifest: { capabilities: ['restart.probe.alt'], tools: ['restart_probe_alt'], entryPoints: ['src/plugin.js'] },
+  })
+  booted.ctx.candidateWorkspace.writeFile(created.id, 'package.json', `${JSON.stringify({ name: 'dsh-generated-restart-probe-b', type: 'module', main: 'src/plugin.js' }, null, 2)}\n`)
+  booted.ctx.candidateWorkspace.writeFile(created.id, 'src/plugin.js', PLUGIN_B)
+  booted.ctx.candidateValidation.validate(created.id)
+  booted.ctx.candidateWorkspace.seal(created.id)
+  const human = booted.recoveryRoot.issueAuthority({ kind: 'human-control', source: 'application-ui' })
+  const fingerprint = booted.ctx.extensionGovernance.requestApproval(created.id).fingerprint
+  booted.recoveryRoot.recordApproval(human, { candidateId: created.id, fingerprint, decision: 'approved-for-exact-diff' })
+  return { created, human }
 }
 
 describe('Self-Extension durable restart', () => {
@@ -168,6 +214,56 @@ describe('Self-Extension durable restart', () => {
     try {
       assert.equal(second.ctx.capabilityRegistry.get('generated/restart-probe', '0.1.0')?.status, 'active')
       assert.equal(await ping(second.ctx), 'pong')
+    } finally {
+      await second.ctx.fiber.dispose()
+    }
+  })
+
+  it('crash between tentative Registry update and authority commit keeps prior LKG', async () => {
+    const home = mkdtempSync(join(tmpdir(), 'dsh-se-reg-'))
+    const { first, created, human } = await prepareCandidate(home)
+    first.recoveryRoot.simulateInterrupt('registry-commit')
+    await assert.rejects(() => first.recoveryRoot.activate(created.id, human), SimulatedCrashError)
+    const authority = JSON.parse(readFileSync(join(home, 'self-extension', 'authority.json'), 'utf8')) as {
+      registry: { records: { owner: string; status: string }[] }
+      activation: { state: string }
+      recovery: { lastKnownGood?: { owners: { owner: string; status: string }[] } }
+    }
+    assert.equal(authority.registry.records.some((row) => row.owner === 'generated/restart-probe' && row.status === 'active'), false)
+    assert.notEqual(authority.activation.state, 'active')
+    await first.ctx.fiber.dispose()
+    const second = await bootAssistantControl({ home })
+    try {
+      assert.equal(second.ctx.tools.get('restart_probe_ping'), undefined)
+      assert.notEqual(second.ctx.capabilityRegistry.get('generated/restart-probe', '0.1.0')?.status, 'active')
+      assert.equal(second.recoveryRoot.inspect().lastKnownGood?.owners.some((row) => row.owner === 'generated/restart-probe' && row.status === 'active'), false)
+      assert.ok(second.ctx.tools.get('remember_memory'))
+    } finally {
+      await second.ctx.fiber.dispose()
+    }
+  })
+
+  it('one missing generated artifact fails closed with zero generated mounts', async () => {
+    const home = mkdtempSync(join(tmpdir(), 'dsh-se-multi-'))
+    const { first, created, human } = await prepareCandidate(home)
+    const secondCandidate = await prepareSecondCandidate(first)
+    try {
+      await first.recoveryRoot.activate(created.id, human)
+      await first.recoveryRoot.activate(secondCandidate.created.id, secondCandidate.human)
+      assert.equal(await ping(first.ctx), 'pong')
+      assert.ok(first.ctx.tools.get('restart_probe_alt'))
+    } finally {
+      await first.ctx.fiber.dispose()
+    }
+    rmSync(join(home, 'self-extension', 'candidates', secondCandidate.created.id), { recursive: true, force: true })
+    const second = await bootAssistantControl({ home })
+    try {
+      assert.equal(second.diagnostics.safeMode, true)
+      assert.match(second.diagnostics.reasons.join('\n'), /missing-active-artifact/)
+      assert.equal(second.ctx.tools.get('restart_probe_ping'), undefined)
+      assert.equal(second.ctx.tools.get('restart_probe_alt'), undefined)
+      assert.ok(second.recoveryRoot.inspect())
+      assert.ok(second.ctx.tools.get('remember_memory'))
     } finally {
       await second.ctx.fiber.dispose()
     }

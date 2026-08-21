@@ -71,9 +71,18 @@ export function parseAuthorityFile(parsed: unknown): AuthorityFile {
 /** Single atomic authority file with named ownership sections. */
 export class DurableAuthorityStore implements RegistryPersistence {
   private file: AuthorityFile
+  private deferred = false
 
   constructor(private readonly home: SelfExtensionHome) {
     this.file = existsSync(home.authorityPath) ? parseAuthorityFile(JSON.parse(readFileSync(home.authorityPath, 'utf8'))) : EMPTY_AUTHORITY
+  }
+
+  beginDeferredWrites(): void {
+    this.deferred = true
+  }
+
+  endDeferredWrites(): void {
+    this.deferred = false
   }
 
   snapshot(): AuthorityFile {
@@ -109,12 +118,18 @@ export class DurableAuthorityStore implements RegistryPersistence {
     })
   }
 
+  /** One atomic replace of every authority section. */
+  commitAll(file: AuthorityFile): void {
+    this.file = { ...structuredClone(file), schemaVersion: SELF_EXTENSION_SCHEMA_VERSION }
+    writeJsonAtomic(this.home.authorityPath, this.file)
+  }
+
   private replace(patch: Partial<AuthorityFile>): void {
     this.file = {
       ...this.file,
       schemaVersion: SELF_EXTENSION_SCHEMA_VERSION,
       ...patch,
     }
-    writeJsonAtomic(this.home.authorityPath, this.file)
+    if (!this.deferred) writeJsonAtomic(this.home.authorityPath, this.file)
   }
 }

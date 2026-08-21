@@ -56,21 +56,25 @@ export function hydrateFromAuthority(authority: DurableAuthorityStore): Governan
 }
 
 export function persistGovernance(authority: DurableAuthorityStore, hydrate: GovernanceHydrate): void {
-  authority.saveGovernance({ approvals: hydrate.approvals, nextApproval: hydrate.nextApproval })
-  authority.saveActivation({
-    state: hydrate.state,
-    generation: hydrate.generation,
-    phase: hydrate.phase,
-    pendingCandidateId: hydrate.pendingCandidateId,
-  })
-  const previous = authority.snapshot().recovery.diagnostics
-  authority.saveRecovery({
-    current: hydrate.current,
-    lastKnownGood: hydrate.lastKnownGood,
-    rollbackTarget: hydrate.rollbackTarget,
-    lastFailure: hydrate.lastFailure,
-    safeMode: hydrate.safeMode,
-    diagnostics: previous,
+  const current = authority.snapshot()
+  authority.commitAll({
+    schemaVersion: current.schemaVersion,
+    registry: current.registry,
+    governance: { approvals: hydrate.approvals, nextApproval: hydrate.nextApproval },
+    activation: {
+      state: hydrate.state,
+      generation: hydrate.generation,
+      phase: hydrate.phase,
+      pendingCandidateId: hydrate.pendingCandidateId,
+    },
+    recovery: {
+      current: hydrate.current,
+      lastKnownGood: hydrate.lastKnownGood,
+      rollbackTarget: hydrate.rollbackTarget,
+      lastFailure: hydrate.lastFailure,
+      safeMode: hydrate.safeMode,
+      diagnostics: current.recovery.diagnostics,
+    },
   })
 }
 

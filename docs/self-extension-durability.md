@@ -14,7 +14,7 @@ Status: **Verified** by `test/self-extension-restart.test.ts`.
 | Activation | `authority.json` → `activation` | transaction state / generation / pending id |
 | Recovery | `authority.json` → `recovery` | LKG, Safe Mode, last failure, diagnostics |
 
-`authority.json` is one atomic write (temp + fsync + rename) with named sections so authority changes are not half-written. Schema version is `1`. Unknown or corrupt schema fails closed into Safe Mode / recovery; it never auto-activates.
+`authority.json` is one atomic write (temp + fsync + rename) with named sections so authority changes are not half-written. A successful activation commits Registry + Activation + Recovery/LKG as **one** snapshot replace; tentative Registry `active` metadata is not independently durable. Schema version is `1`. Unknown or corrupt schema fails closed into Safe Mode / recovery; it never auto-activates.
 
 Authoritative answers:
 
@@ -30,10 +30,11 @@ Authoritative answers:
 load authority + candidate index
 → validate schema
 → complete interrupted rollback / abandon interrupted pre-commit activation
-→ remount only committed generated actives after digest check
+→ remount only generated owners in the committed activation snapshot
+  (preflight every artifact/digest first; any failure → Safe Mode, zero generated mounts)
 ```
 
-LKG advances only after successful health + durable commit. A restart does not rewrite LKG merely because the process booted.
+Registry `active` does not independently authorize remount. LKG advances only after successful health + durable authority commit. A crash after a tentative Registry update and before that commit leaves prior LKG authoritative. A restart does not rewrite LKG merely because the process booted.
 
 ## Artifact retention
 
