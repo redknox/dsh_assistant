@@ -2,7 +2,7 @@
 
 Status: **Verified** by `test/registry.test.ts`. This is the Self-Extension answer to **What do I have?**
 
-It does **not** answer **What should change?** (Capability Resolution Review) or **May I change it?** (install/approval governance). Those remain later issues. See [docs/self-extension.md](./self-extension.md).
+It does **not** answer **What should change?** ([Capability Resolution Review](./capability-resolution.md)) or **May I change it?** (install/approval governance). See [docs/self-extension.md](./self-extension.md).
 
 ## Responsibilities
 
@@ -12,7 +12,7 @@ It does **not** answer **What should change?** (Capability Resolution Review) or
 
 ## Non-responsibilities
 
-- Capability Resolution Review (reuse / configure / evolve / adopt / provider / new-plugin).
+- Capability Resolution Review (reuse / configure / evolve / adopt / provider / new-plugin). See [docs/capability-resolution.md](./capability-resolution.md).
 - User approval of install, upgrade, remove, or switch.
 - Mounting, unmounting, or generating plugins.
 - Inferring approval from a previous version or a larger permission set.
@@ -22,7 +22,7 @@ A `status: active` registry row is metadata. It does not cause DSH to load that 
 
 ```text
 Capability Registry        → What do I have?
-Capability Resolution      → What should change?   (later issue)
+Capability Resolution      → What should change?   [implemented]
 Extension Governance       → May I change it?      (later issue)
 ```
 
@@ -69,4 +69,4 @@ Persistence stores `RegistryRecordSnapshot` DTOs, not domain records. Load decod
 
 `ctx.capabilityRegistry` is the application/DSH service. Optional model-facing tools `list_capabilities` and `lookup_capability` are **read-only** adapters. There are no register / approve / install tools.
 
-Later Capability Resolution Review should query `resolveActiveOwner` and `list` here, then produce a recommendation. This package does not implement that engine.
+Capability Resolution Review queries `resolveActiveOwner` and `list` here, then produces a recommendation. See [docs/capability-resolution.md](./capability-resolution.md).

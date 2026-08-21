@@ -11,6 +11,7 @@ import * as policyPlugin from '../plugins/policy-plugin.js'
 import type { PolicyPluginConfig } from '../plugins/policy-plugin.js'
 import * as registryPlugin from '../plugins/registry-plugin.js'
 import type { RegistryPluginConfig } from '../plugins/registry-plugin.js'
+import * as resolutionPlugin from '../plugins/resolution-plugin.js'
 
 export const name = 'dsh-assistant'
 export const inject = ['systemPrompt', 'agents']
@@ -27,6 +28,7 @@ export interface AssistantBundleConfig {
 /** Bundle entry: compose product plugins through public Cordis lifecycle. */
 export async function apply(ctx: Context, config: AssistantBundleConfig = {}) {
   await ctx.plugin(registryPlugin, config.registry)
+  await ctx.plugin(resolutionPlugin)
   await ctx.plugin(memoryPlugin, config.memory)
   await ctx.plugin(knowledgePlugin, config.knowledge)
   await ctx.plugin(integrationsPlugin)
@@ -38,6 +40,7 @@ export async function apply(ctx: Context, config: AssistantBundleConfig = {}) {
 export const PRODUCT_TOOL_NAMES = [
   'list_capabilities',
   'lookup_capability',
+  'review_capability_resolution',
   'remember_memory',
   'forget_memory',
   'recall_memory',

@@ -1,6 +1,6 @@
 # Self-Extension architecture and governance
 
-Status: governance contract is **Designed** and remains normative. The Capability Registry (**What do I have?**) is **Verified** — see [docs/capability-registry.md](./capability-registry.md). Candidate workspace, installer, and generated-plugin runtime are still **Unsupported**.
+Status: governance contract is **Designed** and remains normative. The Capability Registry (**What do I have?**) is **Verified** — see [docs/capability-registry.md](./capability-registry.md). Capability Resolution Review (**What should change?**) is **Verified** — see [docs/capability-resolution.md](./capability-resolution.md). Candidate workspace, installer, and generated-plugin runtime are still **Unsupported**.
 
 Companion documents: [ARCHITECTURE.md](../ARCHITECTURE.md) (layers and public seams), [ENGINEERING.md](../ENGINEERING.md) (normative contributor rules), [README.md](../README.md) (product boundary).
 
@@ -24,7 +24,7 @@ These concerns must stay separate. Do not collapse them into one “the assistan
 | Question | Concern | Owner of the answer |
 | --- | --- | --- |
 | **What do I have?** | Capability and ownership visibility | Capability Registry (`ctx.capabilityRegistry`) |
-| **What should change?** | Capability Resolution Review | Design-time review evidence |
+| **What should change?** | Capability Resolution Review | `ctx.capabilityResolution.review` ([docs/capability-resolution.md](./capability-resolution.md)) |
 | **May I change it?** | User approval / governance | Explicit user approval; never the assistant |
 
 Visibility is not a change proposal. A change proposal is not authorization. Authorization is not a license to expand capabilities or permissions later without a new review.
@@ -68,6 +68,8 @@ status: active
 ```
 
 ## Capability Resolution Review
+
+The executable review lives at `ctx.capabilityResolution.review`. Details: [docs/capability-resolution.md](./capability-resolution.md). It is advisory only.
 
 Before proposing a **new** plugin, the assistant must produce a Capability Resolution Review. The review is mandatory evidence, not optional commentary.
 
@@ -224,4 +226,4 @@ Capability Resolution Review:
 - First self-generated plugin vertical slice
 - Any change to DSH Agent Loop internals
 
-The Capability Registry / ownership model is now **Verified** ([docs/capability-registry.md](./capability-registry.md)). Next: Capability Resolution Review that consumes registry facts, still without authorizing runtime changes.
+The Capability Registry and Capability Resolution Review are **Verified**. Next: Candidate Development Workspace + build/test/validation, still without authorizing runtime changes.
