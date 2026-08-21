@@ -17,6 +17,13 @@ export type DiscoveryReportStatus = (typeof DISCOVERY_REPORT_STATUSES)[number]
 export const DISCOVERY_ELIGIBILITY = ['match', 'compatible', 'eligible', 'rejected'] as const
 export type DiscoveryEligibility = (typeof DISCOVERY_ELIGIBILITY)[number]
 
+/** Owned by the discovery provider. Raw metadata cannot set or elevate this. */
+export const DISCOVERY_SOURCE_TRUST = ['trusted', 'untrusted'] as const
+export type DiscoverySourceTrust = (typeof DISCOVERY_SOURCE_TRUST)[number]
+
+export const DISCOVERY_AUTHORITIES = ['host', 'untrusted'] as const
+export type DiscoveryAuthority = (typeof DISCOVERY_AUTHORITIES)[number]
+
 export interface DiscoveredEffects {
   readonly filesystem: readonly string[]
   readonly network: readonly string[]
@@ -32,7 +39,12 @@ export interface DiscoveryQuery {
 export interface DiscoveredCapability {
   readonly identity: string
   readonly source: string
+  /** Provider-stamped class. Raw `provenance` claims never override this. */
   readonly provenance: DiscoveryProvenance
+  /** What untrusted metadata claimed, when different from the stamped class. */
+  readonly claimedProvenance?: string
+  /** Provider/source authority. Never read from candidate metadata. */
+  readonly sourceTrust: DiscoverySourceTrust
   readonly version: string
   readonly capabilities: readonly string[]
   readonly seams: readonly string[]

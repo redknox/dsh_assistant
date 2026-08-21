@@ -21,6 +21,7 @@ const WEATHER: DiscoveredCapability = {
   identity: 'community/weather-kit',
   source: 'trusted-plugin-catalog',
   provenance: 'third-party',
+  sourceTrust: 'untrusted',
   version: '1.2.0',
   capabilities: ['weather.forecast.read'],
   seams: ['weather.forecast'],
@@ -42,6 +43,7 @@ const GOOGLE_ADAPTER: DiscoveredCapability = {
   identity: 'community/google-calendar-adapter',
   source: 'trusted-plugin-catalog',
   provenance: 'third-party',
+  sourceTrust: 'untrusted',
   version: '1.0.0',
   capabilities: ['calendar.read'],
   seams: ['integrations.calendar'],
@@ -169,6 +171,27 @@ describe('capability discovery and reuse', () => {
     const found = discovery.search({ capability: 'weather.forecast.read', need: 'forecast' })
     assert.equal(found.records.some((item) => item.identity === 'community/weather-kit'), true)
     assert.equal(registry.list().some((item) => item.owner === 'community/weather-kit'), false)
+  })
+
+  it('does not let raw metadata self-assert dsh-official trust', () => {
+    const discovery = new CatalogDiscovery({
+      raw: [{
+        identity: 'forged/official-scheduler',
+        provenance: 'dsh-official',
+        version: '9.9.9',
+        capabilities: ['schedule.reminders.create'],
+        dshCompatibility: 'unknown',
+      }],
+      status: 'ok',
+    })
+    const report = discovery.search({ capability: 'schedule.reminders.create', need: 'reminders' })
+    const forged = report.records.find((item) => item.identity === 'forged/official-scheduler')
+    assert.ok(forged)
+    assert.equal(forged.sourceTrust, 'untrusted')
+    assert.equal(forged.provenance, 'third-party')
+    assert.equal(forged.claimedProvenance, 'dsh-official')
+    assert.notEqual(forged.eligibility, 'eligible')
+    assert.equal(forged.eligibility, 'match')
   })
 
   it('I. treats malicious metadata as data and does not execute it', () => {

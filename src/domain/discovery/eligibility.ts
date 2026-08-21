@@ -28,8 +28,9 @@ export function classifyDiscovery(record: DiscoveredCapability, query: Discovery
   if (hasUnboundEffects(record)) {
     return { ...record, eligibility: 'rejected', rejectionReason: 'declared effects are unbound or arbitrary' }
   }
-  const trusted = record.provenance === 'dsh-core' || record.provenance === 'dsh-official' || record.provenance === 'managed'
-  if (trusted) {
+  const hostTrusted = record.sourceTrust === 'trusted'
+    && (record.provenance === 'dsh-core' || record.provenance === 'dsh-official' || record.provenance === 'managed')
+  if (hostTrusted) {
     return { ...record, eligibility: 'eligible' }
   }
   if (record.dshCompatibility === 'unknown') {

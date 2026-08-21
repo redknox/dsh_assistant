@@ -4,6 +4,7 @@ import { EMPTY_EFFECTS } from './types.js'
 import type {
   CapabilityDiscovery,
   DiscoveredCapability,
+  DiscoveryAuthority,
   DiscoveryQuery,
   DiscoveryReport,
   DiscoveryReportStatus,
@@ -14,6 +15,21 @@ export interface CatalogDiscoveryOptions {
   readonly raw?: readonly Record<string, unknown>[]
   readonly status?: DiscoveryReportStatus
   readonly source?: string
+  /** Host-owned typed catalogs may be trusted. Raw metadata is always untrusted. */
+  readonly authority?: DiscoveryAuthority
+}
+
+function stampAuthority(record: DiscoveredCapability, authority: DiscoveryAuthority): DiscoveredCapability {
+  if (authority === 'host') {
+    return { ...record, sourceTrust: 'trusted' }
+  }
+  const claimed = record.provenance !== 'third-party' ? record.provenance : record.claimedProvenance
+  return {
+    ...record,
+    sourceTrust: 'untrusted',
+    provenance: 'third-party',
+    claimedProvenance: claimed,
+  }
 }
 
 /** Local catalog. Never imports, installs, or executes package code. */
@@ -25,10 +41,12 @@ export class CatalogDiscovery implements CapabilityDiscovery {
   constructor(options: CatalogDiscoveryOptions = {}) {
     this.status = options.status ?? 'ok'
     this.source = options.source ?? 'catalog'
+    const authority = options.authority ?? 'untrusted'
     const fromRaw = (options.raw ?? [])
       .map((item) => normalizeDiscoveredCapability(item))
       .filter((item): item is DiscoveredCapability => item !== undefined)
-    this.records = [...(options.records ?? []), ...fromRaw]
+    const fromTyped = (options.records ?? []).map((item) => stampAuthority(item, authority))
+    this.records = [...fromTyped, ...fromRaw]
   }
 
   search(query: DiscoveryQuery): DiscoveryReport {
@@ -82,6 +100,7 @@ export const DSH_NATIVE_CATALOG: readonly DiscoveredCapability[] = [
     identity: 'dsh/schedule',
     source: 'dsh-public',
     provenance: 'dsh-core',
+    sourceTrust: 'trusted',
     version: '0.1.0-rc.8',
     capabilities: ['schedule.reminders.create', 'schedule.jobs.run'],
     seams: ['dsh.schedule'],
@@ -100,6 +119,7 @@ export const DSH_NATIVE_CATALOG: readonly DiscoveredCapability[] = [
     identity: 'dsh/llm',
     source: 'dsh-public',
     provenance: 'dsh-core',
+    sourceTrust: 'trusted',
     version: '0.1.0-rc.8',
     capabilities: ['llm.provider'],
     seams: ['dsh.llm'],
@@ -119,6 +139,7 @@ export const DSH_NATIVE_CATALOG: readonly DiscoveredCapability[] = [
     identity: 'dsh/jobs',
     source: 'dsh-public',
     provenance: 'dsh-core',
+    sourceTrust: 'trusted',
     version: '0.1.0-rc.8',
     capabilities: ['jobs.run'],
     seams: ['dsh.jobs'],
@@ -137,6 +158,7 @@ export const DSH_NATIVE_CATALOG: readonly DiscoveredCapability[] = [
     identity: 'dsh/tools',
     source: 'dsh-public',
     provenance: 'dsh-core',
+    sourceTrust: 'trusted',
     version: '0.1.0-rc.8',
     capabilities: ['tools.register'],
     seams: ['dsh.tools'],
@@ -155,12 +177,13 @@ export const DSH_NATIVE_CATALOG: readonly DiscoveredCapability[] = [
 
 export function createDefaultDiscovery(thirdParty: CatalogDiscoveryOptions = {}): CapabilityDiscovery {
   return new CompositeDiscovery([
-    new CatalogDiscovery({ records: DSH_NATIVE_CATALOG, source: 'dsh-native', status: 'ok' }),
+    new CatalogDiscovery({ records: DSH_NATIVE_CATALOG, source: 'dsh-native', status: 'ok', authority: 'host' }),
     new CatalogDiscovery({
       records: thirdParty.records,
       raw: thirdParty.raw,
       source: thirdParty.source ?? 'trusted-plugin-catalog',
       status: thirdParty.status ?? 'incomplete',
+      authority: 'untrusted',
     }),
   ])
 }

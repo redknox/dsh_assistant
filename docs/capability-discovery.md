@@ -37,6 +37,13 @@ Need
 
 Provenance is not trust. Eligibility is not approval. Approval is not activation.
 
+Trust is stamped by the **discovery provider**, never by candidate metadata:
+
+- host-owned typed catalogs (DSH-native) may carry `sourceTrust: trusted` and a `dsh-core` / `dsh-official` / `managed` class;
+- raw or third-party catalog records are always `sourceTrust: untrusted` and `provenance: third-party`, even if metadata claims `dsh-official`.
+
+A forged `provenance: dsh-official` field is stored as `claimedProvenance` only. It cannot skip compatibility checks or become eligible on that claim.
+
 ## Provider seam
 
 ```text

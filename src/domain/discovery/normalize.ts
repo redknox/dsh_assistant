@@ -47,16 +47,21 @@ function asProvenance(value: unknown): DiscoveryProvenance | undefined {
     : undefined
 }
 
-/** Read declared metadata only. Extra keys stay inspectable and are never executed. */
+/**
+ * Read declared metadata only. Extra keys stay inspectable and are never executed.
+ * Provenance/trust are stamped here as untrusted third-party; raw `provenance` is a claim only.
+ */
 export function normalizeDiscoveredCapability(raw: Record<string, unknown>): DiscoveredCapability | undefined {
   const identity = typeof raw.identity === 'string' ? raw.identity : undefined
-  const provenance = asProvenance(raw.provenance)
-  if (identity === undefined || identity === '' || provenance === undefined) return undefined
+  if (identity === undefined || identity === '') return undefined
+  const claimed = asProvenance(raw.provenance) ?? (typeof raw.provenance === 'string' ? raw.provenance : undefined)
   const unexpectedFields = Object.keys(raw).filter((key) => !KNOWN_KEYS.has(key) || key === 'scripts' || key === 'entry' || key === 'install')
   return {
     identity,
     source: typeof raw.source === 'string' ? raw.source : 'unknown',
-    provenance,
+    provenance: 'third-party',
+    claimedProvenance: claimed !== undefined && claimed !== 'third-party' ? claimed : undefined,
+    sourceTrust: 'untrusted',
     version: typeof raw.version === 'string' ? raw.version : 'unknown',
     capabilities: asStringList(raw.capabilities),
     seams: asStringList(raw.seams),
