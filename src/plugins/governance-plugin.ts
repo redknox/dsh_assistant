@@ -46,6 +46,8 @@ export class ExtensionRecoveryService extends Service implements ExtensionRecove
 export interface GovernancePluginConfig {
   /** Bootstrap-only callback. Ordinary plugins must not receive this. */
   readonly attachRecoveryRoot?: (root: RecoveryRoot) => void
+  readonly persist?: () => void
+  readonly hydrate?: import('../domain/governance/service.js').GovernanceHydrate
 }
 
 export const name = 'dsh-assistant-governance'
@@ -57,6 +59,7 @@ export async function apply(ctx: Context, config: GovernancePluginConfig = {}) {
     ctx.capabilityRegistry,
     ctx.candidateWorkspace,
     new CordisActivationRuntime(ctx),
+    { persist: config.persist, hydrate: config.hydrate },
   )
   config.attachRecoveryRoot?.(root)
   await ctx.plugin(class extends ExtensionGovernanceService {

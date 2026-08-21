@@ -225,4 +225,4 @@ Capability Resolution Review:
 - Sandbox or container execution framework
 - Any change to DSH Agent Loop internals
 
-Registry, Resolution, candidate validation, governed activation/recovery, and the first Obsidian Vault generated-plugin slice are **Verified**.
+Registry, Resolution, candidate validation, governed activation/recovery, the first Obsidian Vault generated-plugin slice, and durable restart reconstruction / operator control (`docs/self-extension-durability.md`, `docs/self-extension-operations.md`) are **Verified**.

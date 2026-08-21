@@ -8,6 +8,8 @@ import SessionStore, { SessionId } from '@deepseek-ai/dsh-session'
 import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
 import ToolRuntime from '@deepseek-ai/dsh-tools'
 import type { RecoveryRoot } from '../domain/governance/root.js'
+import { persistCandidates, persistGovernance, openDurableSelfExtension, hydrateFromAuthority } from '../domain/self-extension/durable.js'
+import { reconstructCommittedExtensions } from '../domain/self-extension/reconstruct.js'
 import * as assistantProduct from '../product/bundle.js'
 import type { MemoryPluginConfig } from '../plugins/memory-plugin.js'
 
@@ -19,14 +21,30 @@ export interface BootOptions {
   knowledgeFixturePaths?: string[]
   memory?: MemoryPluginConfig
   safeMode?: boolean
+  /** Durable Self-Extension home. Falls back to DSH_ASSISTANT_HOME. */
+  home?: string
+}
+
+export interface BootDiagnostics {
+  readonly persistence: 'ok' | 'absent' | 'corrupt' | 'unknown-schema'
+  readonly recoveryRequired: boolean
+  readonly safeMode: boolean
+  readonly reasons: readonly string[]
 }
 
 export interface AssistantControl {
   readonly ctx: Context
   readonly recoveryRoot: RecoveryRoot
+  readonly diagnostics: BootDiagnostics
 }
 
 async function bootStack(options: BootOptions = {}): Promise<AssistantControl> {
+  const opened = openDurableSelfExtension(options.home)
+  const durable = opened.durable
+  const persistBroken = opened.loadError !== undefined
+  const safeMode = Boolean(options.safeMode) || persistBroken || Boolean(durable?.authority.snapshot().recovery.safeMode)
+  const holder: { root?: RecoveryRoot } = {}
+
   const ctx = new Context()
   await ctx.plugin(InvariantRegistry)
   await ctx.plugin(SessionStore)
@@ -34,16 +52,27 @@ async function bootStack(options: BootOptions = {}): Promise<AssistantControl> {
   await ctx.plugin(LlmRuntime)
   await ctx.plugin(SystemPrompt, {})
   await ctx.plugin(ToolRuntime)
-  if (!options.safeMode) await ctx.plugin(LocalJobRegistry)
+  if (!safeMode) await ctx.plugin(LocalJobRegistry)
   await ctx.plugin(AgentLoop, { agents: [] })
   let recoveryRoot: RecoveryRoot | undefined
   await ctx.plugin(assistantProduct, {
     memory: options.memory,
     knowledge: { fixturePaths: options.knowledgeFixturePaths },
-    safeMode: options.safeMode,
-    jobs: options.safeMode ? { autoTickMs: null } : undefined,
+    safeMode,
+    jobs: safeMode ? { autoTickMs: null } : undefined,
+    registry: durable === undefined ? undefined : { persistence: durable.authority },
+    candidate: durable === undefined ? undefined : {
+      workspaceRoot: durable.home.candidateArea,
+      restore: persistBroken ? [] : durable.candidates.restore(durable.home.candidateArea),
+      persist: (records) => persistCandidates(durable.candidates, records, ctx.capabilityRegistry),
+    },
     governance: {
+      hydrate: persistBroken || durable === undefined ? undefined : hydrateFromAuthority(durable.authority),
+      persist: durable === undefined ? undefined : () => {
+        if (holder.root) persistGovernance(durable.authority, holder.root.service.exportHydrate())
+      },
       attachRecoveryRoot: (root) => {
+        holder.root = root
         recoveryRoot = root
       },
     },
@@ -51,7 +80,25 @@ async function bootStack(options: BootOptions = {}): Promise<AssistantControl> {
   if (recoveryRoot === undefined) {
     throw new Error('bootstrap did not attach the recovery root')
   }
-  return { ctx, recoveryRoot }
+
+  const reconstruction = persistBroken
+    ? { diagnostics: opened.diagnostics, safeMode: true, recoveryRequired: true }
+    : await reconstructCommittedExtensions(recoveryRoot, durable)
+
+  const persistence: BootDiagnostics['persistence'] = persistBroken
+    ? (opened.loadError?.name === 'PersistenceSchemaError' ? 'unknown-schema' : 'corrupt')
+    : durable === undefined ? 'absent' : 'ok'
+
+  return {
+    ctx,
+    recoveryRoot,
+    diagnostics: {
+      persistence,
+      recoveryRequired: reconstruction.recoveryRequired || persistBroken,
+      safeMode: reconstruction.safeMode || persistBroken,
+      reasons: [...opened.diagnostics, ...reconstruction.diagnostics],
+    },
+  }
 }
 
 export async function bootAssistantControl(options: BootOptions = {}): Promise<AssistantControl> {

@@ -24,13 +24,25 @@ interface MutableCandidate extends CandidateRecord {
   manifest: CandidateRecord['manifest']
 }
 
+export interface CandidateServiceOptions {
+  readonly restore?: readonly CandidateRecord[]
+  readonly persist?: (records: readonly CandidateRecord[]) => void
+}
+
 export class CandidateService implements CandidateWorkspace, CandidateValidation {
   private readonly records = new Map<string, MutableCandidate>()
+  private readonly persistRecords?: (records: readonly CandidateRecord[]) => void
 
   constructor(
     private readonly registry: RegistryReadModel,
     private readonly areaRoot: string,
-  ) {}
+    options: CandidateServiceOptions = {},
+  ) {
+    this.persistRecords = options.persist
+    for (const record of options.restore ?? []) {
+      this.records.set(record.id, { ...record })
+    }
+  }
 
   create(input: CreateCandidateInput): CandidateRecord {
     assertChangeReview(input.review)
@@ -62,6 +74,7 @@ export class CandidateService implements CandidateWorkspace, CandidateValidation
       sealed: false,
     }
     this.records.set(id, record)
+    this.flush()
     return this.snapshot(record)
   }
 
@@ -77,7 +90,9 @@ export class CandidateService implements CandidateWorkspace, CandidateValidation
     const record = this.require(id)
     this.assertMutable(record)
     writeSourceFile(record.workspaceRoot, relativePath, content)
-    return this.snapshot(this.markDeveloping(record))
+    const next = this.snapshot(this.markDeveloping(record))
+    this.flush()
+    return next
   }
 
   readFile(id: string, relativePath: string): string {
@@ -115,7 +130,9 @@ export class CandidateService implements CandidateWorkspace, CandidateValidation
       manifest,
     )
     writeSourceFile(record.workspaceRoot, 'candidate.manifest.json', `${JSON.stringify(record.manifest, null, 2)}\n`)
-    return this.snapshot(this.markDeveloping(record))
+    const next = this.snapshot(this.markDeveloping(record))
+    this.flush()
+    return next
   }
 
   diff(id: string): CandidateDiff {
@@ -131,6 +148,7 @@ export class CandidateService implements CandidateWorkspace, CandidateValidation
     const record = this.require(id)
     removeTree(record.workspaceRoot)
     this.records.delete(id)
+    this.flush()
   }
 
   seal(id: string): CandidateRecord {
@@ -139,7 +157,9 @@ export class CandidateService implements CandidateWorkspace, CandidateValidation
       throw new CandidateContractError(`cannot seal candidate ${id} before validation`)
     }
     record.sealed = true
-    return this.snapshot(record)
+    const next = this.snapshot(record)
+    this.flush()
+    return next
   }
 
   validate(id: string): ValidationReport {
@@ -152,6 +172,7 @@ export class CandidateService implements CandidateWorkspace, CandidateValidation
     record.digest = report.digest
     record.validation = report
     record.lifecycle = lifecycleFromReport(report)
+    this.flush()
     return report
   }
 
@@ -172,6 +193,10 @@ export class CandidateService implements CandidateWorkspace, CandidateValidation
     record.digest = undefined
     record.validation = undefined
     return record
+  }
+
+  private flush(): void {
+    this.persistRecords?.([...this.records.values()].map((record) => this.snapshot(record)))
   }
 
   private snapshot(record: MutableCandidate): CandidateRecord {

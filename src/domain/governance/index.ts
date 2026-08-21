@@ -29,5 +29,5 @@ export {
 } from './errors.js'
 export { approvalFingerprint, approvalSummary, fingerprintFromCandidate } from './fingerprint.js'
 export { InMemoryActivationRuntime, type ActivationPrepareContext, type ActivationRuntime } from './runtime.js'
-export { GovernanceService } from './service.js'
+export { GovernanceService, SimulatedCrashError, type ActivationInterrupt, type GovernanceHydrate } from './service.js'
 export { RecoveryRoot } from './root.js'

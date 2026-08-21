@@ -1,3 +1,6 @@
+import { existsSync } from 'node:fs'
+import { digestFiles } from '../candidate/digest.js'
+import { listSourceFiles } from '../candidate/files.js'
 import type { CapabilityRegistry, RegistryRegisterInput } from '../registry/types.js'
 import type { CandidateRecord, CandidateWorkspace } from '../candidate/types.js'
 import { ActivationDeniedError, GovernanceAuthorityError, GovernanceContractError } from './errors.js'
@@ -21,6 +24,30 @@ import type {
 } from './types.js'
 import { TrustedAuthorityCredential as AuthorityCredential } from './types.js'
 
+export type ActivationInterrupt = 'activation-pending' | 'prepare' | 'commit' | 'rollback-pending'
+
+export interface GovernanceHydrate {
+  readonly approvals: readonly ApprovalRecord[]
+  readonly nextApproval: number
+  readonly generation: number
+  readonly state: ActivationState
+  readonly phase?: ActivationPhase
+  readonly pendingCandidateId?: string
+  readonly current?: ActivationSnapshot
+  readonly lastKnownGood?: ActivationSnapshot
+  readonly rollbackTarget?: ActivationSnapshot
+  readonly lastFailure?: ActivationFailure
+  readonly safeMode: boolean
+}
+
+export class SimulatedCrashError extends Error {
+  readonly retainDurableState = true
+  constructor(point: ActivationInterrupt) {
+    super(`simulated crash after ${point}`)
+    this.name = 'SimulatedCrashError'
+  }
+}
+
 function ownersFromRegistry(registry: CapabilityRegistry): ActivationSnapshot['owners'] {
   return registry.list({ status: 'active' }).map((record) => ({
     owner: record.owner,
@@ -40,15 +67,42 @@ export class GovernanceService implements ExtensionGovernance, ExtensionActivati
   private rollbackTarget?: ActivationSnapshot
   private lastFailure?: ActivationFailure
   private safeMode = false
+  private phase?: ActivationPhase
+  private pendingCandidateId?: string
+  interruptAfter?: ActivationInterrupt
+  private readonly persistHook?: () => void
 
   constructor(
     private readonly registry: CapabilityRegistry,
     private readonly workspace: CandidateWorkspace,
     readonly runtime: ActivationRuntime = new InMemoryActivationRuntime(),
     private readonly rootId: symbol = Symbol('unbound-governance'),
+    options: { persist?: () => void; hydrate?: GovernanceHydrate } = {},
   ) {
-    this.current = this.captureSnapshot()
-    this.lastKnownGood = this.current
+    this.persistHook = options.persist
+    if (options.hydrate && (options.hydrate.generation > 0 || options.hydrate.current !== undefined)) {
+      this.applyHydrate(options.hydrate)
+    } else {
+      this.current = this.captureSnapshot()
+      this.lastKnownGood = this.current
+      if (options.hydrate?.approvals.length) this.applyHydrate({ ...options.hydrate, current: this.current, lastKnownGood: this.lastKnownGood, generation: this.generation })
+    }
+  }
+
+  exportHydrate(): GovernanceHydrate {
+    return {
+      approvals: [...this.approvals.values()],
+      nextApproval: this.nextApproval,
+      generation: this.generation,
+      state: this.state,
+      phase: this.phase,
+      pendingCandidateId: this.pendingCandidateId,
+      current: this.current,
+      lastKnownGood: this.lastKnownGood,
+      rollbackTarget: this.rollbackTarget,
+      lastFailure: this.lastFailure,
+      safeMode: this.safeMode,
+    }
   }
 
   requestApproval(candidateId: string): ApprovalRecord {
@@ -69,6 +123,7 @@ export class GovernanceService implements ExtensionGovernance, ExtensionActivati
       summary: approvalSummary(record, diff),
     }
     this.approvals.set(candidateId, created)
+    this.flush()
     return created
   }
 
@@ -132,6 +187,7 @@ export class GovernanceService implements ExtensionGovernance, ExtensionActivati
       summary: approvalSummary(record, diff),
     }
     this.approvals.set(input.candidateId, created)
+    this.flush()
     return created
   }
 
@@ -141,8 +197,12 @@ export class GovernanceService implements ExtensionGovernance, ExtensionActivati
     if (!gate.ok) throw new ActivationDeniedError(gate.denials)
     const { record } = this.facts(candidateId)
     this.state = 'activation-pending'
+    this.pendingCandidateId = candidateId
+    this.phase = 'verify-eligibility'
     const previousGood = this.lastKnownGood ?? this.captureSnapshot()
     this.rollbackTarget = previousGood
+    this.flush()
+    await this.maybeInterrupt('activation-pending')
     let phase: ActivationPhase = 'capture-lkg'
     try {
       this.state = 'activating'
@@ -159,6 +219,8 @@ export class GovernanceService implements ExtensionGovernance, ExtensionActivati
         runtimeSeams: record.manifest.runtimeSeams,
       })
       if (!prepared.ok) throw new Error(prepared.diagnostics ?? 'prepare failed')
+      this.flush()
+      await this.maybeInterrupt('prepare')
       phase = 'health'
       const health = await this.runtime.verifyHealth(candidateId, [
         ...record.manifest.runtimeSeams,
@@ -172,9 +234,14 @@ export class GovernanceService implements ExtensionGovernance, ExtensionActivati
       this.current = this.captureSnapshot()
       this.lastKnownGood = this.current
       this.state = 'active'
+      this.pendingCandidateId = undefined
+      this.phase = undefined
       this.lastFailure = undefined
+      this.flush()
+      await this.maybeInterrupt('commit')
       return this.status()
     } catch (error) {
+      if (error instanceof SimulatedCrashError) throw error
       const restored = await this.restoreSnapshot(previousGood)
       this.current = this.captureSnapshot()
       this.lastKnownGood = previousGood
@@ -191,6 +258,7 @@ export class GovernanceService implements ExtensionGovernance, ExtensionActivati
         safeModeRequired: !restored,
       }
       if (!restored) this.safeMode = true
+      this.flush()
       return this.status()
     }
   }
@@ -199,12 +267,10 @@ export class GovernanceService implements ExtensionGovernance, ExtensionActivati
     this.assertCredential(credential)
     const target = this.rollbackTarget ?? this.lastKnownGood
     if (target === undefined) throw new GovernanceContractError('no last-known-good snapshot to restore')
-    const restored = await this.restoreSnapshot(target)
-    this.current = this.captureSnapshot()
-    this.lastKnownGood = target
-    this.state = restored ? 'rolled-back' : 'activation-failed'
-    this.safeMode = this.safeMode || !restored
-    return this.status()
+    this.state = 'rollback-pending'
+    this.flush()
+    await this.maybeInterrupt('rollback-pending')
+    return this.finishRollback(target)
   }
 
   enterSafeMode(credential: TrustedAuthorityCredential): ActivationStatus {
@@ -217,6 +283,16 @@ export class GovernanceService implements ExtensionGovernance, ExtensionActivati
     this.safeMode = true
     this.state = 'safe-mode'
     this.current = this.captureSnapshot()
+    this.flush()
+    return this.status()
+  }
+
+  exitSafeMode(credential: TrustedAuthorityCredential): ActivationStatus {
+    this.assertCredential(credential)
+    this.safeMode = false
+    this.state = this.lastKnownGood === undefined ? 'idle' : 'active'
+    this.current = this.captureSnapshot()
+    this.flush()
     return this.status()
   }
 
@@ -224,6 +300,131 @@ export class GovernanceService implements ExtensionGovernance, ExtensionActivati
     this.assertCredential(credential)
     this.registry.transitionStatus(owner, version, 'disabled')
     this.current = this.captureSnapshot()
+    this.flush()
+  }
+
+  async remountCommittedGenerated(): Promise<string[]> {
+    const diagnostics: string[] = []
+    if (this.safeMode) return diagnostics
+    for (const record of this.registry.list({ status: 'active' })) {
+      if (!record.owner.startsWith('generated/')) continue
+      const candidate = this.workspace.list().find((item) => item.owner === record.owner && item.version === record.version)
+      if (candidate === undefined) {
+        diagnostics.push(`missing-active-artifact:${record.owner}@${record.version}`)
+        continue
+      }
+      const integrity = this.verifySealedArtifact(candidate)
+      if (integrity !== undefined) {
+        diagnostics.push(integrity)
+        continue
+      }
+      const prepared = await this.runtime.prepare(candidate.id, {
+        workspaceRoot: candidate.workspaceRoot,
+        entryPoints: candidate.manifest.entryPoints,
+        owner: candidate.owner,
+        resolutionKind: candidate.manifest.resolutionKind,
+        baseVersion: candidate.baseVersion,
+        tools: candidate.manifest.tools,
+        services: candidate.manifest.services,
+        providers: candidate.manifest.providers,
+        runtimeSeams: candidate.manifest.runtimeSeams,
+      })
+      if (!prepared.ok) {
+        diagnostics.push(prepared.diagnostics ?? `prepare-failed:${candidate.id}`)
+        continue
+      }
+      await this.runtime.commit(candidate.id)
+    }
+    if (diagnostics.length > 0) {
+      this.safeMode = true
+      this.state = 'safe-mode'
+      this.lastFailure = {
+        candidateId: this.pendingCandidateId ?? 'restart',
+        version: '',
+        digest: '',
+        phase: 'prepare',
+        diagnostics: diagnostics.join('; '),
+        rollbackAttempted: false,
+        rollbackSucceeded: false,
+        safeModeRequired: true,
+      }
+      this.flush()
+    }
+    return diagnostics
+  }
+
+  completeInterruptedActivation(): void {
+    if (this.state !== 'activation-pending' && this.state !== 'activating') return
+    this.lastFailure = {
+      candidateId: this.pendingCandidateId ?? 'unknown',
+      version: '',
+      digest: '',
+      phase: this.phase ?? 'prepare',
+      diagnostics: 'activation interrupted before durable commit; prior LKG remains authoritative',
+      rollbackAttempted: false,
+      rollbackSucceeded: true,
+      restoredLkgGeneration: this.lastKnownGood?.generation,
+      safeModeRequired: false,
+    }
+    this.state = 'activation-failed'
+    this.pendingCandidateId = undefined
+    this.phase = undefined
+    this.flush()
+  }
+
+  async completeInterruptedRollback(): Promise<void> {
+    if (this.state !== 'rollback-pending') return
+    const target = this.rollbackTarget ?? this.lastKnownGood
+    if (target === undefined) {
+      this.safeMode = true
+      this.state = 'safe-mode'
+      this.flush()
+      return
+    }
+    await this.finishRollback(target)
+  }
+
+  private async finishRollback(target: ActivationSnapshot): Promise<ActivationStatus> {
+    const restored = await this.restoreSnapshot(target)
+    this.current = this.captureSnapshot()
+    this.lastKnownGood = target
+    this.state = restored ? 'rolled-back' : 'activation-failed'
+    this.safeMode = this.safeMode || !restored
+    this.pendingCandidateId = undefined
+    this.phase = undefined
+    this.flush()
+    return this.status()
+  }
+
+  private verifySealedArtifact(record: CandidateRecord): string | undefined {
+    if (!existsSync(record.workspaceRoot)) return `missing-active-artifact:${record.id}`
+    if (record.digest === undefined) return `digest-mismatch:${record.id}`
+    const digest = digestFiles(record.workspaceRoot, listSourceFiles(record.workspaceRoot))
+    if (digest !== record.digest) return `digest-mismatch:${record.id}`
+    return undefined
+  }
+
+  private applyHydrate(hydrate: GovernanceHydrate): void {
+    this.approvals.clear()
+    for (const approval of hydrate.approvals) this.approvals.set(approval.candidateId, approval)
+    this.nextApproval = hydrate.nextApproval
+    this.generation = hydrate.generation
+    this.state = hydrate.state
+    this.phase = hydrate.phase
+    this.pendingCandidateId = hydrate.pendingCandidateId
+    this.current = hydrate.current
+    this.lastKnownGood = hydrate.lastKnownGood
+    this.rollbackTarget = hydrate.rollbackTarget
+    this.lastFailure = hydrate.lastFailure
+    this.safeMode = hydrate.safeMode
+  }
+
+  private flush(): void {
+    this.persistHook?.()
+  }
+
+  private async maybeInterrupt(point: ActivationInterrupt): Promise<void> {
+    if (this.interruptAfter === point) throw new SimulatedCrashError(point)
   }
 
   private assertCredential(credential: TrustedAuthorityCredential): void {

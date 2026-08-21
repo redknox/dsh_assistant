@@ -53,6 +53,7 @@ export class CapabilityRegistryService extends Service implements CapabilityRegi
 export interface RegistryPluginConfig {
   /** Tests may skip Core MVP bootstrap and seed records themselves. */
   bootstrap?: boolean
+  readonly persistence?: import('../domain/registry/persistence.js').RegistryPersistence
 }
 
 export const name = 'dsh-assistant-registry'
@@ -60,8 +61,8 @@ export const inject = ['tools']
 
 /** Descriptive registry only. Status updates never mount or unmount DSH plugins. */
 export async function apply(ctx: Context, config: RegistryPluginConfig = {}) {
-  const registry = new RegistryService(new InMemoryRegistryPersistence())
-  if (config.bootstrap !== false) bootstrapCoreInventory((input) => registry.register(input))
+  const registry = new RegistryService(config.persistence ?? new InMemoryRegistryPersistence())
+  if (config.bootstrap !== false && registry.list().length === 0) bootstrapCoreInventory((input) => registry.register(input))
   await ctx.plugin(class extends CapabilityRegistryService {
     constructor(scope: Context) {
       super(scope, registry)

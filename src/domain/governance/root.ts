@@ -2,7 +2,7 @@ import type { CapabilityRegistry } from '../registry/types.js'
 import type { CandidateWorkspace } from '../candidate/types.js'
 import { GovernanceAuthorityError } from './errors.js'
 import { InMemoryActivationRuntime, type ActivationRuntime } from './runtime.js'
-import { GovernanceService } from './service.js'
+import { GovernanceService, type ActivationInterrupt, type GovernanceHydrate } from './service.js'
 import type {
   ApprovalAuthority,
   ExtensionActivation,
@@ -24,8 +24,9 @@ export class RecoveryRoot {
     registry: CapabilityRegistry,
     workspace: CandidateWorkspace,
     runtime: ActivationRuntime = new InMemoryActivationRuntime(),
+    options: { persist?: () => void; hydrate?: GovernanceHydrate } = {},
   ) {
-    this.service = new GovernanceService(registry, workspace, runtime, this.rootId)
+    this.service = new GovernanceService(registry, workspace, runtime, this.rootId, options)
   }
 
   issueAuthority(authority: ApprovalAuthority): TrustedAuthorityCredential {
@@ -49,6 +50,26 @@ export class RecoveryRoot {
 
   enterSafeMode(credential: TrustedAuthorityCredential) {
     return this.service.enterSafeMode(credential)
+  }
+
+  exitSafeMode(credential: TrustedAuthorityCredential) {
+    return this.service.exitSafeMode(credential)
+  }
+
+  simulateInterrupt(point: ActivationInterrupt) {
+    this.service.interruptAfter = point
+  }
+
+  remountCommittedGenerated() {
+    return this.service.remountCommittedGenerated()
+  }
+
+  completeInterruptedActivation() {
+    return this.service.completeInterruptedActivation()
+  }
+
+  completeInterruptedRollback() {
+    return this.service.completeInterruptedRollback()
   }
 
   disable(credential: TrustedAuthorityCredential, owner: string, version: string) {

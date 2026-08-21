@@ -24,6 +24,7 @@ export const ACTIVATION_STATES = [
   'activating',
   'active',
   'activation-failed',
+  'rollback-pending',
   'rolled-back',
   'safe-mode',
 ] as const
@@ -31,7 +32,7 @@ export type ActivationState = (typeof ACTIVATION_STATES)[number]
 
 export interface ApprovalAuthority {
   readonly kind: 'human-control'
-  readonly source: 'application-ui' | 'recovery-root'
+  readonly source: 'application-ui' | 'recovery-root' | 'operator-cli'
 }
 
 export interface ApprovalFingerprintInput {
