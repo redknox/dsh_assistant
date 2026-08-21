@@ -42,7 +42,7 @@ tars-ng doctor
 tars-ng stop
 ```
 
-`tars-ng start` prints a loopback URL (default `http://127.0.0.1:8787`). Open that address for daily conversation, Activity, approvals, capabilities, and Safe Mode/recovery. Override the port with `TARS_NG_UI_PORT`. The server binds loopback only; unsupported `Origin` headers are rejected; there is no wildcard CORS and no login in this release.
+`tars-ng start` prints a loopback URL (default `http://127.0.0.1:8787`). Open that address for daily conversation, Activity, approvals, capabilities, and Safe Mode/recovery. Override the port with `TARS_NG_UI_PORT`. The server binds loopback only; unsupported `Origin` headers are rejected; there is no wildcard CORS and no login in this release. Governance mutations require the per-launch `HttpOnly; SameSite=Strict` UI session cookie established when the page loads. Approval binds the current card id, candidate id (Self-Extension), and fingerprint. Rollback and Exit Safe Mode require an explicit confirmation; Exit Safe Mode is refused while an integrity failure still requires Safe Mode.
 
 `tars-ng status` reports whether the product is running and, when it is, the Web UI address. `tars-ng stop` terminates the runtime and the local Web server.
 

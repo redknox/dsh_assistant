@@ -4,12 +4,16 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import type { RecoveryRoot } from '../domain/governance/root.js'
 import { AssistantControlSurface } from '../ui/controller.js'
-import type { MissionControlView } from '../domain/workspace/types.js'
+import type { ApprovalCard, MissionControlView } from '../domain/workspace/types.js'
 import { PRODUCT_UI_SESSION_ID } from './constants.js'
 import {
   assertSafePayload,
+  createUiSessionToken,
+  DESTRUCTIVE_RECOVERY_ACTIONS,
   originAllowed,
   resolveWebUiListen,
+  sessionCookieHeader,
+  sessionMatches,
   SUPPORTED_RECOVERY_ACTIONS,
   type WebUiListenOptions,
 } from './web-ui-protocol.js'
@@ -39,6 +43,8 @@ const MIME: Record<string, string> = {
   '.map': 'application/json; charset=utf-8',
 }
 
+const MUTATING = new Set(['POST', 'PUT', 'PATCH', 'DELETE'])
+
 export function defaultWebAssetRoot(): string {
   return path.join(path.dirname(fileURLToPath(import.meta.url)), '../../dist/web')
 }
@@ -46,18 +52,25 @@ export function defaultWebAssetRoot(): string {
 export function startWebUiServer(options: WebUiServerOptions): Promise<WebUiServer> {
   const listen = resolveWebUiListen(process.env, options)
   const assetRoot = path.resolve(options.assetRoot ?? defaultWebAssetRoot())
+  const sessionToken = createUiSessionToken()
   const clients = new Set<ServerResponse>()
   let url = ''
+  let lastPayload = ''
+  let poll: ReturnType<typeof setInterval> | undefined
 
   const snapshot = (): MissionControlView => options.surface.workspace()
 
-  const sendJson = (res: ServerResponse, status: number, body: unknown) => {
+  const envelope = () => ({ view: snapshot(), webUi: url })
+
+  const sendJson = (res: ServerResponse, status: number, body: unknown, setSession = false) => {
     const payload = assertSafePayload(JSON.stringify(body))
-    res.writeHead(status, {
+    const headers: Record<string, string> = {
       'content-type': 'application/json; charset=utf-8',
       'cache-control': 'no-store',
       connection: 'close',
-    })
+    }
+    if (setSession) headers['set-cookie'] = sessionCookieHeader(sessionToken)
+    res.writeHead(status, headers)
     res.end(payload)
   }
 
@@ -65,6 +78,13 @@ export function startWebUiServer(options: WebUiServerOptions): Promise<WebUiServ
     const origin = req.headers.origin
     if (originAllowed(typeof origin === 'string' ? origin : undefined, listen.host, boundPort())) return false
     sendJson(res, 403, { error: 'unsupported origin' })
+    return true
+  }
+
+  const rejectUntrustedMutation = (req: IncomingMessage, res: ServerResponse): boolean => {
+    if (!MUTATING.has(req.method ?? 'GET')) return false
+    if (sessionMatches(req.headers.cookie, sessionToken)) return false
+    sendJson(res, 403, { error: 'untrusted session' })
     return true
   }
 
@@ -76,10 +96,12 @@ export function startWebUiServer(options: WebUiServerOptions): Promise<WebUiServ
   const broadcast = () => {
     let payload: string
     try {
-      payload = assertSafePayload(JSON.stringify({ view: snapshot(), webUi: url }))
+      payload = assertSafePayload(JSON.stringify(envelope()))
     } catch {
       return
     }
+    if (payload === lastPayload) return
+    lastPayload = payload
     for (const client of clients) {
       client.write(`event: view\ndata: ${payload}\n\n`)
     }
@@ -96,24 +118,45 @@ export function startWebUiServer(options: WebUiServerOptions): Promise<WebUiServ
     return Buffer.concat(chunks).toString('utf8')
   }
 
-  const handleRecovery = async (action: string) => {
+  const handleRecovery = async (action: string, confirm: boolean) => {
     if (!(SUPPORTED_RECOVERY_ACTIONS as readonly string[]).includes(action)) {
       return { status: 409 as const, body: { error: 'unsupported', action } }
     }
-    const human = options.recoveryRoot.issueAuthority({ kind: 'human-control', source: 'application-ui' })
+    if ((DESTRUCTIVE_RECOVERY_ACTIONS as readonly string[]).includes(action) && confirm !== true) {
+      return { status: 409 as const, body: { error: 'confirmation-required', action } }
+    }
     if (action === 'diagnostics') {
       return {
         status: 200 as const,
-        body: { action, diagnostics: options.diagnostics ?? options.recoveryRoot.inspect() },
+        body: { action, diagnostics: options.diagnostics ?? { activation: options.recoveryRoot.inspect() } },
       }
     }
+    const human = options.recoveryRoot.issueAuthority({ kind: 'human-control', source: 'application-ui' })
     if (action === 'rollback') {
       return { status: 200 as const, body: { action, result: await options.recoveryRoot.rollback(human) } }
+    }
+    const status = options.recoveryRoot.inspect()
+    if (status.lastFailure?.safeModeRequired || status.lastFailure) {
+      return { status: 409 as const, body: { error: 'integrity-failure', action: 'exit-safe-mode' } }
     }
     return { status: 200 as const, body: { action, result: options.recoveryRoot.exitSafeMode(human) } }
   }
 
-  const serveAsset = (reqPath: string, res: ServerResponse) => {
+  const bindCard = (body: { id?: unknown; candidateId?: unknown; fingerprint?: unknown }, cards: readonly ApprovalCard[]) => {
+    if (typeof body.id !== 'string' || body.id === '') return { error: 'malformed' as const }
+    if (typeof body.fingerprint !== 'string' || body.fingerprint === '') return { error: 'malformed' as const }
+    const card = cards.find((item) => item.id === body.id)
+    if (!card) return { error: 'unknown-approval' as const }
+    if (card.fingerprint !== body.fingerprint) return { error: 'stale-fingerprint' as const }
+    if (card.kind === 'self-extension') {
+      if (typeof body.candidateId !== 'string' || body.candidateId === '' || body.candidateId !== card.candidateId) {
+        return { error: 'stale-candidate' as const }
+      }
+    }
+    return { card }
+  }
+
+  const serveAsset = (reqPath: string, res: ServerResponse, setSession: boolean) => {
     const relative = reqPath === '/' ? 'index.html' : reqPath.replace(/^\//, '')
     const target = path.resolve(assetRoot, relative)
     if (!target.startsWith(`${assetRoot}${path.sep}`) && target !== assetRoot) {
@@ -124,7 +167,10 @@ export function startWebUiServer(options: WebUiServerOptions): Promise<WebUiServ
       if (reqPath === '/' || !path.extname(reqPath)) {
         const index = path.join(assetRoot, 'index.html')
         if (existsSync(index)) {
-          res.writeHead(200, { 'content-type': MIME['.html'] })
+          res.writeHead(200, {
+            'content-type': MIME['.html'],
+            ...(setSession ? { 'set-cookie': sessionCookieHeader(sessionToken) } : {}),
+          })
           createReadStream(index).pipe(res)
           return
         }
@@ -133,17 +179,26 @@ export function startWebUiServer(options: WebUiServerOptions): Promise<WebUiServ
       return
     }
     const mime = MIME[path.extname(target)] ?? 'application/octet-stream'
-    res.writeHead(200, { 'content-type': mime, 'cache-control': 'no-store' })
+    res.writeHead(200, {
+      'content-type': mime,
+      'cache-control': 'no-store',
+      ...(setSession && target.endsWith(`${path.sep}index.html`) ? { 'set-cookie': sessionCookieHeader(sessionToken) } : {}),
+    })
     createReadStream(target).pipe(res)
   }
 
   const server: Server = createServer(async (req, res) => {
     try {
       if (rejectOrigin(req, res)) return
+      if (rejectUntrustedMutation(req, res)) return
       const hostHeader = req.headers.host ?? `${listen.host}:${boundPort()}`
       const requestUrl = new URL(req.url ?? '/', `http://${hostHeader}`)
+      if (req.method === 'GET' && requestUrl.pathname === '/api/session') {
+        sendJson(res, 200, { ok: true, webUi: url }, true)
+        return
+      }
       if (req.method === 'GET' && requestUrl.pathname === '/api/view') {
-        sendJson(res, 200, { view: snapshot(), webUi: url })
+        sendJson(res, 200, envelope())
         return
       }
       if (req.method === 'GET' && requestUrl.pathname === '/api/events') {
@@ -153,7 +208,9 @@ export function startWebUiServer(options: WebUiServerOptions): Promise<WebUiServ
           connection: 'keep-alive',
         })
         clients.add(res)
-        res.write(`event: view\ndata: ${assertSafePayload(JSON.stringify({ view: snapshot(), webUi: url }))}\n\n`)
+        const payload = assertSafePayload(JSON.stringify(envelope()))
+        lastPayload = payload
+        res.write(`event: view\ndata: ${payload}\n\n`)
         req.on('close', () => {
           clients.delete(res)
         })
@@ -166,59 +223,67 @@ export function startWebUiServer(options: WebUiServerOptions): Promise<WebUiServ
           return
         }
         options.surface.sendMessage(body.text.trim())
-        sendJson(res, 202, { view: snapshot(), webUi: url })
+        sendJson(res, 202, envelope())
         broadcast()
         return
       }
       if (req.method === 'POST' && (requestUrl.pathname === '/api/approve' || requestUrl.pathname === '/api/deny' || requestUrl.pathname === '/api/cancel')) {
-        const body = JSON.parse(await readBody(req)) as { id?: unknown }
-        if (typeof body.id !== 'string' || body.id === '') {
-          sendJson(res, 400, { error: 'malformed' })
+        const body = JSON.parse(await readBody(req)) as { id?: unknown; candidateId?: unknown; fingerprint?: unknown }
+        const bound = bindCard(body, snapshot().approvals)
+        if ('error' in bound) {
+          sendJson(res, bound.error === 'malformed' ? 400 : 409, { error: bound.error })
           return
         }
-        const view = snapshot()
-        const card = view.approvals.find((item) => item.id === body.id)
         const decision = requestUrl.pathname === '/api/approve' ? 'approve' : requestUrl.pathname === '/api/deny' ? 'deny' : 'cancel'
-        if (card?.kind === 'self-extension') {
+        const { card } = bound
+        if (card.kind === 'self-extension') {
           if (decision === 'cancel') {
             sendJson(res, 409, { error: 'unsupported', action: 'cancel-self-extension' })
             return
           }
           const human = options.recoveryRoot.issueAuthority({ kind: 'human-control', source: 'application-ui' })
           options.recoveryRoot.recordApproval(human, {
-            candidateId: card.id,
+            candidateId: card.candidateId ?? '',
             fingerprint: card.fingerprint,
             decision: decision === 'approve' ? 'approved-for-exact-diff' : 'rejected',
           })
         } else if (decision === 'approve') {
-          await options.surface.approve(body.id)
+          await options.surface.approve(card.id)
         } else if (decision === 'deny') {
-          await options.surface.deny(body.id)
+          await options.surface.deny(card.id)
         } else {
-          await options.surface.cancelConfirmation(body.id)
+          await options.surface.cancelConfirmation(card.id)
         }
-        sendJson(res, 200, { view: snapshot(), webUi: url })
+        sendJson(res, 200, envelope())
         broadcast()
         return
       }
       if (req.method === 'POST' && requestUrl.pathname === '/api/recovery') {
-        const body = JSON.parse(await readBody(req)) as { action?: unknown }
+        const body = JSON.parse(await readBody(req)) as { action?: unknown; confirm?: unknown }
         if (typeof body.action !== 'string') {
           sendJson(res, 400, { error: 'malformed' })
           return
         }
-        const result = await handleRecovery(body.action)
+        const result = await handleRecovery(body.action, body.confirm === true)
         sendJson(res, result.status, { ...result.body, view: snapshot(), webUi: url })
         broadcast()
         return
       }
       if (req.method === 'GET' && !requestUrl.pathname.startsWith('/api/')) {
-        serveAsset(requestUrl.pathname, res)
+        serveAsset(requestUrl.pathname, res, requestUrl.pathname === '/' || requestUrl.pathname === '/index.html')
         return
       }
       sendJson(res, 404, { error: 'not found' })
     } catch (error) {
       const message = error instanceof Error ? error.message : 'failed'
+      if (message.includes('fingerprint')) {
+        sendJson(res, 409, { error: 'stale-fingerprint' })
+        return
+      }
+      if (message.includes('unknown') || message.includes('not found')) {
+        sendJson(res, 409, { error: 'unknown-candidate' })
+        return
+      }
       sendJson(res, 400, { error: message.startsWith('refusing') ? 'unsafe payload' : 'malformed' })
     }
   })
@@ -229,12 +294,14 @@ export function startWebUiServer(options: WebUiServerOptions): Promise<WebUiServ
       const port = boundPort()
       const host = listen.host === '::1' ? '[::1]' : listen.host
       url = `http://${host}:${port}`
+      poll = setInterval(() => broadcast(), 750)
       resolve({
         url,
         host: listen.host,
         port,
         notify: broadcast,
         close: () => new Promise((done, fail) => {
+          if (poll) clearInterval(poll)
           for (const client of clients) client.end()
           clients.clear()
           server.close((error) => error ? fail(error) : done())
@@ -245,7 +312,8 @@ export function startWebUiServer(options: WebUiServerOptions): Promise<WebUiServ
 }
 
 export function attachWebUiBroadcast(ctx: { on(event: string, listener: (...args: never[]) => void): unknown }, push: () => void): () => void {
-  const offs = [ctx.on('agent/status', push), ctx.on('session/event', push)]
+  const names = ['agent/status', 'session/event', 'session/flush', 'tools/pre-execute']
+  const offs = names.map((name) => ctx.on(name, push))
   return () => {
     for (const off of offs) {
       if (typeof off === 'function') off()

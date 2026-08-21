@@ -1,4 +1,5 @@
 import type { ApprovalCard, WorkspaceSnapshotInput } from './types.js'
+import { allowedApprovalPayload } from './redact.js'
 
 export function projectApprovalCards(input: WorkspaceSnapshotInput): readonly ApprovalCard[] {
   const cards: ApprovalCard[] = []
@@ -13,20 +14,21 @@ export function projectApprovalCards(input: WorkspaceSnapshotInput): readonly Ap
 }
 
 function sideEffectCard(ticket: WorkspaceSnapshotInput['pendingConfirmations'][number]): ApprovalCard {
+  const payload = allowedApprovalPayload(ticket.payload)
   if (ticket.capability === 'calendar' && ticket.operation === 'create_event') {
     return {
       id: ticket.id,
       kind: 'calendar-create',
       title: 'CREATE CALENDAR EVENT',
-      target: String(ticket.payload.calendarId ?? 'Personal'),
+      target: String(payload.calendarId ?? 'Personal'),
       sideEffect: 'yes',
       authorityChange: 'none',
       fingerprint: ticket.fingerprint,
       status: ticket.status,
       details: [
-        `Title       ${String(ticket.payload.title ?? '(untitled)')}`,
-        `When        ${formatWhen(ticket.payload)}`,
-        `Attendees   ${formatAttendees(ticket.payload.attendees)}`,
+        `Title       ${String(payload.title ?? '(untitled)')}`,
+        `When        ${formatWhen(payload)}`,
+        `Attendees   ${formatAttendees(payload.attendees)}`,
       ],
     }
   }
@@ -39,7 +41,7 @@ function sideEffectCard(ticket: WorkspaceSnapshotInput['pendingConfirmations'][n
     authorityChange: 'none',
     fingerprint: ticket.fingerprint,
     status: ticket.status,
-    details: Object.entries(ticket.payload).map(([key, value]) => `${key}: ${stringify(value)}`),
+    details: Object.entries(payload).map(([key, value]) => `${key}: ${stringify(value)}`),
   }
 }
 
@@ -53,7 +55,10 @@ function selfExtensionCard(approval: NonNullable<WorkspaceSnapshotInput['extensi
     authorityChange: 'yes — human approval of exact digest/diff required',
     fingerprint: approval.fingerprint,
     status: approval.decision,
+    candidateId: approval.candidateId,
+    digest: approval.digest,
     details: [
+      `Candidate   ${approval.candidateId}`,
       `Digest      ${approval.digest}`,
       `Capabilities +${approval.capabilitiesAdded.join(', ') || 'none'} −${approval.capabilitiesRemoved.join(', ') || 'none'}`,
       `Permissions +${approval.permissionsAdded.join(', ') || 'none'} −${approval.permissionsRemoved.join(', ') || 'none'}`,

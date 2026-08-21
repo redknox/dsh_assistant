@@ -1,8 +1,11 @@
+import { randomBytes, timingSafeEqual } from 'node:crypto'
 import { DEFAULT_UI_HOST, DEFAULT_UI_PORT } from './constants.js'
 import type { MissionControlView } from '../domain/workspace/types.js'
 
-export const SUPPORTED_RECOVERY_ACTIONS = ['diagnostics', 'rollback', 'restart-normally'] as const
+export const UI_SESSION_COOKIE = 'tars_ng_ui'
+export const SUPPORTED_RECOVERY_ACTIONS = ['diagnostics', 'rollback', 'exit-safe-mode'] as const
 export type SupportedRecoveryAction = (typeof SUPPORTED_RECOVERY_ACTIONS)[number]
+export const DESTRUCTIVE_RECOVERY_ACTIONS = ['rollback', 'exit-safe-mode'] as const
 
 export interface WebUiListenOptions {
   readonly host?: string
@@ -37,6 +40,29 @@ export function originAllowed(origin: string | undefined, host: string, port: nu
   } catch {
     return false
   }
+}
+
+export function createUiSessionToken(): string {
+  return randomBytes(32).toString('base64url')
+}
+
+export function sessionCookieHeader(token: string): string {
+  return `${UI_SESSION_COOKIE}=${token}; HttpOnly; SameSite=Strict; Path=/; Max-Age=86400`
+}
+
+export function readCookie(header: string | undefined, name = UI_SESSION_COOKIE): string | undefined {
+  if (header === undefined || header === '') return undefined
+  for (const part of header.split(';')) {
+    const [key, ...rest] = part.trim().split('=')
+    if (key === name) return rest.join('=')
+  }
+  return undefined
+}
+
+export function sessionMatches(header: string | undefined, token: string): boolean {
+  const got = readCookie(header)
+  if (got === undefined || got.length !== token.length) return false
+  return timingSafeEqual(Buffer.from(got), Buffer.from(token))
 }
 
 export function payloadContainsSecret(payload: string, env: NodeJS.ProcessEnv = process.env): boolean {

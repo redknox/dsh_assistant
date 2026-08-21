@@ -133,6 +133,7 @@ describe('TARS-NG mission-control workspace', () => {
     const view = projectMissionControl(snapshot({
       extensionApprovals: [{
         id: 'apr-1',
+        candidateId: 'cand-obsidian',
         fingerprint: 'fp-ext',
         decision: 'approval-requested',
         owner: 'generated/obsidian-vault',
@@ -147,6 +148,7 @@ describe('TARS-NG mission-control workspace', () => {
     }))
     const card = view.approvals.find((item) => item.kind === 'self-extension')
     assert.ok(card)
+    assert.equal(card.candidateId, 'cand-obsidian')
     assert.match(card.details.join('\n'), /obsidian.read/)
     assert.match(card.details.join('\n'), /not self-authorization/)
     assert.match(card.authorityChange, /human approval/)

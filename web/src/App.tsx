@@ -1,10 +1,12 @@
 import React, { useEffect, useMemo, useState, type FormEvent } from 'react'
-import type { MissionControlView } from '../../src/domain/workspace/types'
+import type { ApprovalCard, MissionControlView } from '../../src/domain/workspace/types'
 import {
   decideApproval,
+  establishSession,
   fetchView,
   formatMarkdownLite,
   openViewStream,
+  recoveryActionId,
   runRecovery,
   sendMessage,
   type UiEnvelope,
@@ -16,11 +18,12 @@ export function MissionControlScreen(props: {
   readonly sending: boolean
   readonly error?: string
   readonly draft: string
+  readonly armedRecovery?: string
   readonly onDraft: (value: string) => void
   readonly onSend: () => void
-  readonly onApprove: (id: string) => void
-  readonly onReject: (id: string) => void
-  readonly onRecovery: (action: 'diagnostics' | 'rollback' | 'restart-normally') => void
+  readonly onApprove: (card: ApprovalCard) => void
+  readonly onReject: (card: ApprovalCard) => void
+  readonly onRecovery: (action: 'diagnostics' | 'rollback' | 'exit-safe-mode') => void
 }) {
   const { view } = props
   const safe = view.systemState === 'SAFE_MODE' || view.systemState === 'RECOVERY'
@@ -39,11 +42,17 @@ export function MissionControlScreen(props: {
           <p>Disabled: {view.recovery.disabled.join(', ') || 'generated/optional capabilities'}</p>
           <div className="recovery-actions">
             {view.recovery.actions.map((action) => {
-              const mapped = action === 'Diagnostics' ? 'diagnostics' : action === 'Rollback' ? 'rollback' : action === 'Restart normally' ? 'restart-normally' : undefined
-              return mapped ? (
-                <button key={action} type="button" onClick={() => props.onRecovery(mapped)}>{action}</button>
-              ) : (
-                <button key={action} type="button" disabled title="Not available from this Web UI">{action}</button>
+              const mapped = recoveryActionId(action)
+              if (!mapped) {
+                return <button key={action} type="button" disabled title="Not available from this Web UI">{action}</button>
+              }
+              const needsConfirm = mapped !== 'diagnostics'
+              const armed = props.armedRecovery === mapped
+              const label = needsConfirm && armed ? `Confirm ${action}` : action
+              return (
+                <button key={action} type="button" data-recovery-action={mapped} onClick={() => props.onRecovery(mapped)}>
+                  {label}
+                </button>
               )
             })}
           </div>
@@ -81,7 +90,7 @@ export function MissionControlScreen(props: {
             ))}
           </ol>
           {view.approvals.map((card) => (
-            <article key={card.id} className="approval" data-approval-id={card.id} data-kind={card.kind} data-fingerprint={card.fingerprint}>
+            <article key={card.id} className="approval" data-approval-id={card.id} data-kind={card.kind} data-fingerprint={card.fingerprint} data-candidate-id={card.candidateId ?? ''}>
               <h3>{card.title}</h3>
               <p>Target {card.target}</p>
               <p>External side effect: {card.sideEffect}</p>
@@ -90,8 +99,8 @@ export function MissionControlScreen(props: {
               <ul>{card.details.map((line) => <li key={line}>{line}</li>)}</ul>
               {card.status === 'pending' || card.status === 'approval-requested' || card.status === 'unreviewed' ? (
                 <div>
-                  <button type="button" onClick={() => props.onApprove(card.id)}>Approve</button>
-                  <button type="button" onClick={() => props.onReject(card.id)}>Reject</button>
+                  <button type="button" onClick={() => props.onApprove(card)}>Approve</button>
+                  <button type="button" onClick={() => props.onReject(card)}>Reject</button>
                 </div>
               ) : <p>Status {card.status}</p>}
             </article>
@@ -133,9 +142,11 @@ export function App() {
   const [sending, setSending] = useState(false)
   const [draft, setDraft] = useState('')
   const [error, setError] = useState<string>()
+  const [armedRecovery, setArmedRecovery] = useState<string>()
 
   useEffect(() => {
     let closed = false
+    void establishSession()
     fetchView().then((next) => { if (!closed) setEnvelope(next) }).catch((caught: unknown) => {
       if (!closed) setError(caught instanceof Error ? caught.message : 'unable to load workspace')
     })
@@ -182,11 +193,19 @@ export function App() {
       sending={sending}
       error={error}
       draft={draft}
+      armedRecovery={armedRecovery}
       onDraft={setDraft}
       onSend={() => { void onSend() }}
-      onApprove={(id) => { void act(() => decideApproval(id, 'approve')) }}
-      onReject={(id) => { void act(() => decideApproval(id, 'deny')) }}
-      onRecovery={(action) => { void act(() => runRecovery(action)) }}
+      onApprove={(card) => { void act(() => decideApproval(card, 'approve')) }}
+      onReject={(card) => { void act(() => decideApproval(card, 'deny')) }}
+      onRecovery={(action) => {
+        if (action !== 'diagnostics' && armedRecovery !== action) {
+          setArmedRecovery(action)
+          return
+        }
+        setArmedRecovery(undefined)
+        void act(() => runRecovery(action, true))
+      }}
     />
   )
 }

@@ -6,6 +6,9 @@ import { describe, it } from 'node:test'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { createElement } from 'react'
 import { FakeReplyAdapter } from '../src/adapters/llm/fake-reply-adapter.js'
+import { googleCalendarReadRiskModel } from '../src/domain/reliability/index.js'
+import type { ResolutionReview } from '../src/domain/resolution/index.js'
+import { projectMissionControl } from '../src/domain/workspace/index.js'
 import { bootAssistantControl, bootSafeModeRuntime, createAssistantAgent } from '../src/runtime/boot.js'
 import { AssistantControlSurface } from '../src/ui/controller.js'
 import {
@@ -40,7 +43,12 @@ function fixtureView(overrides: Partial<MissionControlView> = {}): MissionContro
 async function withServer(
   boot: () => Promise<{ ctx: Awaited<ReturnType<typeof bootAssistantControl>>['ctx']; recoveryRoot: Awaited<ReturnType<typeof bootAssistantControl>>['recoveryRoot'] }>,
   sessionId: string,
-  run: (url: string, surface: AssistantControlSurface, agent: Awaited<ReturnType<typeof createAssistantAgent>>) => Promise<void>,
+  run: (
+    url: string,
+    surface: AssistantControlSurface,
+    agent: Awaited<ReturnType<typeof createAssistantAgent>>,
+    ctx: Awaited<ReturnType<typeof bootAssistantControl>>['ctx'],
+  ) => Promise<void>,
 ) {
   const control = await boot()
   control.ctx.llm.registerAdapter(['fake'], new FakeReplyAdapter('ack'))
@@ -57,13 +65,26 @@ async function withServer(
   })
   const detach = attachWebUiBroadcast(control.ctx, () => web.notify())
   try {
-    await run(web.url, surface, agent)
+    await run(web.url, surface, agent, control.ctx)
   } finally {
     detach()
     await web.close()
     await agent.dispose()
     await control.ctx.fiber.dispose()
   }
+}
+
+async function cookieHeader(url: string): Promise<string> {
+  const res = await fetch(`${url}/api/session`)
+  const setCookie = typeof res.headers.getSetCookie === 'function' ? res.headers.getSetCookie()[0] : res.headers.get('set-cookie')
+  assert.ok(setCookie)
+  assert.match(setCookie, /HttpOnly/i)
+  assert.match(setCookie, /SameSite=Strict/i)
+  return setCookie.split(';')[0] ?? ''
+}
+
+function authHeaders(cookie: string, extra: Record<string, string> = {}): Record<string, string> {
+  return { cookie, ...extra }
 }
 
 describe('local Mission-Control Web UI', () => {
@@ -106,7 +127,7 @@ describe('local Mission-Control Web UI', () => {
 
       const sent = await fetch(`${url}/api/message`, {
         method: 'POST',
-        headers: { 'content-type': 'application/json' },
+        headers: { 'content-type': 'application/json', ...authHeaders(await cookieHeader(url)) },
         body: JSON.stringify({ text: 'Hello from the Web UI' }),
       })
       assert.equal(sent.status, 202)
@@ -117,13 +138,25 @@ describe('local Mission-Control Web UI', () => {
       assert.equal(after.view.conversation.some((item) => item.kind === 'assistant-response' && item.text.includes('ack')), true)
       assert.equal(surface.workspace().systemState, after.view.systemState)
 
-      const malformed = await fetch(`${url}/api/message`, {
+      const cookie = await cookieHeader(url)
+      const untrusted = await fetch(`${url}/api/message`, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ text: 'no session' }),
+      })
+      assert.equal(untrusted.status, 403)
+
+      const malformed = await fetch(`${url}/api/message`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', ...authHeaders(cookie) },
         body: JSON.stringify({ nope: true }),
       })
       assert.equal(malformed.status, 400)
-      const unknown = await fetch(`${url}/api/launch-missiles`, { method: 'POST', body: '{}' })
+      const unknown = await fetch(`${url}/api/launch-missiles`, {
+        method: 'POST',
+        headers: authHeaders(cookie),
+        body: '{}',
+      })
       assert.equal(unknown.status, 404)
     })
   })
@@ -139,6 +172,7 @@ describe('local Mission-Control Web UI', () => {
       })
       assert.equal(pending.kind, 'pending_confirmation')
       if (pending.kind !== 'pending_confirmation') throw new Error('expected pending')
+      const cookie = await cookieHeader(url)
       const view = await fetch(`${url}/api/view`).then((res) => res.json()) as { view: MissionControlView }
       const card = view.view.approvals.find((item) => item.id === pending.confirmationId)
       assert.equal(card?.kind, 'calendar-create')
@@ -147,8 +181,8 @@ describe('local Mission-Control Web UI', () => {
 
       const denied = await fetch(`${url}/api/deny`, {
         method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ id: pending.confirmationId }),
+        headers: { 'content-type': 'application/json', ...authHeaders(cookie) },
+        body: JSON.stringify({ id: pending.confirmationId, fingerprint: card?.fingerprint }),
       }).then((res) => res.json()) as { view: MissionControlView }
       const after = denied.view.approvals.find((item) => item.id === pending.confirmationId)
       assert.equal(after?.status, 'denied')
@@ -167,18 +201,31 @@ describe('local Mission-Control Web UI', () => {
       port: 0,
     })
     try {
+      const cookie = await cookieHeader(web.url)
       const view = await fetch(`${web.url}/api/view`).then((res) => res.json()) as { view: MissionControlView }
       assert.equal(view.view.systemState === 'SAFE_MODE' || view.view.systemState === 'RECOVERY', true)
       assert.ok(view.view.recovery)
-      const blocked = await fetch(`${web.url}/api/recovery`, {
+      const untrusted = await fetch(`${web.url}/api/recovery`, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ action: 'diagnostics' }),
+      })
+      assert.equal(untrusted.status, 403)
+      const blocked = await fetch(`${web.url}/api/recovery`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', ...authHeaders(cookie) },
         body: JSON.stringify({ action: 'self-authorize' }),
       })
       assert.equal(blocked.status, 409)
+      const unconfirmed = await fetch(`${web.url}/api/recovery`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', ...authHeaders(cookie) },
+        body: JSON.stringify({ action: 'exit-safe-mode' }),
+      })
+      assert.equal(unconfirmed.status, 409)
       const diagnostics = await fetch(`${web.url}/api/recovery`, {
         method: 'POST',
-        headers: { 'content-type': 'application/json' },
+        headers: { 'content-type': 'application/json', ...authHeaders(cookie) },
         body: JSON.stringify({ action: 'diagnostics' }),
       })
       assert.equal(diagnostics.status, 200)
@@ -186,6 +233,153 @@ describe('local Mission-Control Web UI', () => {
       await web.close()
       await control.ctx.fiber.dispose()
     }
+  })
+
+  it('approves and rejects a real Self-Extension candidate by candidateId and fingerprint', async () => {
+    await withServer(bootAssistantControl, 'web-ui-extension', async (url, _surface, _agent, ctx) => {
+      const review: ResolutionReview = {
+        kind: 'evolve-owner',
+        capability: 'calendar.read',
+        need: 'Web UI approval path',
+        recommendation: 'evolve managed/integrations',
+        rationale: 'owned',
+        implications: [],
+        assumptions: [],
+        unresolved: [],
+        steps: [],
+        registryFacts: { exact: { kind: 'unknown', capability: 'calendar.read' }, domainOwners: [], conflicts: [] },
+        target: { owner: 'managed/integrations', version: '0.1.0' },
+      }
+      const created = ctx.candidateWorkspace.create({
+        review,
+        owner: 'managed/integrations',
+        version: '0.2.0',
+        baseVersion: '0.1.0',
+        manifest: {
+          capabilities: ['calendar.read', 'calendar.freebusy'],
+          permissions: ['local.fake.suite'],
+          secrets: ['google.calendar.oauth'],
+          effects: {
+            filesystem: [],
+            network: ['https://www.googleapis.com/calendar/v3'],
+            process: [],
+            secrets: ['google.calendar.oauth'],
+            externalSystems: ['google-calendar-v3'],
+            remoteSideEffect: 'read-only',
+          },
+          riskModel: googleCalendarReadRiskModel(),
+        },
+      })
+      ctx.candidateWorkspace.writeFile(created.id, 'src/ok.ts', 'export const value: string = "ok"\n')
+      ctx.candidateValidation.validate(created.id)
+      const sealed = ctx.candidateWorkspace.seal(created.id)
+      const requested = ctx.extensionGovernance.requestApproval(sealed.id)
+      const cookie = await cookieHeader(url)
+      const view = await fetch(`${url}/api/view`).then((res) => res.json()) as { view: MissionControlView }
+      const card = view.view.approvals.find((item) => item.kind === 'self-extension')
+      assert.ok(card)
+      assert.equal(card.candidateId, sealed.id)
+      assert.equal(card.id, requested.id)
+      assert.notEqual(card.id, sealed.id)
+      assert.equal(card.fingerprint, requested.fingerprint)
+      assert.ok(card.digest)
+
+      const stale = await fetch(`${url}/api/approve`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', ...authHeaders(cookie) },
+        body: JSON.stringify({ id: card.id, candidateId: card.candidateId, fingerprint: 'stale-fp' }),
+      })
+      assert.equal(stale.status, 409)
+      const unknown = await fetch(`${url}/api/approve`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', ...authHeaders(cookie) },
+        body: JSON.stringify({ id: 'apr-missing', candidateId: 'missing', fingerprint: card.fingerprint }),
+      })
+      assert.equal(unknown.status, 409)
+      const wrongId = await fetch(`${url}/api/approve`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', ...authHeaders(cookie) },
+        body: JSON.stringify({ id: card.id, candidateId: card.id, fingerprint: card.fingerprint }),
+      })
+      assert.equal(wrongId.status, 409)
+
+      const rejected = await fetch(`${url}/api/deny`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', ...authHeaders(cookie) },
+        body: JSON.stringify({ id: card.id, candidateId: card.candidateId, fingerprint: card.fingerprint }),
+      })
+      assert.equal(rejected.status, 200)
+      const inspected = ctx.extensionGovernance.inspectApproval(sealed.id)
+      assert.equal(inspected?.decision, 'rejected')
+      assert.equal(inspected?.fingerprint, requested.fingerprint)
+      assert.equal(inspected?.candidateId, sealed.id)
+
+      const second = ctx.candidateWorkspace.create({
+        review,
+        owner: 'managed/integrations',
+        version: '0.3.0',
+        baseVersion: '0.1.0',
+        manifest: {
+          capabilities: ['calendar.read'],
+          permissions: ['local.fake.suite'],
+          riskModel: googleCalendarReadRiskModel(),
+        },
+      })
+      ctx.candidateWorkspace.writeFile(second.id, 'src/ok.ts', 'export const value: string = "ok"\n')
+      ctx.candidateValidation.validate(second.id)
+      const sealedSecond = ctx.candidateWorkspace.seal(second.id)
+      const requestedSecond = ctx.extensionGovernance.requestApproval(sealedSecond.id)
+      const secondView = await fetch(`${url}/api/view`).then((res) => res.json()) as { view: MissionControlView }
+      const secondCard = secondView.view.approvals.find((item) => item.candidateId === sealedSecond.id)
+      assert.ok(secondCard)
+      const approved = await fetch(`${url}/api/approve`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', ...authHeaders(cookie) },
+        body: JSON.stringify({ id: secondCard.id, candidateId: secondCard.candidateId, fingerprint: secondCard.fingerprint }),
+      })
+      assert.equal(approved.status, 200)
+      const approvedRecord = ctx.extensionGovernance.inspectApproval(sealedSecond.id)
+      assert.equal(approvedRecord?.decision, 'approved-for-exact-diff')
+      assert.equal(approvedRecord?.fingerprint, requestedSecond.fingerprint)
+    })
+  })
+
+  it('redacts nested secrets and credential-bearing fields at the projection boundary', () => {
+    const view = projectMissionControl({
+      agentStatus: 'idle',
+      safeMode: false,
+      recoveryRequired: false,
+      pendingConfirmations: [{
+        id: 'conf-secret',
+        capability: 'files',
+        operation: 'delete',
+        fingerprint: 'fp-files',
+        status: 'pending',
+        level: 'L4',
+        payload: {
+          id: 'f-1',
+          access_token: 'ya29.nested-secret',
+          description: 'Bearer super.secret.value and https://example.com/?access_token=leak',
+        },
+      }],
+      jobs: [],
+      toolEvents: [],
+      conversation: [{ kind: 'assistant', text: 'Authorization: Bearer leaked.token.value' }],
+      integrationStatus: [{ capability: 'calendar', available: false, reason: 'refresh_token=abc123 leaked' }],
+      registry: [],
+      memory: [],
+      knowledge: [],
+      personality: { humor: 40, directness: 70, initiative: 50, verbosity: 'normal', humorSuppressed: false },
+    })
+    const rendered = JSON.stringify(view)
+    assert.doesNotMatch(rendered, /ya29\.nested-secret/)
+    assert.doesNotMatch(rendered, /Bearer super\.secret\.value/)
+    assert.doesNotMatch(rendered, /access_token=leak/)
+    assert.doesNotMatch(rendered, /refresh_token=abc123/)
+    assert.doesNotMatch(rendered, /Authorization: Bearer leaked/)
+    const card = view.approvals[0]
+    assert.equal(card?.details.some((line) => line.includes('access_token')), false)
+    assert.match(card?.details.join('\n') ?? '', /\[redacted\]/)
   })
 
   it('renders frontend scenarios from the authoritative view', () => {
@@ -286,9 +480,11 @@ describe('local Mission-Control Web UI', () => {
           target: 'generated/search@0.1.0',
           sideEffect: 'network: example.com',
           authorityChange: 'yes — human approval of exact digest/diff required',
-          details: ['Digest abc', 'Capabilities +search', 'not self-authorization'],
+          details: ['Candidate cand-1', 'Digest abc', 'Capabilities +search', 'not self-authorization'],
           fingerprint: 'fp-ext',
           status: 'approval-requested',
+          candidateId: 'cand-1',
+          digest: 'abc',
         }],
       }),
       connected: true,
@@ -327,7 +523,7 @@ describe('local Mission-Control Web UI', () => {
         recovery: {
           why: 'Generated Calendar artifact failed integrity verification.',
           disabled: ['generated/google-calendar@0.1.0'],
-          actions: ['Diagnostics', 'Rollback', 'Restart normally', 'Disable candidate'],
+          actions: ['Diagnostics', 'Rollback', 'Exit Safe Mode', 'Disable candidate'],
         },
         personality: { humor: 90, directness: 70, initiative: 50, verbosity: 'normal', humorSuppressed: true },
         controlStrip: { pendingApprovals: 0, backgroundJobs: 0, mode: 'SAFE_MODE' },

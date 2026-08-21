@@ -168,6 +168,7 @@ function extensionApprovals(ctx: Context): WorkspaceSnapshotInput['extensionAppr
   if (!governance?.inspectApproval || !workspace) return []
   const out: Array<{
     readonly id: string
+    readonly candidateId: string
     readonly fingerprint: string
     readonly decision: string
     readonly owner: string
@@ -186,6 +187,7 @@ function extensionApprovals(ctx: Context): WorkspaceSnapshotInput['extensionAppr
     if (!summary) continue
     out.push({
       id: record.id,
+      candidateId: candidate.id,
       fingerprint: record.fingerprint,
       decision: record.decision,
       owner: summary.owner,

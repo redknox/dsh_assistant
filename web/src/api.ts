@@ -5,37 +5,50 @@ export interface UiEnvelope {
   readonly webUi: string
 }
 
+const include: RequestInit = { credentials: 'include', cache: 'no-store' }
+
 async function parseEnvelope(response: Response): Promise<UiEnvelope> {
   const body = await response.json() as UiEnvelope & { error?: string }
   if (!response.ok) throw new Error(body.error ?? `request failed (${response.status})`)
   return body
 }
 
+export async function establishSession(): Promise<void> {
+  await fetch('/api/session', include)
+}
+
 export async function fetchView(): Promise<UiEnvelope> {
-  return parseEnvelope(await fetch('/api/view', { cache: 'no-store' }))
+  return parseEnvelope(await fetch('/api/view', include))
 }
 
 export async function sendMessage(text: string): Promise<UiEnvelope> {
   return parseEnvelope(await fetch('/api/message', {
+    ...include,
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ text }),
   }))
 }
 
-export async function decideApproval(id: string, decision: 'approve' | 'deny' | 'cancel'): Promise<UiEnvelope> {
+export async function decideApproval(card: ApprovalCard, decision: 'approve' | 'deny' | 'cancel'): Promise<UiEnvelope> {
   return parseEnvelope(await fetch(`/api/${decision}`, {
+    ...include,
     method: 'POST',
     headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ id }),
+    body: JSON.stringify({
+      id: card.id,
+      fingerprint: card.fingerprint,
+      ...(card.candidateId ? { candidateId: card.candidateId } : {}),
+    }),
   }))
 }
 
-export async function runRecovery(action: 'diagnostics' | 'rollback' | 'restart-normally'): Promise<UiEnvelope> {
+export async function runRecovery(action: 'diagnostics' | 'rollback' | 'exit-safe-mode', confirm = false): Promise<UiEnvelope> {
   return parseEnvelope(await fetch('/api/recovery', {
+    ...include,
     method: 'POST',
     headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ action }),
+    body: JSON.stringify({ action, confirm }),
   }))
 }
 
@@ -68,4 +81,11 @@ export function formatMarkdownLite(text: string): string {
 
 export function approvalLabel(card: ApprovalCard): string {
   return `${card.title} · ${card.status}`
+}
+
+export function recoveryActionId(label: string): 'diagnostics' | 'rollback' | 'exit-safe-mode' | undefined {
+  if (label === 'Diagnostics') return 'diagnostics'
+  if (label === 'Rollback') return 'rollback'
+  if (label === 'Exit Safe Mode') return 'exit-safe-mode'
+  return undefined
 }

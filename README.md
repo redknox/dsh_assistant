@@ -28,7 +28,7 @@ tars-ng stop
 
 Daily use is the local Mission-Control **Web UI**. The CLI remains the operator path for install, doctor, status, stop, and recovery when the browser is unavailable. `tars-ng start --once` still boots and exits without waiting for a browser.
 
-The Web UI binds **loopback only** (`127.0.0.1`, default port `8787`, override with `TARS_NG_UI_PORT`). It does not listen on public interfaces. Browser reconnect reloads a fresh authoritative snapshot; the browser does not own approval, Safe Mode, or recovery state.
+The Web UI binds **loopback only** (`127.0.0.1`, default port `8787`, override with `TARS_NG_UI_PORT`). It does not listen on public interfaces. Loading the UI sets an `HttpOnly; SameSite=Strict` process-local session cookie; conversation, approval, and recovery mutations require that session. Browser reconnect reloads a fresh authoritative snapshot; the browser does not own approval, Safe Mode, or recovery state. Destructive recovery actions require an explicit second confirmation. **Exit Safe Mode** is the supported recovery operation; it is refused while an integrity failure still requires Safe Mode.
 
 Home is `$TARS_NG_HOME`, else `$DSH_ASSISTANT_HOME`, else `~/.local/share/tars-ng`. Reinstalling package code does not delete it.
 
