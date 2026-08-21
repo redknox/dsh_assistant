@@ -21,7 +21,7 @@ export function morningBriefWorkflow(
   return {
     name: 'morning-brief',
     title: 'Morning brief',
-    recurrence: 'recurring',
+    schedule: { kind: 'every', everyMs: 24 * 60 * 60 * 1000 },
     intent: 'read',
     async run({ signal }) {
       if (signal.aborted) throw new Error('cancelled')
@@ -43,7 +43,7 @@ export function createFollowupTaskWorkflow(policy: PolicyService): WorkflowDefin
   return {
     name: 'create-followup-task',
     title: 'Create follow-up task',
-    recurrence: 'manual',
+    schedule: { kind: 'manual' },
     intent: 'execute',
     async run({ signal, input }) {
       const title = typeof input.title === 'string' && input.title.trim() ? input.title.trim() : 'Review morning brief'
@@ -63,7 +63,7 @@ export function deleteFileWorkflow(policy: PolicyService): WorkflowDefinition {
   return {
     name: 'delete-file',
     title: 'Delete a file',
-    recurrence: 'manual',
+    schedule: { kind: 'manual' },
     intent: 'execute',
     async run({ signal, input }) {
       const id = typeof input.id === 'string' ? input.id : 'f-1'

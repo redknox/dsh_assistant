@@ -22,7 +22,7 @@ export class AssistantJobService {
     return [...this.workflows.values()].map((workflow) => ({
       name: workflow.name,
       title: workflow.title,
-      recurrence: workflow.recurrence,
+      schedule: workflow.schedule,
       intent: workflow.intent,
       lastRun: this.lastRun(workflow.name),
     }))
