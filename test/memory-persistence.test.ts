@@ -78,7 +78,57 @@ describe('replaceable persistence', () => {
     const filePath = join(dir, 'memory.json')
     try {
       writeFileSync(filePath, JSON.stringify({ version: 1, records: [{ id: 12, statement: true }] }))
-      assert.throws(() => new JsonFileMemoryPersistence(filePath).load())
+      assert.throws(() => new JsonFileMemoryPersistence(filePath).load(), /json memory record 0/)
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  it('rejects hand-edited records that skip domain validation', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'dsh-memory-bypass-'))
+    const filePath = join(dir, 'memory.json')
+    const valid = {
+      id: 'mem-1',
+      category: 'fact',
+      topicKey: 'city',
+      statement: 'Lives in Beijing',
+      polarity: 'true',
+      confidence: { kind: 'score', value: 0.8 },
+      provenance: {
+        actor: 'user',
+        mechanism: 'explicit_write',
+        evidenceIds: [],
+        recordedAt: '2026-08-21T00:00:00.000Z',
+      },
+      createdAt: '2026-08-21T00:00:00.000Z',
+      updatedAt: '2026-08-21T00:00:00.000Z',
+      status: 'active',
+      visibility: 'model',
+    }
+    try {
+      writeFileSync(filePath, JSON.stringify({
+        version: 1,
+        records: [{ ...valid, confidence: { kind: 'score', value: 1.5 } }],
+      }))
+      assert.throws(() => new JsonFileMemoryPersistence(filePath).load(), /confidence score/)
+
+      writeFileSync(filePath, JSON.stringify({
+        version: 1,
+        records: [{ ...valid, provenance: { ...valid.provenance, recordedAt: 'yesterday' } }],
+      }))
+      assert.throws(() => new JsonFileMemoryPersistence(filePath).load(), /ISO-8601/)
+
+      writeFileSync(filePath, JSON.stringify({
+        version: 1,
+        records: [{ ...valid, extra: 'smuggled' }],
+      }))
+      assert.throws(() => new JsonFileMemoryPersistence(filePath).load(), /unknown field extra/)
+
+      writeFileSync(filePath, JSON.stringify({
+        version: 1,
+        records: [{ ...valid, polarity: 'maybe' }],
+      }))
+      assert.throws(() => new JsonFileMemoryPersistence(filePath).load(), /polarity/)
     } finally {
       rmSync(dir, { recursive: true, force: true })
     }
