@@ -11,12 +11,13 @@ export type {
   CreateCandidateInput,
   NamedDiff,
   OperationalEffects,
+  RemoteSideEffect,
   ValidationReport,
   ValidationStageResult,
   ValidationStageStatus,
   ValidationTaskRequest,
 } from './types.js'
-export { ALLOWED_VALIDATION_TASKS, CANDIDATE_LIFECYCLES, VALIDATION_STAGE_STATUSES } from './types.js'
+export { ALLOWED_VALIDATION_TASKS, CANDIDATE_LIFECYCLES, REMOTE_SIDE_EFFECTS, VALIDATION_STAGE_STATUSES } from './types.js'
 export {
   CandidateContractError,
   SealedCandidateError,

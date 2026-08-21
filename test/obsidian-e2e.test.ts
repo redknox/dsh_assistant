@@ -5,6 +5,7 @@ import { join } from 'node:path'
 import { describe, it } from 'node:test'
 import { CallId } from '@deepseek-ai/dsh-llm'
 import { ActivationDeniedError } from '../src/domain/governance/index.js'
+import { obsidianVaultRiskModel } from '../src/domain/reliability/index.js'
 import { CORE_KNOWN_SEAMS } from '../src/domain/resolution/index.js'
 import { bootAssistantControl } from '../src/runtime/boot.js'
 
@@ -98,6 +99,7 @@ describe('Obsidian Self-Extension vertical slice', () => {
           configRequired: ['vaultRoot'],
           effects: { filesystem: [vault], network: [], process: [] },
           entryPoints: ['src/plugin.js'],
+          riskModel: obsidianVaultRiskModel(),
         },
       })
       copyCandidateSources(ctx.candidateWorkspace, created.id)

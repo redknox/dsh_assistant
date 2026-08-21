@@ -71,12 +71,13 @@ The manifest cannot authorize activation.
 Default stages, each with an explicit status (`passed` / `failed` / `blocked` / `not-applicable` / `unresolved`):
 
 1. `manifest.validate`
-2. `package.inspect` — dependencies are inspectable. Install/postinstall scripts are **not** executed and make the stage `blocked`.
-3. `source.boundary` — no DSH package-internal `src/` imports
-4. `typecheck` — offline TypeScript check when `.ts` sources exist
-5. `tests` — Node-native candidate test files (`.js` / `.mjs` / `.cjs`) run only inside an OS/process sandbox that denies network at the system layer (macOS `sandbox-exec` / Linux `unshare --net`), plus `node --permission` for workspace-only filesystem and no child-process flag. The runner probes that a sandboxed process can start before treating the sandbox as available; EPERM / policy-disabled startup is `unresolved`, never host execution. The runner does not inherit host `process.env`. Candidate runtime permissions are not validation-time permissions. TypeScript-only test files stay `unresolved`. If that OS sandbox is unavailable, the stage stays `unresolved` rather than executing candidate code on the host. A failing or denied suite is `failed`. Network denial is not implemented by patching Node APIs.
-6. `bundle.inspect`
-7. `digest` — SHA-256 of candidate source files
+2. `reliability.gate` — risk class + Risk Model. R0 may use a synthesized low-risk model; R1+ fail closed without mandatory reliability evidence. See [docs/engineering-reliability.md](./engineering-reliability.md).
+3. `package.inspect` — dependencies are inspectable. Install/postinstall scripts are **not** executed and make the stage `blocked`.
+4. `source.boundary` — no DSH package-internal `src/` imports
+5. `typecheck` — offline TypeScript check when `.ts` sources exist
+6. `tests` — Node-native candidate test files (`.js` / `.mjs` / `.cjs`) run only inside an OS/process sandbox that denies network at the system layer (macOS `sandbox-exec` / Linux `unshare --net`), plus `node --permission` for workspace-only filesystem and no child-process flag. The runner probes that a sandboxed process can start before treating the sandbox as available; EPERM / policy-disabled startup is `unresolved`, never host execution. The runner does not inherit host `process.env`. Candidate runtime permissions are not validation-time permissions. TypeScript-only test files stay `unresolved`. If that OS sandbox is unavailable, the stage stays `unresolved` rather than executing candidate code on the host. A failing or denied suite is `failed`. Network denial is not implemented by patching Node APIs.
+7. `bundle.inspect`
+8. `digest` — SHA-256 of candidate source files
 
 Only repository-owned allowlisted task names may be requested. `shell.exec`, raw argv, and `npm.script` / `postinstall` requests are **blocked**, never `exec`'d.
 
