@@ -2,9 +2,11 @@ import type { ActivationSnapshot } from './types.js'
 
 export interface ActivationPrepareContext {
   readonly workspaceRoot: string
+  readonly entryPoints: readonly string[]
   readonly tools: readonly string[]
   readonly services: readonly string[]
   readonly providers: readonly string[]
+  readonly runtimeSeams: readonly string[]
 }
 
 export interface ActivationRuntime {

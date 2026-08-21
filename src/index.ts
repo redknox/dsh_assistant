@@ -2,7 +2,7 @@ export { apply, inject, name, PRODUCT_TOOL_NAMES, SAFE_MODE_TOOL_NAMES, type Ass
 
 export { bootAssistantControl, bootAssistantRuntime, bootSafeModeRuntime, createAssistantAgent } from './runtime/boot.js'
 export { RecoveryRoot } from './domain/governance/root.js'
-export { CordisActivationRuntime } from './adapters/activation/cordis-runtime.js'
+export { CordisActivationRuntime, resolveCandidateEntry } from './adapters/activation/cordis-runtime.js'
 export { ASSISTANT_PERSONA } from './product/persona.js'
 export { JsonFileMemoryPersistence } from './adapters/memory/json-file-persistence.js'
 export { ingestLocalTextFile } from './adapters/knowledge/local-file-ingest.js'

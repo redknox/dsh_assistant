@@ -74,7 +74,7 @@ Phases: verify eligibility → capture Last Known Good → prepare/mount → hea
 
 Registry commit happens only after health verification. A failed prepare/health leaves the previous owner active. There is never a final state with two active owners for the same capability.
 
-Prepare / health / commit / restore use a production `CordisActivationRuntime` that mounts and disposes a real Cordis fiber and checks public tools/services. `InMemoryActivationRuntime` remains a unit-test fake only.
+Prepare / health / commit / restore use a production `CordisActivationRuntime` that resolves the sealed candidate's plugin entry from workspace / `entryPoints` / `package.json` and mounts that artifact through `ctx.plugin`. Health only credits tools/services/providers the candidate **produced**; surfaces that were already present on the previous composition do not count. Rollback disposes the candidate fiber. `InMemoryActivationRuntime` remains a unit-test fake only.
 
 This issue still does not implement a first autonomous generated-plugin vertical slice.
 

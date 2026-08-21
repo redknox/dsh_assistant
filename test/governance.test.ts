@@ -306,9 +306,68 @@ describe('governance plugin', () => {
     }
   })
 
-  it('Cordis activation mounts a real fiber and rollback unmounts it', async () => {
+  it('activates the candidate artifact itself, not an adapter probe', async () => {
     const { ctx, recoveryRoot } = await bootAssistantControl()
     try {
+      const unique = 'candidate_unique_surface'
+      assert.equal(ctx.tools.get(unique), undefined)
+      const candidate = ctx.candidateWorkspace.create({
+        review: review({
+          kind: 'new-plugin',
+          capability: 'matter.light.set',
+          need: 'unique candidate surface',
+          target: undefined,
+        }),
+        owner: 'generated/unique-surface',
+        version: '0.1.0',
+        manifest: {
+          capabilities: ['matter.light.set'],
+          tools: [unique],
+          entryPoints: ['src/plugin.js'],
+        },
+      })
+      ctx.candidateWorkspace.writeFile(candidate.id, 'package.json', `${JSON.stringify({
+        name: 'dsh-candidate-unique-surface',
+        type: 'module',
+        main: 'src/plugin.js',
+      }, null, 2)}\n`)
+      ctx.candidateWorkspace.writeFile(candidate.id, 'src/plugin.js', `export const name = 'generated-unique-surface'
+export const inject = ['tools']
+export function apply(ctx) {
+  const dispose = ctx.tools.register({
+    name: '${unique}',
+    description: 'Surface registered only by this sealed candidate.',
+    parameters: {},
+    output: {
+      schema: { type: 'string' },
+      render(_args, value) { return [{ type: 'text', text: String(value) }] },
+    },
+    async execute() { return 'from-candidate-source' },
+  })
+  ctx.effect(() => dispose)
+}
+`)
+      ctx.candidateValidation.validate(candidate.id)
+      const sealed = ctx.candidateWorkspace.seal(candidate.id)
+      const human = recoveryRoot.issueAuthority({ kind: 'human-control', source: 'application-ui' })
+      const fingerprint = ctx.extensionGovernance.requestApproval(sealed.id).fingerprint
+      recoveryRoot.recordApproval(human, { candidateId: sealed.id, fingerprint, decision: 'approved-for-exact-diff' })
+      const after = await recoveryRoot.activate(sealed.id, human)
+      assert.equal(after.state, 'active')
+      assert.ok(ctx.tools.get(unique), 'candidate source must register the unique tool')
+      assert.equal(ctx.tools.get(`activated__${sealed.id.replaceAll(/[^A-Za-z0-9_]/g, '_')}`), undefined)
+      const restored = await recoveryRoot.rollback(human)
+      assert.equal(restored.state, 'rolled-back')
+      assert.equal(ctx.tools.get(unique), undefined)
+    } finally {
+      await ctx.fiber.dispose()
+    }
+  })
+
+  it('does not treat pre-existing product tools as candidate health', async () => {
+    const { ctx, recoveryRoot } = await bootAssistantControl()
+    try {
+      assert.ok(ctx.tools.get('calendar_list_events'))
       const candidate = ctx.candidateWorkspace.create({
         review: review(),
         owner: 'managed/integrations',
@@ -319,23 +378,29 @@ describe('governance plugin', () => {
           permissions: ['local.fake.suite'],
           runtimeSeams: ['integrations.calendar'],
           tools: ['calendar_list_events'],
+          entryPoints: ['src/plugin.js'],
         },
       })
-      ctx.candidateWorkspace.writeFile(candidate.id, 'src/ok.ts', 'export const value: string = "ok"\n')
+      ctx.candidateWorkspace.writeFile(candidate.id, 'package.json', `${JSON.stringify({
+        name: 'dsh-candidate-calendar-evolve',
+        type: 'module',
+        main: 'src/plugin.js',
+      }, null, 2)}\n`)
+      ctx.candidateWorkspace.writeFile(candidate.id, 'src/plugin.js', `export const name = 'candidate-without-new-surface'
+export function apply() {}
+`)
       ctx.candidateValidation.validate(candidate.id)
       const sealed = ctx.candidateWorkspace.seal(candidate.id)
       const human = recoveryRoot.issueAuthority({ kind: 'human-control', source: 'application-ui' })
       const fingerprint = ctx.extensionGovernance.requestApproval(sealed.id).fingerprint
       recoveryRoot.recordApproval(human, { candidateId: sealed.id, fingerprint, decision: 'approved-for-exact-diff' })
-      const probe = `activated__${sealed.id.replaceAll(/[^A-Za-z0-9_]/g, '_')}`
-      const after = await recoveryRoot.activate(sealed.id, human)
-      assert.equal(after.state, 'active')
-      assert.ok(ctx.tools.get(probe), probe)
+      const status = await recoveryRoot.activate(sealed.id, human)
+      assert.equal(status.state, 'activation-failed')
+      assert.equal(status.lastFailure?.phase, 'health')
+      assert.match(status.lastFailure?.diagnostics ?? '', /already present/)
       assert.ok(ctx.tools.get('calendar_list_events'))
-      const restored = await recoveryRoot.rollback(human)
-      assert.equal(restored.state, 'rolled-back')
-      assert.equal(ctx.tools.get(probe), undefined)
-      assert.ok(ctx.tools.get('calendar_list_events'))
+      assert.equal(ctx.capabilityRegistry.get('managed/integrations', '0.1.0')?.status, 'active')
+      assert.equal(ctx.capabilityRegistry.get('managed/integrations', '0.2.0'), undefined)
     } finally {
       await ctx.fiber.dispose()
     }

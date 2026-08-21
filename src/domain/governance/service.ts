@@ -149,9 +149,11 @@ export class GovernanceService implements ExtensionGovernance, ExtensionActivati
       phase = 'prepare'
       const prepared = await this.runtime.prepare(candidateId, {
         workspaceRoot: record.workspaceRoot,
+        entryPoints: record.manifest.entryPoints,
         tools: record.manifest.tools,
         services: record.manifest.services,
         providers: record.manifest.providers,
+        runtimeSeams: record.manifest.runtimeSeams,
       })
       if (!prepared.ok) throw new Error(prepared.diagnostics ?? 'prepare failed')
       phase = 'health'
