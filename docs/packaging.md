@@ -22,7 +22,7 @@ Required:
 
 - Node `>=22`
 - npm
-- A packed `dsh-assistant-0.2.0.tgz` (or this repository for contributors)
+- A packed `dsh-assistant-0.3.0.tgz` (or this repository for contributors)
 
 ```sh
 npm install
@@ -60,7 +60,7 @@ Precedence: CLI flag → environment → env file → `product.json` → default
 | `DSH_ASSISTANT_MEMORY` | no | Contributor boot: `json-file` (product CLI already persists under home) |
 | `DSH_ASSISTANT_KNOWLEDGE_FIXTURES` | no | Comma-separated **explicit** file paths; never a home-directory scan |
 
-Live model API keys belong to a DSH LLM adapter you load yourself. Do not commit `.env`, tokens, or real personal ids.
+Live `DEEPSEEK_API_KEY` belongs in the env file, not git. Do not commit `.env`, tokens, or real personal ids.
 
 Optional capability providers (replaceable, not required to boot):
 

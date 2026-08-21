@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
-import { execFileSync, spawnSync } from 'node:child_process'
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
+import { execFileSync, spawn, spawnSync } from 'node:child_process'
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, it } from 'node:test'
@@ -45,7 +45,7 @@ describe('product package and profile', () => {
       tarsNg?: { dsh: string }
       dependencies: Record<string, string>
     }
-    assert.equal(pkg.version, '0.2.0')
+    assert.equal(pkg.version, '0.3.0')
     assert.equal(pkg.private, true)
     assert.equal(pkg.engines.node, '>=22')
     assert.equal(pkg.dsh.bundle.patch, './cordis.patch.yml')
@@ -210,7 +210,7 @@ describe('product package and profile', () => {
     assert.deepEqual(forbidden, [])
   })
 
-  it('installs the packed artifact and runs tars-ng without src or tsx', { timeout: 120_000 }, () => {
+  it('installs the packed artifact and runs tars-ng without src or tsx', { timeout: 180_000 }, async () => {
     execFileSync('npm', ['run', 'build'], { cwd: root, encoding: 'utf8' })
     const packDir = mkdtempSync(join(tmpdir(), 'tars-ng-pack-'))
     const packedName = execFileSync('npm', ['pack', '--pack-destination', packDir], { cwd: root, encoding: 'utf8' }).trim().split('\n').at(-1)
@@ -257,7 +257,7 @@ describe('product package and profile', () => {
     delete env.DEEPSEEK_API_KEY
 
     const doctor = execFileSync(bin, ['doctor', '--home', productHome], { encoding: 'utf8', env })
-    assert.match(doctor, /TARS-NG/)
+    assert.match(doctor, /TARS-NG 0\.3\.0/)
     assert.match(doctor, new RegExp(productHome.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')))
     assert.match(doctor, /DSH_ASSISTANT_GOOGLE_CALENDAR_ACCESS_TOKEN: present/)
     assert.match(doctor, /DEEPSEEK_API_KEY: missing/)
@@ -294,8 +294,58 @@ describe('product package and profile', () => {
     const started = execFileSync(bin, ['start', '--once', '--home', productHome], { encoding: 'utf8', env })
     assert.match(started, /ai-runtime: configured/)
     assert.match(started, /llm-route: available/)
+    assert.match(started, /TARS-NG 0\.3\.0/)
     assert.doesNotMatch(started, /LLM not configured\/unavailable/)
     assert.doesNotMatch(started, /sk-offline-not-a-live-key/)
+    assert.equal(existsSync(pidFile), false)
+
+    mkdirSync(join(productHome, 'data'), { recursive: true })
+    writeFileSync(join(productHome, 'data', 'soak-marker'), 'keep-across-reinstall\n')
+    rmSync(pkgRoot, { recursive: true, force: true })
+    execFileSync('npm', ['install', tarball, '--omit=dev'], {
+      cwd: installDir,
+      encoding: 'utf8',
+      timeout: 90_000,
+    })
+    assert.equal(existsSync(join(pkgRoot, 'src')), false)
+    assert.equal(existsSync(join(productHome, 'data', 'soak-marker')), true)
+    assert.match(readFileSync(join(productHome, 'data', 'soak-marker'), 'utf8'), /keep-across-reinstall/)
+
+    const child = spawn(bin, ['start', '--home', productHome], {
+      env,
+      stdio: ['ignore', 'pipe', 'pipe'],
+    })
+    let runningOut = ''
+    await new Promise<void>((resolve, reject) => {
+      const timer = setTimeout(() => {
+        child.kill('SIGTERM')
+        reject(new Error(`tars-ng start did not enter running state: ${runningOut}`))
+      }, 20_000)
+      const onData = (chunk: Buffer | string) => {
+        runningOut += String(chunk)
+        if (runningOut.includes('TARS-NG is running')) {
+          clearTimeout(timer)
+          resolve()
+        }
+      }
+      child.stdout?.on('data', onData)
+      child.stderr?.on('data', onData)
+      child.once('exit', (code) => {
+        if (!runningOut.includes('TARS-NG is running')) {
+          clearTimeout(timer)
+          reject(new Error(`tars-ng start exited ${code}: ${runningOut}`))
+        }
+      })
+    })
+    const statusOut = execFileSync(bin, ['status', '--home', productHome], { encoding: 'utf8', env })
+    assert.match(statusOut, /running: yes/)
+    assert.match(statusOut, /TARS-NG 0\.3\.0/)
+    assert.doesNotMatch(statusOut, /sk-offline-not-a-live-key/)
+    const stopped = execFileSync(bin, ['stop', '--home', productHome], { encoding: 'utf8', env })
+    assert.match(stopped, /SIGTERM/)
+    await new Promise<void>((resolve) => {
+      child.once('close', () => resolve())
+    })
     assert.equal(existsSync(pidFile), false)
   })
 })
