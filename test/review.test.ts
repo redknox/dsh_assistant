@@ -360,6 +360,25 @@ describe('independent review', () => {
     assert.match(item?.evidence ?? '', /Stale resolution/)
   })
 
+  it('does not let caller-controlled priorFindings rewrite an inherited BLOCKER to resolved', () => {
+    const provider = new PolicyReviewerProvider((input) => (
+      input.candidate.digest === 'rev-a' ? [trustFinding('rev-a', 'open')] : []
+    ))
+    const service = new ReviewService(provider)
+    const first = service.review(r3({ digest: 'rev-a' }))
+    const inherited = first.findings.find((item) => item.claim === 'forged-discovery-trust')
+    assert.equal(inherited?.status, 'open')
+    const second = service.review(r3({
+      digest: 'rev-b',
+      parentRevision: 'rev-a',
+      priorFindings: inherited ? [{ ...inherited, status: 'resolved' }] : [],
+    }))
+    assert.equal(second.state, 'changes-required')
+    const carried = second.findings.find((item) => item.claim === 'forged-discovery-trust')
+    assert.equal(carried?.status, 'open')
+    assert.equal(carried?.reviewedDigest, 'rev-b')
+  })
+
   it('M. review depth follows risk class', () => {
     const service = new ReviewService()
     const light = service.review(pkg())

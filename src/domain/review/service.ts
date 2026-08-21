@@ -1,7 +1,7 @@
 import type { CandidateRecord } from '../candidate/types.js'
 import { reviewPackageFromCandidate } from './package.js'
 import { formatReviewReport } from './format.js'
-import { bindResolutionToDigest, resolveCarriedFindings } from './lineage.js'
+import { bindResolutionToDigest, inheritedOpenBlockers, resolveCarriedFindings } from './lineage.js'
 import { deterministicPrechecks, lineageOmissions, reportState } from './precheck.js'
 import { PolicyReviewerProvider } from './provider.js'
 import type {
@@ -30,9 +30,9 @@ export class ReviewService implements IndependentReview {
     const semantic = this.semantic.semanticReview(pkg, policy)
     const current = bindResolutionToDigest(dedupe([...prechecks, ...semantic]), pkg)
     const parent = this.parentReport(pkg)
-    const inherited = parent?.findings.filter((item) => item.blocking && item.status === 'open') ?? []
+    const inherited = inheritedOpenBlockers(parent, pkg.priorFindings)
     const omissions = lineageOmissions(inherited, pkg.priorFindings, pkg.candidate.digest)
-    const carried = resolveCarriedFindings(pkg.priorFindings, current, pkg)
+    const carried = resolveCarriedFindings(inherited, current, pkg)
     const findings = dedupe([...current, ...carried, ...omissions])
     const state = reportState(findings)
     const report: ReviewReport = {

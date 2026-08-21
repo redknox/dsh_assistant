@@ -102,6 +102,7 @@ export interface ReviewPackage {
   readonly cancelledContextReuse?: boolean
   readonly independentReconciliation?: boolean
   readonly generated: boolean
+  /** Trace only. Host parent ReviewReport owns which BLOCKERs remain unresolved. */
   readonly priorFindings: readonly ReviewFinding[]
   /** Builder claims to inspect, never authority. */
   readonly builderClaims?: Readonly<Record<string, unknown>>

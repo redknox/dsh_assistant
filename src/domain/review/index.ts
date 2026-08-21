@@ -21,7 +21,7 @@ export {
 export { finding, findingId } from './finding.js'
 export { hiddenReviewKeys, reviewPackageFromCandidate } from './package.js'
 export { deterministicPrechecks, lineageOmissions, openBlockers } from './precheck.js'
-export { hostResolutionEvidence, resolveCarriedFindings } from './lineage.js'
+export { hostResolutionEvidence, inheritedOpenBlockers, resolveCarriedFindings } from './lineage.js'
 export { PermissiveReviewerProvider, PolicyReviewerProvider } from './provider.js'
 export { formatReviewReport } from './format.js'
 export { ReviewService } from './service.js'

@@ -136,12 +136,12 @@ Review N on candidate A
 
 Repairing one finding does not authorize unrelated edits. Resolved findings stay in the report. A BLOCKER that is simply dropped from `priorFindings` while the parent review still has it open becomes a lineage BLOCKER.
 
-Prior open BLOCKERs remain open on the child revision by default. They may become resolved only when current-revision evidence proves the invariant:
+Prior open BLOCKERs are inherited from the host-owned parent `ReviewReport`, not from caller-edited `priorFindings` status. They remain open on the child revision by default. They may become resolved only when current-revision evidence proves the invariant:
 
 - the Reviewer returns the same finding with `status: resolved` and `reviewedDigest` equal to the new digest; or
 - a deterministic host-owned check for that invariant succeeds on the current package.
 
-Reviewer silence is not resolution. Stale resolution evidence bound to an older digest cannot close a newer revision. Builder text that says “fixed” is not proof.
+`priorFindings` is trace/context. It cannot rewrite an inherited BLOCKER from `open` to `resolved`. Reviewer silence is not resolution. Stale resolution evidence bound to an older digest cannot close a newer revision. Builder text that says “fixed” is not proof. A BLOCKER omitted from `priorFindings` while the parent report still has it open also produces a lineage BLOCKER.
 
 New findings may appear during re-review.
 

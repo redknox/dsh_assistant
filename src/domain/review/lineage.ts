@@ -1,7 +1,16 @@
 import { REVIEW_POLICY_VERSION, type ReviewFinding, type ReviewPackage } from './types.js'
 
-function openPriorBlockers(declared: readonly ReviewFinding[]): readonly ReviewFinding[] {
-  return declared.filter((item) => item.severity === 'BLOCKER' && item.status === 'open')
+function openBlockersFrom(findings: readonly ReviewFinding[]): readonly ReviewFinding[] {
+  return findings.filter((item) => item.blocking && item.status === 'open')
+}
+
+/** Host parent report is lineage authority. Package priorFindings cannot rewrite open → resolved. */
+export function inheritedOpenBlockers(
+  parent: { readonly findings: readonly ReviewFinding[] } | undefined,
+  declared: readonly ReviewFinding[],
+): readonly ReviewFinding[] {
+  if (parent) return openBlockersFrom(parent.findings)
+  return openBlockersFrom(declared)
 }
 
 /** Host-owned proof that a known invariant is satisfied on this revision. Silence is not proof. */
@@ -76,18 +85,19 @@ export function bindResolutionToDigest(
 }
 
 /**
- * Prior open BLOCKERs stay open unless current-revision evidence proves resolution.
- * Reviewer silence is not resolution evidence.
+ * Inherited open BLOCKERs stay open unless current-revision evidence proves resolution.
+ * Caller-supplied priorFinding status is not authority.
  */
 export function resolveCarriedFindings(
-  declared: readonly ReviewFinding[],
+  inherited: readonly ReviewFinding[],
   current: readonly ReviewFinding[],
   pkg: ReviewPackage,
 ): readonly ReviewFinding[] {
   const digest = pkg.candidate.digest
   const currentById = new Map(current.map((item) => [item.id, item]))
   const out: ReviewFinding[] = []
-  for (const prior of openPriorBlockers(declared)) {
+  for (const prior of inherited) {
+    if (!(prior.blocking && prior.status === 'open')) continue
     const now = currentById.get(prior.id)
     if (now?.status === 'open') continue
     if (now?.status === 'resolved' && now.reviewedDigest === digest) continue
