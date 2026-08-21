@@ -45,7 +45,7 @@ This project must extend DSH through **public** plugin / service / provider / ev
 
 Prefer **reversible plugin composition** (load/unload, `cordis`/profile layering) over modifying Harness core. One role (definition, provider, or consumer) is not a full capability seam; replace providers without rewriting consumers when DSH already exposes that split.
 
-**Self-Extension** must use these same public seams. Governance contracts remain **Designed** ([docs/self-extension.md](./docs/self-extension.md)). Registry, Resolution, candidate validation, and governed activation/recovery are **Verified** ([docs/extension-governance.md](./docs/extension-governance.md)). Invariants: **self-extension without self-authorization**, and prefer reuse/evolution over new plugins. Assistant-generated code has no privileged runtime path. Registry `active` is metadata, not a mount. Approval is not activation. Recovery authority stays outside Self-Extension.
+**Self-Extension** must use these same public seams. Governance contracts remain **Designed** ([docs/self-extension.md](./docs/self-extension.md)). Registry, Resolution, candidate validation, independent review, and governed activation/recovery are **Verified** ([docs/extension-governance.md](./docs/extension-governance.md), [docs/independent-review.md](./docs/independent-review.md)). Invariants: **self-extension without self-authorization**, **self-development without self-certification**, and prefer reuse/evolution over new plugins. Assistant-generated code has no privileged runtime path. Registry `active` is metadata, not a mount. Approval is not activation. `review-complete` is not approval. Recovery authority stays outside Self-Extension.
 
 ## Capability boundaries
 

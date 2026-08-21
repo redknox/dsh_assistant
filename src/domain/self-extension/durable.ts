@@ -2,6 +2,7 @@ import { candidateDirName } from '../candidate/paths.js'
 import type { CandidateRecord } from '../candidate/types.js'
 import type { GovernanceHydrate } from '../governance/service.js'
 import type { CapabilityRegistry } from '../registry/types.js'
+import { DurableReviewLineage } from './review-lineage.js'
 import { DurableAuthorityStore } from './authority-store.js'
 import { DurableCandidateIndex } from './candidate-index.js'
 import { PersistenceIntegrityError, PersistenceSchemaError } from './errors.js'
@@ -11,6 +12,7 @@ export interface DurableSelfExtension {
   readonly home: SelfExtensionHome
   readonly authority: DurableAuthorityStore
   readonly candidates: DurableCandidateIndex
+  readonly reviews: DurableReviewLineage
 }
 
 export interface DurableOpenResult {
@@ -24,11 +26,13 @@ export function openDurableSelfExtension(explicitHome?: string): DurableOpenResu
   if (root === undefined) return { diagnostics: [] }
   const home = ensureSelfExtensionHome(root)
   try {
+    const authority = new DurableAuthorityStore(home)
     return {
       durable: {
         home,
-        authority: new DurableAuthorityStore(home),
+        authority,
         candidates: new DurableCandidateIndex(home),
+        reviews: new DurableReviewLineage(home, authority),
       },
       diagnostics: [],
     }
@@ -75,6 +79,7 @@ export function persistGovernance(authority: DurableAuthorityStore, hydrate: Gov
       safeMode: hydrate.safeMode,
       diagnostics: current.recovery.diagnostics,
     },
+    reviewLineage: current.reviewLineage ?? { generation: 0 },
   })
 }
 

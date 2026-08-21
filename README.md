@@ -89,6 +89,7 @@ Do not call a capability **Verified** without reproducible evidence. Use:
 | Capability Discovery | no | **Verified** by `test/discovery.test.ts` | Answers **what existing implementation may be available?** Local DSH/catalog evidence only; never installs. See [docs/capability-discovery.md](./docs/capability-discovery.md) |
 | Candidate workspace + validation | no | **Verified** by `test/candidate.test.ts` | Builds/validates an inactive artifact. `validated` is not approval. See [docs/candidate-workspace.md](./docs/candidate-workspace.md) |
 | Engineering reliability | no | **Verified** by `test/reliability.test.ts` | Risk class + Risk Model gate before `validated`. Fixture ≠ provider. See [docs/engineering-reliability.md](./docs/engineering-reliability.md) |
+| Independent review | no | **Verified** by `test/review.test.ts` | Fresh-context review of a sealed digest. `review-complete` is not approval. See [docs/independent-review.md](./docs/independent-review.md) |
 | Extension governance / activation / recovery | no | **Verified** by `test/governance.test.ts` | Exact-diff approval + transactional activate + LKG/Safe Mode. See [docs/extension-governance.md](./docs/extension-governance.md) |
 | Production persistence, public npm publish | no | **Unsupported** | Package is `private` |
 
@@ -131,6 +132,8 @@ Composition is replaceable: this package declares `dsh.bundle` (`cordis.patch.ym
 | [docs/capability-registry.md](./docs/capability-registry.md) | Registry: What do I have? ownership, conflicts, bootstrap |
 | [docs/capability-resolution.md](./docs/capability-resolution.md) | Resolution: What should change? ordered review, evidence |
 | [docs/candidate-workspace.md](./docs/candidate-workspace.md) | Candidate workspace + validation: Can I build it safely? |
+| [docs/engineering-reliability.md](./docs/engineering-reliability.md) | Reliability gate: is the claimed behavior still correct under failure? |
+| [docs/independent-review.md](./docs/independent-review.md) | Independent review: self-development without self-certification |
 | [docs/extension-governance.md](./docs/extension-governance.md) | Governance: May it become active? Recovery / Safe Mode |
 | [docs/v0.2-stabilization.md](./docs/v0.2-stabilization.md) | v0.2.x regression, recovery drills, backup/restore |
 | [docs/RELEASE.md](./docs/RELEASE.md) | 0.2.0 status: Verified vs Implemented vs Unsupported; v0.1.0 remains the historical Core MVP |

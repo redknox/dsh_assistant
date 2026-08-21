@@ -14,6 +14,8 @@ import type { RegistryPluginConfig } from '../plugins/registry-plugin.js'
 import * as resolutionPlugin from '../plugins/resolution-plugin.js'
 import * as candidatePlugin from '../plugins/candidate-plugin.js'
 import type { CandidatePluginConfig } from '../plugins/candidate-plugin.js'
+import * as reviewPlugin from '../plugins/review-plugin.js'
+import type { ReviewPluginConfig } from '../plugins/review-plugin.js'
 import * as governancePlugin from '../plugins/governance-plugin.js'
 import type { GovernancePluginConfig } from '../plugins/governance-plugin.js'
 
@@ -24,6 +26,7 @@ export const inject = ['systemPrompt', 'agents']
 export interface AssistantBundleConfig {
   readonly registry?: RegistryPluginConfig
   readonly candidate?: CandidatePluginConfig
+  readonly review?: ReviewPluginConfig
   readonly memory?: MemoryPluginConfig
   readonly knowledge?: KnowledgePluginConfig
   readonly policy?: PolicyPluginConfig
@@ -38,6 +41,7 @@ export async function apply(ctx: Context, config: AssistantBundleConfig = {}) {
   await ctx.plugin(registryPlugin, config.registry)
   await ctx.plugin(resolutionPlugin)
   await ctx.plugin(candidatePlugin, config.candidate)
+  await ctx.plugin(reviewPlugin, config.review)
   await ctx.plugin(governancePlugin, config.governance)
   if (config.safeMode) return
   await ctx.plugin(memoryPlugin, config.memory)

@@ -67,6 +67,12 @@ async function bootStack(options: BootOptions = {}): Promise<AssistantControl> {
       restore: persistBroken ? [] : durable.candidates.restore(durable.home.candidateArea),
       persist: (records) => persistCandidates(durable.candidates, records, ctx.capabilityRegistry),
     },
+    review: durable === undefined ? undefined : {
+      restore: persistBroken || durable.reviews.lineageUnavailable ? [] : durable.reviews.restore(),
+      persist: persistBroken || durable.reviews.lineageUnavailable ? undefined : (reports) => durable.reviews.save(reports),
+      hostLineage: true,
+      lineageUnavailable: persistBroken || durable.reviews.lineageUnavailable,
+    },
     governance: {
       hydrate: persistBroken || durable === undefined ? undefined : hydrateFromAuthority(durable.authority),
       persist: durable === undefined ? undefined : () => {

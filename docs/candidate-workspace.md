@@ -17,6 +17,9 @@ Can I build a candidate?
 Is this exact candidate valid?
   Build/Test/Validation     [this document]
         ↓
+Is this sealed revision independently reviewed?
+  Independent Review        [implemented]
+        ↓
 May it become active?
   Governance / Activation   [implemented]
 ```
@@ -79,6 +82,8 @@ Default stages, each with an explicit status (`passed` / `failed` / `blocked` / 
 7. `bundle.inspect`
 8. `digest` — SHA-256 of candidate source files
 
+Independent Review is a separate host-managed stage after validation. It binds to that digest and cannot approve or activate. See [docs/independent-review.md](./independent-review.md).
+
 Only repository-owned allowlisted task names may be requested. `shell.exec`, raw argv, and `npm.script` / `postinstall` requests are **blocked**, never `exec`'d.
 
 A candidate becomes `validated` only when every required stage is `passed` or explicitly `not-applicable`. `failed`, `blocked`, and `unresolved` all prevent `report.passed`. Unresolved-only reports become `validation-incomplete`, not green.
@@ -88,6 +93,7 @@ A candidate becomes `validated` only when every required stage is `passed` or ex
 ```text
 ctx.candidateWorkspace.create / writeFile / diff / seal / discard
 ctx.candidateValidation.validate
+ctx.independentReview.review / reviewCandidate / status
 ```
 
 There is no model-facing install, approve, or mount tool. Orchestrators may call these services after a trusted Resolution Review.

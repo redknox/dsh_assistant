@@ -13,6 +13,7 @@ Status: **Verified** by `test/self-extension-restart.test.ts`.
 | Governance | `authority.json` → `governance` | approval request/decision + exact fingerprint |
 | Activation | `authority.json` → `activation` | transaction state / generation / pending id |
 | Recovery | `authority.json` → `recovery` | LKG, Safe Mode, last failure, diagnostics |
+| Independent Review | `review-lineage.json` + `authority.json` → `reviewLineage` | sealed ReviewReport history; generation > 0 means the lineage file is expected |
 
 `authority.json` is one atomic write (temp + fsync + rename) with named sections so authority changes are not half-written. A successful activation commits Registry + Activation + Recovery/LKG as **one** snapshot replace; tentative Registry `active` metadata is not independently durable. Schema version is `1`. Unknown or corrupt schema fails closed into Safe Mode / recovery; it never auto-activates.
 

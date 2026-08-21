@@ -9,11 +9,12 @@ Need
 → Capability Resolution
 → Candidate development
 → Validation + Reliability gate
+→ Independent Review
 → Human approval
 → Activation
 ```
 
-A passing happy-path test is not enough. Transport failure is not remote failure. Unknown stays unknown.
+A passing happy-path test is not enough. Transport failure is not remote failure. Unknown stays unknown. Independent Review cannot waive this gate. See [docs/independent-review.md](./independent-review.md).
 
 ## Risk classes
 

@@ -27,13 +27,21 @@ export interface DurableGovernanceSection {
   readonly nextApproval: number
 }
 
+/** Host metadata: generation 0 is first-ever empty history; generation > 0 means lineage file is expected. */
+export interface DurableReviewLineageSection {
+  readonly generation: number
+}
+
 export interface AuthorityFile {
   readonly schemaVersion: number
   readonly registry: { readonly records: readonly RegistryRecordSnapshot[] }
   readonly governance: DurableGovernanceSection
   readonly activation: DurableActivationSection
   readonly recovery: DurableRecoverySection
+  readonly reviewLineage: DurableReviewLineageSection
 }
+
+const EMPTY_REVIEW_LINEAGE: DurableReviewLineageSection = { generation: 0 }
 
 const EMPTY_AUTHORITY: AuthorityFile = {
   schemaVersion: SELF_EXTENSION_SCHEMA_VERSION,
@@ -41,6 +49,7 @@ const EMPTY_AUTHORITY: AuthorityFile = {
   governance: { approvals: [], nextApproval: 1 },
   activation: { state: 'idle', generation: 0 },
   recovery: { safeMode: false, diagnostics: [] },
+  reviewLineage: EMPTY_REVIEW_LINEAGE,
 }
 
 function isObject(value: unknown): value is Record<string, unknown> {
@@ -65,7 +74,18 @@ export function parseAuthorityFile(parsed: unknown): AuthorityFile {
   if (!isObject(parsed.recovery) || typeof parsed.recovery.safeMode !== 'boolean') {
     throw new PersistenceIntegrityError('authority.recovery.safeMode is required')
   }
-  return parsed as unknown as AuthorityFile
+  return {
+    ...(parsed as unknown as AuthorityFile),
+    reviewLineage: parseReviewLineageSection(parsed.reviewLineage),
+  }
+}
+
+function parseReviewLineageSection(value: unknown): DurableReviewLineageSection {
+  if (value === undefined) return EMPTY_REVIEW_LINEAGE
+  if (!isObject(value) || typeof value.generation !== 'number' || !Number.isInteger(value.generation) || value.generation < 0) {
+    throw new PersistenceIntegrityError('authority.reviewLineage.generation must be a non-negative integer')
+  }
+  return { generation: value.generation }
 }
 
 /** Single atomic authority file with named ownership sections. */
@@ -109,6 +129,10 @@ export class DurableAuthorityStore implements RegistryPersistence {
     this.replace({ recovery: structuredClone(section) })
   }
 
+  saveReviewLineage(section: DurableReviewLineageSection): void {
+    this.replace({ reviewLineage: structuredClone(section) })
+  }
+
   appendDiagnostic(message: string): void {
     this.replace({
       recovery: {
@@ -120,7 +144,11 @@ export class DurableAuthorityStore implements RegistryPersistence {
 
   /** One atomic replace of every authority section. */
   commitAll(file: AuthorityFile): void {
-    this.file = { ...structuredClone(file), schemaVersion: SELF_EXTENSION_SCHEMA_VERSION }
+    this.file = {
+      ...structuredClone(file),
+      schemaVersion: SELF_EXTENSION_SCHEMA_VERSION,
+      reviewLineage: file.reviewLineage ?? EMPTY_REVIEW_LINEAGE,
+    }
     writeJsonAtomic(this.home.authorityPath, this.file)
   }
 
