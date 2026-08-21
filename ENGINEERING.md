@@ -70,6 +70,7 @@ Normative. Details: [docs/self-extension.md](./docs/self-extension.md).
 4. Active plugin code is immutable. Modifications produce a new candidate version.
 5. Writing code is not authorization to execute or mount that code.
 6. The Capability Registry is descriptive only. Resolution is advisory. Validation is evidence. Approval is a trusted-control record for an exact digest/diff. Activation is transactional. The assistant must not approve itself or rewrite the recovery root.
+7. TARS-NG personality is expression and initiative, never authorization. Personality configuration must not grant capability, change permissions, mint approval, activate extensions, or alter Recovery/Bootstrap authority.
 
 ## 9. Non-goals (engineering)
 

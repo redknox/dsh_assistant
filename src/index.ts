@@ -19,12 +19,16 @@ export * from './domain/reliability/index.js'
 export * from './domain/review/index.js'
 export * from './domain/governance/index.js'
 export * from './domain/self-extension/index.js'
+export * from './domain/personality/index.js'
+export * from './domain/workspace/index.js'
 export { FakeClock, IntervalScheduler } from './adapters/jobs/interval-scheduler.js'
 export {
   AssistantControlSurface,
   projectAssistantView,
   renderAssistantViewAsHtml,
   renderAssistantViewAsText,
+  renderMissionControlAsHtml,
+  renderMissionControlAsText,
 } from './ui/index.js'
 export type {
   AssistantView,

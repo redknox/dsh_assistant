@@ -7,7 +7,7 @@ How to install, boot, remove, and remount `dsh-assistant` as a DSH-native produc
 | Piece | Location | Role |
 | --- | --- | --- |
 | Product bundle | `package.json` → `dsh.bundle.patch` = `cordis.patch.yml` | Inserts plugin id `dsh-assistant` |
-| Bundle entry | `src/product/bundle.ts` (`name`, `inject`, `apply`) | Loads memory, knowledge, integrations, policy, jobs, persona |
+| Bundle entry | `src/product/bundle.ts` (`name`, `inject`, `apply`) | Loads registry, candidate, review, personality, governance, then optional memory/knowledge/integrations/policy/jobs |
 | Example profile | `profiles/assistant/` | `dsh.profile.bundles`: `@deepseek-ai/dsh-base` then `dsh-assistant` |
 | Headless boot | `npm run boot` | Public DSH plugins + product bundle, one agent, dispose |
 

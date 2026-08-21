@@ -4,6 +4,9 @@ import { SessionId } from '@deepseek-ai/dsh-session'
 import type { KnowledgeRetrieval } from '../domain/knowledge/types.js'
 import type { MemoryCategory, MemoryReplaceInput, MemoryWriteInput, Provenance } from '../domain/memory/types.js'
 import type { PolicyOutcome } from '../domain/policy/types.js'
+import type { ObjectiveView } from '../domain/workspace/types.js'
+import { projectWorkspace } from '../domain/workspace/gather.js'
+import type { UserPersonalityPrefs } from '../domain/personality/types.js'
 import type { AssistantView, KnowledgeSourceDto } from './dto.js'
 import { projectAssistantView } from './projection.js'
 
@@ -24,6 +27,7 @@ export interface EditMemoryInput {
  */
 export class AssistantControlSurface {
   private retrieval?: KnowledgeRetrieval
+  private objective?: ObjectiveView
 
   constructor(
     private readonly ctx: Context,
@@ -36,6 +40,25 @@ export class AssistantControlSurface {
       sessionId: this.sessionId,
       lastRetrieval: this.retrieval,
     })
+  }
+
+  workspace() {
+    return projectWorkspace({
+      ctx: this.ctx,
+      sessionId: this.sessionId,
+      ...(this.objective ? { objective: this.objective } : {}),
+    })
+  }
+
+  setObjective(text: string) {
+    this.objective = { text, status: 'active' }
+    return this.workspace()
+  }
+
+  setPersonality(prefs: UserPersonalityPrefs) {
+    const preview = this.ctx.tarsPersonality.preview(prefs)
+    this.ctx.tarsPersonality.setUserPrefs(prefs)
+    return preview
   }
 
   sendMessage(text: string): void {
