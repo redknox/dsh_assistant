@@ -52,6 +52,7 @@ Precedence: CLI flag → environment → env file → `product.json` → default
 | `TARS_NG_HOME` | no | Product home (default `~/.local/share/tars-ng`) |
 | `DSH_ASSISTANT_HOME` | no | Compatibility alias for the same home |
 | `TARS_NG_ALLOW_FIXTURES` | no | `1` enables explicit fixture integrations (not live data) |
+| `DEEPSEEK_API_KEY` | yes (for AI) | Secret. Official DeepSeek adapter; never commit |
 | `DSH_ASSISTANT_GOOGLE_CALENDAR_MODE` | no | `live` selects the host-bounded Google Calendar transport |
 | `DSH_ASSISTANT_GOOGLE_CALENDAR_ACCESS_TOKEN` | no | Secret. OAuth access token; expires; never commit |
 | `GOOGLE_SEARCH_API_KEY` | no | Secret. Diagnosed by name; Search is not shipped |
@@ -65,7 +66,7 @@ Optional capability providers (replaceable, not required to boot):
 
 | Provider | Default in product CLI | Status |
 | --- | --- | --- |
-| LLM adapter | none | Fake adapters **Implemented** for tests/`ui`/`slice`; live accounts **Unsupported** |
+| LLM adapter | `deepseek-official` / `deepseek-v4-flash` via `@deepseek-ai/dsh-llm-deepseek` | **Implemented** in the product runtime; live calls need `DEEPSEEK_API_KEY`. Fake adapters remain for tests/`ui`/`slice` |
 | Calendar | **unavailable** unless live token+mode or explicit fixtures | Fake suite **Verified** for tests; product default does not return fixture events as live data |
 | Memory persistence | `$TARS_NG_HOME/data/memory.json` | JSON adapter **Verified**; hosted DB **Unsupported** |
 | Knowledge ingest | none, or explicit fixture paths | Local lexical index **Verified** |

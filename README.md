@@ -26,17 +26,18 @@ tars-ng start                                      # Ctrl-C or tars-ng stop
 
 Home is `$TARS_NG_HOME`, else `$DSH_ASSISTANT_HOME`, else `~/.local/share/tars-ng`. Reinstalling package code does not delete it.
 
-Optional secrets (chmod 600, never git):
+Required for AI (chmod 600, never git):
 
 ```sh
 mkdir -p ~/.config/tars-ng && chmod 700 ~/.config/tars-ng
+# DEEPSEEK_API_KEY=                            (required for a usable AI runtime)
 # DSH_ASSISTANT_GOOGLE_CALENDAR_ACCESS_TOKEN=  (OAuth access token; expires; not an API key)
 # GOOGLE_SEARCH_API_KEY=
 # GOOGLE_SEARCH_ENGINE_ID=                     (non-secret config)
 chmod 600 ~/.config/tars-ng/env
 ```
 
-`tars-ng doctor` reports missing **names** only. Core start does not require Google credentials. Default Calendar is **unavailable**, not a realistic fixture. Live Calendar: `DSH_ASSISTANT_GOOGLE_CALENDAR_MODE=live` plus the access token. When the token expires, replace it; TARS-NG does not refresh OAuth in this release.
+`tars-ng doctor` reports missing **names** only. Soak LLM baseline is `deepseek-official` / `deepseek-v4-flash`, shipped with the package. Missing `DEEPSEEK_API_KEY` does not block start, but doctor reports `LLM not configured/unavailable` — start is not a usable AI runtime. Core start does not require Google credentials. Default Calendar is **unavailable**, not a realistic fixture. Live Calendar: `DSH_ASSISTANT_GOOGLE_CALENDAR_MODE=live` plus the access token. When the token expires, replace it; TARS-NG does not refresh OAuth in this release.
 
 Operator manual: [docs/operator.md](./docs/operator.md). Soak / feature freeze: [docs/soak.md](./docs/soak.md).
 

@@ -53,6 +53,8 @@ describe('product package and profile', () => {
     assert.equal(pkg.tarsNg?.dsh, '0.1.0-rc.8')
     assert.deepEqual(pkg.files, ['dist', 'cordis.patch.yml'])
     assert.equal(pkg.dependencies['@deepseek-ai/dsh-agent-loop'], '0.1.0-rc.8')
+    assert.equal(pkg.dependencies['@deepseek-ai/dsh-llm-deepseek'], '0.1.0-rc.8')
+    assert.equal(pkg.dependencies['@deepseek-ai/dsh-agent-default-model'], '0.1.0-rc.8')
     assert.match(readFileSync(join(root, 'cordis.patch.yml'), 'utf8'), /id: dsh-assistant/)
 
     const profile = JSON.parse(readFileSync(join(root, 'profiles/assistant/package.json'), 'utf8')) as {
@@ -226,6 +228,8 @@ describe('product package and profile', () => {
     const pkgRoot = join(installDir, 'node_modules', 'dsh-assistant')
     assert.equal(existsSync(join(pkgRoot, 'src')), false)
     assert.equal(existsSync(join(pkgRoot, 'dist', 'product', 'bin.js')), true)
+    assert.equal(existsSync(join(installDir, 'node_modules', '@deepseek-ai', 'dsh-llm-deepseek')), true)
+    assert.equal(existsSync(join(installDir, 'node_modules', '@deepseek-ai', 'dsh-agent-default-model')), true)
     const binSource = readFileSync(join(pkgRoot, 'dist', 'product', 'bin.js'), 'utf8')
     assert.match(binSource, /^#!\/usr\/bin\/env node/m)
     assert.doesNotMatch(binSource, /\btsx\b/)
@@ -250,6 +254,7 @@ describe('product package and profile', () => {
     delete env.GOOGLE_SEARCH_API_KEY
     delete env.GOOGLE_SEARCH_ENGINE_ID
     delete env.TARS_NG_ALLOW_FIXTURES
+    delete env.DEEPSEEK_API_KEY
 
     const doctor = execFileSync(bin, ['doctor', '--home', productHome], { encoding: 'utf8', env })
     const started = execFileSync(bin, ['start', '--once', '--home', productHome], { encoding: 'utf8', env })
@@ -257,10 +262,23 @@ describe('product package and profile', () => {
     assert.match(combined, /TARS-NG/)
     assert.match(combined, new RegExp(productHome.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')))
     assert.match(combined, /DSH_ASSISTANT_GOOGLE_CALENDAR_ACCESS_TOKEN: present/)
+    assert.match(combined, /DEEPSEEK_API_KEY: missing/)
     assert.match(combined, /GOOGLE_SEARCH_API_KEY: missing/)
+    assert.match(combined, /llm-provider: deepseek-official/)
+    assert.match(combined, /llm-model: deepseek-v4-flash/)
+    assert.match(combined, /llm-route: available/)
+    assert.match(combined, /ai-runtime: LLM not configured\/unavailable/)
     assert.doesNotMatch(combined, /ya29\.installed-secret/)
     assert.doesNotMatch(combined, /\btsx\b/)
     assert.doesNotMatch(combined, /Team standup/)
     assert.match(combined, /calendar: unavailable|calendar: live/)
+
+    writeFileSync(join(productHome, 'config', 'env'), 'DEEPSEEK_API_KEY=sk-offline-not-a-live-key\n', { mode: 0o600 })
+    chmodSync(join(productHome, 'config', 'env'), 0o600)
+    const withKey = execFileSync(bin, ['doctor', '--home', productHome], { encoding: 'utf8', env })
+    assert.match(withKey, /DEEPSEEK_API_KEY: present/)
+    assert.match(withKey, /llm-route: available/)
+    assert.match(withKey, /ai-runtime: configured/)
+    assert.doesNotMatch(withKey, /sk-offline-not-a-live-key/)
   })
 })

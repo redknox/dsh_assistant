@@ -4,6 +4,7 @@ import { inspectCompatibility, type CompatibilityReport } from './compatibility.
 import { PRODUCT_NAME } from './constants.js'
 import { credentialInventory, missingCredentialNames, type CredentialPresence, type EnvFileLoad } from './env.js'
 import type { ProductHomeLayout } from './home.js'
+import type { LlmDiagnosis } from './llm.js'
 
 export type IntegrationMode = 'live' | 'fake' | 'unavailable' | 'disabled'
 
@@ -31,6 +32,7 @@ export interface DoctorReport {
   readonly operator?: OperatorStatus
   readonly lastStartup?: unknown
   readonly logFile: string
+  readonly llm?: LlmDiagnosis
 }
 
 export function calendarDiagnosis(allowFixtures: boolean): IntegrationDiagnosis {
@@ -100,6 +102,7 @@ export function attachRuntimeDoctor(report: DoctorReport, input: {
   readonly safeMode: boolean
   readonly recoveryRequired: boolean
   readonly operator: OperatorStatus
+  readonly llm?: LlmDiagnosis
 }): DoctorReport {
   return {
     ...report,
@@ -107,6 +110,7 @@ export function attachRuntimeDoctor(report: DoctorReport, input: {
     safeMode: input.safeMode,
     recoveryRequired: input.recoveryRequired,
     operator: input.operator,
+    llm: input.llm,
   }
 }
 
@@ -116,7 +120,7 @@ export function formatDoctorReport(report: DoctorReport): string {
     const perm = file.insecurePermissions ? 'insecure-permissions (expected chmod 600)' : 'mode-ok'
     return `env-file: ${file.path} (${perm}; keys-loaded=${file.keysSet.length})`
   })
-  const credLines = report.credentials.map((item) => `${item.kind} ${item.name}: ${item.present ? 'present' : 'missing'}`)
+  const credLines = report.credentials.map((item) => `${item.kind} ${item.name}: ${item.present ? 'present' : 'missing'}${item.required ? ' (required)' : ''}`)
   const integrationLines = report.integrations.map((item) => {
     const missing = item.missing?.length ? `; missing ${item.missing.join(', ')}` : ''
     return `${item.capability}: ${item.mode}${missing} — ${item.note}`
@@ -134,6 +138,12 @@ export function formatDoctorReport(report: DoctorReport): string {
     ...credLines,
     `allow-fixtures: ${report.allowFixtures}`,
     ...integrationLines,
+    report.llm ? `llm-provider: ${report.llm.provider}` : 'llm-provider: not-booted',
+    report.llm ? `llm-model: ${report.llm.model}` : 'llm-model: not-booted',
+    report.llm ? `llm-credential ${report.llm.credential}: ${report.llm.credentialPresent ? 'present' : 'missing'}` : undefined,
+    report.llm ? `llm-route: ${report.llm.routeAvailable ? 'available' : 'unavailable'}` : undefined,
+    report.llm ? `ai-runtime: ${report.llm.state}` : 'ai-runtime: LLM not configured/unavailable',
+    report.llm ? `llm-note: ${report.llm.note}` : undefined,
     `persistence: ${report.persistence ?? 'not-booted'}`,
     `safe-mode: ${report.safeMode ?? 'not-booted'}`,
     `recovery-required: ${report.recoveryRequired ?? 'not-booted'}`,

@@ -42,7 +42,15 @@ tars-ng doctor
 tars-ng stop
 ```
 
-Missing optional Google credentials do not block core start. Missing Node/DSH, or corrupt/unsupported durable authority, fails closed.
+Missing optional Google credentials do not block core start. Missing `DEEPSEEK_API_KEY` also does not prevent start, but `doctor` reports `ai-runtime: LLM not configured/unavailable`. Missing Node/DSH, or corrupt/unsupported durable authority, fails closed.
+
+Soak LLM baseline (shipped with the product, not assembled by the operator):
+
+```text
+provider: deepseek-official
+model: deepseek-v4-flash
+credential: DEEPSEEK_API_KEY
+```
 
 ## Configuration precedence
 
@@ -62,7 +70,7 @@ Classes of configuration:
 | --- | --- | --- |
 | Product configuration | `config/product.json` | `allowFixtures` |
 | Non-secret integration config | env / env file | `GOOGLE_SEARCH_ENGINE_ID`, `DSH_ASSISTANT_GOOGLE_CALENDAR_MODE` |
-| Secrets | env / chmod 600 env file only | `DSH_ASSISTANT_GOOGLE_CALENDAR_ACCESS_TOKEN`, `GOOGLE_SEARCH_API_KEY` |
+| Secrets | env / chmod 600 env file only | `DEEPSEEK_API_KEY`, `DSH_ASSISTANT_GOOGLE_CALENDAR_ACCESS_TOKEN`, `GOOGLE_SEARCH_API_KEY` |
 | Runtime/durable state | `$TARS_NG_HOME/self-extension/` | authority, candidates, review lineage |
 
 `product.json` schema version is `1`. A newer schema fails clearly.
@@ -77,6 +85,7 @@ Supported injection:
 mkdir -p ~/.config/tars-ng
 chmod 700 ~/.config/tars-ng
 cat > ~/.config/tars-ng/env <<'EOF'
+DEEPSEEK_API_KEY=...
 DSH_ASSISTANT_GOOGLE_CALENDAR_ACCESS_TOKEN=...
 GOOGLE_SEARCH_API_KEY=...
 GOOGLE_SEARCH_ENGINE_ID=...
@@ -87,6 +96,14 @@ chmod 600 ~/.config/tars-ng/env
 `$TARS_NG_HOME/config/env` is also loaded. `tars-ng doctor` reports **which names are missing** and never prints values. An env file that is group/world-readable is flagged as insecure.
 
 Do not invent an internal plaintext vault.
+
+## Default LLM (soak baseline)
+
+The packed runtime mounts `@deepseek-ai/dsh-llm-deepseek` and sets the Agent default to `deepseek-official` / `deepseek-v4-flash`. Operators do not wire DSH provider internals.
+
+`DEEPSEEK_API_KEY` is required for a usable AI runtime. `tars-ng start` without it still boots the product, but `doctor` reports `ai-runtime: LLM not configured/unavailable`. Product start is not equivalent to a usable AI runtime.
+
+`tars-ng doctor` prints provider, model, whether the credential name is present, and whether the model route is available. It never prints the key.
 
 ## Google Search setup
 
@@ -115,7 +132,7 @@ A generated Google Calendar provider still requires the existing M1–M4 approva
 | `tars-ng start` | Ensures home, loads env, checks Node/DSH, boots, prints first-run + doctor facts, waits for SIGINT/SIGTERM |
 | `tars-ng start --once` | Same boot, then exits (packaging/smoke) |
 | `tars-ng status` | Version, running pid, home, DSH compatibility — no secret values |
-| `tars-ng doctor` | Version, Node, DSH packages, home, env-file safety, credential **names**, integration mode, Safe Mode/recovery, last failure |
+| `tars-ng doctor` | Version, Node, DSH packages, home, env-file safety, credential **names**, LLM provider/model/route, `ai-runtime`, integration mode, Safe Mode/recovery |
 | `tars-ng stop` | SIGTERM to the pid recorded by `start` |
 | `tars-ng self-extension …` | Existing Recovery Root operator commands (approve/activate/rollback/backup/…) |
 
@@ -166,7 +183,7 @@ Backups exclude secrets, credentials, personal memory, env files, and unsealed w
 
 | Symptom | What to do |
 | --- | --- |
-| `Node … is unsupported` | Install Node >=22 |
+| `ai-runtime: LLM not configured/unavailable` | Set `DEEPSEEK_API_KEY`; start is not a usable AI runtime until it is present |
 | `… is outside the supported DSH release` | Reinstall this tarball; do not mix newer RCs |
 | Calendar fixture events in daily use | Unset `TARS_NG_ALLOW_FIXTURES`; do not pass `--allow-fixtures` |
 | Calendar unavailable after live mode | Replace `DSH_ASSISTANT_GOOGLE_CALENDAR_ACCESS_TOKEN`; it expires |

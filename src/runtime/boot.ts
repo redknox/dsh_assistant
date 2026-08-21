@@ -1,9 +1,11 @@
 import { Context } from '@deepseek-ai/cordis'
 import AgentRegistry, { type AgentOptions } from '@deepseek-ai/dsh-agent'
+import AgentDefaultModel from '@deepseek-ai/dsh-agent-default-model'
 import AgentLoop from '@deepseek-ai/dsh-agent-loop'
 import InvariantRegistry from '@deepseek-ai/dsh-invariants'
 import LocalJobRegistry from '@deepseek-ai/dsh-jobs-local'
 import LlmRuntime from '@deepseek-ai/dsh-llm'
+import * as DeepSeekLlm from '@deepseek-ai/dsh-llm-deepseek'
 import SessionStore, { SessionId } from '@deepseek-ai/dsh-session'
 import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
 import ToolRuntime from '@deepseek-ai/dsh-tools'
@@ -12,6 +14,7 @@ import { persistCandidates, persistGovernance, openDurableSelfExtension, hydrate
 import { resolveAssistantHome } from '../domain/self-extension/home.js'
 import { reconstructCommittedExtensions } from '../domain/self-extension/reconstruct.js'
 import * as assistantProduct from '../product/bundle.js'
+import { DEFAULT_LLM_CREDENTIAL, DEFAULT_LLM_MODEL, DEFAULT_LLM_PROVIDER } from '../product/constants.js'
 import type { MemoryPluginConfig } from '../plugins/memory-plugin.js'
 
 /**
@@ -53,6 +56,8 @@ async function bootStack(options: BootOptions = {}): Promise<AssistantControl> {
   await ctx.plugin(SessionStore)
   await ctx.plugin(AgentRegistry)
   await ctx.plugin(LlmRuntime)
+  await ctx.plugin(DeepSeekLlm, { apiKeyEnv: DEFAULT_LLM_CREDENTIAL })
+  await ctx.plugin(AgentDefaultModel, { provider: DEFAULT_LLM_PROVIDER, model: DEFAULT_LLM_MODEL })
   await ctx.plugin(SystemPrompt, {})
   await ctx.plugin(ToolRuntime)
   if (!safeMode) await ctx.plugin(LocalJobRegistry)
@@ -132,8 +137,12 @@ export async function createAssistantAgent(
   sessionId = 'dsh-assistant',
   agentOptions?: AgentOptions,
 ) {
+  const defaults = ctx.get('agentDefaultModel')?.currentSelection()
   return ctx.agents.create({
     sessionId: SessionId(sessionId),
-    ...(agentOptions ? { agentOptions } : {}),
+    agentOptions: {
+      ...(defaults ? { provider: defaults.provider, model: defaults.model } : {}),
+      ...agentOptions,
+    },
   })
 }

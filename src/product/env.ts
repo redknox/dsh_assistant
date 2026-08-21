@@ -1,5 +1,5 @@
 import { existsSync, readFileSync, statSync } from 'node:fs'
-import { CONFIG_ENV_NAMES, SECRET_ENV_NAMES } from './constants.js'
+import { CONFIG_ENV_NAMES, REQUIRED_SECRET_ENV_NAMES, SECRET_ENV_NAMES } from './constants.js'
 
 export interface EnvFileLoad {
   readonly path: string
@@ -55,7 +55,7 @@ export function credentialInventory(): readonly CredentialPresence[] {
     ...SECRET_ENV_NAMES.map((name) => ({
       name,
       kind: 'secret' as const,
-      required: false,
+      required: (REQUIRED_SECRET_ENV_NAMES as readonly string[]).includes(name),
       present: Boolean(process.env[name]),
     })),
     ...CONFIG_ENV_NAMES.map((name) => ({
@@ -69,4 +69,8 @@ export function credentialInventory(): readonly CredentialPresence[] {
 
 export function missingCredentialNames(inventory: readonly CredentialPresence[] = credentialInventory()): readonly string[] {
   return inventory.filter((item) => !item.present).map((item) => item.name)
+}
+
+export function missingRequiredCredentialNames(inventory: readonly CredentialPresence[] = credentialInventory()): readonly string[] {
+  return inventory.filter((item) => item.required && !item.present).map((item) => item.name)
 }

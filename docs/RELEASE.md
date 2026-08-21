@@ -40,7 +40,7 @@ Trusted operator control
 - Safe Mode recovery: excludes generated/optional extensions; missing/mutated/corrupt state fails closed
 - Trusted operator control: `npm run self-extension` (`docs/self-extension-operations.md`); recovery authority stays outside generated and model-facing seams
 - v0.2.x stabilization: product-level regression/recovery drills, durable-state backup/restore, `npm run verify:v0.2` (`docs/v0.2-stabilization.md`)
-- M5 product-readiness: installable `tars-ng` artifact, product home, external secrets, doctor/status, fixture vs live Calendar, soak/freeze (`docs/operator.md`, `docs/soak.md`)
+- M5 product-readiness: installable `tars-ng` artifact, product home, external secrets including `DEEPSEEK_API_KEY`, default `deepseek-official` / `deepseek-v4-flash`, doctor/status, fixture vs live Calendar, soak/freeze (`docs/operator.md`, `docs/soak.md`)
 
 Preserved invariants: Self-extension without self-authorization; Validation ≠ Approval; Approval ≠ Activation; exact candidate/diff binding; fail-closed artifact integrity.
 

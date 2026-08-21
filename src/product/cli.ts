@@ -3,9 +3,10 @@ import { operatorStatus } from '../domain/self-extension/status.js'
 import { runSelfExtensionCli } from '../runtime/self-extension-cli.js'
 import { bootAssistantControl } from '../runtime/boot.js'
 import { inspectCompatibility } from './compatibility.js'
-import { PRODUCT_COMMAND, PRODUCT_NAME } from './constants.js'
+import { DEFAULT_LLM_MODEL, DEFAULT_LLM_PROVIDER, PRODUCT_COMMAND, PRODUCT_NAME } from './constants.js'
 import { attachRuntimeDoctor, collectStaticDoctor, formatDoctorReport } from './doctor.js'
 import { inspectEnvFile, type EnvFileLoad } from './env.js'
+import { inspectLlmRuntime } from './llm.js'
 import {
   ensureProductHome,
   readLastStatus,
@@ -137,6 +138,7 @@ function firstRunText(layout: ProductHomeLayout, allowFixtures: boolean): string
     `${PRODUCT_NAME} first run`,
     `Home: ${layout.root} (reinstalling package code does not delete this directory)`,
     'Required: Node >=22; DSH 0.1.0-rc.8 arrives via npm, not a DSH clone.',
+    'Required for AI: DEEPSEEK_API_KEY (deepseek-official / deepseek-v4-flash). Product start is not a usable AI runtime until this key is present.',
     'Optional: Google Calendar live token (DSH_ASSISTANT_GOOGLE_CALENDAR_ACCESS_TOKEN) and MODE=live.',
     'Optional: GOOGLE_SEARCH_API_KEY / GOOGLE_SEARCH_ENGINE_ID are diagnosed but Search is not shipped.',
     allowFixtures
@@ -192,6 +194,7 @@ export async function runProductCli(argv: readonly string[], io: { log: (text: s
       `home: ${layout.root}`,
       `dsh: ${compatibility.dshSupported}`,
       `node: ${compatibility.nodeVersion}`,
+      `llm: ${DEFAULT_LLM_PROVIDER} / ${DEFAULT_LLM_MODEL}`,
       last === undefined ? 'last-start: none' : `last-start: recorded`,
     ].join('\n'))
     return 0
@@ -208,11 +211,13 @@ export async function runProductCli(argv: readonly string[], io: { log: (text: s
     const booted = await bootProduct(layout, allowFixtures)
     try {
       const operator = await operatorFromBoot(booted)
+      const llm = await inspectLlmRuntime(booted.ctx)
       report = attachRuntimeDoctor(report, {
         persistence: booted.diagnostics.persistence,
         safeMode: booted.diagnostics.safeMode,
         recoveryRequired: booted.diagnostics.recoveryRequired,
         operator,
+        llm,
       })
       const snapshot = {
         productVersion: report.productVersion,
@@ -222,6 +227,7 @@ export async function runProductCli(argv: readonly string[], io: { log: (text: s
         allowFixtures,
         missingConfiguration: report.missingConfiguration,
         calendar: report.integrations.find((item) => item.capability === 'calendar')?.mode,
+        llm: { provider: llm.provider, model: llm.model, routeAvailable: llm.routeAvailable, usable: llm.usable },
       }
       writeLastStatus(layout, snapshot)
       appendProductLog(layout.logFile, `lifecycle ${parsed.command} persistence=${report.persistence} safeMode=${report.safeMode}`)

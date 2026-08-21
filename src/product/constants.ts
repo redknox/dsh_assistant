@@ -5,11 +5,18 @@ export const PRODUCT_CONFIG_SCHEMA_VERSION = 1
 export const PRODUCT_STATE_SCHEMA_VERSION = 1
 export const DEFAULT_HOME_DIRNAME = 'tars-ng'
 
+export const DEFAULT_LLM_PROVIDER = 'deepseek-official'
+export const DEFAULT_LLM_MODEL = 'deepseek-v4-flash'
+export const DEFAULT_LLM_CREDENTIAL = 'DEEPSEEK_API_KEY'
+
 /** Environment names that may hold secrets. Never log or print their values. */
 export const SECRET_ENV_NAMES = [
+  'DEEPSEEK_API_KEY',
   'DSH_ASSISTANT_GOOGLE_CALENDAR_ACCESS_TOKEN',
   'GOOGLE_SEARCH_API_KEY',
 ] as const
+
+export const REQUIRED_SECRET_ENV_NAMES = ['DEEPSEEK_API_KEY'] as const
 
 /** Non-secret integration configuration. */
 export const CONFIG_ENV_NAMES = [
@@ -21,10 +28,12 @@ export const CONFIG_ENV_NAMES = [
 export const DSH_RUNTIME_PACKAGES = [
   '@deepseek-ai/cordis',
   '@deepseek-ai/dsh-agent',
+  '@deepseek-ai/dsh-agent-default-model',
   '@deepseek-ai/dsh-agent-loop',
   '@deepseek-ai/dsh-invariants',
   '@deepseek-ai/dsh-jobs-local',
   '@deepseek-ai/dsh-llm',
+  '@deepseek-ai/dsh-llm-deepseek',
   '@deepseek-ai/dsh-session',
   '@deepseek-ai/dsh-system-prompt',
   '@deepseek-ai/dsh-tools',
