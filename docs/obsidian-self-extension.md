@@ -53,7 +53,7 @@ These steps are Recovery Root / human-control only. They are not model tools.
 
 ## Candidate artifact
 
-The generated plugin lives in the Candidate Workspace (copied from `fixtures/self-extension/obsidian-vault-candidate/` in the E2E). It is not added to the managed product tree before approval. Validation executes the candidate's Node test files in the restricted runner and binds evidence to the sealed digest.
+The generated plugin lives in the Candidate Workspace (copied from `fixtures/self-extension/obsidian-vault-candidate/` in the E2E). It is not added to the managed product tree before approval. Validation executes the candidate's Node test files only inside an OS network sandbox and binds evidence to the sealed digest.
 
 Vault IO (list / read / write) goes through `ctx.integrations.hub.files()` confined-root methods. The Obsidian layer only owns note identity, frontmatter, tags, and wikilinks. Access is confined to one approved root, including symlink parents; listing does not follow symlink directories. The inspectable permission ids are `filesystem.vault.read` and `filesystem.vault.write`; the exact root is in `effects.filesystem` and `configRequired: vaultRoot`. Network and process effects stay empty.
 

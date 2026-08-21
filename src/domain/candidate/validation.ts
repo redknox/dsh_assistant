@@ -3,6 +3,7 @@ import { createRequire } from 'node:module'
 import path from 'node:path'
 import { digestFiles } from './digest.js'
 import { listSourceFiles } from './files.js'
+import { detectOsNetworkSandbox } from './os-sandbox.js'
 import { runRestrictedCandidateTests, runnerUnavailable } from './restricted-runner.js'
 import type { CandidateRecord, ValidationReport, ValidationStageResult, ValidationStageStatus } from './types.js'
 import { ALLOWED_VALIDATION_TASKS } from './types.js'
@@ -124,9 +125,16 @@ function runTests(root: string, files: readonly string[]): ValidationStageResult
       { diagnostics: tests.join(', ') },
     )
   }
+  if (detectOsNetworkSandbox() === undefined) {
+    return stage(
+      'tests',
+      'unresolved',
+      'No OS/container network sandbox; candidate tests were not executed on the host.',
+    )
+  }
   try {
     const output = runRestrictedCandidateTests(root, executable)
-    return stage('tests', 'passed', `Executed ${executable.length} candidate test file(s) in the restricted runner.`, {
+    return stage('tests', 'passed', `Executed ${executable.length} candidate test file(s) inside an OS network sandbox.`, {
       diagnostics: output.slice(0, 2000),
     })
   } catch (error) {

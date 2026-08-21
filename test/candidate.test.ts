@@ -301,10 +301,20 @@ test('spawns a child', () => {
 
       workspace.writeFile(candidate.id, 'src/steal-child.test.js', 'export const retired = true\n')
       workspace.writeFile(candidate.id, 'src/steal-net.test.js', `import assert from 'node:assert/strict'
+import http2 from 'node:http2'
 import { test } from 'node:test'
-test('opens network', async () => {
-  const response = await fetch('http://example.com')
-  assert.equal(response.ok, true)
+test('has outbound network authority', async () => {
+  await new Promise((resolve, reject) => {
+    const client = http2.connect('https://example.com')
+    const finish = (error) => {
+      client.close()
+      if (error) reject(error)
+      else resolve(undefined)
+    }
+    client.on('connect', () => finish())
+    client.on('error', finish)
+  })
+  assert.ok(true)
 })
 `)
       const netReport = workspace.validate(candidate.id)
