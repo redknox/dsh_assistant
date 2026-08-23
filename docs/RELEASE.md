@@ -44,6 +44,20 @@ Daily soak surface: loopback Mission-Control Web UI from `tars-ng start` (`http:
 
 `v0.3.0` remains the immutable historical Governance + Mission-Control baseline. Do not retag it. Development toward **v0.4.0 — Self-Developing Product Baseline** starts with an enforceable generated-extension runtime. Self-development is allowed; self-authorization is not. The Candidate Workbench is not claimed complete by this issue.
 
+## Direction after v0.4.0
+
+v0.4.0 is the governed construction/control substrate, not the completion of a no-code professional-system builder. After it is sealed, real daily use should drive defects and usability fixes before broad platform expansion.
+
+The directional milestones are:
+
+| Milestone | Product question |
+| --- | --- |
+| **v0.4.0 — Self-Developing Product Baseline** | Can TARS-NG construct, validate, review, approve, activate, observe, and recover a generated capability without self-authorization? |
+| **Domain Construction Slice** | Can a professional who does not know TypeScript or DSH describe one bounded domain need and obtain an explicit, testable, governed capability? |
+| **Professional Application Composition** | Can several governed capabilities, domain adapters, policies, and UI components be composed into a coherent professional AI system? |
+
+These later names are directional, not release commitments. Finance, HR, Legal, and Operations kits remain future product layers. They must reuse the same governance invariants rather than introducing a privileged generation or activation path. See [product-vision.md](./product-vision.md).
+
 ## v0.2.0 Verified (Governed Self-Extension)
 
 Historical Governed Self-Extension baseline. These remain true and are not rewritten as the current product version:
