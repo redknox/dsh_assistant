@@ -69,17 +69,19 @@ function SystemHeader(props: {
   readonly connected: boolean
 }) {
   return (
-    <header className="topbar" aria-label="System header">
+    <header className="faceplate topbar" aria-label="System header">
       <PlateRivets />
-      <div className="brand-block">
-        <span className="brand">{props.identity}</span>
-        <span className="divider" aria-hidden="true">/</span>
-        <span className="product-area">MISSION CONTROL</span>
-        {props.objective ? <span className="objective">{props.objective}</span> : null}
-      </div>
-      <div className="system-state" role="status" aria-label={`System state ${props.systemState}${props.connected ? '' : ', disconnected'}`}>
-        <span className={`status-lamp status-lamp--${lampModifier(props.systemState, props.connected)}`} aria-hidden="true"></span>
-        <span>{props.systemState}</span>
+      <div className="plate-well topbar-well">
+        <div className="brand-block">
+          <span className="brand">{props.identity}</span>
+          <span className="divider" aria-hidden="true">/</span>
+          <span className="product-area">MISSION CONTROL</span>
+          {props.objective ? <span className="objective">{props.objective}</span> : null}
+        </div>
+        <div className="system-state" role="status" aria-label={`System state ${props.systemState}${props.connected ? '' : ', disconnected'}`}>
+          <span className={`status-lamp status-lamp--${lampModifier(props.systemState, props.connected)}`} aria-hidden="true"></span>
+          <span>{props.systemState}</span>
+        </div>
       </div>
     </header>
   )
@@ -344,9 +346,9 @@ function ControlStripView(props: {
   const strip = props.view.controlStrip
   const safe = props.view.systemState === 'SAFE_MODE' || props.view.systemState === 'RECOVERY'
   return (
-    <footer className="control-strip" aria-label="Runtime status" data-control-plane="user-workspace">
+    <footer className="faceplate control-strip" aria-label="Runtime status" data-control-plane="user-workspace">
       <PlateRivets />
-      <div className="control-strip-row">
+      <div className="plate-well control-strip-row">
         <div>
           <Glyph name="chip" />
           <span className="strip-copy">
