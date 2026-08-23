@@ -6,6 +6,8 @@ import { describe, it } from 'node:test'
 import { ConfinedRootFiles } from '../src/adapters/integrations/confined-root-files.js'
 import {
   ConfinedRootError,
+  SANDBOX_MAX_LIST_DEPTH,
+  SANDBOX_MAX_LIST_ENTRIES,
   deleteConfinedText,
   listConfinedTextFiles,
   readConfinedText,
@@ -61,6 +63,20 @@ describe('confined-root files seam', () => {
     assert.deepEqual(listConfinedTextFiles(vault), [])
     assert.throws(() => deleteConfinedText(vault, 'note.md'), ConfinedRootError)
     assert.throws(() => deleteConfinedText(vault, '../outside.md'), ConfinedRootError)
+  })
+
+  it('fails listing when the entry or depth bound is crossed during the walk', () => {
+    const vault = mkdtempSync(path.join(tmpdir(), 'confined-bound-'))
+    for (let i = 0; i < SANDBOX_MAX_LIST_ENTRIES + 1; i += 1) writeFileSync(path.join(vault, `n${i}.md`), 'ok\n')
+    assert.throws(() => listConfinedTextFiles(vault), /entry bound/)
+    const deep = mkdtempSync(path.join(tmpdir(), 'confined-depth-'))
+    let current = deep
+    for (let i = 0; i < SANDBOX_MAX_LIST_DEPTH + 1; i += 1) {
+      current = path.join(current, `d${i}`)
+      mkdirSync(current)
+    }
+    writeFileSync(path.join(current, 'leaf.md'), 'ok\n')
+    assert.throws(() => listConfinedTextFiles(deep), /depth bound/)
   })
 
   it('records confined access on the public files adapter', async () => {

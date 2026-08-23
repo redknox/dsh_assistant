@@ -82,7 +82,7 @@ export function sandboxDiagnosis(allowFixtures: boolean): IntegrationDiagnosis {
     return {
       capability: 'sandbox',
       mode: 'live',
-      note: `Confined files and tasks at ${inspected.root}. Writes use existing policy; deletes stay L4.`,
+      note: 'Confined files and tasks are live. Writes use existing policy; deletes stay L4.',
     }
   }
   if (inspected.configured) {

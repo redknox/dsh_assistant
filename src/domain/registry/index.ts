@@ -13,6 +13,7 @@ export type {
   RegistryQuery,
   RegistryRecord,
   RegistryRegisterInput,
+  RegistryRevisePatch,
 } from './types.js'
 export {
   APPROVAL_STATES,

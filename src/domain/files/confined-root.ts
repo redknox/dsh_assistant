@@ -1,6 +1,13 @@
 import { existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, realpathSync, unlinkSync, writeFileSync } from 'node:fs'
 import path from 'node:path'
 
+/** Hard bounds on the model-facing confined-file seam. Fail during the walk, not after collection. */
+export const SANDBOX_MAX_FILE_BYTES = 256 * 1024
+export const SANDBOX_MAX_LIST_ENTRIES = 200
+export const SANDBOX_MAX_LIST_DEPTH = 8
+export const SANDBOX_MAX_TASK_TITLE_CHARS = 200
+export const SANDBOX_MAX_TASK_BODY_CHARS = 8 * 1024
+
 export class ConfinedRootError extends Error {
   constructor(message: string) {
     super(message)
@@ -61,27 +68,50 @@ export function listConfinedTextFiles(root: string, prefix = '', extension = '.m
     throw new ConfinedRootError('confined root itself must not be a symlink')
   }
   const files: string[] = []
-  const walk = (dir: string, rel: string) => {
+  const walk = (dir: string, rel: string, depth: number) => {
+    if (depth > SANDBOX_MAX_LIST_DEPTH) {
+      throw new ConfinedRootError(`sandbox listing exceeded the depth bound of ${SANDBOX_MAX_LIST_DEPTH}`)
+    }
     for (const entry of readdirSync(dir)) {
       const relative = rel === '' ? entry : `${rel}/${entry}`
       const full = path.join(dir, entry)
       const stat = lstatSync(full)
       if (stat.isSymbolicLink()) continue
-      if (stat.isDirectory()) walk(full, relative)
-      else if (stat.isFile() && (extension === '' || relative.endsWith(extension))) files.push(relative)
+      if (stat.isDirectory()) walk(full, relative, depth + 1)
+      else if (stat.isFile() && (extension === '' || relative.endsWith(extension))) {
+        if (files.length >= SANDBOX_MAX_LIST_ENTRIES) {
+          throw new ConfinedRootError(`sandbox listing exceeded the entry bound of ${SANDBOX_MAX_LIST_ENTRIES}`)
+        }
+        files.push(relative)
+      }
     }
   }
   const start = prefix === '' ? rootReal : resolveConfined(root, prefix)
   const startRel = prefix.replaceAll('\\', '/').replace(/\/$/, '')
-  if (existsSync(start) && lstatSync(start).isDirectory()) walk(start, startRel)
+  if (existsSync(start) && lstatSync(start).isDirectory()) walk(start, startRel, 0)
   return files.sort()
 }
 
 export function readConfinedText(root: string, relativePath: string): string {
-  return readFileSync(resolveConfined(root, relativePath), 'utf8')
+  const dest = resolveConfined(root, relativePath)
+  const stat = lstatSync(dest)
+  if (!stat.isFile()) {
+    throw new ConfinedRootError(`file not found: ${relativePath}`)
+  }
+  if (stat.size > SANDBOX_MAX_FILE_BYTES) {
+    throw new ConfinedRootError(`sandbox file exceeds the ${SANDBOX_MAX_FILE_BYTES} byte bound`)
+  }
+  const text = readFileSync(dest, 'utf8')
+  if (Buffer.byteLength(text, 'utf8') > SANDBOX_MAX_FILE_BYTES) {
+    throw new ConfinedRootError(`sandbox file exceeds the ${SANDBOX_MAX_FILE_BYTES} byte bound`)
+  }
+  return text
 }
 
 export function writeConfinedText(root: string, relativePath: string, content: string): void {
+  if (Buffer.byteLength(content, 'utf8') > SANDBOX_MAX_FILE_BYTES) {
+    throw new ConfinedRootError(`sandbox write exceeds the ${SANDBOX_MAX_FILE_BYTES} byte bound`)
+  }
   const dest = resolveConfined(root, relativePath)
   const rootReal = existsSync(root) ? realpathSync(root) : path.resolve(root)
   const parent = path.dirname(dest)

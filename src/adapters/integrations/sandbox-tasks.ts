@@ -1,4 +1,6 @@
 import {
+  SANDBOX_MAX_TASK_BODY_CHARS,
+  SANDBOX_MAX_TASK_TITLE_CHARS,
   listConfinedTextFiles,
   readConfinedText,
   writeConfinedText,
@@ -52,6 +54,15 @@ function parseTask(relative: string, content: string): TaskItem {
   return { id: relative, title: heading || relative.slice(TASKS_PREFIX.length + 1).replace(/\.md$/, ''), status }
 }
 
+function requireBoundedTitle(title: string): string {
+  const trimmed = title.trim()
+  if (!trimmed) throw new IntegrationError('tasks', 'invalid_request', 'title is required')
+  if (trimmed.length > SANDBOX_MAX_TASK_TITLE_CHARS) {
+    throw new IntegrationError('tasks', 'invalid_request', `task title exceeds the ${SANDBOX_MAX_TASK_TITLE_CHARS} character bound`)
+  }
+  return trimmed
+}
+
 function wrap<T>(op: () => T): T {
   try {
     return op()
@@ -78,15 +89,17 @@ export function createSandboxTasksProvider(root: string): TasksProvider {
     },
     async proposeCreateTask(input: { title: string }, signal?: AbortSignal): Promise<ProposedMutation<TaskItem>> {
       throwIfAborted('tasks', signal)
-      const title = input.title.trim()
-      if (!title) throw new IntegrationError('tasks', 'invalid_request', 'title is required')
+      const title = requireBoundedTitle(input.title)
       const draft: TaskItem = { id: `${TASKS_PREFIX}/${slugify(title)}.md`, title, status: 'open' }
       return { trust: 'propose', summary: `Propose task "${draft.title}"`, draft }
     },
     async createTask(input: { title: string }, signal?: AbortSignal): Promise<TaskItem> {
       throwIfAborted('tasks', signal)
-      const title = input.title.trim()
-      if (!title) throw new IntegrationError('tasks', 'invalid_request', 'title is required')
+      const title = requireBoundedTitle(input.title)
+      const body = renderTask(title, 'open')
+      if (body.length > SANDBOX_MAX_TASK_BODY_CHARS) {
+        throw new IntegrationError('tasks', 'invalid_request', `task content exceeds the ${SANDBOX_MAX_TASK_BODY_CHARS} character bound`)
+      }
       return wrap(() => {
         const existing = new Set(listConfinedTextFiles(root, TASKS_PREFIX, '.md'))
         let slug = slugify(title)
@@ -96,7 +109,7 @@ export function createSandboxTasksProvider(root: string): TasksProvider {
           relative = `${TASKS_PREFIX}/${slug}-${n}.md`
           n += 1
         }
-        writeConfinedText(root, relative, renderTask(title, 'open'))
+        writeConfinedText(root, relative, body)
         return { id: relative, title, status: 'open' as const }
       })
     },

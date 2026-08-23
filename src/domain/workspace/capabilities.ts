@@ -47,6 +47,7 @@ export function projectUserCapabilities(input: WorkspaceSnapshotInput): readonly
         const key = `${row.area}:${row.action}`
         if (seen.has(key)) continue
         seen.add(key)
+        const provider = projectionProvider(row.area, record)
         views.push({
           area: row.area,
           action: row.action,
@@ -55,6 +56,7 @@ export function projectUserCapabilities(input: WorkspaceSnapshotInput): readonly
             owner: record.owner,
             version: record.version,
             provenance: record.provenance,
+            ...(provider ? { provider } : {}),
           },
         })
       }
@@ -73,6 +75,16 @@ export function projectUserCapabilities(input: WorkspaceSnapshotInput): readonly
     }
   }
   return views
+}
+
+function projectionProvider(
+  area: string,
+  record: WorkspaceSnapshotInput['registry'][number],
+): string | undefined {
+  const permissions = record.permissions ?? []
+  if (area === 'Files' && permissions.some((item) => item.startsWith('local.sandbox.files.'))) return 'sandbox'
+  if (area === 'Tasks' && permissions.some((item) => item.startsWith('local.sandbox.tasks.'))) return 'sandbox'
+  return record.provider
 }
 
 function resolveStatus(

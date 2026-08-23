@@ -18,6 +18,7 @@ import type {
   RegistryQuery,
   RegistryRecord,
   RegistryRegisterInput,
+  RegistryRevisePatch,
 } from './types.js'
 
 function claimsCapability(record: RegistryRecord, capability: string): boolean {
@@ -122,6 +123,31 @@ export class RegistryService implements CapabilityRegistry {
     if (current === undefined) throw new RegistryContractError(`unknown record: ${key}`)
     const next = { ...cloneRecord(current), status }
     if (status === 'active') this.assertNoActiveConflict(next, key)
+    this.records.set(key, next)
+    this.persist()
+    return cloneRecord(next)
+  }
+
+  revise(owner: string, version: string, patch: RegistryRevisePatch): RegistryRecord {
+    const key = recordKey(parseOwnerId(owner), parseVersion(version))
+    const current = this.records.get(key)
+    if (current === undefined) throw new RegistryContractError(`unknown record: ${key}`)
+    const normalized = normalizeRegisterInput({
+      owner: current.owner,
+      version: current.version,
+      provenance: current.provenance,
+      status: current.status,
+      evidence: current.evidence,
+      capabilities: patch.capabilities ?? current.capabilities,
+      permissions: patch.permissions ?? [...current.permissions],
+      runtimeSeams: [...current.runtimeSeams],
+      provider: patch.provider ?? current.provider,
+      tools: [...current.tools],
+      services: [...current.services],
+      providers: patch.providers ?? [...current.providers],
+    })
+    const next = { ...normalized, approval: current.approval, status: current.status }
+    if (next.status === 'active') this.assertNoActiveConflict(next, key)
     this.records.set(key, next)
     this.persist()
     return cloneRecord(next)

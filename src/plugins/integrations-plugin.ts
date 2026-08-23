@@ -3,7 +3,9 @@ import { FakeIntegrationSuite } from '../adapters/integrations/fake-providers.js
 import { createGoogleCalendarProvider, createHostGoogleCalendarTransport } from '../adapters/integrations/google-calendar.js'
 import { createSandboxFilesProvider } from '../adapters/integrations/sandbox-files.js'
 import { createSandboxTasksProvider } from '../adapters/integrations/sandbox-tasks.js'
+import { applySandboxAuthorityStamp } from '../domain/files/sandbox-authority.js'
 import { inspectSandboxRoot } from '../domain/files/sandbox-root.js'
+import type { CapabilityRegistry } from '../domain/registry/index.js'
 import { IntegrationHub } from '../domain/integrations/hub.js'
 import type { BoundedGoogleCalendarTransport } from '../domain/integrations/google-api.js'
 import { registerIntegrationTools } from './integration-tools.js'
@@ -61,6 +63,8 @@ export async function apply(ctx: Context, config: IntegrationsPluginConfig = {})
     fakes.state.unavailable.files = sandbox.reason
     fakes.state.unavailable.tasks = sandbox.reason
   }
+  const registry = ctx.get('capabilityRegistry') as CapabilityRegistry | undefined
+  if (registry) applySandboxAuthorityStamp(registry, sandbox.configured && sandbox.ok)
   await ctx.plugin(class extends IntegrationsService {
     constructor(scope: Context) {
       super(scope, fakes.hub, googleCalendarTransport)
@@ -70,8 +74,8 @@ export async function apply(ctx: Context, config: IntegrationsPluginConfig = {})
     name: 'product:integrations',
     order: 40,
     text: sandbox.configured && sandbox.ok
-      ? `Personal integrations are provider-neutral. Files and tasks are confined to the operator sandbox at ${sandbox.root}. Use sandbox-relative paths only. Absolute paths and parent traversal are rejected. Prefer read tools for lookup. Mutation tools only propose drafts; do not treat a proposal as executed.`
-      : 'Personal integrations are provider-neutral. Prefer read tools for lookup. Mutation tools only propose drafts; do not treat a proposal as executed.',
+      ? 'Personal integrations are provider-neutral. Files and tasks are confined to the configured operator sandbox. Use sandbox-relative paths only. Absolute paths and parent traversal are rejected. Prefer read tools for lookup. Proposal tools do not execute. Execution tools (files_write, files_delete, tasks_create) run only through the policy/confirmation path.'
+      : 'Personal integrations are provider-neutral. Prefer read tools for lookup. Proposal tools do not execute. Execution tools run only through the policy/confirmation path.',
   })
   ctx.effect(() => registerIntegrationTools(ctx.tools, fakes.hub))
 }

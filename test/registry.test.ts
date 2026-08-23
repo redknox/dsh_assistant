@@ -262,6 +262,25 @@ describe('capability registry', () => {
     assert.equal(serialized.includes('google'), false)
     assert.equal(store.resolveActiveOwner('matter.light.set').kind, 'unknown')
   })
+
+  it('revises permissions on an existing record without resetting approval', () => {
+    const store = registry()
+    bootstrapCoreInventory((input) => store.register(input))
+    const current = store.get('managed/integrations', '0.1.0')
+    assert.ok(current)
+    const revised = store.revise('managed/integrations', '0.1.0', {
+      capabilities: current.capabilities.map((claim) => (
+        claim.id === 'files.read'
+          ? { id: claim.id, permissions: ['local.sandbox.files.read'] }
+          : claim
+      )),
+      permissions: ['local.sandbox.files.read'],
+      providers: ['fake', 'sandbox'],
+    })
+    assert.equal(revised.approval, current.approval)
+    assert.deepEqual(revised.capabilities.find((item) => item.id === 'files.read')?.permissions, ['local.sandbox.files.read'])
+    assert.deepEqual(store.get('managed/integrations', '0.1.0')?.providers, ['fake', 'sandbox'])
+  })
 })
 
 describe('capability registry plugin', () => {
