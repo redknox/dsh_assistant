@@ -179,6 +179,53 @@ describe('TARS-NG mission-control workspace', () => {
     assert.match(card.authorityChange, /human approval/)
   })
 
+  it('G2. approved Self-Extension projects an Activation Card without claiming NOT APPROVED', () => {
+    const view = projectMissionControl(snapshot({
+      extensionApprovals: [{
+        id: 'apr-2',
+        candidateId: 'cand-obsidian',
+        fingerprint: 'fp-ext',
+        decision: 'approved-for-exact-diff',
+        owner: 'generated/obsidian-vault',
+        candidateVersion: '0.1.0',
+        digest: 'abc123',
+        capabilitiesAdded: ['obsidian.read'],
+        capabilitiesRemoved: [],
+        permissionsAdded: ['files.read'],
+        permissionsRemoved: [],
+        effects: ['vault read'],
+        toolsAdded: ['obsidian_read'],
+        toolsRemoved: [],
+        runtimeContractVersion: 'generated-extension-api/v1',
+        eligibilityOk: true,
+        eligibilityDenials: [],
+      }],
+      candidates: [{
+        id: 'cand-obsidian',
+        owner: 'generated/obsidian-vault',
+        version: '0.1.0',
+        lifecycle: 'sealed',
+        sealed: true,
+        reviewState: 'review-complete',
+        canRequestApproval: false,
+        currentStep: 'approved',
+        approvalState: 'approved',
+        governanceApproval: 'approved-for-exact-diff',
+        activationState: 'inactive',
+        extensionLifecycle: 'APPROVED_NOT_ACTIVE',
+      }],
+    }))
+    assert.equal(view.approvals.some((item) => item.kind === 'self-extension'), false)
+    const card = view.activations.find((item) => item.candidateId === 'cand-obsidian')
+    assert.ok(card)
+    assert.equal(card.status, 'APPROVED_NOT_ACTIVE')
+    assert.match(card.details.join('\n'), /did not activate/)
+    assert.doesNotMatch(JSON.stringify(view), /NOT APPROVED/)
+    const text = renderMissionControlAsText(view)
+    assert.match(text, /activation-request/)
+    assert.match(renderMissionControlAsHtml(view), /data-activation-id="apr-2"/)
+  })
+
   it('H. Safe Mode is a dedicated comprehensible product state', () => {
     const view = projectMissionControl(snapshot({
       safeMode: true,

@@ -216,7 +216,7 @@ export function registerWorkbenchTools(
 
   const disposeReview = tools.register(defineTool({
     name: 'review_candidate',
-    description: 'Request Independent Review for the current sealed digest. review-complete is NOT APPROVED.',
+    description: 'Request Independent Review for the current sealed digest. review-complete is not a governance approval.',
     parameters: { candidateId: { type: 'string', required: true } },
     output: textOutput(),
     async execute(args) {

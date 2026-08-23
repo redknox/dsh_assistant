@@ -1,5 +1,6 @@
 import type { CandidateDiff } from '../candidate/types.js'
 import type { SystemState } from '../personality/types.js'
+import type { ActivationViewState, ExtensionLifecycleState } from './lifecycle.js'
 
 export const ACTIVITY_KINDS = [
   'OBSERVED',
@@ -65,6 +66,30 @@ export interface ApprovalCard {
   readonly digest?: string
 }
 
+export interface ActivationCard {
+  readonly id: string
+  readonly kind: 'self-extension-activate'
+  readonly title: string
+  readonly owner: string
+  readonly version: string
+  readonly candidateId: string
+  readonly digest: string
+  readonly fingerprint: string
+  readonly runtimeContractVersion?: string
+  readonly isolatedRuntime: true
+  readonly capabilitiesAdded: readonly string[]
+  readonly capabilitiesRemoved: readonly string[]
+  readonly permissionsAdded: readonly string[]
+  readonly permissionsRemoved: readonly string[]
+  readonly toolsAdded: readonly string[]
+  readonly toolsRemoved: readonly string[]
+  readonly effects: readonly string[]
+  readonly eligibilityOk: boolean
+  readonly eligibilityDenials: readonly string[]
+  readonly status: ExtensionLifecycleState
+  readonly details: readonly string[]
+}
+
 export interface UserCapabilityView {
   readonly area: string
   readonly action: string
@@ -112,6 +137,7 @@ export interface MissionControlView {
   readonly conversation: readonly { readonly kind: WorkObjectKind; readonly text: string }[]
   readonly activity: readonly ActivityItem[]
   readonly approvals: readonly ApprovalCard[]
+  readonly activations: readonly ActivationCard[]
   readonly capabilities: readonly UserCapabilityView[]
   readonly memory: readonly WorkspaceMemoryItem[]
   readonly knowledge: readonly WorkspaceKnowledgeItem[]
@@ -151,6 +177,9 @@ export interface WorkbenchProjection {
   readonly parentId?: string
   readonly leftover?: boolean
   readonly approvalState?: 'not-ready' | 'ready-for-approval' | 'approval-requested' | 'approved' | 'active'
+  readonly governanceApproval?: string
+  readonly activationState?: ActivationViewState
+  readonly extensionLifecycle?: ExtensionLifecycleState
 }
 
 export interface WorkspaceSnapshotInput {
@@ -200,7 +229,17 @@ export interface WorkspaceSnapshotInput {
     readonly permissionsAdded: readonly string[]
     readonly permissionsRemoved: readonly string[]
     readonly effects: readonly string[]
+    readonly toolsAdded?: readonly string[]
+    readonly toolsRemoved?: readonly string[]
+    readonly runtimeContractVersion?: string
+    readonly eligibilityOk?: boolean
+    readonly eligibilityDenials?: readonly string[]
   }[]
+  readonly activation?: {
+    readonly state: string
+    readonly pendingCandidateId?: string
+    readonly lastFailureCandidateId?: string
+  }
   readonly candidates?: readonly WorkbenchProjection[]
   readonly memory: readonly WorkspaceMemoryItem[]
   readonly knowledge: readonly WorkspaceKnowledgeItem[]

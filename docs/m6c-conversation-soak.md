@@ -18,6 +18,6 @@ This implementation environment has no configured `DEEPSEEK_API_KEY` / `deepseek
 | Secrets recorded | none |
 | Outcome | **unresolved** |
 
-A live conversation was not available in the implementation environment. Do not treat Workbench conversation self-development as **Verified** until a secret-safe human soak records a real `text.slugify` loop: resolve → scaffold → bounded edit → diagnostics/repair if needed → seal + Independent Review → approval request → human approve+activate → later session uses the isolated tool → restart reconstructs → human rollback to LKG.
+A live conversation was not available in the implementation environment. Do not treat Workbench conversation self-development or WUI activation (#72) as **Verified** until a secret-safe human soak records a real `text.slugify` loop: resolve → scaffold → bounded edit → diagnostics/repair if needed → seal + Independent Review → approval request → WUI approve (still inactive) → WUI activate → later session uses the isolated tool → restart reconstructs → human rollback to LKG.
 
 Do not paste credentials, tokens, home paths, or candidate source dumps into this file.

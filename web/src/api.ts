@@ -1,4 +1,4 @@
-import type { ApprovalCard, MissionControlView, WorkObjectKind } from '../../src/domain/workspace/types'
+import type { ActivationCard, ApprovalCard, MissionControlView, WorkObjectKind } from '../../src/domain/workspace/types'
 
 export interface UiEnvelope {
   readonly view: MissionControlView
@@ -40,6 +40,21 @@ export async function decideApproval(card: ApprovalCard, decision: 'approve' | '
       fingerprint: card.fingerprint,
       ...(card.candidateId ? { candidateId: card.candidateId } : {}),
       ...(card.digest ? { digest: card.digest } : {}),
+    }),
+  }))
+}
+
+export async function activateCandidate(card: ActivationCard, confirm: boolean): Promise<UiEnvelope> {
+  return parseEnvelope(await fetch('/api/activate', {
+    ...include,
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({
+      id: card.id,
+      candidateId: card.candidateId,
+      digest: card.digest,
+      fingerprint: card.fingerprint,
+      confirm,
     }),
   }))
 }

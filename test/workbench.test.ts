@@ -26,10 +26,9 @@ import { CatalogDiscovery } from '../src/domain/discovery/index.js'
 import { InMemoryRegistryPersistence, RegistryService, bootstrapCoreInventory } from '../src/domain/registry/index.js'
 import { ResolutionService } from '../src/domain/resolution/index.js'
 import { PolicyReviewerProvider, ReviewService, finding, reviewPackageFromCandidate } from '../src/domain/review/index.js'
-import { projectMissionControl } from '../src/domain/workspace/index.js'
+import { gatherWorkspaceSnapshot, projectMissionControl } from '../src/domain/workspace/index.js'
 import { PRODUCT_TOOL_NAMES } from '../src/product/bundle.js'
 import { bootAssistantControl, bootSafeModeRuntime } from '../src/runtime/boot.js'
-import { gatherWorkspaceSnapshot } from '../src/domain/workspace/gather.js'
 
 const R0_SOURCE = `export const name = 'generated-r0-workbench'
 export function apply(ctx) {
@@ -288,6 +287,16 @@ describe('candidate workbench', () => {
         fingerprint: String(requested.fingerprint),
         decision: 'approved-for-exact-diff',
       })
+      const approvedView = projectMissionControl(gatherWorkspaceSnapshot({ ctx, sessionId: 'wb-e' }))
+      assert.equal(approvedView.approvals.some((item) => item.candidateId === id), false)
+      const activationCard = approvedView.activations.find((item) => item.candidateId === id)
+      assert.ok(activationCard)
+      assert.equal(activationCard.status, 'APPROVED_NOT_ACTIVE')
+      const inspected = ctx.candidateWorkbench.inspect(id)
+      assert.equal('approvalStatus' in (inspected.review ?? {}), false)
+      assert.equal(inspected.governanceApproval, 'approved-for-exact-diff')
+      assert.equal(inspected.activationState, 'inactive')
+      assert.doesNotMatch(JSON.stringify(inspected), /NOT APPROVED/)
       const activated = await recoveryRoot.activate(id, human)
       assert.equal(activated.state, 'active', activated.lastFailure?.diagnostics)
       const ping = await tool(ctx, 'r0_workbench_ping', { text: 'ok' })

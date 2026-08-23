@@ -9,6 +9,7 @@ import { createElement } from 'react'
 import { FakeReplyAdapter } from '../src/adapters/llm/fake-reply-adapter.js'
 import { googleCalendarReadRiskModel } from '../src/domain/reliability/index.js'
 import type { ResolutionReview } from '../src/domain/resolution/index.js'
+import { GENERATED_EXTENSION_API_V1 } from '../src/domain/workbench/index.js'
 import { projectMissionControl } from '../src/domain/workspace/index.js'
 import { bootAssistantControl, bootSafeModeRuntime, createAssistantAgent } from '../src/runtime/boot.js'
 import { AssistantControlSurface } from '../src/ui/controller.js'
@@ -31,6 +32,7 @@ function fixtureView(overrides: Partial<MissionControlView> = {}): MissionContro
     ],
     activity: [{ id: 'a1', kind: 'COMPLETED', summary: 'Calendar inspected', source: 'calendar' }],
     approvals: [],
+    activations: [],
     capabilities: [{ area: 'Memory', action: 'remember', status: 'active' }],
     memory: [],
     knowledge: [],
@@ -464,6 +466,127 @@ export function apply(ctx) {
       const approvedRecord = ctx.extensionGovernance.inspectApproval(sealedSecond.id)
       assert.equal(approvedRecord?.decision, 'approved-for-exact-diff')
       assert.equal(approvedRecord?.fingerprint, requestedSecond.fingerprint)
+      assert.equal(ctx.capabilityRegistry.get('managed/integrations', '0.3.0'), undefined)
+    })
+  })
+
+  it('activates an approved Self-Extension candidate from a distinct WUI confirmation', async () => {
+    await withServer(bootAssistantControl, 'web-ui-activate', async (url, _surface, _agent, ctx) => {
+      const plan = ctx.candidateWorkbench.rememberPlan(ctx.capabilityResolution.review({
+        capability: 'r0.workbench.ping',
+        need: 'WUI activation path',
+        inventory: { complete: true, seams: [] },
+      }))
+      const created = ctx.candidateWorkbench.create({
+        planId: plan.planId,
+        manifest: { capabilities: ['r0.workbench.ping'], tools: ['r0_workbench_ping'], entryPoints: ['src/plugin.js'] },
+      })
+      const manifest = ctx.candidateWorkspace.get(created.id).manifest
+      ctx.candidateWorkspace.setManifest(created.id, {
+        capabilities: [...manifest.capabilities],
+        tools: [...manifest.tools],
+        entryPoints: [...manifest.entryPoints],
+        runtimeContractVersion: GENERATED_EXTENSION_API_V1,
+      })
+      ctx.candidateWorkbench.writeFile(created.id, 'src/plugin.js', `export const name = 'generated-r0-workbench'
+export function apply(ctx) {
+  const dispose = ctx.tools.register({
+    name: 'r0_workbench_ping',
+    description: 'Workbench R0 ping',
+    parameters: { text: { type: 'string', required: true } },
+    output: { schema: { type: 'string' }, render(_a, v) { return [{ type: 'text', text: String(v) }] } },
+    async execute(args) { return String(args.text ?? '').toUpperCase() },
+  })
+  ctx.effect(() => dispose)
+}
+`)
+      ctx.candidateWorkbench.writeFile(created.id, 'package.json', `${JSON.stringify({ name: 'dsh-generated-r0-workbench', type: 'module', main: 'src/plugin.js' }, null, 2)}\n`)
+      ctx.candidateWorkbench.validate(created.id)
+      const sealed = ctx.candidateWorkbench.seal(created.id)
+      ctx.candidateWorkbench.review(sealed.id)
+      const requested = ctx.extensionGovernance.requestApproval(sealed.id)
+      const cookie = await cookieHeader(url)
+      const beforeApprove = await fetch(`${url}/api/view`).then((res) => res.json()) as { view: MissionControlView }
+      assert.ok(beforeApprove.view.approvals.find((item) => item.kind === 'self-extension' && item.candidateId === sealed.id))
+      assert.equal(beforeApprove.view.activations.length, 0)
+      const inspectedRequested = ctx.candidateWorkbench.inspect(sealed.id)
+      assert.equal('approvalStatus' in (inspectedRequested.review ?? {}), false)
+      assert.equal(inspectedRequested.governanceApproval, 'approval-requested')
+      assert.equal(inspectedRequested.activationState, 'inactive')
+      assert.doesNotMatch(JSON.stringify(inspectedRequested), /NOT APPROVED/)
+
+      const approvalCard = beforeApprove.view.approvals.find((item) => item.candidateId === sealed.id)
+      assert.ok(approvalCard)
+      const approved = await fetch(`${url}/api/approve`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', ...authHeaders(cookie) },
+        body: JSON.stringify({ id: approvalCard.id, candidateId: approvalCard.candidateId, fingerprint: approvalCard.fingerprint }),
+      })
+      assert.equal(approved.status, 200)
+      const afterApprove = await approved.json() as { view: MissionControlView }
+      assert.equal(afterApprove.view.approvals.some((item) => item.candidateId === sealed.id), false)
+      const card = afterApprove.view.activations.find((item) => item.candidateId === sealed.id)
+      assert.ok(card)
+      assert.equal(card.status, 'APPROVED_NOT_ACTIVE')
+      assert.equal(card.digest, requested.summary.digest)
+      assert.equal(ctx.capabilityRegistry.get('generated/r0-workbench-ping', '0.1.0'), undefined)
+      const projected = afterApprove.view.candidates?.find((item) => item.id === sealed.id)
+      assert.equal(projected?.reviewState, 'review-complete')
+      assert.equal(projected?.governanceApproval, 'approved-for-exact-diff')
+      assert.equal(projected?.activationState, 'inactive')
+      assert.equal(projected?.extensionLifecycle, 'APPROVED_NOT_ACTIVE')
+      assert.doesNotMatch(JSON.stringify(projected), /NOT APPROVED/)
+
+      const noConfirm = await fetch(`${url}/api/activate`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', ...authHeaders(cookie) },
+        body: JSON.stringify({ id: card.id, candidateId: card.candidateId, digest: card.digest, fingerprint: card.fingerprint }),
+      })
+      assert.equal(noConfirm.status, 409)
+      const untrusted = await fetch(`${url}/api/activate`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ id: card.id, candidateId: card.candidateId, digest: card.digest, fingerprint: card.fingerprint, confirm: true }),
+      })
+      assert.equal(untrusted.status, 403)
+      const badOrigin = await fetch(`${url}/api/activate`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', origin: 'https://evil.example', ...authHeaders(cookie) },
+        body: JSON.stringify({ id: card.id, candidateId: card.candidateId, digest: card.digest, fingerprint: card.fingerprint, confirm: true }),
+      })
+      assert.equal(badOrigin.status, 403)
+      const wrongDigest = await fetch(`${url}/api/activate`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', ...authHeaders(cookie) },
+        body: JSON.stringify({ id: card.id, candidateId: card.candidateId, digest: 'stale-digest', fingerprint: card.fingerprint, confirm: true }),
+      })
+      assert.equal(wrongDigest.status, 409)
+      const wrongCard = await fetch(`${url}/api/activate`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', ...authHeaders(cookie) },
+        body: JSON.stringify({ id: 'apr-missing', candidateId: card.candidateId, digest: card.digest, fingerprint: card.fingerprint, confirm: true }),
+      })
+      assert.equal(wrongCard.status, 409)
+      assert.equal(ctx.capabilityRegistry.get('generated/r0-workbench-ping', '0.1.0'), undefined)
+      assert.equal(ctx.tools.get('approve_extension'), undefined)
+      assert.equal(ctx.tools.get('activate_extension'), undefined)
+      assert.equal(ctx.tools.get('rollback_extension'), undefined)
+
+      const activated = await fetch(`${url}/api/activate`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', ...authHeaders(cookie) },
+        body: JSON.stringify({ id: card.id, candidateId: card.candidateId, digest: card.digest, fingerprint: card.fingerprint, confirm: true }),
+      })
+      assert.equal(activated.status, 200, await activated.clone().text())
+      const afterActivate = await activated.json() as { view: MissionControlView }
+      assert.equal(afterActivate.view.activations.length, 0)
+      assert.equal(ctx.capabilityRegistry.get('generated/r0-workbench-ping', '0.1.0')?.status, 'active')
+      const replay = await fetch(`${url}/api/activate`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', ...authHeaders(cookie) },
+        body: JSON.stringify({ id: card.id, candidateId: card.candidateId, digest: card.digest, fingerprint: card.fingerprint, confirm: true }),
+      })
+      assert.equal(replay.status, 409)
     })
   })
 
@@ -634,6 +757,47 @@ export function apply(ctx) {
     assert.match(extension, /data-candidate-id="cand-1"/)
     assert.match(extension, /data-fingerprint="fp-ext"/)
     assert.match(extension, /not self-authorization/)
+
+    const activation = renderToStaticMarkup(createElement(MissionControlScreen, {
+      view: fixtureView({
+        activations: [{
+          id: 'apr-act',
+          kind: 'self-extension-activate',
+          title: 'SELF-EXTENSION ACTIVATION',
+          owner: 'generated/search',
+          version: '0.1.0',
+          candidateId: 'cand-1',
+          digest: 'abc',
+          fingerprint: 'fp-ext',
+          isolatedRuntime: true,
+          capabilitiesAdded: ['search'],
+          capabilitiesRemoved: [],
+          permissionsAdded: [],
+          permissionsRemoved: [],
+          toolsAdded: ['web_search'],
+          toolsRemoved: [],
+          effects: ['network: example.com'],
+          eligibilityOk: true,
+          eligibilityDenials: [],
+          status: 'APPROVED_NOT_ACTIVE',
+          details: ['Approval did not activate this candidate.'],
+        }],
+      }),
+      connected: true,
+      sending: false,
+      draft: '',
+      onDraft() {},
+      onSend() {},
+      onApprove() {},
+      onReject() {},
+      onRecovery() {},
+    }))
+    assert.match(activation, /data-activation-id="apr-act"/)
+    assert.match(activation, /data-activation-action="activate"/)
+    assert.match(activation, /data-activation-action="defer"/)
+    assert.match(activation, /ACTIVATE/)
+    assert.match(activation, /NOT NOW/)
+    assert.doesNotMatch(activation, /NOT APPROVED/)
 
     const workbench = renderToStaticMarkup(createElement(MissionControlScreen, {
       view: fixtureView({

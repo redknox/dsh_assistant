@@ -200,6 +200,7 @@ export class GovernanceService implements ExtensionGovernance, ExtensionActivati
   status(): ActivationStatus {
     return {
       state: this.safeMode ? 'safe-mode' : this.state,
+      pendingCandidateId: this.pendingCandidateId,
       current: this.current,
       lastKnownGood: this.lastKnownGood,
       rollbackTarget: this.rollbackTarget,

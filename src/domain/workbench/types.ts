@@ -76,8 +76,9 @@ export interface WorkbenchCandidateView {
   readonly review?: {
     readonly state: ReviewState
     readonly blockingFindings: number
-    readonly approvalStatus: 'NOT APPROVED'
   }
+  readonly governanceApproval?: string
+  readonly activationState?: 'inactive' | 'activating' | 'active' | 'failed'
   readonly diff?: CandidateDiff
   readonly requestEligibility: EligibilityResult
   readonly step: WorkbenchStep
@@ -110,6 +111,13 @@ export interface WorkbenchServiceOptions {
   readonly persist?: (state: WorkbenchPersistState) => void
   readonly inventory?: { snapshot(): import('../resolution/types.js').ArchitectureInventory }
   readonly registry?: { get(owner: string, version: string): { status: string } | undefined }
+  readonly activation?: {
+    inspect(): {
+      state?: string
+      pendingCandidateId?: string
+      lastFailure?: { candidateId?: string }
+    }
+  }
 }
 
 export interface CandidateWorkbench {

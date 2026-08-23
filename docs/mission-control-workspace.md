@@ -17,7 +17,7 @@ Visual language: industrial / instrument-grade. Restrained type, semantic status
 
 The packed product serves a React Mission-Control Web UI from `tars-ng start` on loopback. The framework-independent HTML/text renderer remains a contract/test surface; the browser does not infer agent, approval, Safe Mode, or recovery state.
 
-Approvals in the Web UI call `AssistantControlSurface.approve` / `deny` (and Recovery Root for Self-Extension using **candidate id + exact fingerprint**, not the approval record id). Activity shows operational facts only — never hidden reasoning. Recovery labels match trusted operations (`Diagnostics`, `Rollback`, `Exit Safe Mode`); Exit Safe Mode does not clear an unresolved integrity failure. After a verified rollback, historical failure diagnostics remain, and Exit Safe Mode can complete the recovery loop.
+Approvals in the Web UI call `AssistantControlSurface.approve` / `deny` (and Recovery Root for Self-Extension using **candidate id + exact fingerprint**, not the approval record id). Exact-diff approval does **not** activate. After approval, Mission-Control projects a separate Activation Card; `POST /api/activate` requires the same session cookie, Origin check, and an explicit `confirm: true` bound to card id + candidate id + digest + fingerprint. Conversation yes cannot activate. Activity shows operational facts only — never hidden reasoning. Recovery labels match trusted operations (`Diagnostics`, `Rollback`, `Exit Safe Mode`); Exit Safe Mode does not clear an unresolved integrity failure. After a verified rollback, historical failure diagnostics remain, and Exit Safe Mode can complete the recovery loop.
 
 ## Surfaces
 
@@ -50,7 +50,9 @@ Projected from authoritative runtime/governance/policy/integration state, never 
 
 Calendar create is an ordinary external side-effect card: target, when, attendees, external side effect, no authority change.
 
-Self-Extension is a capability/permission/effect diff bound to digest/fingerprint. Effect diffs include secret-access metadata (name/scope/type only); secret values are never rendered. It is not self-authorization. UI approve still goes through the existing policy/governance roots.
+Self-Extension is a capability/permission/effect diff bound to digest/fingerprint. Effect diffs include secret-access metadata (name/scope/type only); secret values are never rendered. It is not self-authorization. UI approve still goes through the existing policy/governance roots and leaves the candidate `APPROVED_NOT_ACTIVE` until a distinct trusted activation.
+
+Workbench/Mission-Control DTOs split `reviewState`, `governanceApproval`, and `activationState`. Independent Review may still say it is not a human approval; public Workbench inspect no longer prints `NOT APPROVED` next to an already-approved candidate.
 
 ## Memory and context
 

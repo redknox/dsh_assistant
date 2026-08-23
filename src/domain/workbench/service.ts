@@ -21,6 +21,7 @@ import {
   type WorkbenchListView,
 } from './listing.js'
 import { parseWorkbenchRiskModel } from './risk-model.js'
+import { activationViewOf, extensionLifecycleOf } from '../workspace/lifecycle.js'
 import { parseScaffoldNames, scaffoldFiles } from './scaffold.js'
 import {
   WORKBENCH_CHANGE_KINDS,
@@ -152,8 +153,8 @@ export class WorkbenchService implements CandidateWorkbench {
       review: {
         state: reviewState,
         blockingFindings: last?.findings.filter((item) => item.blocking && item.status === 'open').length ?? 0,
-        approvalStatus: 'NOT APPROVED',
       },
+      ...this.lifecycleOf(record),
       diff: this.workspace.diff(record.id),
       requestEligibility: this.governance.requestEligibility(record.id),
       step: this.stepOf(record.id),
@@ -475,6 +476,23 @@ export class WorkbenchService implements CandidateWorkbench {
       approval: this.governance.inspectApproval(record.id)?.decision,
       registryStatus: this.options.registry?.get(record.owner, record.version)?.status,
     })
+  }
+
+  private lifecycleOf(record: CandidateRecord): Pick<WorkbenchCandidateView, 'governanceApproval' | 'activationState'> {
+    const decision = this.governance.inspectApproval(record.id)?.decision
+    const inspected = this.options.activation?.inspect()
+    const lifecycle = extensionLifecycleOf({
+      registryStatus: this.options.registry?.get(record.owner, record.version)?.status,
+      decision,
+      activationState: inspected?.state,
+      pendingCandidateId: inspected?.pendingCandidateId,
+      candidateId: record.id,
+      lastFailureCandidateId: inspected?.lastFailure?.candidateId,
+    })
+    return {
+      governanceApproval: decision ?? 'none',
+      activationState: activationViewOf(lifecycle),
+    }
   }
 }
 

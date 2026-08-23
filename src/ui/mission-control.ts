@@ -28,6 +28,14 @@ export function renderMissionControlAsText(view: MissionControlView): string {
       `  authority change: ${card.authorityChange}`,
       ...card.details.map((line) => `  ${line}`),
     ]).flat(),
+    ...view.activations.map((card) => [
+      `[activation-request] ${card.title}`,
+      `  owner: ${card.owner}@${card.version}`,
+      `  candidate: ${card.candidateId}`,
+      `  digest: ${card.digest}`,
+      `  status: ${card.status}`,
+      ...card.details.map((line) => `  ${line}`),
+    ]).flat(),
     '',
     '# Activity',
     ...view.activity.map((item) => `- ${item.kind}  ${item.summary}`),
@@ -64,6 +72,12 @@ export function renderMissionControlAsHtml(view: MissionControlView): string {
       <p>Authority change: ${escapeHtml(card.authorityChange)}</p>
       <ul>${card.details.map((line) => `<li>${escapeHtml(line)}</li>`).join('')}</ul>
     </article>`).join('')
+  const activations = view.activations.map((card) => `<article data-activation-id="${escapeHtml(card.id)}" data-kind="${escapeHtml(card.kind)}" data-fingerprint="${escapeHtml(card.fingerprint)}" data-candidate-id="${escapeHtml(card.candidateId)}" data-digest="${escapeHtml(card.digest)}">
+      <h2>${escapeHtml(card.title)}</h2>
+      <p>Owner ${escapeHtml(card.owner)}@${escapeHtml(card.version)}</p>
+      <p>Status ${escapeHtml(card.status)}</p>
+      <ul>${card.details.map((line) => `<li>${escapeHtml(line)}</li>`).join('')}</ul>
+    </article>`).join('')
   const activity = view.activity.map((item) => `<li data-activity="${escapeHtml(item.kind)}" data-source="${escapeHtml(item.source)}">${escapeHtml(item.summary)}</li>`).join('')
   return `<!doctype html>
 <html lang="en">
@@ -98,6 +112,7 @@ export function renderMissionControlAsHtml(view: MissionControlView): string {
       <h1>Conversation / work</h1>
       <ol>${conversation}</ol>
       <section id="approvals">${approvals}</section>
+      <section id="activations">${activations}</section>
     </main>
     <aside id="activity"><h1>Activity</h1><ul>${activity}</ul></aside>
   </div>

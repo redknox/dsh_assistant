@@ -1,5 +1,6 @@
 import { humorSuppressed } from '../personality/effective.js'
 import { projectActivity } from './activity.js'
+import { projectActivationCards } from './activations.js'
 import { projectApprovalCards } from './approvals.js'
 import { projectUserCapabilities } from './capabilities.js'
 import { sanitizeMissionControlView } from './redact.js'
@@ -9,6 +10,7 @@ import type { MissionControlView, WorkObjectKind, WorkspaceSnapshotInput } from 
 export function projectMissionControl(input: WorkspaceSnapshotInput): MissionControlView {
   const systemState = deriveSystemState(input)
   const approvals = projectApprovalCards(input)
+  const activations = projectActivationCards(input)
   const jobsRunning = input.jobs.filter((job) => job.lastRunStatus === 'running' || job.lastRunStatus === 'pending').length
   const degraded = input.integrationStatus.filter((item) => !item.available).map((item) => item.capability)
   return sanitizeMissionControlView({
@@ -21,6 +23,7 @@ export function projectMissionControl(input: WorkspaceSnapshotInput): MissionCon
     })),
     activity: projectActivity(input),
     approvals,
+    activations,
     capabilities: projectUserCapabilities(input),
     memory: input.memory,
     knowledge: input.knowledge,
