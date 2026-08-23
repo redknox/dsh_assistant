@@ -1,3 +1,4 @@
+import type { CandidateDiff } from '../candidate/types.js'
 import type { SystemState } from '../personality/types.js'
 
 export const ACTIVITY_KINDS = [
@@ -131,14 +132,19 @@ export interface WorkbenchProjection {
   readonly id: string
   readonly owner: string
   readonly version: string
+  readonly baseVersion?: string
   readonly lifecycle: string
   readonly resolutionKind?: string
+  readonly resolutionCapability?: string
   readonly sealed: boolean
   readonly validationPassed?: boolean
   readonly validationFailed?: readonly string[]
   readonly reviewState?: string
   readonly blockingFindings?: number
+  readonly blockerClaims?: readonly string[]
+  readonly diff?: CandidateDiff
   readonly canRequestApproval: boolean
+  readonly requestDenials?: readonly string[]
 }
 
 export interface WorkspaceSnapshotInput {

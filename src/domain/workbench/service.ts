@@ -1,6 +1,9 @@
 import { existsSync, lstatSync, opendirSync, readFileSync, statSync } from 'node:fs'
 import path from 'node:path'
+import { digestFiles } from '../candidate/digest.js'
 import { defaultProvenance } from '../candidate/manifest.js'
+import { resolveInsideRoot } from '../candidate/paths.js'
+import { SealedCandidateError } from '../candidate/errors.js'
 import type { CandidateManifestInput, CandidateRecord, CandidateValidation, CandidateWorkspace } from '../candidate/types.js'
 import type { ExtensionGovernance } from '../governance/types.js'
 import type { CapabilityResolution, ResolutionReview } from '../resolution/types.js'
@@ -16,8 +19,10 @@ import {
   type CandidateWorkbench,
   type WorkbenchCandidateView,
   type WorkbenchCreateInput,
+  type WorkbenchPersistState,
   type WorkbenchPlan,
   type WorkbenchPlanView,
+  type WorkbenchServiceOptions,
 } from './types.js'
 
 interface Binding {
@@ -37,7 +42,20 @@ export class WorkbenchService implements CandidateWorkbench {
     private readonly validation: CandidateValidation,
     private readonly independentReview: IndependentReview,
     private readonly governance: ExtensionGovernance,
-  ) {}
+    private readonly options: WorkbenchServiceOptions = {},
+  ) {
+    const restore = options.restore
+    if (restore === undefined) return
+    this.nextPlan = restore.nextPlan
+    for (const plan of restore.plans) this.plans.set(plan.id, plan)
+    for (const binding of restore.bindings) {
+      this.bindings.set(binding.candidateId, {
+        planId: binding.planId,
+        parentId: binding.parentId,
+        parentDigest: binding.parentDigest,
+      })
+    }
+  }
 
   plan(input: { capability: string; need: string; behavior?: string }): WorkbenchPlanView {
     const review = this.resolution.review({
@@ -51,6 +69,7 @@ export class WorkbenchService implements CandidateWorkbench {
   rememberPlan(review: ResolutionReview): WorkbenchPlanView {
     const id = `plan-${this.nextPlan++}`
     this.plans.set(id, { id, review })
+    this.flush()
     return viewPlan(id, review)
   }
 
@@ -78,6 +97,7 @@ export class WorkbenchService implements CandidateWorkbench {
       manifest: input.manifest,
     })
     this.bindings.set(record.id, { planId: plan.id })
+    this.flush()
     return this.inspect(record.id)
   }
 
@@ -99,6 +119,7 @@ export class WorkbenchService implements CandidateWorkbench {
       resolutionCapability: record.manifest.resolutionCapability,
       planId: binding?.planId,
       parentId: binding?.parentId,
+      parentDigest: binding?.parentDigest,
       validation: record.validation === undefined
         ? undefined
         : {
@@ -139,7 +160,13 @@ export class WorkbenchService implements CandidateWorkbench {
     }
     const record = this.workspace.get(candidateId)
     assertWorkspaceBudget(record, relativePath, content)
-    this.workspace.writeFile(record.id, relativePath, content)
+    try {
+      this.workspace.writeFile(record.id, relativePath, content)
+    } catch (error) {
+      if (error instanceof SealedCandidateError) throw new WorkbenchContractError(error.message)
+      throw error
+    }
+    this.flush()
     return this.inspect(record.id)
   }
 
@@ -148,23 +175,33 @@ export class WorkbenchService implements CandidateWorkbench {
       throw new WorkbenchContractError('candidate manifest cannot include argv, scripts, or a shell runner')
     }
     this.workspace.setManifest(candidateId, manifest)
+    this.flush()
     return this.inspect(candidateId)
   }
 
   validate(candidateId: string): WorkbenchCandidateView {
     this.validation.validate(candidateId)
+    this.flush()
     return this.inspect(candidateId)
   }
 
   seal(candidateId: string): WorkbenchCandidateView {
     this.workspace.seal(candidateId)
+    this.flush()
     return this.inspect(candidateId)
   }
 
   review(candidateId: string): ReviewReport {
     const record = this.workspace.get(candidateId)
-    const parentId = this.bindings.get(candidateId)?.parentId
-    return this.independentReview.reviewCandidate(record.id, parentId === undefined ? {} : { parentRevision: parentId })
+    const binding = this.bindings.get(candidateId)
+    const parentDigest = binding?.parentDigest
+    const parentReport = binding?.parentId === undefined ? undefined : this.independentReview.lastReport(binding.parentId)
+    return this.independentReview.reviewCandidate(record.id, {
+      ...(parentDigest === undefined ? {} : { parentRevision: parentDigest }),
+      ...(parentReport === undefined
+        ? {}
+        : { priorFindings: parentReport.findings.filter((item) => item.blocking && item.status === 'open') }),
+    })
   }
 
   inspectReview(candidateId: string) {
@@ -182,6 +219,7 @@ export class WorkbenchService implements CandidateWorkbench {
     if (last?.state !== 'changes-required') {
       throw new WorkbenchContractError('repair requires Independent Review changes-required on the parent')
     }
+    assertParentIntact(parent)
     const binding = this.bindings.get(parent.id)
     const plan = binding?.planId === undefined ? undefined : this.plans.get(binding.planId)
     const review = plan?.review ?? reviewFromRecord(parent)
@@ -212,11 +250,35 @@ export class WorkbenchService implements CandidateWorkbench {
       parentDigest: parent.digest,
     })
     if (binding?.planId === undefined) this.plans.set(`inherited-${parent.id}`, { id: `inherited-${parent.id}`, review })
-    for (const relative of this.workspace.listFiles(parent.id)) {
-      if (relative === 'candidate.manifest.json') continue
-      this.workspace.writeFile(created.id, relative, this.workspace.readFile(parent.id, relative))
-    }
+    this.copyParentWorkspace(parent, created.id)
+    this.flush()
     return this.inspect(created.id)
+  }
+
+  exportState(): WorkbenchPersistState {
+    return {
+      nextPlan: this.nextPlan,
+      plans: [...this.plans.values()],
+      bindings: [...this.bindings.entries()].map(([candidateId, binding]) => ({
+        candidateId,
+        planId: binding.planId,
+        ...(binding.parentId === undefined ? {} : { parentId: binding.parentId }),
+        ...(binding.parentDigest === undefined ? {} : { parentDigest: binding.parentDigest }),
+      })),
+    }
+  }
+
+  private copyParentWorkspace(parent: CandidateRecord, childId: string): void {
+    assertParentIntact(parent)
+    for (const relative of listBoundedFiles(parent.workspaceRoot)) {
+      if (relative === 'candidate.manifest.json') continue
+      const content = readBoundedFile(parent.workspaceRoot, relative)
+      this.writeFile(childId, relative, content)
+    }
+  }
+
+  private flush(): void {
+    this.options.persist?.(this.exportState())
   }
 
   requestApproval(candidateId: string) {
@@ -272,6 +334,17 @@ function reviewFromRecord(record: CandidateRecord): ResolutionReview {
     steps: [],
     registryFacts: { exact: { kind: 'unknown', capability: record.manifest.resolutionCapability }, domainOwners: [], conflicts: [] },
     target: { owner: record.owner, version: record.baseVersion },
+  }
+}
+
+function assertParentIntact(parent: CandidateRecord): void {
+  if (parent.digest === undefined) {
+    throw new WorkbenchContractError('repair requires a sealed parent with a host digest')
+  }
+  const files = listBoundedFiles(parent.workspaceRoot)
+  const live = digestFiles(parent.workspaceRoot, files)
+  if (live !== parent.digest) {
+    throw new WorkbenchContractError('parent candidate digest no longer matches the sealed revision')
   }
 }
 
@@ -334,7 +407,10 @@ function listBoundedFiles(root: string): string[] {
 }
 
 export function readBoundedFile(root: string, relativePath: string): string {
-  const dest = path.join(root, ...relativePath.split('/'))
+  const dest = resolveInsideRoot(root, relativePath)
+  if (existsSync(dest) && lstatSync(dest).isSymbolicLink()) {
+    throw new WorkbenchContractError(`symlink is not allowed in a candidate workspace: ${relativePath}`)
+  }
   const text = readFileSync(dest, 'utf8')
   if (Buffer.byteLength(text, 'utf8') > WORKBENCH_MAX_FILE_BYTES) {
     throw new WorkbenchContractError(`candidate file exceeds the ${WORKBENCH_MAX_FILE_BYTES} byte bound`)

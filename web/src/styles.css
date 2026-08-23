@@ -409,6 +409,13 @@ button { color: inherit; }
 .activity-item--approval .activity-node { border-color: var(--signal-amber); border-radius: 6px; color: var(--signal-amber); }
 .activity-item--fault { color: #e08a82; }
 .activity-item--fault .activity-node { border-color: var(--fault-red); color: var(--fault-red); }
+.workbench-section { border-top: 1px solid #555a56; padding: 20px 22px 8px; }
+.workbench-section h2 { margin: 0 0 14px; font: 700 16px/1 var(--font-instrument); letter-spacing: .08em; }
+.workbench-list { margin: 0; padding: 0; list-style: none; }
+.workbench-item { padding: 12px 0; border-top: 1px solid #555a56; }
+.workbench-identity { font: 650 14px/1.3 var(--font-instrument); }
+.workbench-meta, .workbench-diff, .workbench-request { color: var(--muted-inverse); margin-top: 6px; font: 500 13px/1.4 var(--font-instrument); }
+.workbench-item[data-can-request="yes"] .workbench-request { color: var(--signal-amber); }
 .capability-section { margin-top: auto; border-top: 1px solid #555a56; }
 .capability-section h2 { padding: 20px 22px 0; }
 .capability-list { margin: 0; }

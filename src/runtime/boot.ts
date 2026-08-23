@@ -81,6 +81,10 @@ async function bootStack(options: BootOptions = {}): Promise<AssistantControl> {
       hostLineage: true,
       lineageUnavailable: persistBroken || durable.reviews.lineageUnavailable,
     },
+    workbench: durable === undefined ? undefined : {
+      restore: persistBroken ? undefined : durable.workbench.restore(),
+      persist: persistBroken ? undefined : (state) => durable.workbench.save(state),
+    },
     governance: {
       hydrate: persistBroken || durable === undefined ? undefined : hydrateFromAuthority(durable.authority),
       persist: durable === undefined ? undefined : () => {

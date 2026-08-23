@@ -1,5 +1,5 @@
 import { Service, type Context } from '@deepseek-ai/cordis'
-import { WorkbenchService, type CandidateWorkbench } from '../domain/workbench/index.js'
+import { WorkbenchService, type CandidateWorkbench, type WorkbenchServiceOptions } from '../domain/workbench/index.js'
 import { registerWorkbenchTools } from './workbench-tools.js'
 
 declare module '@deepseek-ai/cordis' {
@@ -34,6 +34,8 @@ export class CandidateWorkbenchService extends Service implements CandidateWorkb
   requestApproval(candidateId: string) { return this.store.requestApproval(candidateId) }
 }
 
+export interface WorkbenchPluginConfig extends WorkbenchServiceOptions {}
+
 export const name = 'dsh-assistant-workbench'
 export const inject = [
   'capabilityResolution',
@@ -46,13 +48,14 @@ export const inject = [
 ]
 
 /** Host-owned Candidate Workbench. Development authority only; never approval or activation. */
-export async function apply(ctx: Context) {
+export async function apply(ctx: Context, config: WorkbenchPluginConfig = {}) {
   const workbench = new WorkbenchService(
     ctx.capabilityResolution,
     ctx.candidateWorkspace,
     ctx.candidateValidation,
     ctx.independentReview,
     ctx.extensionGovernance,
+    { restore: config.restore, persist: config.persist },
   )
   await ctx.plugin(class extends CandidateWorkbenchService {
     constructor(scope: Context) {

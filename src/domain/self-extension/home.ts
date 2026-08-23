@@ -9,6 +9,7 @@ export interface SelfExtensionHome {
   readonly candidateIndexPath: string
   readonly candidateArea: string
   readonly reviewLineagePath: string
+  readonly workbenchPath: string
 }
 
 export function resolveAssistantHome(explicit?: string): string | undefined {
@@ -28,6 +29,7 @@ export function selfExtensionPaths(home: string): SelfExtensionHome {
     candidateIndexPath: path.join(root, 'candidates', 'index.json'),
     candidateArea: path.join(root, 'candidates'),
     reviewLineagePath: path.join(root, 'review-lineage.json'),
+    workbenchPath: path.join(root, 'workbench.json'),
   }
 }
 

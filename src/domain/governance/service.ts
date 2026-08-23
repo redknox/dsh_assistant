@@ -567,7 +567,12 @@ export class GovernanceService implements ExtensionGovernance, ExtensionActivati
     }
     if (record.baseVersion !== undefined) {
       const active = this.registry.list({ owner: record.owner, status: 'active' })[0]
-      if (active !== undefined && active.version !== record.baseVersion) {
+      if (active === undefined) {
+        denials.push({
+          reason: 'base-changed',
+          detail: `no active owner for ${record.owner}; proposal assumed ${record.baseVersion}`,
+        })
+      } else if (active.version !== record.baseVersion) {
         denials.push({ reason: 'base-changed', detail: `active base is ${active.version}, proposal assumed ${record.baseVersion}` })
       }
     }

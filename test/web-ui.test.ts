@@ -635,6 +635,56 @@ export function apply(ctx) {
     assert.match(extension, /data-fingerprint="fp-ext"/)
     assert.match(extension, /not self-authorization/)
 
+    const workbench = renderToStaticMarkup(createElement(MissionControlScreen, {
+      view: fixtureView({
+        candidates: [{
+          id: 'cand-wb',
+          owner: 'generated/r0-workbench-ping',
+          version: '0.1.0',
+          lifecycle: 'validated',
+          resolutionKind: 'new-plugin',
+          resolutionCapability: 'r0.workbench.ping',
+          sealed: true,
+          validationPassed: true,
+          reviewState: 'review-complete',
+          blockingFindings: 0,
+          canRequestApproval: true,
+          diff: {
+            owner: 'generated/r0-workbench-ping',
+            candidateVersion: '0.1.0',
+            capabilities: { added: ['r0.workbench.ping'], removed: [], changed: [] },
+            permissions: { added: [], removed: [], changed: [] },
+            tools: { added: ['r0_workbench_ping'], removed: [], changed: [] },
+            services: { added: [], removed: [], changed: [] },
+            providers: { added: [], removed: [], changed: [] },
+            runtimeSeams: { added: [], removed: [], changed: [] },
+            effects: {
+              filesystem: [],
+              network: [],
+              process: [],
+              secrets: [],
+              externalSystems: [],
+              remoteSideEffect: 'none',
+            },
+          },
+        }],
+      }),
+      connected: true,
+      sending: false,
+      draft: '',
+      onDraft() {},
+      onSend() {},
+      onApprove() {},
+      onReject() {},
+      onRecovery() {},
+    }))
+    assert.match(workbench, /data-workbench="true"/)
+    assert.match(workbench, /data-candidate-id="cand-wb"/)
+    assert.match(workbench, /generated\/r0-workbench-ping@0.1.0/)
+    assert.match(workbench, /r0.workbench.ping/)
+    assert.match(workbench, /can request approval/)
+    assert.match(workbench, /\+r0.workbench.ping/)
+
     const degraded = renderToStaticMarkup(createElement(MissionControlScreen, {
       view: fixtureView({
         systemState: 'DEGRADED',

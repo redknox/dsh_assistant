@@ -2,10 +2,13 @@ export { WorkbenchContractError } from './errors.js'
 export { WorkbenchService } from './service.js'
 export type {
   CandidateWorkbench,
+  WorkbenchBinding,
   WorkbenchCandidateView,
   WorkbenchCreateInput,
+  WorkbenchPersistState,
   WorkbenchPlan,
   WorkbenchPlanView,
+  WorkbenchServiceOptions,
 } from './types.js'
 export {
   WORKBENCH_CHANGE_KINDS,

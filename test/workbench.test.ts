@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { mkdirSync, mkdtempSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { describe, it } from 'node:test'
@@ -8,14 +8,17 @@ import { CandidateService } from '../src/domain/candidate/index.js'
 import {
   WORKBENCH_MAX_FILE_BYTES,
   WORKBENCH_MAX_FILE_COUNT,
+  WORKBENCH_MAX_LIST_DEPTH,
   WORKBENCH_MAX_TRAVERSAL_ENTRIES,
+  WORKBENCH_MAX_WORKSPACE_BYTES,
   WorkbenchContractError,
   WorkbenchService,
+  type WorkbenchPersistState,
 } from '../src/domain/workbench/index.js'
 import { RecoveryRoot } from '../src/domain/governance/index.js'
 import { InMemoryRegistryPersistence, RegistryService, bootstrapCoreInventory } from '../src/domain/registry/index.js'
 import { ResolutionService } from '../src/domain/resolution/index.js'
-import { PolicyReviewerProvider, ReviewService, finding } from '../src/domain/review/index.js'
+import { PolicyReviewerProvider, ReviewService, finding, reviewPackageFromCandidate } from '../src/domain/review/index.js'
 import { projectMissionControl } from '../src/domain/workspace/index.js'
 import { bootAssistantControl, bootSafeModeRuntime } from '../src/runtime/boot.js'
 import { gatherWorkspaceSnapshot } from '../src/domain/workspace/gather.js'
@@ -163,9 +166,9 @@ describe('candidate workbench', () => {
     }
   })
 
-  it('D. repair keeps the sealed parent and inherited blockers', () => {
-    const blocker = finding({
-      reviewedDigest: 'pending',
+  it('D. repair uses host parent digest and keeps inherited blockers until remediated', () => {
+    const openBlocker = (digest: string) => finding({
+      reviewedDigest: digest,
       severity: 'BLOCKER',
       category: 'acceptance-contract',
       claim: 'needs-repair',
@@ -175,27 +178,78 @@ describe('candidate workbench', () => {
       requiredRemediation: 'fix it',
       status: 'open',
     })
-    const setup = isolatedWorkbench(new PolicyReviewerProvider(() => [blocker]))
-    const created = setup.workbench.create({
-      planId: setup.workbench.rememberPlan(setup.review).planId,
-      manifest: { capabilities: ['r0.workbench.ping'], tools: ['r0_workbench_ping'], entryPoints: ['src/plugin.js'] },
-    })
-    setup.workbench.writeFile(created.id, 'src/plugin.js', R0_SOURCE)
-    setup.workbench.writeFile(created.id, 'package.json', `${JSON.stringify({ name: 'dsh-r0', type: 'module', main: 'src/plugin.js' }, null, 2)}\n`)
-    setup.workbench.validate(created.id)
-    setup.workbench.seal(created.id)
-    const report = setup.workbench.review(created.id)
+    const inherited = isolatedWorkbench(new PolicyReviewerProvider((pkg) => [openBlocker(pkg.candidate.digest)]))
+    const created = authorIsolated(inherited)
+    const report = inherited.workbench.review(created)
     assert.equal(report.state, 'changes-required')
-    assert.equal(setup.governance.requestEligibility(created.id).ok, false)
-    assert.ok(setup.governance.requestEligibility(created.id).denials.some((item) => item.reason === 'review-changes-required'))
-    const repaired = setup.workbench.repair(created.id)
-    assert.notEqual(repaired.id, created.id)
-    assert.equal(setup.workspace.get(created.id).sealed, true)
-    assert.throws(() => setup.workspace.writeFile(created.id, 'src/plugin.js', 'mutated'), /sealed|Sealed/)
-    assert.equal(repaired.parentId, created.id)
-    const again = setup.workbench.review(repaired.id)
-    assert.equal(again.state, 'changes-required')
-    assert.ok(again.findings.some((item) => item.claim === 'needs-repair' && item.blocking))
+    assert.ok(inherited.governance.requestEligibility(created).denials.some((item) => item.reason === 'review-changes-required'))
+    const repaired = inherited.workbench.repair(created)
+    assert.notEqual(repaired.id, created)
+    assert.equal(inherited.workspace.get(created).sealed, true)
+    assert.throws(() => inherited.workbench.writeFile(created, 'src/plugin.js', 'mutated'), WorkbenchContractError)
+    assert.equal(repaired.parentId, created)
+    assert.equal(repaired.parentDigest, inherited.workspace.get(created).digest)
+    const carried = inherited.workbench.review(repaired.id)
+    assert.equal(carried.state, 'changes-required')
+    assert.ok(carried.findings.some((item) => item.claim === 'needs-repair' && item.blocking && item.status === 'open'))
+    assert.equal(carried.findings.some((item) => item.claim === 'invalid-parent-revision'), false)
+
+    const omittedSetup = isolatedWorkbench(new PolicyReviewerProvider((pkg) => (
+      pkg.candidate.parentRevision ? [] : [openBlocker(pkg.candidate.digest)]
+    )))
+    const omittedParent = authorIsolated(omittedSetup)
+    omittedSetup.workbench.review(omittedParent)
+    const omittedChild = omittedSetup.workbench.repair(omittedParent)
+    const omitted = omittedSetup.workbench.review(omittedChild.id)
+    assert.equal(omitted.state, 'changes-required')
+    assert.ok(omitted.findings.some((item) => item.claim === 'needs-repair' && item.status === 'open'))
+
+    const forged = isolatedWorkbench(new PolicyReviewerProvider((pkg) => (
+      pkg.candidate.parentRevision
+        ? [finding({
+          reviewedDigest: pkg.candidate.digest,
+          severity: 'BLOCKER',
+          category: 'acceptance-contract',
+          claim: 'unrelated-forged',
+          location: 'policy',
+          evidence: 'forged close',
+          whyItMatters: 'wrong claim cannot drop the parent blocker',
+          requiredRemediation: 'fix the original claim',
+          status: 'resolved',
+        })]
+        : [openBlocker(pkg.candidate.digest)]
+    )))
+    const forgedParent = authorIsolated(forged)
+    forged.workbench.review(forgedParent)
+    const forgedChild = forged.workbench.repair(forgedParent)
+    const forgedReport = forged.workbench.review(forgedChild.id)
+    assert.equal(forgedReport.state, 'changes-required')
+    assert.ok(forgedReport.findings.some((item) => item.claim === 'needs-repair' && item.status === 'open'))
+
+    const closing = isolatedWorkbench(new PolicyReviewerProvider((pkg) => (
+      pkg.candidate.parentRevision
+        ? [finding({
+          reviewedDigest: pkg.candidate.digest,
+          severity: 'BLOCKER',
+          category: 'acceptance-contract',
+          claim: 'needs-repair',
+          location: 'policy',
+          evidence: 'remediated on this digest',
+          whyItMatters: 'current-revision evidence',
+          requiredRemediation: 'none',
+          status: 'resolved',
+        })]
+        : [openBlocker(pkg.candidate.digest)]
+    )))
+    const closeParent = authorIsolated(closing)
+    closing.workbench.review(closeParent)
+    const closeChild = closing.workbench.repair(closeParent)
+    closing.workbench.validate(closeChild.id)
+    closing.workbench.seal(closeChild.id)
+    const closed = closing.workbench.review(closeChild.id)
+    assert.equal(closed.state, 'review-complete')
+    assert.equal(closed.findings.some((item) => item.claim === 'invalid-parent-revision'), false)
+    assert.equal(closed.findings.some((item) => item.claim === 'needs-repair' && item.status === 'open'), false)
   })
 
   it('E. scripted slice reaches an Approval Card, isolated activation, and rollback', async () => {
@@ -211,7 +265,10 @@ describe('candidate workbench', () => {
       const view = projectMissionControl(snapshot)
       const card = view.approvals.find((item) => item.kind === 'self-extension' && item.candidateId === id)
       assert.ok(card)
-      assert.equal(view.candidates?.find((item) => item.id === id)?.canRequestApproval, true)
+      const projected = view.candidates?.find((item) => item.id === id)
+      assert.equal(projected?.canRequestApproval, true)
+      assert.equal(projected?.owner, 'generated/r0-workbench-ping')
+      assert.ok(projected?.diff?.capabilities.added.includes('r0.workbench.ping'))
       assert.equal(ctx.capabilityRegistry.get('generated/r0-workbench-ping', '0.1.0'), undefined)
       assert.throws(() => ctx.extensionGovernance.recordUntrustedApproval({ approved: true }))
       assert.equal('activate' in ctx.extensionGovernance, false)
@@ -231,6 +288,220 @@ describe('candidate workbench', () => {
     } finally {
       await ctx.fiber.dispose()
     }
+  })
+
+  it('denies request when the active base is upgraded or disabled', () => {
+    const upgraded = isolatedWorkbench()
+    const evolve = new ResolutionService(upgraded.registry).review({
+      capability: 'calendar.read',
+      need: 'richer attendee filtering',
+      behavior: 'attendee-filter',
+    })
+    const plan = upgraded.workbench.rememberPlan(evolve)
+    const created = upgraded.workbench.create({
+      planId: plan.planId,
+      manifest: { capabilities: ['calendar.read'], tools: ['calendar_list_events'] },
+    })
+    upgraded.workbench.writeFile(created.id, 'src/ok.ts', 'export const value: string = "ok"\n')
+    upgraded.workbench.validate(created.id)
+    upgraded.workbench.seal(created.id)
+    upgraded.workbench.review(created.id)
+    const current = upgraded.registry.get('managed/integrations', '0.1.0')
+    assert.ok(current)
+    upgraded.registry.transitionStatus('managed/integrations', '0.1.0', 'disabled')
+    upgraded.registry.register({
+      ...current,
+      version: '0.3.0',
+      status: 'active',
+    })
+    const afterUpgrade = upgraded.governance.requestEligibility(created.id)
+    assert.equal(afterUpgrade.ok, false)
+    assert.ok(afterUpgrade.denials.some((item) => item.reason === 'base-changed'))
+
+    const disabled = isolatedWorkbench()
+    const disabledPlan = disabled.workbench.rememberPlan(new ResolutionService(disabled.registry).review({
+      capability: 'calendar.read',
+      need: 'richer attendee filtering',
+      behavior: 'attendee-filter',
+    }))
+    const disabledCandidate = disabled.workbench.create({
+      planId: disabledPlan.planId,
+      manifest: { capabilities: ['calendar.read'], tools: ['calendar_list_events'] },
+    })
+    disabled.workbench.writeFile(disabledCandidate.id, 'src/ok.ts', 'export const value: string = "ok"\n')
+    disabled.workbench.validate(disabledCandidate.id)
+    disabled.workbench.seal(disabledCandidate.id)
+    disabled.workbench.review(disabledCandidate.id)
+    disabled.registry.transitionStatus('managed/integrations', '0.1.0', 'disabled')
+    const afterDisable = disabled.governance.requestEligibility(disabledCandidate.id)
+    assert.equal(afterDisable.ok, false)
+    assert.ok(afterDisable.denials.some((item) => item.reason === 'base-changed'))
+  })
+
+  it('rejects tampered, symlink, and over-budget repair copies', () => {
+    const blocker = new PolicyReviewerProvider((pkg) => [finding({
+      reviewedDigest: pkg.candidate.digest,
+      severity: 'BLOCKER',
+      category: 'acceptance-contract',
+      claim: 'needs-repair',
+      location: 'policy',
+      evidence: 'forced',
+      whyItMatters: 'repair path',
+      requiredRemediation: 'fix',
+      status: 'open',
+    })])
+    const tampered = isolatedWorkbench(blocker)
+    const tamperedId = authorIsolated(tampered)
+    tampered.workbench.review(tamperedId)
+    writeFileSync(path.join(tampered.workspace.get(tamperedId).workspaceRoot, 'src/plugin.js'), 'tampered\n')
+    assert.throws(() => tampered.workbench.repair(tamperedId), /digest/)
+
+    const linked = isolatedWorkbench(blocker)
+    const linkedId = authorIsolated(linked)
+    linked.workbench.review(linkedId)
+    const hostSecret = path.join(mkdtempSync(path.join(tmpdir(), 'dsh-wb-secret-')), 'secret.txt')
+    writeFileSync(hostSecret, 'host-secret\n')
+    symlinkSync(hostSecret, path.join(linked.workspace.get(linkedId).workspaceRoot, 'leaked.txt'))
+    assert.throws(() => linked.workbench.repair(linkedId), /symlink|digest/)
+
+    const deep = isolatedWorkbench(blocker)
+    const deepDraft = draftIsolated(deep)
+    const deepDir = path.join(deep.workspace.get(deepDraft).workspaceRoot, ...Array.from({ length: WORKBENCH_MAX_LIST_DEPTH + 1 }, (_, i) => `d${i}`))
+    mkdirSync(deepDir, { recursive: true })
+    writeFileSync(path.join(deepDir, 'file.txt'), 'too-deep\n')
+    deep.workbench.validate(deepDraft)
+    deep.workbench.seal(deepDraft)
+    deep.workbench.review(deepDraft)
+    assert.throws(() => deep.workbench.repair(deepDraft), WorkbenchContractError)
+
+    const counted = isolatedWorkbench(blocker)
+    const countedDraft = draftIsolated(counted)
+    for (let i = 0; i < WORKBENCH_MAX_FILE_COUNT; i += 1) {
+      counted.workspace.writeFile(countedDraft, `extra-${i}.txt`, 'x\n')
+    }
+    counted.workbench.validate(countedDraft)
+    counted.workbench.seal(countedDraft)
+    counted.workbench.review(countedDraft)
+    assert.throws(() => counted.workbench.repair(countedDraft), WorkbenchContractError)
+
+    const heavy = isolatedWorkbench(blocker)
+    const heavyDraft = draftIsolated(heavy)
+    heavy.workspace.writeFile(heavyDraft, 'blob.bin', 'x'.repeat(WORKBENCH_MAX_WORKSPACE_BYTES + 1))
+    heavy.workbench.validate(heavyDraft)
+    heavy.workbench.seal(heavyDraft)
+    heavy.workbench.review(heavyDraft)
+    assert.throws(() => heavy.workbench.repair(heavyDraft), WorkbenchContractError)
+  })
+
+  it('denies request after invalid validation or a stale review', () => {
+    const setup = isolatedWorkbench()
+    const id = draftIsolated(setup)
+    setup.workbench.writeFile(id, 'src/bad.ts', 'export const n: number = "nope"\n')
+    setup.workbench.validate(id)
+    setup.workbench.seal(id)
+    const invalid = setup.governance.requestEligibility(id)
+    assert.equal(invalid.ok, false)
+    assert.ok(invalid.denials.some((item) => item.reason === 'not-validated'))
+
+    const stale = isolatedWorkbench()
+    const staleId = authorIsolated(stale)
+    stale.workbench.review(staleId)
+    const record = stale.workspace.get(staleId)
+    const pkg = reviewPackageFromCandidate(record)
+    stale.independent.review({
+      ...pkg,
+      candidate: { ...pkg.candidate, digest: `${record.digest}-mutated` },
+    })
+    const staleGate = stale.governance.requestEligibility(staleId)
+    assert.equal(staleGate.ok, false)
+    assert.ok(staleGate.denials.some((item) => item.reason === 'review-stale'))
+  })
+
+  it('restores host plans and parent digest across a real home restart', async () => {
+    const home = mkdtempSync(path.join(tmpdir(), 'dsh-wb-home-'))
+    const first = await bootAssistantControl({ home })
+    let planId = ''
+    let candidateId = ''
+    let parentDigest = ''
+    try {
+      candidateId = authorR0(first.ctx)
+      planId = first.ctx.candidateWorkbench.inspect(candidateId).planId ?? ''
+      first.ctx.candidateWorkbench.validate(candidateId)
+      first.ctx.candidateWorkbench.seal(candidateId)
+      first.ctx.candidateWorkbench.review(candidateId)
+      parentDigest = first.ctx.candidateWorkspace.get(candidateId).digest ?? ''
+      assert.ok(planId)
+      assert.ok(parentDigest)
+    } finally {
+      await first.ctx.fiber.dispose()
+    }
+    const second = await bootAssistantControl({ home })
+    try {
+      const view = second.ctx.candidateWorkbench.inspect(candidateId)
+      assert.equal(view.planId, planId)
+      const plan = second.ctx.candidateWorkbench.getPlan(planId)
+      assert.equal(plan.review.capability, 'r0.workbench.ping')
+      assert.equal(plan.review.kind, 'new-plugin')
+      assert.notEqual(plan.review.registryFacts, undefined)
+      const snapshot = gatherWorkspaceSnapshot({ ctx: second.ctx, sessionId: 'wb-restart' })
+      const projected = projectMissionControl(snapshot).candidates?.find((item) => item.id === candidateId)
+      assert.equal(projected?.owner, 'generated/r0-workbench-ping')
+      assert.ok(projected?.diff)
+    } finally {
+      await second.ctx.fiber.dispose()
+    }
+  })
+
+  it('fails closed when durable workbench state is corrupt', async () => {
+    const home = mkdtempSync(path.join(tmpdir(), 'dsh-wb-corrupt-'))
+    const first = await bootAssistantControl({ home })
+    try {
+      authorR0(first.ctx)
+    } finally {
+      await first.ctx.fiber.dispose()
+    }
+    writeFileSync(path.join(home, 'self-extension', 'workbench.json'), '{not-json')
+    const broken = await bootAssistantControl({ home })
+    try {
+      assert.equal(broken.diagnostics.persistence, 'corrupt')
+      assert.equal(broken.diagnostics.safeMode, true)
+    } finally {
+      await broken.ctx.fiber.dispose()
+    }
+  })
+
+  it('restores repair lineage from persisted workbench state', () => {
+    let stored: WorkbenchPersistState | undefined
+    const blocker = new PolicyReviewerProvider((pkg) => [finding({
+      reviewedDigest: pkg.candidate.digest,
+      severity: 'BLOCKER',
+      category: 'acceptance-contract',
+      claim: 'needs-repair',
+      location: 'policy',
+      evidence: 'forced',
+      whyItMatters: 'lineage',
+      requiredRemediation: 'fix',
+      status: 'open',
+    })])
+    const first = isolatedWorkbench(blocker, { persist: (state) => { stored = state } })
+    const parentId = authorIsolated(first)
+    first.workbench.review(parentId)
+    const child = first.workbench.repair(parentId)
+    assert.ok(stored)
+    const restored = new WorkbenchService(
+      new ResolutionService(first.registry),
+      first.workspace,
+      first.workspace,
+      first.independent,
+      first.governance,
+      { restore: stored },
+    )
+    const view = restored.inspect(child.id)
+    assert.equal(view.parentDigest, first.workspace.get(parentId).digest)
+    assert.equal(view.planId, first.workbench.inspect(parentId).planId)
+    const report = restored.review(child.id)
+    assert.equal(report.findings.some((item) => item.claim === 'invalid-parent-revision'), false)
+    assert.ok(report.findings.some((item) => item.claim === 'needs-repair'))
   })
 
   it('omits authoring and request tools in Safe Mode', async () => {
@@ -262,7 +533,24 @@ function authorR0(ctx: Awaited<ReturnType<typeof bootAssistantControl>>['ctx']):
   return created.id
 }
 
-function isolatedWorkbench(provider?: PolicyReviewerProvider) {
+function draftIsolated(setup: ReturnType<typeof isolatedWorkbench>): string {
+  const created = setup.workbench.create({
+    planId: setup.workbench.rememberPlan(setup.review).planId,
+    manifest: { capabilities: ['r0.workbench.ping'], tools: ['r0_workbench_ping'], entryPoints: ['src/plugin.js'] },
+  })
+  setup.workbench.writeFile(created.id, 'src/plugin.js', R0_SOURCE)
+  setup.workbench.writeFile(created.id, 'package.json', `${JSON.stringify({ name: 'dsh-r0', type: 'module', main: 'src/plugin.js' }, null, 2)}\n`)
+  return created.id
+}
+
+function authorIsolated(setup: ReturnType<typeof isolatedWorkbench>): string {
+  const id = draftIsolated(setup)
+  setup.workbench.validate(id)
+  setup.workbench.seal(id)
+  return id
+}
+
+function isolatedWorkbench(provider?: PolicyReviewerProvider, options: { persist?: (state: WorkbenchPersistState) => void } = {}) {
   const registry = new RegistryService(new InMemoryRegistryPersistence())
   bootstrapCoreInventory((input) => registry.register(input))
   const workspace = new CandidateService(registry, mkdtempSync(path.join(tmpdir(), 'dsh-wb-')))
@@ -273,6 +561,13 @@ function isolatedWorkbench(provider?: PolicyReviewerProvider) {
   })
   const independent = new ReviewService(provider, (id) => workspace.get(id), { hostLineage: true })
   const root = new RecoveryRoot(registry, workspace, undefined, { independentReview: independent })
-  const workbench = new WorkbenchService(new ResolutionService(registry), workspace, workspace, independent, root.service)
-  return { workbench, workspace, review, governance: root.service }
+  const workbench = new WorkbenchService(
+    new ResolutionService(registry),
+    workspace,
+    workspace,
+    independent,
+    root.service,
+    { persist: options.persist },
+  )
+  return { workbench, workspace, review, governance: root.service, registry, independent }
 }

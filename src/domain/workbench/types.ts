@@ -23,6 +23,19 @@ export interface WorkbenchPlan {
   readonly review: ResolutionReview
 }
 
+export interface WorkbenchBinding {
+  readonly candidateId: string
+  readonly planId: string
+  readonly parentId?: string
+  readonly parentDigest?: string
+}
+
+export interface WorkbenchPersistState {
+  readonly nextPlan: number
+  readonly plans: readonly WorkbenchPlan[]
+  readonly bindings: readonly WorkbenchBinding[]
+}
+
 export interface WorkbenchPlanView {
   readonly planId: string
   readonly kind: ResolutionKind
@@ -48,6 +61,7 @@ export interface WorkbenchCandidateView {
   readonly resolutionCapability: string
   readonly planId?: string
   readonly parentId?: string
+  readonly parentDigest?: string
   readonly validation?: {
     readonly passed: boolean
     readonly lifecycle: CandidateLifecycle
@@ -69,6 +83,11 @@ export interface WorkbenchCreateInput {
   readonly owner?: string
   readonly version?: string
   readonly provenance?: { readonly kind?: string; readonly origin?: string }
+}
+
+export interface WorkbenchServiceOptions {
+  readonly restore?: WorkbenchPersistState
+  readonly persist?: (state: WorkbenchPersistState) => void
 }
 
 export interface CandidateWorkbench {

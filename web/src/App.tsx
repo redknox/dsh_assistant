@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState, type FormEvent } from 'react'
-import type { ApprovalCard, MissionControlView, UserCapabilityStatus, WorkObjectKind } from '../../src/domain/workspace/types'
+import type { ApprovalCard, MissionControlView, UserCapabilityStatus, WorkObjectKind, WorkbenchProjection } from '../../src/domain/workspace/types'
 import {
   decideApproval,
   establishSession,
@@ -322,6 +322,7 @@ function OperationsPanel(props: { readonly view: MissionControlView }) {
           ))}
         </ol>
       </section>
+      <WorkbenchPanel candidates={props.view.candidates ?? []} />
       <section className="capability-section" id="capabilities" aria-labelledby="capability-title">
         <h2 id="capability-title">CAPABILITY STATUS</h2>
         <dl className="capability-list">
@@ -339,6 +340,57 @@ function OperationsPanel(props: { readonly view: MissionControlView }) {
         </dl>
       </section>
     </aside>
+  )
+}
+
+function formatDiff(added: readonly string[], removed: readonly string[]): string {
+  const plus = added.map((item) => `+${item}`).join(' ')
+  const minus = removed.map((item) => `-${item}`).join(' ')
+  return [plus, minus].filter((item) => item !== '').join(' ') || 'none'
+}
+
+function WorkbenchPanel(props: { readonly candidates: readonly WorkbenchProjection[] }) {
+  if (props.candidates.length === 0) return null
+  return (
+    <section className="workbench-section" data-workbench="true" aria-labelledby="workbench-title">
+      <h2 id="workbench-title">CANDIDATE WORKBENCH</h2>
+      <ul className="workbench-list">
+        {props.candidates.map((item) => (
+          <li
+            key={item.id}
+            className="workbench-item"
+            data-candidate-id={item.id}
+            data-can-request={item.canRequestApproval ? 'yes' : 'no'}
+            data-review-state={item.reviewState ?? 'not-reviewed'}
+          >
+            <div className="workbench-identity">{item.owner}@{item.version}</div>
+            <div className="workbench-meta">
+              {item.resolutionKind ?? 'unresolved'} {item.resolutionCapability ?? ''}
+            </div>
+            <div className="workbench-meta">
+              validation {item.validationPassed === true ? 'passed' : item.validationFailed?.join(', ') || item.lifecycle}
+            </div>
+            <div className="workbench-meta">
+              review {item.reviewState ?? 'not-reviewed'}
+              {item.blockingFindings ? ` · ${item.blockingFindings} blockers` : ''}
+              {item.blockerClaims?.length ? ` (${item.blockerClaims.join(', ')})` : ''}
+            </div>
+            <div className="workbench-diff">
+              capabilities {formatDiff(item.diff?.capabilities.added ?? [], item.diff?.capabilities.removed ?? [])}
+            </div>
+            <div className="workbench-diff">
+              permissions {formatDiff(item.diff?.permissions.added ?? [], item.diff?.permissions.removed ?? [])}
+            </div>
+            <div className="workbench-diff">
+              effects {item.diff?.effects.network?.join(', ') || item.diff?.effects.filesystem?.join(', ') || 'none'}
+            </div>
+            <div className="workbench-request" data-can-request={item.canRequestApproval ? 'yes' : 'no'}>
+              {item.canRequestApproval ? 'can request approval' : `cannot request${item.requestDenials?.length ? `: ${item.requestDenials.join(', ')}` : ''}`}
+            </div>
+          </li>
+        ))}
+      </ul>
+    </section>
   )
 }
 
