@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { describe, it } from 'node:test'
 import { CallId } from '@deepseek-ai/dsh-llm'
-import { resolveChildMain } from '../src/adapters/activation/generated-runner.js'
+import { listGeneratedRuntimePids, resolveChildMain } from '../src/adapters/activation/generated-runner.js'
 import { GENERATED_MAX_MESSAGE_BYTES, generatedRuntimeDiagnosis } from '../src/domain/generated-runtime/index.js'
 import type { ExtensionProvenance } from '../src/domain/registry/index.js'
 import type { ResolutionKind, ResolutionReview } from '../src/domain/resolution/index.js'
@@ -447,13 +447,14 @@ describe('isolated generated-extension runtime', () => {
     const home = mkdtempSync(path.join(tmpdir(), 'tars-ng-hang-gov-'))
     const first = await bootAssistantControl({ home })
     try {
-      const { status } = await activateGenerated(first.ctx, first.recoveryRoot, { owner: 'generated/r0-hang-exec', tool: 'r0_hang_exec', source })
+      const { status, created } = await activateGenerated(first.ctx, first.recoveryRoot, { owner: 'generated/r0-hang-exec', tool: 'r0_hang_exec', source })
       assert.equal(status.state, 'active', status.lastFailure?.diagnostics)
       const during = generatedRuntimeDiagnosis().activeProcesses
       const result = await execTool(first.ctx, 'r0_hang_exec')
       assert.equal(result.isError, true)
       assert.equal(first.ctx.tools.get('r0_hang_exec'), undefined)
       assert.equal(generatedRuntimeDiagnosis().activeProcesses, during - 1)
+      assert.deepEqual(listGeneratedRuntimePids({ artifact: created.workspaceRoot }), [])
       const inspect = first.recoveryRoot.inspect()
       assert.notEqual(inspect.state, 'active')
       assert.equal(first.ctx.capabilityRegistry.get('generated/r0-hang-exec', '0.1.0')?.status, 'disabled')
@@ -703,6 +704,26 @@ describe('isolated generated-extension runtime', () => {
       assert.equal(ctx.tools.get('r0_old_only'), undefined)
       assert.equal(ctx.capabilityRegistry.get('managed/r0-swap', '0.1.0')?.status, 'disabled')
       assert.equal(ctx.capabilityRegistry.get('managed/r0-swap', '0.2.0')?.status, 'active')
+      const rolled = await recoveryRoot.rollback(second.human)
+      assert.equal(rolled.state, 'rolled-back', rolled.lastFailure?.diagnostics)
+      assert.equal(String((await execTool(ctx, 'r0_swap')).value), 'in-process')
+      assert.equal(ctx.tools.get('r0_old_only') === undefined, false)
+      assert.equal(String((await execTool(ctx, 'r0_old_only')).value), 'ghost')
+      assert.equal(ctx.capabilityRegistry.get('managed/r0-swap', '0.1.0')?.status, 'active')
+      assert.equal(ctx.capabilityRegistry.get('managed/r0-swap', '0.2.0')?.status, 'disabled')
+      assert.deepEqual(listGeneratedRuntimePids({ artifact: second.created.workspaceRoot }), [])
+      const third = await activateGenerated(ctx, recoveryRoot, {
+        owner: 'managed/r0-swap',
+        version: '0.3.0',
+        baseVersion: '0.1.0',
+        tool: 'r0_swap',
+        source: next,
+        provenance: { kind: 'managed', origin: 'assistant' },
+        reviewKind: 'evolve-owner',
+      })
+      assert.equal(third.status.state, 'active', third.status.lastFailure?.diagnostics)
+      assert.equal(String((await execTool(ctx, 'r0_swap')).value), 'isolated')
+      assert.equal(ctx.tools.get('r0_old_only'), undefined)
     } finally {
       await ctx.fiber.dispose()
     }
@@ -727,17 +748,20 @@ describe('isolated generated-extension runtime', () => {
   })
 }
 `
-    const { ctx, recoveryRoot } = await bootAssistantControl()
+    const home = mkdtempSync(path.join(tmpdir(), 'tars-ng-iso-rollback-'))
+    const firstBoot = await bootAssistantControl({ home })
+    const during = { processes: 0 }
     try {
-      const first = await activateGenerated(ctx, recoveryRoot, {
+      const first = await activateGenerated(firstBoot.ctx, firstBoot.recoveryRoot, {
         owner: 'generated/r0-swap',
         version: '0.1.0',
         tool: 'r0_swap',
         source: v1,
       })
       assert.equal(first.status.state, 'active', first.status.lastFailure?.diagnostics)
-      assert.equal(String((await execTool(ctx, 'r0_swap')).value), 'v1')
-      const second = await activateGenerated(ctx, recoveryRoot, {
+      assert.equal(String((await execTool(firstBoot.ctx, 'r0_swap')).value), 'v1')
+      during.processes = generatedRuntimeDiagnosis().activeProcesses
+      const second = await activateGenerated(firstBoot.ctx, firstBoot.recoveryRoot, {
         owner: 'generated/r0-swap',
         version: '0.2.0',
         baseVersion: '0.1.0',
@@ -746,10 +770,24 @@ describe('isolated generated-extension runtime', () => {
         reviewKind: 'evolve-owner',
       })
       assert.equal(second.status.state, 'active', second.status.lastFailure?.diagnostics)
-      assert.equal(String((await execTool(ctx, 'r0_swap')).value), 'v2')
-      assert.equal(ctx.capabilityRegistry.get('generated/r0-swap', '0.1.0')?.status, 'disabled')
+      assert.equal(String((await execTool(firstBoot.ctx, 'r0_swap')).value), 'v2')
+      assert.equal(firstBoot.ctx.capabilityRegistry.get('generated/r0-swap', '0.1.0')?.status, 'disabled')
+      const rolled = await firstBoot.recoveryRoot.rollback(second.human)
+      assert.equal(rolled.state, 'rolled-back', rolled.lastFailure?.diagnostics)
+      assert.equal(String((await execTool(firstBoot.ctx, 'r0_swap')).value), 'v1')
+      assert.equal(generatedRuntimeDiagnosis().activeProcesses, during.processes)
+      assert.equal(firstBoot.ctx.capabilityRegistry.get('generated/r0-swap', '0.1.0')?.status, 'active')
+      assert.equal(firstBoot.ctx.capabilityRegistry.get('generated/r0-swap', '0.2.0')?.status, 'disabled')
+      assert.deepEqual(listGeneratedRuntimePids({ artifact: second.created.workspaceRoot }), [])
     } finally {
-      await ctx.fiber.dispose()
+      await firstBoot.ctx.fiber.dispose()
+    }
+    const again = await bootAssistantControl({ home })
+    try {
+      assert.ok(again.ctx.tools.get('r0_swap'), 'rolled-back isolated v1 must remount')
+      assert.equal(String((await execTool(again.ctx, 'r0_swap')).value), 'v1')
+    } finally {
+      await again.ctx.fiber.dispose()
     }
   })
 
@@ -780,6 +818,33 @@ describe('isolated generated-extension runtime', () => {
       assert.equal(result.isError, false, String(result.value))
       assert.doesNotMatch(String(result.value), /^allowed:/)
       assert.match(String(result.value), /denied|EPERM|EACCES|ESRCH|not permitted|not allowed|Operation not permitted/i)
+    } finally {
+      await ctx.fiber.dispose()
+    }
+  })
+
+  it('preserves reserved-looking DSH parameter names on the host proxy', async () => {
+    const source = `export function apply(ctx) {
+  ctx.tools.register({
+    name: 'r0_reserved',
+    parameters: {
+      type: { type: 'string', required: true },
+      properties: { type: 'string', required: true },
+    },
+    output: { schema: { type: 'string' }, render(_a, v) { return [{ type: 'text', text: String(v) }] } },
+    async execute(args) { return String(args.type) + ':' + String(args.properties) },
+  })
+}
+`
+    const { ctx, recoveryRoot } = await bootAssistantControl()
+    try {
+      const { status } = await activateGenerated(ctx, recoveryRoot, { owner: 'generated/r0-reserved', tool: 'r0_reserved', source })
+      assert.equal(status.state, 'active', status.lastFailure?.diagnostics)
+      const schema = JSON.stringify((ctx.tools.get('r0_reserved') as { parameters?: unknown } | undefined)?.parameters ?? {})
+      assert.match(schema, /"type":\{|"type":\{"type"/)
+      const result = await execTool(ctx, 'r0_reserved', { type: 'a', properties: 'b' })
+      assert.equal(result.isError, false, String(result.value))
+      assert.equal(String(result.value), 'a:b')
     } finally {
       await ctx.fiber.dispose()
     }

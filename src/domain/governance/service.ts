@@ -432,12 +432,17 @@ export class GovernanceService implements ExtensionGovernance, ExtensionActivati
 
   private async finishRollback(target: ActivationSnapshot): Promise<ActivationStatus> {
     const restored = await this.restoreSnapshot(target)
-    this.current = this.captureSnapshot()
     this.lastKnownGood = target
+    this.current = target
     this.state = restored ? 'rolled-back' : 'activation-failed'
     this.safeMode = this.safeMode || !restored
     this.pendingCandidateId = undefined
     this.phase = undefined
+    if (restored) {
+      const remount = await this.remountCommittedGenerated()
+      if (remount.length > 0) return this.status()
+    }
+    this.current = this.captureSnapshot()
     this.integrityVerified = restored && this.verifyRestoredIntegrity(target)
     this.flush()
     return this.status()

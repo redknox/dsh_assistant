@@ -39,5 +39,8 @@ export function wrapGeneratedOsSandbox(
     writeFileSync(dest, generatedSeatbelt(nodePath))
     return { file: sandbox.file, args: ['-f', dest, ...argv] }
   }
-    return { file: sandbox.file, args: ['--user', '--map-root-user', '--net', '--pid', '--fork', '--mount-proc', '--', ...argv] }
+    return {
+      file: sandbox.file,
+      args: ['--user', '--map-root-user', '--net', '--pid', '--fork', '--kill-child', '--mount-proc', '--', ...argv],
+    }
 }

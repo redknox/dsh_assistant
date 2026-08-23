@@ -1,5 +1,5 @@
-import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process'
-import { copyFileSync, existsSync, mkdtempSync, realpathSync } from 'node:fs'
+import { execFileSync, spawn, type ChildProcessWithoutNullStreams } from 'node:child_process'
+import { copyFileSync, existsSync, mkdtempSync, readdirSync, readFileSync, realpathSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -39,6 +39,8 @@ export class IsolatedGeneratedRunner {
   private resolveExit?: () => void
   private fatal = false
   private stdoutBuffer = ''
+  private pgid?: number
+  runId = ''
   onFatal?: (reason: string) => void | Promise<void>
   private fatalSettled = Promise.resolve()
   private resolveFatal?: () => void
@@ -90,6 +92,7 @@ export class IsolatedGeneratedRunner {
         childMain.file,
       ]
       const wrapped = wrapGeneratedOsSandbox(sandbox, nodeArgv, artifact, process.execPath)
+      this.runId = `tars-ng-gen-${Date.now().toString(16)}-${Math.random().toString(16).slice(2)}`
       const child = spawn(wrapped.file, wrapped.args, {
         cwd: artifact,
         env: {
@@ -99,10 +102,13 @@ export class IsolatedGeneratedRunner {
           NODE_ENV: 'generated-runtime',
           DSH_GENERATED_ARTIFACT: artifact,
           DSH_GENERATED_ENTRY: relativeEntry,
+          DSH_GENERATED_RUN_ID: this.runId,
         },
         stdio: ['pipe', 'pipe', 'pipe'],
+        detached: true,
       })
       this.child = child
+      this.pgid = child.pid
       this.exited = new Promise((resolve) => {
         this.resolveExit = resolve
       })
@@ -157,12 +163,17 @@ export class IsolatedGeneratedRunner {
   }
 
   kill(): void {
-    if (this.child === undefined) {
+    const pid = this.child?.pid ?? this.pgid
+    if (pid === undefined) {
       this.resolveExit?.()
       return
     }
     this.failAll('generated process terminated')
-    this.child.kill('SIGKILL')
+    try {
+      process.kill(-pid, 'SIGKILL')
+    } catch {
+      this.child?.kill('SIGKILL')
+    }
   }
 
   async waitForExit(timeoutMs = 10_000): Promise<void> {
@@ -349,6 +360,40 @@ function stageChildMain(): { file: string; dir: string } {
   copyFileSync(source, dest)
   const file = realpathSync(dest)
   return { file, dir: path.dirname(file) }
+}
+
+/** OS-visible generated children, including descendants of an unshare wrapper. */
+export function listGeneratedRuntimePids(match: { readonly runId?: string; readonly artifact?: string } = {}): number[] {
+  const token = match.runId === undefined ? undefined : `DSH_GENERATED_RUN_ID=${match.runId}`
+  const artifact = match.artifact === undefined ? undefined : `DSH_GENERATED_ARTIFACT=${match.artifact}`
+  const hits: number[] = []
+  if (process.platform === 'linux') {
+    for (const entry of readdirSync('/proc')) {
+      if (!/^\d+$/.test(entry)) continue
+      try {
+        const env = readFileSync(`/proc/${entry}/environ`, 'utf8')
+        if (token !== undefined && env.includes(token)) hits.push(Number(entry))
+        else if (token === undefined && artifact !== undefined && env.includes(artifact)) hits.push(Number(entry))
+        else if (token === undefined && artifact === undefined && env.includes('NODE_ENV=generated-runtime')) hits.push(Number(entry))
+      } catch {
+        /* process exited or environ is unreadable */
+      }
+    }
+    return hits
+  }
+  try {
+    const text = execFileSync('ps', ['eww', '-A'], { encoding: 'utf8', maxBuffer: 32 * 1024 * 1024 })
+    for (const line of text.split('\n')) {
+      if (token !== undefined && !line.includes(token)) continue
+      else if (token === undefined && artifact !== undefined && !line.includes(artifact)) continue
+      else if (token === undefined && artifact === undefined && !line.includes('NODE_ENV=generated-runtime')) continue
+      const pid = Number(line.trim().split(/\s+/)[0])
+      if (Number.isInteger(pid) && pid > 0) hits.push(pid)
+    }
+  } catch {
+    return []
+  }
+  return hits
 }
 
 export function resolveChildMain(): string {

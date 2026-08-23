@@ -16,10 +16,10 @@ interface SurfaceSnapshot {
 }
 
 interface PriorOwnerMount {
-  readonly name?: string
-  readonly inject: readonly string[]
-  readonly apply: Plugin
+  readonly plugin: Plugin
   readonly config: unknown
+  readonly candidateId?: string
+  readonly owner?: string
 }
 
 const OWNER_PLUGIN_NAMES: Readonly<Record<string, string>> = {
@@ -77,9 +77,11 @@ function capturePriorOwner(ctx: Context, owner: string): { mounts: PriorOwnerMou
     for (const fiber of runtime.fibers) {
       if (fiber.uid === null) continue
       mounts.push({
-        name: runtime.name,
-        inject: Object.keys(fiber.inject ?? {}),
-        apply: runtime.callback as Plugin,
+        plugin: {
+          name: runtime.name,
+          inject: Object.keys(fiber.inject ?? {}),
+          apply: runtime.callback as Plugin.Function,
+        },
         config: fiber.config,
       })
       fibers.push(fiber)
@@ -101,6 +103,7 @@ export class CordisActivationRuntime implements ActivationRuntime {
   private readonly candidateOwners = new Map<string, string>()
   private readonly inProcessPlugins = new Map<string, PriorOwnerMount>()
   private readonly parkedBy = new Map<string, Array<{ id: string; runner: IsolatedGeneratedRunner }>>()
+  private readonly isolatedRecipes = new Map<string, ActivationPrepareContext>()
 
   constructor(private readonly ctx: Context) {
     ctx.effect(() => () => {
@@ -151,10 +154,10 @@ export class CordisActivationRuntime implements ActivationRuntime {
       this.fibers.set(candidateId, fiber)
       this.candidateOwners.set(candidateId, context.owner)
       this.inProcessPlugins.set(candidateId, {
-        name: OWNER_PLUGIN_NAMES[context.owner],
-        inject: [],
-        apply: plugin as Plugin,
+        plugin: plugin as Plugin,
         config: undefined,
+        candidateId,
+        owner: context.owner,
       })
       return { ok: true }
     } catch (error) {
@@ -232,7 +235,15 @@ export class CordisActivationRuntime implements ActivationRuntime {
       await this.restoreIsolatedSwap(id)
     }
     await Promise.all(waiting)
-    this.currentMounted = [...snapshot.mounted]
+    for (const id of snapshot.mounted) {
+      if (this.generated.has(id) || this.fibers.has(id)) continue
+      const recipe = this.isolatedRecipes.get(id)
+      if (recipe === undefined) continue
+      const remounted = await this.prepareGenerated(id, recipe)
+      if (!remounted.ok) throw new Error(remounted.diagnostics ?? `failed to remount isolated candidate ${id}`)
+      await this.commit(id)
+    }
+    this.currentMounted = snapshot.mounted.filter((id) => this.generated.has(id) || this.fibers.has(id))
   }
 
   async unloadGenerated(): Promise<void> {
@@ -285,6 +296,7 @@ export class CordisActivationRuntime implements ActivationRuntime {
     }
     this.generated.set(candidateId, runner)
     this.candidateOwners.set(candidateId, context.owner)
+    this.isolatedRecipes.set(candidateId, context)
     this.baselines.set(candidateId, snapshotDeclared(this.ctx, context))
     const disposers: Array<() => void> = []
     try {
@@ -339,7 +351,7 @@ export class CordisActivationRuntime implements ActivationRuntime {
     for (const fiber of named.fibers) await fiber.dispose()
     for (const [id, fiber] of fiberPriors) {
       const mount = this.inProcessPlugins.get(id)
-      if (mount !== undefined) priorMounts.push(mount)
+      if (mount !== undefined) priorMounts.push({ ...mount, candidateId: id, owner: context.owner })
       await fiber.dispose()
       this.fibers.delete(id)
       this.baselines.delete(id)
@@ -419,11 +431,13 @@ export class CordisActivationRuntime implements ActivationRuntime {
 
   private async restorePriorOwner(candidateId: string, mounts: readonly PriorOwnerMount[]): Promise<void> {
     for (const prior of mounts) {
-      await this.ctx.plugin({
-        name: prior.name,
-        inject: [...prior.inject],
-        apply: prior.apply as Plugin.Function,
-      }, prior.config)
+      const fiber = await this.ctx.plugin(prior.plugin, prior.config)
+      if (prior.candidateId !== undefined) {
+        this.fibers.set(prior.candidateId, fiber)
+        this.baselines.delete(prior.candidateId)
+        this.inProcessPlugins.set(prior.candidateId, prior)
+        if (prior.owner !== undefined) this.candidateOwners.set(prior.candidateId, prior.owner)
+      }
     }
     this.priorOwners.delete(candidateId)
   }

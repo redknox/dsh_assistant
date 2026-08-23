@@ -1,5 +1,4 @@
 const VALUE_TYPES = new Set(['string', 'number', 'integer', 'boolean', 'null', 'array', 'object', 'json'])
-const PARAMETER_META = new Set(['type', 'properties', 'required', 'additionalProperties', 'description', 'title', '$schema'])
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === 'object' && !Array.isArray(value)
@@ -74,14 +73,11 @@ export function projectValueSchema(raw: unknown, path = 'schema'): Record<string
   return projected
 }
 
-/** Project an implicit DSH parameter root, preserving required and nested types. */
+/** Project a DSH implicit parameter map. Every key is a parameter name, including `type`/`properties`. */
 export function projectParameterSchema(raw: unknown, path = 'parameters'): Record<string, Record<string, unknown>> {
   if (!isRecord(raw)) throw new Error(`unsupported generated parameters at ${path}`)
-  const fromProperties = isRecord(raw.properties)
-  const props: Record<string, unknown> = fromProperties ? { ...raw.properties as Record<string, unknown> } : raw
   const out: Record<string, Record<string, unknown>> = {}
-  for (const [key, spec] of Object.entries(props)) {
-    if (!fromProperties && PARAMETER_META.has(key)) continue
+  for (const [key, spec] of Object.entries(raw)) {
     if (!isRecord(spec)) throw new Error(`unsupported generated parameters at ${path}.${key}`)
     if (typeof spec.type !== 'string' && !Array.isArray(spec.oneOf)) {
       throw new Error(`unsupported generated schema type at ${path}.${key}`)
