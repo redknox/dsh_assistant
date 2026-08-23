@@ -1,8 +1,8 @@
 # M6C conversation soak record
 
-Status: **unresolved** (no live `DEEPSEEK_API_KEY` in this implementation environment; packed `tars-ng doctor` / `start --once` remain covered by `test/packaging.test.ts`)
+Status: **unresolved**. Issue #70 stays open. This conversation-operable Workbench slice is **Implemented** only; it is not Verified and does not satisfy #70 Definition of done.
 
-This is the secret-safe record required before labeling Candidate Workbench conversation self-development **Verified**.
+This implementation environment has no configured `DEEPSEEK_API_KEY` / `deepseek-official` soak route. Packed `tars-ng doctor` / `start --once` remain covered by `test/packaging.test.ts`. Do not treat that as a live-model soak.
 
 ## Deterministic CI
 

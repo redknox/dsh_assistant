@@ -4,7 +4,8 @@ import { listSourceFiles } from '../candidate/files.js'
 import { isolatedRuntimeOwner, requiresIsolatedGeneratedRuntime } from '../generated-runtime/trust.js'
 import type { CapabilityRegistry, RegistryRegisterInput } from '../registry/types.js'
 import { REVIEW_POLICY_VERSION, type IndependentReview } from '../review/index.js'
-import type { CandidateRecord, CandidateWorkspace } from '../candidate/types.js'
+import type { CandidateManifestInput, CandidateRecord, CandidateValidation, CandidateWorkspace } from '../candidate/types.js'
+import { AUTHORING_CONTRACT_STAMP, GENERATED_EXTENSION_API_V1 } from '../workbench/authoring-contract.js'
 import { ActivationDeniedError, GovernanceAuthorityError, GovernanceContractError } from './errors.js'
 import { approvalSummary, fingerprintFromCandidate } from './fingerprint.js'
 import { InMemoryActivationRuntime, type ActivationPrepareContext, type ActivationRuntime } from './runtime.js'
@@ -78,6 +79,7 @@ export class GovernanceService implements ExtensionGovernance, ExtensionActivati
   private readonly beginAuthorityCommit?: () => void
   private readonly finishAuthorityCommit?: () => void
   private readonly independentReview?: IndependentReview
+  private readonly validation?: CandidateValidation
 
   constructor(
     private readonly registry: CapabilityRegistry,
@@ -90,12 +92,14 @@ export class GovernanceService implements ExtensionGovernance, ExtensionActivati
       beginAuthorityCommit?: () => void
       finishAuthorityCommit?: () => void
       independentReview?: IndependentReview
+      validation?: CandidateValidation
     } = {},
   ) {
     this.persistHook = options.persist
     this.beginAuthorityCommit = options.beginAuthorityCommit
     this.finishAuthorityCommit = options.finishAuthorityCommit
     this.independentReview = options.independentReview
+    this.validation = options.validation
     if (options.hydrate && (options.hydrate.generation > 0 || options.hydrate.current !== undefined)) {
       this.applyHydrate(options.hydrate)
     } else {
@@ -345,9 +349,48 @@ export class GovernanceService implements ExtensionGovernance, ExtensionActivati
     this.flush()
   }
 
+  migrateAuthoringContract(credential: TrustedAuthorityCredential, candidateId: string): CandidateRecord {
+    this.assertCredential(credential)
+    const parent = this.workspace.get(candidateId)
+    if (!isolatedRuntimeOwner(parent)) {
+      throw new GovernanceContractError(`authoring-contract migration applies only to isolated generated candidates: ${candidateId}`)
+    }
+    if (parent.manifest.runtimeContractVersion === GENERATED_EXTENSION_API_V1) {
+      throw new GovernanceContractError(`candidate ${candidateId} already has host authoring contract ${GENERATED_EXTENSION_API_V1}`)
+    }
+    const version = nextUnusedPatch(this.workspace, parent.owner, parent.version)
+    const created = this.workspace.create({
+      review: reviewFromRecord(parent),
+      owner: parent.owner,
+      version,
+      baseVersion: undefined,
+      provenance: { kind: parent.provenance.kind, origin: parent.provenance.origin },
+      manifest: manifestInputFrom(parent, GENERATED_EXTENSION_API_V1),
+    })
+    for (const relative of this.workspace.listFiles(parent.id)) {
+      if (relative === 'candidate.manifest.json') continue
+      this.workspace.writeFile(created.id, relative, this.workspace.readFile(parent.id, relative))
+    }
+    this.workspace.writeFile(created.id, AUTHORING_CONTRACT_STAMP, `${JSON.stringify({
+      version: GENERATED_EXTENSION_API_V1,
+      hostOwned: true,
+    }, null, 2)}\n`)
+    this.workspace.setManifest(created.id, manifestInputFrom(parent, GENERATED_EXTENSION_API_V1))
+    const validation = this.validation ?? asValidation(this.workspace)
+    if (validation === undefined) {
+      throw new GovernanceContractError('authoring-contract migration requires host candidate validation')
+    }
+    const report = validation.validate(created.id)
+    if (!report.passed) {
+      throw new GovernanceContractError(`authoring-contract migration failed validation: ${report.stages.filter((item) => item.status === 'failed' || item.status === 'blocked').map((item) => item.name).join(', ') || created.id}`)
+    }
+    return this.workspace.seal(created.id)
+  }
+
   async remountCommittedGenerated(): Promise<string[]> {
-    const diagnostics: string[] = []
-    if (this.safeMode) return diagnostics
+    const fatal: string[] = []
+    const withheld: string[] = []
+    if (this.safeMode) return []
     const snapshot = this.committedActivationSnapshot()
     const targets = (snapshot?.owners ?? []).filter((item) => {
       if (item.status !== 'active') return false
@@ -358,30 +401,36 @@ export class GovernanceService implements ExtensionGovernance, ExtensionActivati
     for (const record of this.registry.list({ status: 'active' })) {
       if (!isolatedRuntimeOwner(record)) continue
       const key = `${record.owner}@${record.version}`
-      if (!committed.has(key)) diagnostics.push(`inconsistent-active-owner:${key}`)
+      if (!committed.has(key)) fatal.push(`inconsistent-active-owner:${key}`)
     }
     const verified: CandidateRecord[] = []
     for (const target of targets) {
       const candidate = this.workspace.list().find((item) => item.owner === target.owner && item.version === target.version)
       if (candidate === undefined) {
-        diagnostics.push(`missing-active-artifact:${target.owner}@${target.version}`)
+        fatal.push(`missing-active-artifact:${target.owner}@${target.version}`)
         continue
       }
       const integrity = this.verifySealedArtifact(candidate)
       if (integrity !== undefined) {
-        diagnostics.push(integrity)
+        fatal.push(integrity)
+        continue
+      }
+      if (missingHostAuthoringContract(candidate)) {
+        this.registry.transitionStatus(target.owner, target.version, 'disabled')
+        withheld.push(`legacy-authoring-contract:${candidate.id}`)
         continue
       }
       verified.push(candidate)
     }
-    if (diagnostics.length > 0) {
-      await this.failClosedSafeMode(diagnostics)
-      return diagnostics
+    if (fatal.length > 0) {
+      await this.failClosedSafeMode([...fatal, ...withheld])
+      return [...fatal, ...withheld]
     }
+    if (withheld.length > 0) this.recordLegacyContractWithhold(withheld)
     for (const candidate of verified) {
       const prepared = await this.runtime.prepare(candidate.id, this.prepareContext(candidate))
       if (!prepared.ok) {
-        diagnostics.push(prepared.diagnostics ?? `prepare-failed:${candidate.id}`)
+        const diagnostics = [...withheld, prepared.diagnostics ?? `prepare-failed:${candidate.id}`]
         await this.runtime.restore({
           generation: snapshot?.generation ?? 0,
           capturedAt: new Date().toISOString(),
@@ -394,12 +443,27 @@ export class GovernanceService implements ExtensionGovernance, ExtensionActivati
       }
       await this.runtime.commit(candidate.id)
     }
-    return diagnostics
+    return withheld
   }
 
   private committedActivationSnapshot(): ActivationSnapshot | undefined {
     if (this.state === 'active' || this.state === 'rolled-back') return this.current ?? this.lastKnownGood
     return this.lastKnownGood
+  }
+
+  private recordLegacyContractWithhold(diagnostics: readonly string[]): void {
+    this.lastFailure = {
+      candidateId: this.pendingCandidateId ?? 'restart',
+      version: '',
+      digest: '',
+      phase: 'prepare',
+      diagnostics: `${diagnostics.join('; ')}; migrate with tars-ng self-extension migrate-authoring-contract <id>`,
+      rollbackAttempted: false,
+      rollbackSucceeded: false,
+      safeModeRequired: false,
+    }
+    this.current = this.captureSnapshot()
+    this.flush()
   }
 
   private async failClosedSafeMode(diagnostics: readonly string[]): Promise<void> {
@@ -465,10 +529,7 @@ export class GovernanceService implements ExtensionGovernance, ExtensionActivati
     this.safeMode = this.safeMode || !restored
     this.pendingCandidateId = undefined
     this.phase = undefined
-    if (restored) {
-      const remount = await this.remountCommittedGenerated()
-      if (remount.length > 0) return this.status()
-    }
+    if (restored) await this.remountCommittedGenerated()
     this.current = this.captureSnapshot()
     this.integrityVerified = restored && this.verifyRestoredIntegrity(target)
     this.flush()
@@ -683,8 +744,8 @@ export class GovernanceService implements ExtensionGovernance, ExtensionActivati
     this.lastKnownGood = target
     const restored = await this.restoreSnapshot(target)
     this.current = this.captureSnapshot()
-    const remount = restored ? await this.remountCommittedGenerated() : ['restore-failed']
-    const recovered = restored && remount.length === 0
+    if (restored) await this.remountCommittedGenerated()
+    const recovered = restored && !this.safeMode
     this.lastFailure = {
       ...this.lastFailure,
       rollbackAttempted: true,
@@ -770,4 +831,62 @@ export class GovernanceService implements ExtensionGovernance, ExtensionActivati
       return false
     }
   }
+}
+
+function missingHostAuthoringContract(record: CandidateRecord): boolean {
+  const generated = record.provenance.kind === 'generated' || record.owner.startsWith('generated/')
+  return generated && record.manifest.runtimeContractVersion !== GENERATED_EXTENSION_API_V1
+}
+
+function asValidation(workspace: CandidateWorkspace): CandidateValidation | undefined {
+  const candidate = workspace as CandidateWorkspace & Partial<CandidateValidation>
+  return typeof candidate.validate === 'function' ? { validate: candidate.validate.bind(workspace) } : undefined
+}
+
+function manifestInputFrom(record: CandidateRecord, runtimeContractVersion: string): CandidateManifestInput {
+  return {
+    capabilities: [...record.manifest.capabilities],
+    permissions: [...record.manifest.permissions],
+    runtimeSeams: [...record.manifest.runtimeSeams],
+    tools: [...record.manifest.tools],
+    services: [...record.manifest.services],
+    providers: [...record.manifest.providers],
+    secrets: [...record.manifest.secrets],
+    configRequired: [...record.manifest.configRequired],
+    effects: record.manifest.effects,
+    entryPoints: [...record.manifest.entryPoints],
+    validationTasks: record.manifest.validationTasks,
+    riskModel: record.manifest.riskModel,
+    runtimeContractVersion,
+  }
+}
+
+function reviewFromRecord(record: CandidateRecord) {
+  return {
+    kind: record.manifest.resolutionKind,
+    capability: record.manifest.resolutionCapability,
+    need: record.manifest.resolutionNeed,
+    recommendation: 'Host migration revision for a missing authoring contract.',
+    rationale: 'Pre-contract generated artifacts cannot remount until a human restamps and reapproves.',
+    implications: [] as string[],
+    assumptions: [] as string[],
+    unresolved: [] as string[],
+    steps: [] as never[],
+    registryFacts: { exact: { kind: 'unknown' as const, capability: record.manifest.resolutionCapability }, domainOwners: [], conflicts: [] },
+  }
+}
+
+function nextUnusedPatch(workspace: CandidateWorkspace, owner: string, version: string): string {
+  let next = bumpPatch(version)
+  const taken = new Set(workspace.list().filter((item) => item.owner === owner).map((item) => item.version))
+  while (taken.has(next)) next = bumpPatch(next)
+  return next
+}
+
+function bumpPatch(version: string): string {
+  const parts = version.split('.')
+  const last = Number(parts[parts.length - 1])
+  if (!Number.isInteger(last)) throw new GovernanceContractError(`cannot bump version ${version}`)
+  parts[parts.length - 1] = String(last + 1)
+  return parts.join('.')
 }

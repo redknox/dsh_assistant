@@ -32,7 +32,8 @@ load authority + candidate index
 → validate schema
 → complete interrupted rollback / abandon interrupted pre-commit activation
 → remount only generated owners in the committed activation snapshot
-  (preflight every artifact/digest first; any failure → Safe Mode, zero generated mounts)
+  (preflight digest/artifact first; integrity failure → Safe Mode, zero generated mounts)
+  (missing/unsupported host authoring contract → withhold that owner only; do not invent v1)
 ```
 
 Registry `active` does not independently authorize remount. LKG advances only after successful health + durable authority commit. A crash after a tentative Registry update and before that commit leaves prior LKG authoritative. A restart does not rewrite LKG merely because the process booted.

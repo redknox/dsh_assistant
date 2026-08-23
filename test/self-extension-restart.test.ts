@@ -1,11 +1,15 @@
 import assert from 'node:assert/strict'
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, it } from 'node:test'
 import { CallId } from '@deepseek-ai/dsh-llm'
 import { SimulatedCrashError } from '../src/domain/governance/index.js'
 import { PersistenceSchemaError, formatOperatorStatus, operatorStatus } from '../src/domain/self-extension/index.js'
+import { digestFiles } from '../src/domain/candidate/digest.js'
+import { listSourceFiles } from '../src/domain/candidate/files.js'
+import { selfExtensionPaths } from '../src/domain/self-extension/home.js'
+import { GENERATED_EXTENSION_API_V1 } from '../src/domain/workbench/index.js'
 import { bootAssistantControl } from '../src/runtime/boot.js'
 import type { ResolutionReview } from '../src/domain/resolution/index.js'
 
@@ -381,9 +385,82 @@ describe('Self-Extension durable restart', () => {
     }
   })
 
+  it('upgrades a pre-contract generated home without Safe Mode and requires reapproval', async () => {
+    const home = mkdtempSync(join(tmpdir(), 'dsh-se-upgrade-'))
+    const { first, created, human, fingerprint } = await prepareCandidate(home)
+    const secondCandidate = await prepareSecondCandidate(first)
+    try {
+      await first.recoveryRoot.activate(created.id, human)
+      await first.recoveryRoot.activate(secondCandidate.created.id, secondCandidate.human)
+    } finally {
+      await first.ctx.fiber.dispose()
+    }
+    downgradePersistedContractToMain6998205(home, created.id)
+    const upgraded = await bootAssistantControl({ home })
+    try {
+      assert.equal(upgraded.diagnostics.safeMode, false)
+      assert.equal(upgraded.recoveryRoot.inspect().safeMode, false)
+      assert.notEqual(upgraded.ctx.capabilityRegistry.get('generated/restart-probe', '0.1.0')?.status, 'active')
+      assert.equal(upgraded.ctx.capabilityRegistry.get('generated/restart-probe-b', '0.1.0')?.status, 'active')
+      assert.equal(upgraded.ctx.tools.get('restart_probe_ping'), undefined)
+      assert.ok(upgraded.ctx.tools.get('restart_probe_alt'))
+      assert.match(upgraded.recoveryRoot.inspect().lastFailure?.diagnostics ?? '', /legacy-authoring-contract/)
+      assert.match(upgraded.recoveryRoot.inspect().lastFailure?.diagnostics ?? '', /migrate-authoring-contract/)
+      const migrated = upgraded.recoveryRoot.migrateAuthoringContract(
+        upgraded.recoveryRoot.issueAuthority({ kind: 'human-control', source: 'operator-cli' }),
+        created.id,
+      )
+      assert.equal(migrated.manifest.runtimeContractVersion, GENERATED_EXTENSION_API_V1)
+      assert.notEqual(migrated.id, created.id)
+      assert.notEqual(migrated.digest, created.digest)
+      assert.equal(upgraded.ctx.extensionGovernance.inspectApproval(migrated.id), undefined)
+      const operator = upgraded.recoveryRoot.issueAuthority({ kind: 'human-control', source: 'operator-cli' })
+      assert.throws(() => upgraded.recoveryRoot.recordApproval(operator, {
+        candidateId: migrated.id,
+        fingerprint,
+        decision: 'approved-for-exact-diff',
+      }), /fingerprint/)
+      upgraded.ctx.independentReview.reviewCandidate(migrated.id)
+      const requested = upgraded.ctx.extensionGovernance.requestApproval(migrated.id)
+      assert.notEqual(requested.fingerprint, fingerprint)
+      upgraded.recoveryRoot.recordApproval(operator, {
+        candidateId: migrated.id,
+        fingerprint: requested.fingerprint,
+        decision: 'approved-for-exact-diff',
+      })
+      const activated = await upgraded.recoveryRoot.activate(migrated.id, operator)
+      assert.equal(activated.state, 'active', activated.lastFailure?.diagnostics)
+      assert.equal(await ping(upgraded.ctx), 'pong')
+    } finally {
+      await upgraded.ctx.fiber.dispose()
+    }
+  })
+
   it('rejects an unknown future authority schema', () => {
     assert.throws(() => {
       throw new PersistenceSchemaError('unsupported self-extension schema 99')
     }, PersistenceSchemaError)
   })
 })
+
+/** Replay main `6998205` persistence: generated records had no host contract field. */
+function downgradePersistedContractToMain6998205(home: string, candidateId: string): void {
+  const paths = selfExtensionPaths(home)
+  const index = JSON.parse(readFileSync(paths.candidateIndexPath, 'utf8')) as {
+    candidates: { record: { id: string; digest?: string; manifest: Record<string, unknown>; validation?: { digest?: string } } }[]
+  }
+  const row = index.candidates.find((item) => item.record.id === candidateId)
+  assert.ok(row)
+  delete row.record.manifest.runtimeContractVersion
+  const artifact = join(paths.candidateArea, candidateId)
+  const manifestPath = join(artifact, 'candidate.manifest.json')
+  const manifest = JSON.parse(readFileSync(manifestPath, 'utf8')) as Record<string, unknown>
+  delete manifest.runtimeContractVersion
+  writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`)
+  const stamp = join(artifact, 'generated-extension-api.json')
+  if (existsSync(stamp)) rmSync(stamp)
+  const digest = digestFiles(artifact, listSourceFiles(artifact))
+  row.record.digest = digest
+  if (row.record.validation) row.record.validation.digest = digest
+  writeFileSync(paths.candidateIndexPath, `${JSON.stringify(index, null, 2)}\n`)
+}

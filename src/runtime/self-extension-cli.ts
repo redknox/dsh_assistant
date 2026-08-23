@@ -7,6 +7,7 @@ function usage(): string {
   return `self-extension <command>
   status | candidates | inspect <id> | diff <id> | request-approval <id>
   approve <id> <fingerprint> | activate <id> | rollback | disable <owner> <version>
+  migrate-authoring-contract <id>
   lkg | diagnostics | safe-mode status|enter|exit
   backup <dir> | restore <dir>`
 }
@@ -78,6 +79,19 @@ export async function runSelfExtensionCli(argv: string[]): Promise<void> {
     if (command === 'disable') {
       recoveryRoot.disable(human, String(rest[0]), String(rest[1]))
       console.log(`disabled ${rest[0]}@${rest[1]}`)
+      return
+    }
+    if (command === 'migrate-authoring-contract') {
+      const migrated = recoveryRoot.migrateAuthoringContract(human, String(rest[0]))
+      console.log(JSON.stringify({
+        id: migrated.id,
+        owner: migrated.owner,
+        version: migrated.version,
+        contractVersion: migrated.manifest.runtimeContractVersion,
+        digest: migrated.digest,
+        sealed: migrated.sealed,
+        approval: 'NOT APPROVED',
+      }, null, 2))
       return
     }
     if (command === 'lkg') {

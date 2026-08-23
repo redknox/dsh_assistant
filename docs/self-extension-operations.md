@@ -31,6 +31,7 @@ self-extension activate <id>
 self-extension status
 self-extension rollback
 self-extension disable <owner> <version>
+self-extension migrate-authoring-contract <id>
 self-extension safe-mode enter|status|exit
 self-extension diagnostics
 self-extension lkg
@@ -48,5 +49,6 @@ Backup/restore procedures and the v0.2.x release-confidence command: [docs/v0.2-
 - Interrupted activation after a tentative Registry update and before the authority commit: prior LKG remains authoritative.
 - Interrupted activation after commit: restart remounts the committed version.
 - One committed generated artifact missing or mutated: Safe Mode, no generated extension remounts.
+- Pre-`generated-extension-api/v1` generated artifacts (homes persisted before this contract): remount withholds **that owner only**. The host does not invent a v1 stamp or reuse the old approval fingerprint. Other valid generated owners still remount. `lastFailure` includes `legacy-authoring-contract:<id>`. Operator path: `tars-ng self-extension migrate-authoring-contract <id>` (new host-stamped revision) → Independent Review → request → approve the **new** fingerprint → activate. The old sealed parent stays for audit.
 - Interrupted rollback: restart completes rollback or enters Safe Mode.
 - Exit Safe Mode is a trusted operator action. It does not remount a failed generated plugin by itself. Historical `lastFailure` remains diagnosable after a verified rollback; that history is not the current recovery-required condition.
