@@ -102,6 +102,10 @@ describe('TARS-NG product runtime', () => {
   })
 
   it('keeps fixture calendar unavailable in product mode', async () => {
+    const previousMode = process.env.DSH_ASSISTANT_GOOGLE_CALENDAR_MODE
+    const previousToken = process.env.DSH_ASSISTANT_GOOGLE_CALENDAR_ACCESS_TOKEN
+    delete process.env.DSH_ASSISTANT_GOOGLE_CALENDAR_MODE
+    delete process.env.DSH_ASSISTANT_GOOGLE_CALENDAR_ACCESS_TOKEN
     const { ctx } = await bootAssistantControl({ allowFixtures: false })
     try {
       const result = await ctx.tools.execute({
@@ -115,6 +119,53 @@ describe('TARS-NG product runtime', () => {
       assert.doesNotMatch(String(result.value), /Team standup|Google standup/)
     } finally {
       await ctx.fiber.dispose()
+      if (previousMode === undefined) delete process.env.DSH_ASSISTANT_GOOGLE_CALENDAR_MODE
+      else process.env.DSH_ASSISTANT_GOOGLE_CALENDAR_MODE = previousMode
+      if (previousToken === undefined) delete process.env.DSH_ASSISTANT_GOOGLE_CALENDAR_ACCESS_TOKEN
+      else process.env.DSH_ASSISTANT_GOOGLE_CALENDAR_ACCESS_TOKEN = previousToken
+    }
+  })
+
+  it('routes calendar tools through the live Google provider when mode and token are present', async () => {
+    const previousMode = process.env.DSH_ASSISTANT_GOOGLE_CALENDAR_MODE
+    const previousToken = process.env.DSH_ASSISTANT_GOOGLE_CALENDAR_ACCESS_TOKEN
+    const previousFetch = globalThis.fetch
+    process.env.DSH_ASSISTANT_GOOGLE_CALENDAR_MODE = 'live'
+    process.env.DSH_ASSISTANT_GOOGLE_CALENDAR_ACCESS_TOKEN = 'ya29.test-live-placeholder'
+    let requested = ''
+    globalThis.fetch = (async (input: RequestInfo | URL) => {
+      requested = String(input)
+      return new Response(JSON.stringify({ items: [] }), { status: 200, headers: { 'content-type': 'application/json' } })
+    }) as typeof fetch
+    const { ctx } = await bootAssistantControl({ allowFixtures: false })
+    try {
+      const status = await ctx.tools.execute({
+        callId: CallId('product-cal-live-status'),
+        name: 'integration_status',
+        arguments: {},
+        signal: AbortSignal.timeout(5000),
+      })
+      assert.equal(status.isError, false, String(status.value))
+      const body = JSON.parse(String(status.value)) as { status?: { calendar?: { available?: boolean } } }
+      assert.equal(body.status?.calendar?.available, true)
+
+      const listed = await ctx.tools.execute({
+        callId: CallId('product-cal-live-list'),
+        name: 'calendar_list_events',
+        arguments: { from: '2026-08-21T00:00:00.000Z', to: '2026-08-22T00:00:00.000Z' },
+        signal: AbortSignal.timeout(5000),
+      })
+      assert.equal(listed.isError, false, String(listed.value))
+      assert.match(requested, /googleapis\.com\/calendar\/v3/)
+      assert.doesNotMatch(requested, /ya29|access_token/)
+      assert.doesNotMatch(String(listed.value), /Team standup|Google standup|calendar is not configured/)
+    } finally {
+      globalThis.fetch = previousFetch
+      await ctx.fiber.dispose()
+      if (previousMode === undefined) delete process.env.DSH_ASSISTANT_GOOGLE_CALENDAR_MODE
+      else process.env.DSH_ASSISTANT_GOOGLE_CALENDAR_MODE = previousMode
+      if (previousToken === undefined) delete process.env.DSH_ASSISTANT_GOOGLE_CALENDAR_ACCESS_TOKEN
+      else process.env.DSH_ASSISTANT_GOOGLE_CALENDAR_ACCESS_TOKEN = previousToken
     }
   })
 

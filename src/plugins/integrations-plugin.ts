@@ -1,9 +1,14 @@
 import { Service, type Context } from '@deepseek-ai/cordis'
 import { FakeIntegrationSuite } from '../adapters/integrations/fake-providers.js'
-import { createHostGoogleCalendarTransport } from '../adapters/integrations/google-calendar-transport.js'
+import { createGoogleCalendarProvider, createHostGoogleCalendarTransport } from '../adapters/integrations/google-calendar.js'
 import { IntegrationHub } from '../domain/integrations/hub.js'
 import type { BoundedGoogleCalendarTransport } from '../domain/integrations/google-api.js'
 import { registerIntegrationTools } from './integration-tools.js'
+
+function liveCalendarConfigured(): boolean {
+  return process.env.DSH_ASSISTANT_GOOGLE_CALENDAR_MODE === 'live'
+    && Boolean(process.env.DSH_ASSISTANT_GOOGLE_CALENDAR_ACCESS_TOKEN)
+}
 
 declare module '@deepseek-ai/cordis' {
   interface Context {
@@ -39,6 +44,12 @@ export async function apply(ctx: Context, config: IntegrationsPluginConfig = {})
     }
   }
   const googleCalendarTransport = createHostGoogleCalendarTransport()
+  if (liveCalendarConfigured()) {
+    fakes.hub.replaceCalendar(createGoogleCalendarProvider({
+      transport: googleCalendarTransport,
+      allowCreate: true,
+    }))
+  }
   await ctx.plugin(class extends IntegrationsService {
     constructor(scope: Context) {
       super(scope, fakes.hub, googleCalendarTransport)
