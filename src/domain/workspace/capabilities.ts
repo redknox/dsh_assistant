@@ -7,10 +7,11 @@ interface CatalogRow {
   readonly write?: boolean
 }
 
+const HUB_CAPABILITIES = new Set(['calendar', 'mail', 'contacts', 'files', 'tasks'])
+
 const CATALOG: readonly CatalogRow[] = [
-  { area: 'Calendar', action: 'Read schedule', match: (id) => id.includes('calendar') && !isWrite(id) },
-  { area: 'Calendar', action: 'Find free time', match: (id) => id.includes('freebusy') || id === 'calendar.read' },
-  { area: 'Calendar', action: 'Create event', match: (id) => isWrite(id) && id.includes('calendar'), write: true },
+  { area: 'Calendar', action: 'Read schedule', match: (id) => isCalendar(id) && !isCalendarWrite(id) },
+  { area: 'Calendar', action: 'Create event', match: (id) => isCalendarWrite(id), write: true },
   { area: 'Tasks', action: 'Create task', match: (id) => id.includes('task'), write: true },
   { area: 'Files', action: 'Manage files', match: (id) => id.includes('files'), write: true },
   { area: 'Memory', action: 'Remember facts', match: (id) => id.includes('memory') },
@@ -21,60 +22,72 @@ function isWrite(id: string): boolean {
   return /create|write|delete|send|update/.test(id)
 }
 
+function isCalendar(id: string): boolean {
+  return id === 'calendar' || id.includes('calendar')
+}
+
+function isCalendarWrite(id: string): boolean {
+  return isCalendar(id) && (isWrite(id) || id.includes('execute') || id.includes('propose'))
+}
+
+function rowsFor(capability: string): readonly CatalogRow[] {
+  if (HUB_CAPABILITIES.has(capability)) {
+    return CATALOG.filter((item) => item.area.toLowerCase() === capability)
+  }
+  const row = CATALOG.find((item) => item.match(capability))
+  return row ? [row] : []
+}
+
 export function projectUserCapabilities(input: WorkspaceSnapshotInput): readonly UserCapabilityView[] {
   const views: UserCapabilityView[] = []
   const seen = new Set<string>()
   for (const record of input.registry) {
     for (const capability of record.capabilities) {
-      const row = CATALOG.find((item) => item.match(capability))
-      if (!row) continue
-      const key = `${row.area}:${row.action}`
-      if (seen.has(key)) continue
-      seen.add(key)
-      views.push({
-        area: row.area,
-        action: row.action,
-        status: capabilityStatus(input, record, row.write === true),
-        advanced: {
-          owner: record.owner,
-          version: record.version,
-          provenance: record.provenance,
-        },
-      })
+      for (const row of rowsFor(capability)) {
+        const key = `${row.area}:${row.action}`
+        if (seen.has(key)) continue
+        seen.add(key)
+        views.push({
+          area: row.area,
+          action: row.action,
+          status: resolveStatus(input, row, record),
+          advanced: {
+            owner: record.owner,
+            version: record.version,
+            provenance: record.provenance,
+          },
+        })
+      }
     }
   }
   for (const integration of input.integrationStatus) {
-    const rows = CATALOG.filter((item) => item.match(integration.capability) || (integration.capability === 'calendar' && item.area === 'Calendar'))
-    for (const row of rows) {
+    for (const row of rowsFor(integration.capability)) {
       const key = `${row.area}:${row.action}`
       if (seen.has(key)) continue
       seen.add(key)
       views.push({
         area: row.area,
         action: row.action,
-        status: capabilityFromIntegration(input, integration, row.write === true),
+        status: resolveStatus(input, row),
       })
     }
   }
   return views
 }
 
-function capabilityFromIntegration(
+function resolveStatus(
   input: WorkspaceSnapshotInput,
-  integration: WorkspaceSnapshotInput['integrationStatus'][number],
-  write: boolean,
+  row: CatalogRow,
+  record?: WorkspaceSnapshotInput['registry'][number],
 ): UserCapabilityStatus {
-  if (input.safeMode) return 'safe-mode-disabled'
-  if (!integration.available) return 'unavailable'
-  return write ? 'approval-required' : 'active'
-}
-
-function capabilityStatus(
-  input: WorkspaceSnapshotInput,
-  record: WorkspaceSnapshotInput['registry'][number],
-  write: boolean,
-): UserCapabilityStatus {
-  if (input.safeMode && record.provenance === 'generated') return 'safe-mode-disabled'
-  if (record.status !== 'active') return 'unavailable'
-  return write ? 'approval-required' : 'active'
+  if (input.safeMode && record?.provenance === 'generated') return 'safe-mode-disabled'
+  const integration = input.integrationStatus.find((item) => item.capability === row.area.toLowerCase())
+  if (integration) {
+    if (input.safeMode && record === undefined) return 'safe-mode-disabled'
+    if (!integration.available) return 'unavailable'
+    return row.write === true ? 'approval-required' : 'active'
+  }
+  if (record && record.status !== 'active') return 'unavailable'
+  if (record) return row.write === true ? 'approval-required' : 'active'
+  return 'unavailable'
 }

@@ -327,7 +327,10 @@ function OperationsPanel(props: { readonly view: MissionControlView }) {
         <dl className="capability-list">
           {props.view.capabilities.map((item) => (
             <div key={`${item.area}-${item.action}`}>
-              <dt>{item.area}</dt>
+              <dt>
+                <span className="capability-area">{item.area}</span>
+                <span className="capability-action">{item.action}</span>
+              </dt>
               <dd data-status={item.status} data-capability-state={capabilitySignal(item.status)}>
                 {item.status.replaceAll('-', ' ').toUpperCase()}
               </dd>

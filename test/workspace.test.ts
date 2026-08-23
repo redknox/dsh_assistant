@@ -73,6 +73,18 @@ describe('TARS-NG mission-control workspace', () => {
     assert.ok(view.activity.some((item) => item.summary.includes('3 events found')))
     assert.ok(view.activity.some((item) => item.summary.includes('Free/busy')))
     assert.ok(view.capabilities.some((item) => item.area === 'Calendar' && item.action === 'Read schedule' && item.status === 'active'))
+    assert.equal(view.capabilities.filter((item) => item.area === 'Calendar').length, 2)
+    assert.equal(view.capabilities.some((item) => item.action === 'Find free time'), false)
+    assert.ok(view.capabilities.some((item) => item.area === 'Calendar' && item.action === 'Create event' && item.status === 'approval-required'))
+  })
+
+  it('does not treat registry-active calendar as connected when the provider is down', () => {
+    const view = projectMissionControl(snapshot({
+      integrationStatus: [{ capability: 'calendar', available: false, reason: 'not configured' }],
+    }))
+    const calendar = view.capabilities.filter((item) => item.area === 'Calendar')
+    assert.equal(calendar.length, 2)
+    assert.equal(calendar.every((item) => item.status === 'unavailable'), true)
   })
 
   it('D. calendar create is a first-class approval object', () => {
