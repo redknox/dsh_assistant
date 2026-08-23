@@ -570,7 +570,7 @@ export class GovernanceService implements ExtensionGovernance, ExtensionActivati
     return denials
   }
 
-  private noteIsolatedRuntimeFailure(failure: { readonly candidateId: string; readonly diagnostics: string }): void {
+  private async noteIsolatedRuntimeFailure(failure: { readonly candidateId: string; readonly diagnostics: string }): Promise<void> {
     const record = this.workspace.list().find((item) => item.id === failure.candidateId)
     if (record !== undefined) {
       const active = this.registry.get(record.owner, record.version)
@@ -578,6 +578,7 @@ export class GovernanceService implements ExtensionGovernance, ExtensionActivati
         this.registry.transitionStatus(record.owner, record.version, 'disabled')
       }
     }
+    const target = this.rollbackTarget ?? this.lastKnownGood
     this.state = 'activation-failed'
     this.lastFailure = {
       candidateId: failure.candidateId,
@@ -585,13 +586,33 @@ export class GovernanceService implements ExtensionGovernance, ExtensionActivati
       digest: record?.digest ?? '',
       phase: 'health',
       diagnostics: failure.diagnostics,
-      rollbackAttempted: false,
+      rollbackAttempted: target !== undefined,
       rollbackSucceeded: false,
-      safeModeRequired: false,
+      restoredLkgGeneration: target?.generation,
+      safeModeRequired: target === undefined,
     }
+    if (target === undefined) {
+      this.current = this.captureSnapshot()
+      this.integrityVerified = false
+      this.safeMode = true
+      this.flush()
+      return
+    }
+    this.lastKnownGood = target
+    const restored = await this.restoreSnapshot(target)
     this.current = this.captureSnapshot()
-    this.lastKnownGood = this.current
-    this.integrityVerified = true
+    const remount = restored ? await this.remountCommittedGenerated() : ['restore-failed']
+    const recovered = restored && remount.length === 0
+    this.lastFailure = {
+      ...this.lastFailure,
+      rollbackAttempted: true,
+      rollbackSucceeded: recovered,
+      restoredLkgGeneration: target.generation,
+      safeModeRequired: !recovered,
+    }
+    this.state = recovered ? 'rolled-back' : 'activation-failed'
+    this.integrityVerified = recovered && this.verifyRestoredIntegrity(target)
+    if (!recovered) this.safeMode = true
     this.flush()
   }
 

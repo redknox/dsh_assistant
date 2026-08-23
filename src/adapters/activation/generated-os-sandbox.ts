@@ -21,6 +21,8 @@ function generatedSeatbelt(nodePath: string): string {
 (deny network-bind)
 (deny process-exec)
 ${execAllows}
+(deny signal)
+(allow signal (target self))
 `
 }
 
@@ -37,5 +39,5 @@ export function wrapGeneratedOsSandbox(
     writeFileSync(dest, generatedSeatbelt(nodePath))
     return { file: sandbox.file, args: ['-f', dest, ...argv] }
   }
-  return { file: sandbox.file, args: ['--user', '--map-root-user', '--net', '--', ...argv] }
+    return { file: sandbox.file, args: ['--user', '--map-root-user', '--net', '--pid', '--fork', '--mount-proc', '--', ...argv] }
 }

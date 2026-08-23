@@ -29,7 +29,7 @@ export interface ActivationRuntime {
   restore(snapshot: ActivationSnapshot): Promise<void>
   mounted(): readonly string[]
   unloadGenerated(): Promise<void>
-  bindIsolatedFailure(handler: (failure: IsolatedRuntimeFailure) => void): void
+  bindIsolatedFailure(handler: (failure: IsolatedRuntimeFailure) => void | Promise<void>): void
 }
 
 export class InMemoryActivationRuntime implements ActivationRuntime {
@@ -71,5 +71,5 @@ export class InMemoryActivationRuntime implements ActivationRuntime {
 
   async unloadGenerated(): Promise<void> {}
 
-  bindIsolatedFailure(_handler: (failure: IsolatedRuntimeFailure) => void): void {}
+  bindIsolatedFailure(_handler: (failure: IsolatedRuntimeFailure) => void | Promise<void>): void {}
 }

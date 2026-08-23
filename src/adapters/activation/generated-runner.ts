@@ -39,11 +39,21 @@ export class IsolatedGeneratedRunner {
   private resolveExit?: () => void
   private fatal = false
   private stdoutBuffer = ''
-  onFatal?: (reason: string) => void
+  onFatal?: (reason: string) => void | Promise<void>
+  private fatalSettled = Promise.resolve()
+  private resolveFatal?: () => void
   readonly tools: string[] = []
   descriptors: GeneratedToolDescriptor[] = []
 
   constructor(private readonly input: GeneratedPrepareInput) {}
+
+  get owner(): string {
+    return this.input.owner
+  }
+
+  get candidateId(): string {
+    return this.input.candidateId
+  }
 
   async start(): Promise<{ ok: boolean; diagnostics?: string }> {
     if (generatedIsolation() === 'unavailable') {
@@ -97,6 +107,9 @@ export class IsolatedGeneratedRunner {
         this.resolveExit = resolve
       })
       recordGeneratedProcessStart()
+      this.fatalSettled = new Promise((resolve) => {
+        this.resolveFatal = resolve
+      })
       child.stderr.setEncoding('utf8')
       child.stderr.on('data', (chunk: string) => {
         this.stderr = `${this.stderr}${chunk}`.slice(-GENERATED_MAX_STDERR_BYTES)
@@ -113,7 +126,7 @@ export class IsolatedGeneratedRunner {
         this.child = undefined
         recordGeneratedProcessStop()
         this.resolveExit?.()
-        this.onFatal?.(reason)
+        void Promise.resolve(this.onFatal?.(reason)).finally(() => this.resolveFatal?.())
       })
       await ready
       this.started = true
@@ -152,9 +165,9 @@ export class IsolatedGeneratedRunner {
     this.child.kill('SIGKILL')
   }
 
-  async waitForExit(timeoutMs = 2_000): Promise<void> {
+  async waitForExit(timeoutMs = 10_000): Promise<void> {
     await Promise.race([
-      this.exited,
+      Promise.all([this.exited, this.fatalSettled]),
       new Promise<void>((resolve) => {
         setTimeout(resolve, timeoutMs)
       }),

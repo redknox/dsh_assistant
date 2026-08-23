@@ -42,7 +42,10 @@ export function apply(ctx) {
 
 async function activateGenerated(ctx: Awaited<ReturnType<typeof bootAssistantControl>>['ctx'], recoveryRoot: Awaited<ReturnType<typeof bootAssistantControl>>['recoveryRoot'], input: {
   readonly owner?: string
+  readonly version?: string
+  readonly baseVersion?: string
   readonly tool: string
+  readonly tools?: readonly string[]
   readonly source: string
   readonly permissions?: readonly string[]
   readonly provenance?: ExtensionProvenance
@@ -53,11 +56,12 @@ async function activateGenerated(ctx: Awaited<ReturnType<typeof bootAssistantCon
   const created = ctx.candidateWorkspace.create({
     review: review('r0.transform', input.reviewKind ?? 'new-plugin'),
     owner: input.owner ?? 'generated/r0-transform',
-    version: '0.1.0',
+    version: input.version ?? '0.1.0',
+    baseVersion: input.baseVersion,
     provenance: input.provenance,
     manifest: {
       capabilities: ['r0.transform'],
-      tools: [input.tool],
+      tools: input.tools ?? [input.tool],
       services: [...(input.services ?? [])],
       providers: [...(input.providers ?? [])],
       entryPoints: ['src/plugin.js'],
@@ -450,16 +454,30 @@ describe('isolated generated-extension runtime', () => {
       assert.equal(result.isError, true)
       assert.equal(first.ctx.tools.get('r0_hang_exec'), undefined)
       assert.equal(generatedRuntimeDiagnosis().activeProcesses, during - 1)
-      assert.notEqual(first.recoveryRoot.inspect().state, 'active')
+      const inspect = first.recoveryRoot.inspect()
+      assert.notEqual(inspect.state, 'active')
       assert.equal(first.ctx.capabilityRegistry.get('generated/r0-hang-exec', '0.1.0')?.status, 'disabled')
+      assert.equal(
+        inspect.lastKnownGood?.owners.some((item) => item.owner === 'generated/r0-hang-exec' && item.status === 'active'),
+        false,
+      )
+      assert.equal(inspect.lastFailure?.rollbackAttempted, true)
+      assert.equal(inspect.recoveryRequired, inspect.state === 'activation-failed' || inspect.safeMode)
+      assert.equal(inspect.lastKnownGood?.generation, inspect.rollbackTarget?.generation)
     } finally {
       await first.ctx.fiber.dispose()
     }
     const second = await bootAssistantControl({ home })
     try {
       assert.equal(second.ctx.tools.get('r0_hang_exec'), undefined)
-      assert.notEqual(second.recoveryRoot.inspect().state, 'active')
+      const again = second.recoveryRoot.inspect()
+      assert.notEqual(again.state, 'active')
       assert.notEqual(second.ctx.capabilityRegistry.get('generated/r0-hang-exec', '0.1.0')?.status, 'active')
+      assert.equal(
+        again.lastKnownGood?.owners.some((item) => item.owner === 'generated/r0-hang-exec' && item.status === 'active'),
+        false,
+      )
+      assert.equal(again.recoveryRequired, again.state === 'activation-failed' || again.safeMode)
     } finally {
       await second.ctx.fiber.dispose()
     }
@@ -628,6 +646,161 @@ describe('isolated generated-extension runtime', () => {
       const flooded = await execTool(ctx, 'r0_flood')
       assert.equal(flooded.isError, true)
       assert.equal(ctx.tools.get('r0_flood'), undefined)
+    } finally {
+      await ctx.fiber.dispose()
+    }
+  })
+
+  it('swaps a live managed owner for an isolated evolve-owner with overlapping tools', async () => {
+    const prior = `export function apply(ctx) {
+  ctx.tools.register({
+    name: 'r0_swap',
+    parameters: {},
+    output: { schema: { type: 'string' }, render(_a, v) { return [{ type: 'text', text: String(v) }] } },
+    async execute() { return 'in-process' },
+  })
+  ctx.tools.register({
+    name: 'r0_old_only',
+    parameters: {},
+    output: { schema: { type: 'string' }, render(_a, v) { return [{ type: 'text', text: String(v) }] } },
+    async execute() { return 'ghost' },
+  })
+}
+`
+    const next = `export function apply(ctx) {
+  ctx.tools.register({
+    name: 'r0_swap',
+    parameters: {},
+    output: { schema: { type: 'string' }, render(_a, v) { return [{ type: 'text', text: String(v) }] } },
+    async execute() { return 'isolated' },
+  })
+}
+`
+    const { ctx, recoveryRoot } = await bootAssistantControl()
+    try {
+      const first = await activateGenerated(ctx, recoveryRoot, {
+        owner: 'managed/r0-swap',
+        version: '0.1.0',
+        tool: 'r0_swap',
+        tools: ['r0_swap', 'r0_old_only'],
+        source: prior,
+        provenance: { kind: 'managed', origin: 'human' },
+        reviewKind: 'evolve-owner',
+      })
+      assert.equal(first.status.state, 'active', first.status.lastFailure?.diagnostics)
+      assert.equal(String((await execTool(ctx, 'r0_swap')).value), 'in-process')
+      const second = await activateGenerated(ctx, recoveryRoot, {
+        owner: 'managed/r0-swap',
+        version: '0.2.0',
+        baseVersion: '0.1.0',
+        tool: 'r0_swap',
+        source: next,
+        provenance: { kind: 'managed', origin: 'assistant' },
+        reviewKind: 'evolve-owner',
+      })
+      assert.equal(second.status.state, 'active', second.status.lastFailure?.diagnostics)
+      assert.equal(String((await execTool(ctx, 'r0_swap')).value), 'isolated')
+      assert.equal(ctx.tools.get('r0_old_only'), undefined)
+      assert.equal(ctx.capabilityRegistry.get('managed/r0-swap', '0.1.0')?.status, 'disabled')
+      assert.equal(ctx.capabilityRegistry.get('managed/r0-swap', '0.2.0')?.status, 'active')
+    } finally {
+      await ctx.fiber.dispose()
+    }
+  })
+
+  it('replaces an isolated owner when a later isolated version overlaps its tools', async () => {
+    const v1 = `export function apply(ctx) {
+  ctx.tools.register({
+    name: 'r0_swap',
+    parameters: {},
+    output: { schema: { type: 'string' }, render(_a, v) { return [{ type: 'text', text: String(v) }] } },
+    async execute() { return 'v1' },
+  })
+}
+`
+    const v2 = `export function apply(ctx) {
+  ctx.tools.register({
+    name: 'r0_swap',
+    parameters: {},
+    output: { schema: { type: 'string' }, render(_a, v) { return [{ type: 'text', text: String(v) }] } },
+    async execute() { return 'v2' },
+  })
+}
+`
+    const { ctx, recoveryRoot } = await bootAssistantControl()
+    try {
+      const first = await activateGenerated(ctx, recoveryRoot, {
+        owner: 'generated/r0-swap',
+        version: '0.1.0',
+        tool: 'r0_swap',
+        source: v1,
+      })
+      assert.equal(first.status.state, 'active', first.status.lastFailure?.diagnostics)
+      assert.equal(String((await execTool(ctx, 'r0_swap')).value), 'v1')
+      const second = await activateGenerated(ctx, recoveryRoot, {
+        owner: 'generated/r0-swap',
+        version: '0.2.0',
+        baseVersion: '0.1.0',
+        tool: 'r0_swap',
+        source: v2,
+        reviewKind: 'evolve-owner',
+      })
+      assert.equal(second.status.state, 'active', second.status.lastFailure?.diagnostics)
+      assert.equal(String((await execTool(ctx, 'r0_swap')).value), 'v2')
+      assert.equal(ctx.capabilityRegistry.get('generated/r0-swap', '0.1.0')?.status, 'disabled')
+    } finally {
+      await ctx.fiber.dispose()
+    }
+  })
+
+  it('denies process.kill against the host parent without sending a destructive signal', async () => {
+    const source = `export function apply(ctx) {
+  ctx.tools.register({
+    name: 'r0_signal',
+    parameters: {},
+    output: { schema: { type: 'string' }, render(_a, v) { return [{ type: 'text', text: String(v) }] } },
+    async execute() {
+      const ppid = process.ppid
+      if (ppid === 0) return 'denied:pid-namespace'
+      try {
+        process.kill(ppid, 0)
+        return 'allowed:' + ppid
+      } catch (error) {
+        return error instanceof Error ? error.message : String(error)
+      }
+    },
+  })
+}
+`
+    const { ctx, recoveryRoot } = await bootAssistantControl()
+    try {
+      const { status } = await activateGenerated(ctx, recoveryRoot, { owner: 'generated/r0-signal', tool: 'r0_signal', source })
+      assert.equal(status.state, 'active', status.lastFailure?.diagnostics)
+      const result = await execTool(ctx, 'r0_signal')
+      assert.equal(result.isError, false, String(result.value))
+      assert.doesNotMatch(String(result.value), /^allowed:/)
+      assert.match(String(result.value), /denied|EPERM|EACCES|ESRCH|not permitted|not allowed|Operation not permitted/i)
+    } finally {
+      await ctx.fiber.dispose()
+    }
+  })
+
+  it('refuses activation when a descriptor parameter schema is unsupported', async () => {
+    const source = `export function apply(ctx) {
+  ctx.tools.register({
+    name: 'r0_bad_schema',
+    parameters: { payload: { type: 'string', enum: [1, 2] } },
+    output: { schema: { type: 'string' }, render(_a, v) { return [{ type: 'text', text: String(v) }] } },
+    async execute() { return 'nope' },
+  })
+}
+`
+    const { ctx, recoveryRoot } = await bootAssistantControl()
+    try {
+      const { status } = await activateGenerated(ctx, recoveryRoot, { owner: 'generated/r0-bad-schema', tool: 'r0_bad_schema', source })
+      assert.equal(status.state, 'activation-failed')
+      assert.match(status.lastFailure?.diagnostics ?? '', /unsupported generated schema/)
+      assert.equal(ctx.tools.get('r0_bad_schema'), undefined)
     } finally {
       await ctx.fiber.dispose()
     }

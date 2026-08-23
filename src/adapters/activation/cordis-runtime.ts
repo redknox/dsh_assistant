@@ -97,7 +97,10 @@ export class CordisActivationRuntime implements ActivationRuntime {
   private readonly proxyDisposers = new Map<string, Array<() => void>>()
   private currentMounted: string[] = []
   private lastContext?: ActivationPrepareContext
-  private isolatedFailure?: (failure: IsolatedRuntimeFailure) => void
+  private isolatedFailure?: (failure: IsolatedRuntimeFailure) => void | Promise<void>
+  private readonly candidateOwners = new Map<string, string>()
+  private readonly inProcessPlugins = new Map<string, PriorOwnerMount>()
+  private readonly parkedBy = new Map<string, Array<{ id: string; runner: IsolatedGeneratedRunner }>>()
 
   constructor(private readonly ctx: Context) {
     ctx.effect(() => () => {
@@ -146,6 +149,13 @@ export class CordisActivationRuntime implements ActivationRuntime {
       const plugin = imported.default ?? imported
       const fiber = await this.ctx.plugin(plugin as Plugin)
       this.fibers.set(candidateId, fiber)
+      this.candidateOwners.set(candidateId, context.owner)
+      this.inProcessPlugins.set(candidateId, {
+        name: OWNER_PLUGIN_NAMES[context.owner],
+        inject: [],
+        apply: plugin as Plugin,
+        config: undefined,
+      })
       return { ok: true }
     } catch (error) {
       await this.restorePriorOwner(candidateId, swapped)
@@ -160,7 +170,7 @@ export class CordisActivationRuntime implements ActivationRuntime {
     if (generated !== undefined) {
       const produced = await generated.health()
       const declaredTools = declared.tools.filter((name) => name !== '')
-      const missing = declaredTools.filter((name) => !produced.includes(name))
+      const missing = declaredTools.filter((name) => !produced.includes(name) || this.ctx.tools.get(name) === undefined)
       const extra = produced.filter((name) => !declaredTools.includes(name))
       if (missing.length > 0 || extra.length > 0) {
         return {
@@ -196,6 +206,7 @@ export class CordisActivationRuntime implements ActivationRuntime {
   }
 
   async commit(candidateId: string): Promise<void> {
+    await this.discardParked(candidateId)
     if (!this.currentMounted.includes(candidateId)) this.currentMounted = [...this.currentMounted, candidateId]
   }
 
@@ -213,6 +224,13 @@ export class CordisActivationRuntime implements ActivationRuntime {
       this.dropGenerated(id, runner)
       waiting.push(runner.waitForExit())
     }
+    for (const id of new Set([...this.parkedBy.keys(), ...this.priorOwners.keys()])) {
+      if (snapshot.mounted.includes(id)) {
+        await this.discardParked(id)
+        continue
+      }
+      await this.restoreIsolatedSwap(id)
+    }
     await Promise.all(waiting)
     this.currentMounted = [...snapshot.mounted]
   }
@@ -221,13 +239,14 @@ export class CordisActivationRuntime implements ActivationRuntime {
     const runners = [...this.generated.entries()]
     for (const [id, runner] of runners) this.dropGenerated(id, runner)
     await Promise.all(runners.map(([, runner]) => runner.waitForExit()))
+    for (const id of [...this.parkedBy.keys()]) await this.discardParked(id)
   }
 
   mounted(): readonly string[] {
     return this.currentMounted
   }
 
-  bindIsolatedFailure(handler: (failure: IsolatedRuntimeFailure) => void): void {
+  bindIsolatedFailure(handler: (failure: IsolatedRuntimeFailure) => void | Promise<void>): void {
     this.isolatedFailure = handler
   }
 
@@ -235,6 +254,8 @@ export class CordisActivationRuntime implements ActivationRuntime {
     if (context.services.length > 0 || context.providers.length > 0) {
       return { ok: false, diagnostics: 'generated runtime does not proxy services or providers' }
     }
+    const swapped = await this.swapIsolatedOwner(candidateId, context)
+    if (!swapped.ok) return swapped
     const runner = new IsolatedGeneratedRunner({
       candidateId,
       workspaceRoot: context.workspaceRoot,
@@ -244,46 +265,144 @@ export class CordisActivationRuntime implements ActivationRuntime {
       tools: context.tools,
       permissions: context.permissions ?? [],
     })
-    const started = await runner.start()
-    if (!started.ok) {
+    const fail = async (diagnostics: string) => {
       runner.kill()
-      return started
+      await runner.waitForExit()
+      await this.restoreIsolatedSwap(candidateId)
+      return { ok: false as const, diagnostics }
     }
+    const started = await runner.start()
+    if (!started.ok) return fail(started.diagnostics ?? 'generated runner failed to start')
     const declaredTools = context.tools.filter((name) => name !== '')
     const produced = runner.descriptors.map((item) => item.name)
     const missing = declaredTools.filter((name) => !produced.includes(name))
     const extra = produced.filter((name) => !declaredTools.includes(name))
     if (missing.length > 0 || extra.length > 0) {
-      runner.kill()
-      await runner.waitForExit()
-      return {
-        ok: false,
-        diagnostics: [
-          ...missing.map((name) => `tool:${name} missing after candidate mount`),
-          ...extra.map((name) => `descriptor/manifest mismatch: ${name}`),
-        ].join('; ') || 'descriptor/manifest mismatch',
-      }
+      return fail([
+        ...missing.map((name) => `tool:${name} missing after candidate mount`),
+        ...extra.map((name) => `descriptor/manifest mismatch: ${name}`),
+      ].join('; ') || 'descriptor/manifest mismatch')
     }
     this.generated.set(candidateId, runner)
+    this.candidateOwners.set(candidateId, context.owner)
     this.baselines.set(candidateId, snapshotDeclared(this.ctx, context))
     const disposers: Array<() => void> = []
     try {
       for (const descriptor of runner.descriptors) {
-        if (this.ctx.tools.get(descriptor.name) !== undefined) continue
+        if (this.ctx.tools.get(descriptor.name) !== undefined) {
+          throw new Error(`tool:${descriptor.name} was already present; candidate did not produce it`)
+        }
         disposers.push(this.ctx.tools.register(defineProxyTool(descriptor, runner)))
+      }
+      const unregistered = declaredTools.filter((name) => this.ctx.tools.get(name) === undefined)
+      if (unregistered.length > 0) {
+        throw new Error(unregistered.map((name) => `tool:${name} missing after candidate mount`).join('; '))
       }
     } catch (error) {
       for (const dispose of disposers) dispose()
-      runner.kill()
-      await runner.waitForExit()
-      return { ok: false, diagnostics: error instanceof Error ? error.message : String(error) }
+      this.generated.delete(candidateId)
+      return fail(error instanceof Error ? error.message : String(error))
     }
     this.proxyDisposers.set(candidateId, disposers)
     runner.onFatal = (reason) => {
       this.dropGenerated(candidateId, runner)
-      this.isolatedFailure?.({ candidateId, diagnostics: reason })
+      return this.isolatedFailure?.({ candidateId, diagnostics: reason })
     }
     return { ok: true }
+  }
+
+  private async swapIsolatedOwner(candidateId: string, context: ActivationPrepareContext): Promise<{ ok: boolean; diagnostics?: string }> {
+    const overlapping = snapshotDeclared(this.ctx, context)
+    const isolatedPriors = [...this.generated.entries()].filter(([id, runner]) => (
+      id !== candidateId && (runner.owner === context.owner || runner.tools.some((name) => context.tools.includes(name)))
+    ))
+    const fiberPriors = [...this.fibers.entries()].filter(([id]) => (
+      id !== candidateId && this.candidateOwners.get(id) === context.owner
+    ))
+    const named = capturePriorOwner(this.ctx, context.owner)
+    const shouldSwap = needsOwnerSwap(this.ctx, context) || isolatedPriors.length > 0 || fiberPriors.length > 0
+    if (!shouldSwap) return { ok: true }
+    if (
+      isolatedPriors.length === 0
+      && fiberPriors.length === 0
+      && named.fibers.length === 0
+      && overlapping.tools.length + overlapping.services.length > 0
+    ) {
+      return { ok: false, diagnostics: `cannot locate prior owner fiber for ${context.owner}` }
+    }
+    const parked = isolatedPriors.map(([id, runner]) => {
+      this.parkGenerated(id, runner)
+      return { id, runner }
+    })
+    this.parkedBy.set(candidateId, parked)
+    const priorMounts: PriorOwnerMount[] = [...named.mounts]
+    for (const fiber of named.fibers) await fiber.dispose()
+    for (const [id, fiber] of fiberPriors) {
+      const mount = this.inProcessPlugins.get(id)
+      if (mount !== undefined) priorMounts.push(mount)
+      await fiber.dispose()
+      this.fibers.delete(id)
+      this.baselines.delete(id)
+      this.inProcessPlugins.delete(id)
+    }
+    this.priorOwners.set(candidateId, priorMounts)
+    return { ok: true }
+  }
+
+  private parkGenerated(candidateId: string, runner: IsolatedGeneratedRunner): void {
+    const disposers = this.proxyDisposers.get(candidateId) ?? []
+    this.proxyDisposers.delete(candidateId)
+    for (const dispose of disposers) dispose()
+    runner.onFatal = undefined
+    this.generated.delete(candidateId)
+    this.baselines.delete(candidateId)
+    this.currentMounted = this.currentMounted.filter((id) => id !== candidateId)
+  }
+
+  private attachFatalHandler(candidateId: string, runner: IsolatedGeneratedRunner): void {
+    runner.onFatal = (reason) => {
+      this.dropGenerated(candidateId, runner)
+      return this.isolatedFailure?.({ candidateId, diagnostics: reason })
+    }
+  }
+
+  private remountParkedRunner(id: string, runner: IsolatedGeneratedRunner): void {
+    const disposers: Array<() => void> = []
+    for (const descriptor of runner.descriptors) {
+      if (this.ctx.tools.get(descriptor.name) !== undefined) continue
+      disposers.push(this.ctx.tools.register(defineProxyTool(descriptor, runner)))
+    }
+    this.generated.set(id, runner)
+    this.proxyDisposers.set(id, disposers)
+    this.candidateOwners.set(id, runner.owner)
+    this.attachFatalHandler(id, runner)
+    if (!this.currentMounted.includes(id)) this.currentMounted = [...this.currentMounted, id]
+  }
+
+  private async restoreParked(candidateId: string): Promise<void> {
+    const parked = this.parkedBy.get(candidateId) ?? []
+    this.parkedBy.delete(candidateId)
+    for (const item of parked) this.remountParkedRunner(item.id, item.runner)
+  }
+
+  private async discardParked(candidateId: string): Promise<void> {
+    const parked = this.parkedBy.get(candidateId) ?? []
+    this.parkedBy.delete(candidateId)
+    for (const item of parked) {
+      item.runner.onFatal = undefined
+      item.runner.kill()
+      this.candidateOwners.delete(item.id)
+      await item.runner.waitForExit()
+    }
+  }
+
+  private async restoreIsolatedSwap(candidateId: string): Promise<void> {
+    this.generated.delete(candidateId)
+    this.proxyDisposers.delete(candidateId)
+    this.candidateOwners.delete(candidateId)
+    this.baselines.delete(candidateId)
+    await this.restoreParked(candidateId)
+    await this.restorePriorOwner(candidateId, this.priorOwners.get(candidateId) ?? [])
   }
 
   private dropGenerated(candidateId: string, runner: IsolatedGeneratedRunner): void {
@@ -294,6 +413,7 @@ export class CordisActivationRuntime implements ActivationRuntime {
     runner.kill()
     this.generated.delete(candidateId)
     this.baselines.delete(candidateId)
+    this.candidateOwners.delete(candidateId)
     this.currentMounted = this.currentMounted.filter((id) => id !== candidateId)
   }
 
