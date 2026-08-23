@@ -117,6 +117,19 @@ describe('TARS-NG mission-control workspace', () => {
     }))
     assert.equal(view.systemState, 'READY')
     assert.equal(view.controlStrip.pendingApprovals, 0)
+    const failed = projectMissionControl(snapshot({
+      pendingConfirmations: [{
+        id: 'conf-failed',
+        capability: 'calendar',
+        operation: 'create_event',
+        fingerprint: 'fp-cal',
+        status: 'failed',
+        level: 'L2',
+        payload: { title: '给妈妈打电话', start: '2026-08-23T20:30:00+08:00', end: '2026-08-23T21:00:00+08:00' },
+      }],
+    }))
+    assert.equal(failed.approvals[0]?.status, 'failed')
+    assert.equal(failed.approvals[0]?.kind, 'calendar-create')
     assert.match(view.conversation.at(-1)?.text ?? '', /will not create/)
   })
 

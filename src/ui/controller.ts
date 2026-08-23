@@ -70,16 +70,22 @@ export class AssistantControlSurface {
     agent.followup(message)
   }
 
-  approve(confirmationId: string): Promise<PolicyOutcome> {
-    return this.ctx.actionPolicy.policy.resolve(confirmationId, 'approve')
+  async approve(confirmationId: string): Promise<PolicyOutcome> {
+    const outcome = await this.ctx.actionPolicy.policy.resolve(confirmationId, 'approve')
+    this.announceDecision(confirmationId, 'approve', outcome)
+    return outcome
   }
 
-  deny(confirmationId: string): Promise<PolicyOutcome> {
-    return this.ctx.actionPolicy.policy.resolve(confirmationId, 'deny')
+  async deny(confirmationId: string): Promise<PolicyOutcome> {
+    const outcome = await this.ctx.actionPolicy.policy.resolve(confirmationId, 'deny')
+    this.announceDecision(confirmationId, 'deny', outcome)
+    return outcome
   }
 
-  cancelConfirmation(confirmationId: string): Promise<PolicyOutcome> {
-    return this.ctx.actionPolicy.policy.resolve(confirmationId, 'cancel')
+  async cancelConfirmation(confirmationId: string): Promise<PolicyOutcome> {
+    const outcome = await this.ctx.actionPolicy.policy.resolve(confirmationId, 'cancel')
+    this.announceDecision(confirmationId, 'cancel', outcome)
+    return outcome
   }
 
   startJob(name: string, input: Record<string, unknown> = {}) {
@@ -147,6 +153,13 @@ export class AssistantControlSurface {
       intent: 'execute',
       payload,
     })
+  }
+
+  private announceDecision(confirmationId: string, decision: 'approve' | 'deny' | 'cancel', outcome: PolicyOutcome): void {
+    const result = outcome.kind === 'allow'
+      ? 'The bound action completed.'
+      : `${outcome.kind}${outcome.kind === 'deny' ? ` (${outcome.code})` : ''}: ${outcome.reason}`
+    this.sendMessage(`Confirmation ${confirmationId} ${decision}: ${result}`)
   }
 
   private requireAgent() {
