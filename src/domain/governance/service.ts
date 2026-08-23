@@ -1,11 +1,12 @@
 import { existsSync } from 'node:fs'
 import { digestFiles } from '../candidate/digest.js'
 import { listSourceFiles } from '../candidate/files.js'
+import { isolatedRuntimeOwner, requiresIsolatedGeneratedRuntime } from '../generated-runtime/trust.js'
 import type { CapabilityRegistry, RegistryRegisterInput } from '../registry/types.js'
 import type { CandidateRecord, CandidateWorkspace } from '../candidate/types.js'
 import { ActivationDeniedError, GovernanceAuthorityError, GovernanceContractError } from './errors.js'
 import { approvalSummary, fingerprintFromCandidate } from './fingerprint.js'
-import { InMemoryActivationRuntime, type ActivationRuntime } from './runtime.js'
+import { InMemoryActivationRuntime, type ActivationPrepareContext, type ActivationRuntime } from './runtime.js'
 import type {
   ActivationFailure,
   ActivationPhase,
@@ -98,6 +99,7 @@ export class GovernanceService implements ExtensionGovernance, ExtensionActivati
       this.lastKnownGood = this.current
       if (options.hydrate?.approvals.length) this.applyHydrate({ ...options.hydrate, current: this.current, lastKnownGood: this.lastKnownGood, generation: this.generation })
     }
+    this.runtime.bindIsolatedFailure((failure) => this.noteIsolatedRuntimeFailure(failure))
   }
 
   exportHydrate(): GovernanceHydrate {
@@ -221,17 +223,7 @@ export class GovernanceService implements ExtensionGovernance, ExtensionActivati
     try {
       this.state = 'activating'
       phase = 'prepare'
-      const prepared = await this.runtime.prepare(candidateId, {
-        workspaceRoot: record.workspaceRoot,
-        entryPoints: record.manifest.entryPoints,
-        owner: record.owner,
-        resolutionKind: record.manifest.resolutionKind,
-        baseVersion: record.baseVersion,
-        tools: record.manifest.tools,
-        services: record.manifest.services,
-        providers: record.manifest.providers,
-        runtimeSeams: record.manifest.runtimeSeams,
-      })
+      const prepared = await this.runtime.prepare(candidateId, this.prepareContext(record))
       if (!prepared.ok) throw new Error(prepared.diagnostics ?? 'prepare failed')
       this.flush()
       await this.maybeInterrupt('prepare')
@@ -295,13 +287,14 @@ export class GovernanceService implements ExtensionGovernance, ExtensionActivati
   enterSafeMode(credential: TrustedAuthorityCredential): ActivationStatus {
     this.assertCredential(credential)
     for (const record of this.registry.list({ status: 'active' })) {
-      if (record.owner.startsWith('generated/')) {
+      if (isolatedRuntimeOwner(record)) {
         this.registry.transitionStatus(record.owner, record.version, 'disabled')
       }
     }
     this.safeMode = true
     this.state = 'safe-mode'
     this.current = this.captureSnapshot()
+    void this.runtime.unloadGenerated()
     this.flush()
     return this.status()
   }
@@ -329,12 +322,14 @@ export class GovernanceService implements ExtensionGovernance, ExtensionActivati
     const diagnostics: string[] = []
     if (this.safeMode) return diagnostics
     const snapshot = this.committedActivationSnapshot()
-    const targets = (snapshot?.owners ?? []).filter(
-      (item) => item.owner.startsWith('generated/') && item.status === 'active',
-    )
+    const targets = (snapshot?.owners ?? []).filter((item) => {
+      if (item.status !== 'active') return false
+      const record = this.registry.get(item.owner, item.version)
+      return isolatedRuntimeOwner(record ?? { owner: item.owner })
+    })
     const committed = new Set(targets.map((item) => `${item.owner}@${item.version}`))
     for (const record of this.registry.list({ status: 'active' })) {
-      if (!record.owner.startsWith('generated/')) continue
+      if (!isolatedRuntimeOwner(record)) continue
       const key = `${record.owner}@${record.version}`
       if (!committed.has(key)) diagnostics.push(`inconsistent-active-owner:${key}`)
     }
@@ -357,17 +352,7 @@ export class GovernanceService implements ExtensionGovernance, ExtensionActivati
       return diagnostics
     }
     for (const candidate of verified) {
-      const prepared = await this.runtime.prepare(candidate.id, {
-        workspaceRoot: candidate.workspaceRoot,
-        entryPoints: candidate.manifest.entryPoints,
-        owner: candidate.owner,
-        resolutionKind: candidate.manifest.resolutionKind,
-        baseVersion: candidate.baseVersion,
-        tools: candidate.manifest.tools,
-        services: candidate.manifest.services,
-        providers: candidate.manifest.providers,
-        runtimeSeams: candidate.manifest.runtimeSeams,
-      })
+      const prepared = await this.runtime.prepare(candidate.id, this.prepareContext(candidate))
       if (!prepared.ok) {
         diagnostics.push(prepared.diagnostics ?? `prepare-failed:${candidate.id}`)
         await this.runtime.restore({
@@ -392,7 +377,7 @@ export class GovernanceService implements ExtensionGovernance, ExtensionActivati
 
   private async failClosedSafeMode(diagnostics: readonly string[]): Promise<void> {
     for (const record of this.registry.list({ status: 'active' })) {
-      if (record.owner.startsWith('generated/')) {
+      if (isolatedRuntimeOwner(record)) {
         this.registry.transitionStatus(record.owner, record.version, 'disabled')
       }
     }
@@ -400,6 +385,7 @@ export class GovernanceService implements ExtensionGovernance, ExtensionActivati
     this.state = 'safe-mode'
     this.integrityVerified = false
     this.current = this.captureSnapshot()
+    void this.runtime.unloadGenerated()
     this.lastFailure = {
       candidateId: this.pendingCandidateId ?? 'restart',
       version: '',
@@ -446,12 +432,17 @@ export class GovernanceService implements ExtensionGovernance, ExtensionActivati
 
   private async finishRollback(target: ActivationSnapshot): Promise<ActivationStatus> {
     const restored = await this.restoreSnapshot(target)
-    this.current = this.captureSnapshot()
     this.lastKnownGood = target
+    this.current = target
     this.state = restored ? 'rolled-back' : 'activation-failed'
     this.safeMode = this.safeMode || !restored
     this.pendingCandidateId = undefined
     this.phase = undefined
+    if (restored) {
+      const remount = await this.remountCommittedGenerated()
+      if (remount.length > 0) return this.status()
+    }
+    this.current = this.captureSnapshot()
     this.integrityVerified = restored && this.verifyRestoredIntegrity(target)
     this.flush()
     return this.status()
@@ -474,7 +465,7 @@ export class GovernanceService implements ExtensionGovernance, ExtensionActivati
     for (const owner of snapshot.owners) {
       const record = this.registry.get(owner.owner, owner.version)
       if (record === undefined || record.status !== 'active') return false
-      if (!owner.owner.startsWith('generated/')) continue
+      if (!isolatedRuntimeOwner(record)) continue
       const candidate = this.workspace.list().find((item) => item.owner === owner.owner && item.version === owner.version)
       if (candidate === undefined) return false
       if (this.verifySealedArtifact(candidate) !== undefined) return false
@@ -541,6 +532,11 @@ export class GovernanceService implements ExtensionGovernance, ExtensionActivati
     }
     if (record.digest === undefined || record.validation?.digest !== record.digest) {
       denials.push({ reason: 'digest-mismatch', detail: 'validation digest does not match the sealed artifact' })
+    } else if (existsSync(record.workspaceRoot)) {
+      const live = digestFiles(record.workspaceRoot, listSourceFiles(record.workspaceRoot))
+      if (live !== record.digest) {
+        denials.push({ reason: 'digest-mismatch', detail: 'sealed artifact no longer matches the approved digest' })
+      }
     }
     const approval = this.approvals.get(candidateId)
     if (approval === undefined || approval.decision === 'unreviewed' || approval.decision === 'approval-requested') {
@@ -569,10 +565,78 @@ export class GovernanceService implements ExtensionGovernance, ExtensionActivati
     if (conflicts.length > 0) {
       denials.push({ reason: 'ownership-conflict', detail: conflicts.map((item) => item.capability).join(', ') })
     }
-    if (this.safeMode && record.owner.startsWith('generated/')) {
+    if (this.safeMode && requiresIsolatedGeneratedRuntime({
+      owner: record.owner,
+      provenanceKind: record.provenance.kind,
+      origin: record.provenance.origin,
+    })) {
       denials.push({ reason: 'safe-mode', detail: 'generated extensions are excluded in Safe Mode' })
     }
     return denials
+  }
+
+  private async noteIsolatedRuntimeFailure(failure: { readonly candidateId: string; readonly diagnostics: string }): Promise<void> {
+    const record = this.workspace.list().find((item) => item.id === failure.candidateId)
+    if (record !== undefined) {
+      const active = this.registry.get(record.owner, record.version)
+      if (active?.status === 'active') {
+        this.registry.transitionStatus(record.owner, record.version, 'disabled')
+      }
+    }
+    const target = this.rollbackTarget ?? this.lastKnownGood
+    this.state = 'activation-failed'
+    this.lastFailure = {
+      candidateId: failure.candidateId,
+      version: record?.version ?? '',
+      digest: record?.digest ?? '',
+      phase: 'health',
+      diagnostics: failure.diagnostics,
+      rollbackAttempted: target !== undefined,
+      rollbackSucceeded: false,
+      restoredLkgGeneration: target?.generation,
+      safeModeRequired: target === undefined,
+    }
+    if (target === undefined) {
+      this.current = this.captureSnapshot()
+      this.integrityVerified = false
+      this.safeMode = true
+      this.flush()
+      return
+    }
+    this.lastKnownGood = target
+    const restored = await this.restoreSnapshot(target)
+    this.current = this.captureSnapshot()
+    const remount = restored ? await this.remountCommittedGenerated() : ['restore-failed']
+    const recovered = restored && remount.length === 0
+    this.lastFailure = {
+      ...this.lastFailure,
+      rollbackAttempted: true,
+      rollbackSucceeded: recovered,
+      restoredLkgGeneration: target.generation,
+      safeModeRequired: !recovered,
+    }
+    this.state = recovered ? 'rolled-back' : 'activation-failed'
+    this.integrityVerified = recovered && this.verifyRestoredIntegrity(target)
+    if (!recovered) this.safeMode = true
+    this.flush()
+  }
+
+  private prepareContext(record: CandidateRecord): ActivationPrepareContext {
+    return {
+      workspaceRoot: record.workspaceRoot,
+      entryPoints: record.manifest.entryPoints,
+      owner: record.owner,
+      resolutionKind: record.manifest.resolutionKind,
+      baseVersion: record.baseVersion,
+      digest: record.digest,
+      tools: record.manifest.tools,
+      services: record.manifest.services,
+      providers: record.manifest.providers,
+      runtimeSeams: record.manifest.runtimeSeams,
+      permissions: record.manifest.permissions,
+      provenanceKind: record.provenance.kind,
+      origin: record.provenance.origin,
+    }
   }
 
   private captureSnapshot(): ActivationSnapshot {

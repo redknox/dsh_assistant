@@ -8,7 +8,8 @@ Personal-assistant product layer on DeepSeek Harness **0.1.0-rc.8**. Current pac
 | --- | --- |
 | **v0.1.0** | Assistant Core MVP baseline |
 | **v0.2.0** | Governed Self-Extension baseline |
-| **v0.3.0** | Product Soak baseline (M1–M5 + Product Readiness) |
+| **v0.3.0** | Governance + Mission-Control product baseline (historical soak seal) |
+| **v0.4.0 target** | Self-Developing Product Baseline |
 
 The repository package version is `0.3.0`. The annotated `v0.3.0` git tag is created only on the exact `main` commit after this seal is merged. Do not move or recreate that tag; later soak fixes are `v0.3.1`, `v0.3.2`, etc.
 
@@ -41,7 +42,7 @@ credential: DEEPSEEK_API_KEY
 
 Daily soak surface: loopback Mission-Control Web UI from `tars-ng start` (`http://127.0.0.1:8787`).
 
-After `v0.3.0` is tagged, feature development is frozen. Only security, authority, data-loss, reliability, packaging, operational, usability, and documentation fixes should enter the v0.3.x soak line.
+`v0.3.0` remains the immutable historical Governance + Mission-Control baseline. Do not retag it. Development toward **v0.4.0 — Self-Developing Product Baseline** starts with an enforceable generated-extension runtime. Self-development is allowed; self-authorization is not. The Candidate Workbench is not claimed complete by this issue.
 
 ## v0.2.0 Verified (Governed Self-Extension)
 
@@ -100,6 +101,7 @@ Historical Assistant Core MVP baseline. These remain true and are not rewritten 
 - Vector DB, crawler, hosted production persistence
 - Durable user-level reminders (prefer a future official DSH Schedule seam)
 - Public npm publish from this repository
-- Autonomous plugin generation and automatic install/upgrade/remove
+- Model-facing Candidate Workbench create/write/validate tools (blocked until the isolated generated runtime is the only production activation path)
+- Automatic install/upgrade/remove or self-authorization
 - OAuth refresh for Google Calendar (replace the expiring access token manually)
 - New Google Search product wiring (credentials are diagnosed by name only)

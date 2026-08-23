@@ -6,10 +6,19 @@ export interface ActivationPrepareContext {
   readonly owner: string
   readonly resolutionKind: string
   readonly baseVersion?: string
+  readonly digest?: string
   readonly tools: readonly string[]
   readonly services: readonly string[]
   readonly providers: readonly string[]
   readonly runtimeSeams: readonly string[]
+  readonly permissions?: readonly string[]
+  readonly provenanceKind?: string
+  readonly origin?: string
+}
+
+export interface IsolatedRuntimeFailure {
+  readonly candidateId: string
+  readonly diagnostics: string
 }
 
 export interface ActivationRuntime {
@@ -19,6 +28,8 @@ export interface ActivationRuntime {
   commit(candidateId: string): Promise<void>
   restore(snapshot: ActivationSnapshot): Promise<void>
   mounted(): readonly string[]
+  unloadGenerated(): Promise<void>
+  bindIsolatedFailure(handler: (failure: IsolatedRuntimeFailure) => void | Promise<void>): void
 }
 
 export class InMemoryActivationRuntime implements ActivationRuntime {
@@ -57,4 +68,8 @@ export class InMemoryActivationRuntime implements ActivationRuntime {
   mounted(): readonly string[] {
     return this.currentMounted
   }
+
+  async unloadGenerated(): Promise<void> {}
+
+  bindIsolatedFailure(_handler: (failure: IsolatedRuntimeFailure) => void | Promise<void>): void {}
 }

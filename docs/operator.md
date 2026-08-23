@@ -140,7 +140,7 @@ A generated Google Calendar provider still requires the existing M1–M4 approva
 | `tars-ng start` | Ensures home, loads env, checks Node/DSH and default LLM, boots, starts the loopback Web UI, prints the URL, waits for SIGINT/SIGTERM. Fails without writing a pid when the default LLM is unusable or the Web UI cannot bind |
 | `tars-ng start --once` | Same checks and boot, then exits without serving the Web UI (packaging/smoke). Non-zero when the default LLM is unusable |
 | `tars-ng status` | Version, running pid, home, Web UI URL when running, DSH compatibility — no secret values |
-| `tars-ng doctor` | Version, Node, DSH packages, home, env-file safety, credential **names**, LLM provider/model/route, `ai-runtime`, integration mode, Safe Mode/recovery |
+| `tars-ng doctor` | Version, Node, DSH packages, home, env-file safety, credential **names**, LLM provider/model/route, `ai-runtime`, integration mode, generated-runtime isolation, Safe Mode/recovery |
 | `tars-ng stop` | SIGTERM to the pid recorded by `start` (runtime and Web UI) |
 | `tars-ng self-extension …` | Existing Recovery Root operator commands (approve/activate/rollback/backup/…) |
 

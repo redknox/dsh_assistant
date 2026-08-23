@@ -1,9 +1,13 @@
-import { existsSync, readFileSync } from 'node:fs'
-import path from 'node:path'
 import { pathToFileURL } from 'node:url'
 import type { Context, Plugin } from '@deepseek-ai/cordis'
-import type { ActivationPrepareContext, ActivationRuntime } from '../../domain/governance/runtime.js'
+import { defineTool, type ParameterSchemaSpec, type ValueSchemaSpec } from '@deepseek-ai/dsh-tools'
+import type { ActivationPrepareContext, ActivationRuntime, IsolatedRuntimeFailure } from '../../domain/governance/runtime.js'
 import type { ActivationSnapshot } from '../../domain/governance/types.js'
+import { projectParameterSchema, projectValueSchema } from '../../domain/generated-runtime/schema.js'
+import { requiresIsolatedGeneratedRuntime } from '../../domain/generated-runtime/trust.js'
+import type { GeneratedToolDescriptor } from '../../domain/generated-runtime/types.js'
+import { resolveCandidateEntry } from './candidate-entry.js'
+import { IsolatedGeneratedRunner } from './generated-runner.js'
 
 interface SurfaceSnapshot {
   readonly tools: readonly string[]
@@ -12,10 +16,10 @@ interface SurfaceSnapshot {
 }
 
 interface PriorOwnerMount {
-  readonly name?: string
-  readonly inject: readonly string[]
-  readonly apply: Plugin
+  readonly plugin: Plugin
   readonly config: unknown
+  readonly candidateId?: string
+  readonly owner?: string
 }
 
 const OWNER_PLUGIN_NAMES: Readonly<Record<string, string>> = {
@@ -29,59 +33,7 @@ const OWNER_PLUGIN_NAMES: Readonly<Record<string, string>> = {
 
 const SWAP_KINDS = new Set(['evolve-owner', 'configure', 'adopt-existing', 'implement-provider'])
 
-function packageEntries(root: string): string[] {
-  const pkgPath = path.join(root, 'package.json')
-  if (!existsSync(pkgPath)) return []
-  try {
-    const pkg = JSON.parse(readFileSync(pkgPath, 'utf8')) as {
-      main?: string
-      exports?: string | { '.'?: string | { import?: string; default?: string } }
-    }
-    const found: string[] = []
-    if (typeof pkg.exports === 'string') found.push(pkg.exports)
-    if (pkg.exports && typeof pkg.exports === 'object') {
-      const exp = pkg.exports['.']
-      if (typeof exp === 'string') found.push(exp)
-      if (exp && typeof exp === 'object') {
-        if (exp.import) found.push(exp.import)
-        if (exp.default) found.push(exp.default)
-      }
-    }
-    if (pkg.main) found.push(pkg.main)
-    return found
-  } catch {
-    return []
-  }
-}
-
-/** Resolve a sealed candidate's plugin entry from workspace/manifest/package metadata. */
-export function resolveCandidateEntry(workspaceRoot: string, entryPoints: readonly string[] = []): string {
-  const relatives = [
-    ...entryPoints,
-    ...packageEntries(workspaceRoot),
-    'src/index.js',
-    'src/plugin.js',
-    'index.js',
-    'plugin.js',
-    'src/index.ts',
-    'src/plugin.ts',
-  ]
-  const seen = new Set<string>()
-  const root = path.resolve(workspaceRoot)
-  for (const rel of relatives) {
-    if (rel === undefined || rel === '' || seen.has(rel)) continue
-    seen.add(rel)
-    const unix = rel.replaceAll('\\', '/')
-    if (path.isAbsolute(rel) || unix.split('/').some((part) => part === '' || part === '.' || part === '..')) {
-      continue
-    }
-    const abs = path.resolve(root, ...unix.split('/'))
-    const inside = abs === root || abs.startsWith(`${root}${path.sep}`)
-    if (!inside || !existsSync(abs)) continue
-    return abs
-  }
-  throw new Error('candidate workspace has no mountable plugin entry')
-}
+export { resolveCandidateEntry } from './candidate-entry.js'
 
 function hasService(ctx: Context, name: string): boolean {
   try {
@@ -125,9 +77,11 @@ function capturePriorOwner(ctx: Context, owner: string): { mounts: PriorOwnerMou
     for (const fiber of runtime.fibers) {
       if (fiber.uid === null) continue
       mounts.push({
-        name: runtime.name,
-        inject: Object.keys(fiber.inject ?? {}),
-        apply: runtime.callback as Plugin,
+        plugin: {
+          name: runtime.name,
+          inject: Object.keys(fiber.inject ?? {}),
+          apply: runtime.callback as Plugin.Function,
+        },
         config: fiber.config,
       })
       fibers.push(fiber)
@@ -136,15 +90,26 @@ function capturePriorOwner(ctx: Context, owner: string): { mounts: PriorOwnerMou
   return { mounts, fibers }
 }
 
-/** Production adapter: mount/unmount the sealed candidate artifact through Cordis. */
+/** Production adapter: human-maintained managed code stays in-process; assistant-origin code is isolated. */
 export class CordisActivationRuntime implements ActivationRuntime {
   private readonly fibers = new Map<string, { dispose: () => Promise<unknown> }>()
   private readonly baselines = new Map<string, SurfaceSnapshot>()
   private readonly priorOwners = new Map<string, PriorOwnerMount[]>()
+  private readonly generated = new Map<string, IsolatedGeneratedRunner>()
+  private readonly proxyDisposers = new Map<string, Array<() => void>>()
   private currentMounted: string[] = []
   private lastContext?: ActivationPrepareContext
+  private isolatedFailure?: (failure: IsolatedRuntimeFailure) => void | Promise<void>
+  private readonly candidateOwners = new Map<string, string>()
+  private readonly inProcessPlugins = new Map<string, PriorOwnerMount>()
+  private readonly parkedBy = new Map<string, Array<{ id: string; runner: IsolatedGeneratedRunner }>>()
+  private readonly isolatedRecipes = new Map<string, ActivationPrepareContext>()
 
-  constructor(private readonly ctx: Context) {}
+  constructor(private readonly ctx: Context) {
+    ctx.effect(() => () => {
+      this.unloadGenerated()
+    })
+  }
 
   snapshot(generation: number, owners: ActivationSnapshot['owners']): ActivationSnapshot {
     return {
@@ -158,9 +123,16 @@ export class CordisActivationRuntime implements ActivationRuntime {
 
   async prepare(candidateId: string, context?: ActivationPrepareContext): Promise<{ ok: boolean; diagnostics?: string }> {
     this.lastContext = context
-    if (this.fibers.has(candidateId)) return { ok: true }
+    if (this.fibers.has(candidateId) || this.generated.has(candidateId)) return { ok: true }
     if (context === undefined || context.workspaceRoot === '') {
       return { ok: false, diagnostics: 'candidate workspace metadata is required to mount the artifact' }
+    }
+    if (requiresIsolatedGeneratedRuntime({
+      owner: context.owner,
+      provenanceKind: context.provenanceKind,
+      origin: context.origin,
+    })) {
+      return this.prepareGenerated(candidateId, context)
     }
     let swapped: PriorOwnerMount[] = []
     try {
@@ -180,6 +152,13 @@ export class CordisActivationRuntime implements ActivationRuntime {
       const plugin = imported.default ?? imported
       const fiber = await this.ctx.plugin(plugin as Plugin)
       this.fibers.set(candidateId, fiber)
+      this.candidateOwners.set(candidateId, context.owner)
+      this.inProcessPlugins.set(candidateId, {
+        plugin: plugin as Plugin,
+        config: undefined,
+        candidateId,
+        owner: context.owner,
+      })
       return { ok: true }
     } catch (error) {
       await this.restorePriorOwner(candidateId, swapped)
@@ -190,6 +169,29 @@ export class CordisActivationRuntime implements ActivationRuntime {
   async verifyHealth(candidateId: string, expected: readonly string[]): Promise<{ ok: boolean; diagnostics?: string }> {
     const declared = this.lastContext
     if (declared === undefined) return { ok: false, diagnostics: 'no candidate mount context' }
+    const generated = this.generated.get(candidateId)
+    if (generated !== undefined) {
+      const produced = await generated.health()
+      const declaredTools = declared.tools.filter((name) => name !== '')
+      const missing = declaredTools.filter((name) => !produced.includes(name) || this.ctx.tools.get(name) === undefined)
+      const extra = produced.filter((name) => !declaredTools.includes(name))
+      if (missing.length > 0 || extra.length > 0) {
+        return {
+          ok: false,
+          diagnostics: [
+            ...missing.map((name) => `tool:${name} missing after candidate mount`),
+            ...extra.map((name) => `descriptor/manifest mismatch: ${name}`),
+          ].join('; '),
+        }
+      }
+      if (declared.services.length > 0 || declared.providers.length > 0) {
+        return { ok: false, diagnostics: 'generated runtime does not proxy services or providers' }
+      }
+      if (declaredTools.length === 0) {
+        return { ok: false, diagnostics: 'candidate declared no tools, services, or providers to verify' }
+      }
+      return { ok: true }
+    }
     if (!this.fibers.has(candidateId)) return { ok: false, diagnostics: 'candidate artifact is not mounted' }
     const before = this.baselines.get(candidateId) ?? { tools: [], services: [], providers: [] }
     const after = snapshotDeclared(this.ctx, declared)
@@ -207,6 +209,7 @@ export class CordisActivationRuntime implements ActivationRuntime {
   }
 
   async commit(candidateId: string): Promise<void> {
+    await this.discardParked(candidateId)
     if (!this.currentMounted.includes(candidateId)) this.currentMounted = [...this.currentMounted, candidateId]
   }
 
@@ -218,21 +221,243 @@ export class CordisActivationRuntime implements ActivationRuntime {
       this.baselines.delete(id)
       await this.restorePriorOwner(id, this.priorOwners.get(id) ?? [])
     }
-    this.currentMounted = [...snapshot.mounted]
+    const waiting: Array<Promise<void>> = []
+    for (const [id, runner] of this.generated) {
+      if (snapshot.mounted.includes(id)) continue
+      this.dropGenerated(id, runner)
+      waiting.push(runner.waitForExit())
+    }
+    for (const id of new Set([...this.parkedBy.keys(), ...this.priorOwners.keys()])) {
+      if (snapshot.mounted.includes(id)) {
+        await this.discardParked(id)
+        continue
+      }
+      await this.restoreIsolatedSwap(id)
+    }
+    await Promise.all(waiting)
+    for (const id of snapshot.mounted) {
+      if (this.generated.has(id) || this.fibers.has(id)) continue
+      const recipe = this.isolatedRecipes.get(id)
+      if (recipe === undefined) continue
+      const remounted = await this.prepareGenerated(id, recipe)
+      if (!remounted.ok) throw new Error(remounted.diagnostics ?? `failed to remount isolated candidate ${id}`)
+      await this.commit(id)
+    }
+    this.currentMounted = snapshot.mounted.filter((id) => this.generated.has(id) || this.fibers.has(id))
+  }
+
+  async unloadGenerated(): Promise<void> {
+    const runners = [...this.generated.entries()]
+    for (const [id, runner] of runners) this.dropGenerated(id, runner)
+    await Promise.all(runners.map(([, runner]) => runner.waitForExit()))
+    for (const id of [...this.parkedBy.keys()]) await this.discardParked(id)
   }
 
   mounted(): readonly string[] {
     return this.currentMounted
   }
 
+  bindIsolatedFailure(handler: (failure: IsolatedRuntimeFailure) => void | Promise<void>): void {
+    this.isolatedFailure = handler
+  }
+
+  private async prepareGenerated(candidateId: string, context: ActivationPrepareContext): Promise<{ ok: boolean; diagnostics?: string }> {
+    if (context.services.length > 0 || context.providers.length > 0) {
+      return { ok: false, diagnostics: 'generated runtime does not proxy services or providers' }
+    }
+    const swapped = await this.swapIsolatedOwner(candidateId, context)
+    if (!swapped.ok) return swapped
+    const runner = new IsolatedGeneratedRunner({
+      candidateId,
+      workspaceRoot: context.workspaceRoot,
+      entryPoints: context.entryPoints,
+      owner: context.owner,
+      digest: context.digest,
+      tools: context.tools,
+      permissions: context.permissions ?? [],
+    })
+    const fail = async (diagnostics: string) => {
+      runner.kill()
+      await runner.waitForExit()
+      await this.restoreIsolatedSwap(candidateId)
+      return { ok: false as const, diagnostics }
+    }
+    const started = await runner.start()
+    if (!started.ok) return fail(started.diagnostics ?? 'generated runner failed to start')
+    const declaredTools = context.tools.filter((name) => name !== '')
+    const produced = runner.descriptors.map((item) => item.name)
+    const missing = declaredTools.filter((name) => !produced.includes(name))
+    const extra = produced.filter((name) => !declaredTools.includes(name))
+    if (missing.length > 0 || extra.length > 0) {
+      return fail([
+        ...missing.map((name) => `tool:${name} missing after candidate mount`),
+        ...extra.map((name) => `descriptor/manifest mismatch: ${name}`),
+      ].join('; ') || 'descriptor/manifest mismatch')
+    }
+    this.generated.set(candidateId, runner)
+    this.candidateOwners.set(candidateId, context.owner)
+    this.isolatedRecipes.set(candidateId, context)
+    this.baselines.set(candidateId, snapshotDeclared(this.ctx, context))
+    const disposers: Array<() => void> = []
+    try {
+      for (const descriptor of runner.descriptors) {
+        if (this.ctx.tools.get(descriptor.name) !== undefined) {
+          throw new Error(`tool:${descriptor.name} was already present; candidate did not produce it`)
+        }
+        disposers.push(this.ctx.tools.register(defineProxyTool(descriptor, runner)))
+      }
+      const unregistered = declaredTools.filter((name) => this.ctx.tools.get(name) === undefined)
+      if (unregistered.length > 0) {
+        throw new Error(unregistered.map((name) => `tool:${name} missing after candidate mount`).join('; '))
+      }
+    } catch (error) {
+      for (const dispose of disposers) dispose()
+      this.generated.delete(candidateId)
+      return fail(error instanceof Error ? error.message : String(error))
+    }
+    this.proxyDisposers.set(candidateId, disposers)
+    runner.onFatal = (reason) => {
+      this.dropGenerated(candidateId, runner)
+      return this.isolatedFailure?.({ candidateId, diagnostics: reason })
+    }
+    return { ok: true }
+  }
+
+  private async swapIsolatedOwner(candidateId: string, context: ActivationPrepareContext): Promise<{ ok: boolean; diagnostics?: string }> {
+    const overlapping = snapshotDeclared(this.ctx, context)
+    const isolatedPriors = [...this.generated.entries()].filter(([id, runner]) => (
+      id !== candidateId && (runner.owner === context.owner || runner.tools.some((name) => context.tools.includes(name)))
+    ))
+    const fiberPriors = [...this.fibers.entries()].filter(([id]) => (
+      id !== candidateId && this.candidateOwners.get(id) === context.owner
+    ))
+    const named = capturePriorOwner(this.ctx, context.owner)
+    const shouldSwap = needsOwnerSwap(this.ctx, context) || isolatedPriors.length > 0 || fiberPriors.length > 0
+    if (!shouldSwap) return { ok: true }
+    if (
+      isolatedPriors.length === 0
+      && fiberPriors.length === 0
+      && named.fibers.length === 0
+      && overlapping.tools.length + overlapping.services.length > 0
+    ) {
+      return { ok: false, diagnostics: `cannot locate prior owner fiber for ${context.owner}` }
+    }
+    const parked = isolatedPriors.map(([id, runner]) => {
+      this.parkGenerated(id, runner)
+      return { id, runner }
+    })
+    this.parkedBy.set(candidateId, parked)
+    const priorMounts: PriorOwnerMount[] = [...named.mounts]
+    for (const fiber of named.fibers) await fiber.dispose()
+    for (const [id, fiber] of fiberPriors) {
+      const mount = this.inProcessPlugins.get(id)
+      if (mount !== undefined) priorMounts.push({ ...mount, candidateId: id, owner: context.owner })
+      await fiber.dispose()
+      this.fibers.delete(id)
+      this.baselines.delete(id)
+      this.inProcessPlugins.delete(id)
+    }
+    this.priorOwners.set(candidateId, priorMounts)
+    return { ok: true }
+  }
+
+  private parkGenerated(candidateId: string, runner: IsolatedGeneratedRunner): void {
+    const disposers = this.proxyDisposers.get(candidateId) ?? []
+    this.proxyDisposers.delete(candidateId)
+    for (const dispose of disposers) dispose()
+    runner.onFatal = undefined
+    this.generated.delete(candidateId)
+    this.baselines.delete(candidateId)
+    this.currentMounted = this.currentMounted.filter((id) => id !== candidateId)
+  }
+
+  private attachFatalHandler(candidateId: string, runner: IsolatedGeneratedRunner): void {
+    runner.onFatal = (reason) => {
+      this.dropGenerated(candidateId, runner)
+      return this.isolatedFailure?.({ candidateId, diagnostics: reason })
+    }
+  }
+
+  private remountParkedRunner(id: string, runner: IsolatedGeneratedRunner): void {
+    const disposers: Array<() => void> = []
+    for (const descriptor of runner.descriptors) {
+      if (this.ctx.tools.get(descriptor.name) !== undefined) continue
+      disposers.push(this.ctx.tools.register(defineProxyTool(descriptor, runner)))
+    }
+    this.generated.set(id, runner)
+    this.proxyDisposers.set(id, disposers)
+    this.candidateOwners.set(id, runner.owner)
+    this.attachFatalHandler(id, runner)
+    if (!this.currentMounted.includes(id)) this.currentMounted = [...this.currentMounted, id]
+  }
+
+  private async restoreParked(candidateId: string): Promise<void> {
+    const parked = this.parkedBy.get(candidateId) ?? []
+    this.parkedBy.delete(candidateId)
+    for (const item of parked) this.remountParkedRunner(item.id, item.runner)
+  }
+
+  private async discardParked(candidateId: string): Promise<void> {
+    const parked = this.parkedBy.get(candidateId) ?? []
+    this.parkedBy.delete(candidateId)
+    for (const item of parked) {
+      item.runner.onFatal = undefined
+      item.runner.kill()
+      this.candidateOwners.delete(item.id)
+      await item.runner.waitForExit()
+    }
+  }
+
+  private async restoreIsolatedSwap(candidateId: string): Promise<void> {
+    this.generated.delete(candidateId)
+    this.proxyDisposers.delete(candidateId)
+    this.candidateOwners.delete(candidateId)
+    this.baselines.delete(candidateId)
+    await this.restoreParked(candidateId)
+    await this.restorePriorOwner(candidateId, this.priorOwners.get(candidateId) ?? [])
+  }
+
+  private dropGenerated(candidateId: string, runner: IsolatedGeneratedRunner): void {
+    const disposers = this.proxyDisposers.get(candidateId) ?? []
+    this.proxyDisposers.delete(candidateId)
+    for (const dispose of disposers) dispose()
+    runner.onFatal = undefined
+    runner.kill()
+    this.generated.delete(candidateId)
+    this.baselines.delete(candidateId)
+    this.candidateOwners.delete(candidateId)
+    this.currentMounted = this.currentMounted.filter((id) => id !== candidateId)
+  }
+
   private async restorePriorOwner(candidateId: string, mounts: readonly PriorOwnerMount[]): Promise<void> {
     for (const prior of mounts) {
-      await this.ctx.plugin({
-        name: prior.name,
-        inject: [...prior.inject],
-        apply: prior.apply as Plugin.Function,
-      }, prior.config)
+      const fiber = await this.ctx.plugin(prior.plugin, prior.config)
+      if (prior.candidateId !== undefined) {
+        this.fibers.set(prior.candidateId, fiber)
+        this.baselines.delete(prior.candidateId)
+        this.inProcessPlugins.set(prior.candidateId, prior)
+        if (prior.owner !== undefined) this.candidateOwners.set(prior.candidateId, prior.owner)
+      }
     }
     this.priorOwners.delete(candidateId)
   }
+}
+
+function defineProxyTool(descriptor: GeneratedToolDescriptor, runner: IsolatedGeneratedRunner) {
+  const parameters = projectParameterSchema(descriptor.parameters) as unknown as ParameterSchemaSpec
+  const schema = projectValueSchema(descriptor.output) as unknown as ValueSchemaSpec
+  return defineTool({
+    name: descriptor.name,
+    description: descriptor.description,
+    parameters,
+    output: {
+      schema,
+      render(_args, value) {
+        return [{ type: 'text' as const, text: typeof value === 'string' ? value : JSON.stringify(value) }]
+      },
+    },
+    async execute(args, exec) {
+      return await runner.call(descriptor.name, (args ?? {}) as Record<string, unknown>, exec.signal) as never
+    },
+  })
 }

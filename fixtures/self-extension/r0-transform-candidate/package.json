@@ -1,0 +1,5 @@
+{
+  "name": "dsh-generated-r0-transform",
+  "type": "module",
+  "main": "src/plugin.js"
+}

@@ -51,7 +51,7 @@ The inspectable summary includes added/removed capabilities and permissions, run
 Activation is denied with explicit reasons unless all of these hold:
 
 - candidate exists, is sealed, and `validated`
-- validation digest matches the sealed artifact
+- validation digest matches the sealed artifact, and the on-disk artifact still hashes to that digest
 - trusted approval exists for the current fingerprint
 - approval is not rejected/superseded/stale
 - assumed base version still matches the active owner
@@ -74,7 +74,7 @@ Phases: verify eligibility → capture Last Known Good → prepare/mount → hea
 
 Registry commit happens only after health verification. A failed prepare/health leaves the previous owner active. There is never a final state with two active owners for the same capability.
 
-Prepare / health / commit / restore use a production `CordisActivationRuntime` that resolves the sealed candidate's plugin entry from workspace / `entryPoints` / `package.json` and mounts that artifact through `ctx.plugin`. For `evolve-owner`, the prior owner fiber is disposed before the candidate mounts so old and new versions are never simultaneously authoritative; failure and rollback remount the previous owner. Health only credits tools/services/providers the candidate **produced** after that swap. `InMemoryActivationRuntime` remains a unit-test fake only.
+Prepare / health / commit / restore use a production `CordisActivationRuntime`. `managed/*` owners resolve the sealed plugin entry from workspace / `entryPoints` / `package.json` and mount through `ctx.plugin`. `generated/*` owners are not imported into the host process and do not receive the live Cordis context: the runtime starts an isolated child, registers host-owned DSH proxy tools, and mediates declared host operations through a capability broker. If the OS/process sandbox cannot start, generated activation is refused with no host fallback. For `evolve-owner`, the prior owner fiber is disposed before the candidate mounts so old and new versions are never simultaneously authoritative; failure and rollback remount the previous owner. Health only credits tools/services/providers the candidate **produced** after that swap. `InMemoryActivationRuntime` remains a unit-test fake only.
 
 The first generated-plugin vertical slice is the governed Obsidian Vault path in [docs/obsidian-self-extension.md](./obsidian-self-extension.md).
 

@@ -40,7 +40,7 @@ export function defaultProvenance(review: ResolutionReview, owner: string): Exte
   if (review.kind === 'new-plugin' || owner.startsWith('generated/')) {
     return { kind: 'generated', origin: 'assistant' }
   }
-  return { kind: 'managed', origin: 'human' }
+  return { kind: 'managed', origin: 'assistant' }
 }
 
 export function normalizeManifest(

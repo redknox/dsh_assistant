@@ -48,7 +48,7 @@ Disabled or retired owners are not resolved as active.
 
 ## Provenance
 
-`managed/*` and `generated/*` share the same DSH plugin model. Provenance is metadata (`kind` + `origin`), not a privileged loader.
+`managed/*` and `generated/*` share the same governance model (registry, review, exact approval). They do not share the same execution trust: `managed/*` may use the in-process Cordis lifecycle; `generated/*` is not imported into the host process and runs in the isolated generated-extension runner. Provenance is metadata (`kind` + `origin`), not a privilege grant.
 
 ## Lifecycle vs approval
 

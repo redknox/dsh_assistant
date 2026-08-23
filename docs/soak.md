@@ -2,14 +2,19 @@
 
 Status: **Implemented** as the v0.3.0 Product Soak policy. Duration is operational, not a release metric.
 
-After annotated tag `v0.3.0` exists on `main`:
+```text
+v0.3.0 = Governance + Mission-Control product baseline
+v0.4.0 target = Self-Developing Product Baseline
+```
 
-- do not add new user-facing capabilities during the initial soak;
+`v0.3.0` remains an immutable historical seal. v0.4.0 work may proceed on `main` after this re-opening. Self-development is allowed; self-authorization is not. Do not expose model-facing candidate write/build tools until generated activation is isolated.
+
+For any remaining v0.3.x soak-line fixes:
+
+- do not add unrelated user-facing capabilities;
 - do not add providers merely because they are interesting;
-- do not expand Self-Extension authority;
-- do not add new tool categories without a reliability-driven reason;
-- accept bug fixes, reliability/security/packaging/diagnostics/usability fixes, and documentation;
-- treat new-functionality requests as backlog, not immediate work.
+- do not expand Self-Extension authority beyond the isolated generated runtime;
+- accept bug fixes, reliability/security/packaging/diagnostics/usability fixes, and documentation.
 
 The question to answer is: **can I depend on this product every day?**
 

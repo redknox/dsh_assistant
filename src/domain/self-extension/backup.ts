@@ -5,6 +5,7 @@ import { listSourceFiles } from '../candidate/files.js'
 import { writeJsonAtomic } from '../persistence/atomic.js'
 import { parseAuthorityFile, type AuthorityFile } from './authority-store.js'
 import { parseCandidateIndexFile, resolveCandidateArtifactDir, type CandidateIndexFile, type CandidateIndexRow } from './candidate-index.js'
+import { isolatedRuntimeOwner } from '../generated-runtime/trust.js'
 import { PersistenceIntegrityError, PersistenceSchemaError } from './errors.js'
 import { SELF_EXTENSION_SCHEMA_VERSION, selfExtensionPaths } from './home.js'
 
@@ -75,11 +76,14 @@ function ownerKey(owner: string, version: string): string {
   return `${owner}@${version}`
 }
 
-function snapshotOwnerKeys(authority: AuthorityFile): Set<string> {
+function snapshotOwnerKeys(authority: AuthorityFile, rows: readonly CandidateIndexRow[]): Set<string> {
+  const index = new Map(rows.map((row) => [ownerKey(row.record.owner, row.record.version), row.record]))
   const keys = new Set<string>()
   for (const snapshot of [authority.recovery.current, authority.recovery.lastKnownGood, authority.recovery.rollbackTarget]) {
     for (const item of snapshot?.owners ?? []) {
-      if (item.owner.startsWith('generated/') && item.status === 'active') keys.add(ownerKey(item.owner, item.version))
+      if (item.status !== 'active') continue
+      const record = index.get(ownerKey(item.owner, item.version))
+      if (isolatedRuntimeOwner(record ?? { owner: item.owner })) keys.add(ownerKey(item.owner, item.version))
     }
   }
   return keys
@@ -88,7 +92,7 @@ function snapshotOwnerKeys(authority: AuthorityFile): Set<string> {
 /** Sealed artifacts that approvals, LKG/current, or index retention still depend on. */
 export function requiredBackupRows(authority: AuthorityFile, rows: readonly CandidateIndexRow[]): CandidateIndexRow[] {
   const approved = new Set(authority.governance.approvals.map((item) => item.candidateId))
-  const owners = snapshotOwnerKeys(authority)
+  const owners = snapshotOwnerKeys(authority, rows)
   return rows.filter((row) => {
     if (!row.record.sealed) return false
     const retention = row.retention === 'active' || row.retention === 'sealed' || row.retention === 'rollback-retained'

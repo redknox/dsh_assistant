@@ -87,4 +87,4 @@ These are **Unsupported** unless a later issue explicitly promotes them:
 
 ## 10. Feature freeze (v0.3.x soak)
 
-After annotated tag `v0.3.0` exists on `main`, do not add new user-facing capabilities, providers, tool categories, or Self-Extension authority during the soak. Bug, reliability, security, packaging, diagnostics, usability, and documentation fixes remain in scope. Policy: [docs/soak.md](./docs/soak.md).
+`v0.3.0` is the historical Governance + Mission-Control baseline. The v0.4.0 target is a Self-Developing Product Baseline: self-development is allowed; self-authorization is not. Generated candidates must activate only through the isolated runner. Policy: [docs/soak.md](./docs/soak.md).
