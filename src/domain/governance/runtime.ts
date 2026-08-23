@@ -14,6 +14,7 @@ export interface ActivationPrepareContext {
   readonly permissions?: readonly string[]
   readonly provenanceKind?: string
   readonly origin?: string
+  readonly runtimeContractVersion?: string
 }
 
 export interface IsolatedRuntimeFailure {

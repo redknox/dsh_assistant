@@ -1,7 +1,7 @@
 import { existsSync, readFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import path from 'node:path'
-import { digestFiles } from './digest.js'
+import { contractDigestExtras, digestFiles } from './digest.js'
 import { listSourceFiles } from './files.js'
 import { detectOsNetworkSandbox } from './os-sandbox.js'
 import { runRestrictedCandidateTests, runnerUnavailable } from './restricted-runner.js'
@@ -30,7 +30,7 @@ function stage(
   }
 }
 
-function inspectPackage(root: string): ValidationStageResult {
+function inspectPackage(root: string, generatedV1: boolean): ValidationStageResult {
   const pkgPath = path.join(root, 'package.json')
   if (!existsSync(pkgPath)) {
     return stage('package.inspect', 'not-applicable', 'No package.json in the candidate workspace.')
@@ -49,6 +49,14 @@ function inspectPackage(root: string): ValidationStageResult {
     dependencies: Object.keys(deps),
     lifecycleScripts: lifecycle.map((name) => ({ name, command: scripts[name], executed: false, risk: 'blocked' })),
   })
+  if (generatedV1 && (Object.keys(scripts).length > 0 || Object.keys(deps).length > 0)) {
+    return stage(
+      'package.inspect',
+      'failed',
+      'generated-extension-api/v1 forbids package scripts and dependencies.',
+      { diagnostics },
+    )
+  }
   if (lifecycle.length > 0) {
     return stage(
       'package.inspect',
@@ -65,25 +73,28 @@ function inspectPackage(root: string): ValidationStageResult {
   )
 }
 
-function inspectRuntimeContract(root: string): ValidationStageResult {
-  const stamp = path.join(root, 'generated-extension-api.json')
-  if (!existsSync(stamp)) {
-    return stage('runtime.contract', 'not-applicable', 'No host authoring-contract stamp.')
-  }
-  try {
-    const parsed = JSON.parse(readFileSync(stamp, 'utf8')) as { version?: string }
-    if (parsed.version !== 'generated-extension-api/v1') {
+function inspectRuntimeContract(record: CandidateRecord): ValidationStageResult {
+  const generated = record.provenance.kind === 'generated' || record.owner.startsWith('generated/')
+  const version = record.manifest.runtimeContractVersion
+  if (generated) {
+    if (version !== 'generated-extension-api/v1') {
       return stage(
         'runtime.contract',
         'failed',
-        `Unsupported authoring contract ${String(parsed.version)}.`,
-        { diagnostics: 'unsupported-contract-version' },
+        version === undefined
+          ? 'Generated candidate is missing a host-owned authoring contract version.'
+          : `Unsupported authoring contract ${version}.`,
+        { diagnostics: 'unsupported-or-missing-contract-version' },
       )
     }
     return stage('runtime.contract', 'passed', 'Host authoring contract generated-extension-api/v1.')
-  } catch {
-    return stage('runtime.contract', 'failed', 'Authoring-contract stamp is not valid JSON.')
   }
+  if (version !== undefined && version !== 'generated-extension-api/v1') {
+    return stage('runtime.contract', 'failed', `Unsupported authoring contract ${version}.`, {
+      diagnostics: 'unsupported-contract-version',
+    })
+  }
+  return stage('runtime.contract', 'not-applicable', 'Host authoring contract is not required for this provenance.')
 }
 
 function inspectBoundary(root: string, files: readonly string[]): ValidationStageResult {
@@ -206,13 +217,16 @@ export function runValidation(record: CandidateRecord): ValidationReport {
     reliabilitySummary(reliability),
     { diagnostics: JSON.stringify({ derivedClass: reliability.derivedClass, checks: reliability.checks }) },
   ))
-  stages.push(inspectPackage(record.workspaceRoot))
-  stages.push(inspectRuntimeContract(record.workspaceRoot))
+  stages.push(inspectPackage(
+    record.workspaceRoot,
+    record.manifest.runtimeContractVersion === 'generated-extension-api/v1',
+  ))
+  stages.push(inspectRuntimeContract(record))
   stages.push(inspectBoundary(record.workspaceRoot, files))
   stages.push(runTypecheck(record.workspaceRoot, files))
   stages.push(runTests(record.workspaceRoot, files))
   stages.push(inspectBundle(record.workspaceRoot))
-  const digest = digestFiles(record.workspaceRoot, files)
+  const digest = digestFiles(record.workspaceRoot, files, contractDigestExtras(record.manifest.runtimeContractVersion))
   stages.push(stage('digest', 'passed', `Bound validation evidence to digest ${digest.slice(0, 12)}.`))
   const unresolved = stages.filter((item) => item.status === 'unresolved').map((item) => item.summary)
   const complete = stages.every((item) => item.status === 'passed' || item.status === 'not-applicable')

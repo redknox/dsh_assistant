@@ -2,7 +2,7 @@
 
 Status: **Implemented**. This is the host-owned authoring contract for assistant-generated R0 candidates. A candidate may consume it. It cannot redefine it.
 
-Inspect it at runtime with `inspect_authoring_contract`. Unsupported versions fail closed.
+Inspect it at runtime with `inspect_authoring_contract`. The version is host authority on the candidate manifest, Workbench binding, digest, approval fingerprint, and generated activation. Workspace `generated-extension-api.json` is a read-only mirror. Model writes cannot change it. Unsupported or missing versions fail validation and activation.
 
 ## Entry
 

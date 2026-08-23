@@ -32,4 +32,5 @@ export interface GeneratedPrepareInput {
   readonly digest?: string
   readonly tools: readonly string[]
   readonly permissions: readonly string[]
+  readonly runtimeContractVersion?: string
 }

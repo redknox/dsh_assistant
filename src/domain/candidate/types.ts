@@ -76,6 +76,7 @@ export interface CandidateManifest {
   readonly entryPoints: readonly string[]
   readonly validationTasks: readonly ValidationTaskRequest[]
   readonly riskModel?: RiskModel
+  readonly runtimeContractVersion?: string
 }
 
 export interface CandidateManifestInput {
@@ -91,6 +92,7 @@ export interface CandidateManifestInput {
   readonly entryPoints?: readonly string[]
   readonly validationTasks?: readonly ValidationTaskRequest[]
   readonly riskModel?: RiskModel
+  readonly runtimeContractVersion?: string
 }
 
 export interface CandidateIdentity {
@@ -132,6 +134,7 @@ export interface CandidateDiff {
   readonly providers: NamedDiff
   readonly runtimeSeams: NamedDiff
   readonly effects: OperationalEffects
+  readonly runtimeContractVersion?: string
 }
 
 export interface ValidationStageResult {

@@ -207,6 +207,7 @@ describe('product package and profile', () => {
       || path.includes('candidates/')
       || path.startsWith('.env')
       || path.includes('credentials')
+      || path.includes('conversation-self-dev-adapter')
     ))
     assert.deepEqual(forbidden, [])
   })

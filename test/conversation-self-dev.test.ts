@@ -5,7 +5,7 @@ import path from 'node:path'
 import { describe, it } from 'node:test'
 import { CallId } from '@deepseek-ai/dsh-llm'
 import { SessionId } from '@deepseek-ai/dsh-session'
-import { ConversationSelfDevAdapter, SLUGIFY_IMPLEMENTATION } from '../src/adapters/llm/conversation-self-dev-adapter.js'
+import { ConversationSelfDevAdapter, SLUGIFY_IMPLEMENTATION } from './helpers/conversation-self-dev-adapter.js'
 import { bootAssistantControl, createAssistantAgent } from '../src/runtime/boot.js'
 import { AssistantControlSurface } from '../src/ui/controller.js'
 import { projectMissionControl } from '../src/domain/workspace/index.js'
@@ -46,16 +46,23 @@ describe('conversation self-development', () => {
       assert.ok(tools.includes('plan_capability_change'))
       assert.ok(tools.includes('inspect_authoring_contract'))
       assert.ok(tools.includes('scaffold_candidate'))
+      assert.ok(tools.includes('inspect_validation_diagnostics'))
       assert.ok(tools.includes('write_candidate_file'))
       assert.ok(tools.includes('validate_candidate'))
+      const inspectIdx = snap.conversation.findIndex((item) => item.kind === 'tool_result' && item.text.includes('"stages"'))
+      const writeIdx = snap.conversation.findIndex((item) => item.kind === 'tool_call' && item.toolName === 'write_candidate_file')
+      assert.ok(inspectIdx >= 0 && writeIdx > inspectIdx)
+      assert.match(snap.conversation[inspectIdx]?.text ?? '', /tests|src\/plugin\.js/)
+      assert.doesNotMatch(snap.conversation.slice(0, writeIdx).map((item) => item.text).join('\n'), /SLUGIFY_IMPLEMENTATION/)
       assert.ok(tools.includes('review_candidate'))
       assert.ok(tools.includes('request_extension_approval'))
       assert.ok(snap.conversation.some((item) => item.kind === 'assistant' && item.text.includes('human approval')))
       const listed = JSON.parse(String((await tool(first.ctx, 'list_workbench', {})).value)) as {
-        candidates: { id: string; owner: string }[]
+        candidates: { id: string; owner: string; states?: string[]; step?: string }[]
       }
       const generated = listed.candidates.find((item) => item.owner === 'generated/text-slugify')
       assert.ok(generated)
+      assert.ok(generated.states?.includes('approval-requested') || generated.step === 'request')
       candidateId = generated.id
       const source = first.ctx.candidateWorkbench.readFile(candidateId, 'src/plugin.js')
       assert.match(source, /slugify/)
@@ -76,6 +83,11 @@ describe('conversation self-development', () => {
       })
       const activated = await first.recoveryRoot.activate(candidateId, human)
       assert.equal(activated.state, 'active', activated.lastFailure?.diagnostics)
+      const afterActivate = JSON.parse(String((await tool(first.ctx, 'list_workbench', {})).value)) as {
+        candidates: { id: string; states?: string[]; step?: string }[]
+      }
+      const active = afterActivate.candidates.find((item) => item.id === candidateId)
+      assert.ok(active?.states?.includes('active') || active?.step === 'active')
       const slug = await tool(first.ctx, 'text_slugify', { text: 'Hello World' })
       assert.equal(slug.isError, false, String(slug.value))
       assert.equal(String(slug.value), 'hello-world')
@@ -90,13 +102,20 @@ describe('conversation self-development', () => {
       const again = await tool(second.ctx, 'text_slugify', { text: 'Hello World' })
       assert.equal(String(again.value), 'hello-world')
       const listed = JSON.parse(String((await tool(second.ctx, 'list_workbench', {})).value)) as {
-        candidates: { id: string }[]
+        candidates: { id: string; states?: string[]; step?: string }[]
       }
-      assert.ok(listed.candidates.some((item) => item.id === candidateId))
+      const restored = listed.candidates.find((item) => item.id === candidateId)
+      assert.ok(restored?.states?.includes('active') || restored?.step === 'active')
       const human = second.recoveryRoot.issueAuthority({ kind: 'human-control', source: 'operator-cli' })
       const rolled = await second.recoveryRoot.rollback(human)
       assert.equal(rolled.state, 'rolled-back')
       assert.equal(second.ctx.tools.get('text_slugify'), undefined)
+      const afterRollback = JSON.parse(String((await tool(second.ctx, 'list_workbench', {})).value)) as {
+        candidates: { id: string; states?: string[]; step?: string }[]
+      }
+      const rolledItem = afterRollback.candidates.find((item) => item.id === candidateId)
+      assert.equal(rolledItem?.states?.includes('active'), false)
+      assert.notEqual(rolledItem?.step, 'active')
     } finally {
       await second.ctx.fiber.dispose()
     }

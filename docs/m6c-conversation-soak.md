@@ -1,6 +1,6 @@
 # M6C conversation soak record
 
-Status: **unresolved**
+Status: **unresolved** (no live `DEEPSEEK_API_KEY` in this implementation environment; packed `tars-ng doctor` / `start --once` remain covered by `test/packaging.test.ts`)
 
 This is the secret-safe record required before labeling Candidate Workbench conversation self-development **Verified**.
 

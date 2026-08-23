@@ -54,11 +54,19 @@ function parseBinding(value: unknown, index: number): WorkbenchPersistState['bin
   if (value.parentDigest !== undefined && typeof value.parentDigest !== 'string') {
     throw new PersistenceIntegrityError(`workbench binding ${index} parentDigest is invalid`)
   }
+  if (value.leftover !== undefined && typeof value.leftover !== 'boolean') {
+    throw new PersistenceIntegrityError(`workbench binding ${index} leftover is invalid`)
+  }
+  if (value.runtimeContractVersion !== undefined && typeof value.runtimeContractVersion !== 'string') {
+    throw new PersistenceIntegrityError(`workbench binding ${index} runtimeContractVersion is invalid`)
+  }
   return {
     candidateId: value.candidateId,
     planId: value.planId,
     ...(typeof value.parentId === 'string' ? { parentId: value.parentId } : {}),
     ...(typeof value.parentDigest === 'string' ? { parentDigest: value.parentDigest } : {}),
+    ...(value.leftover === true ? { leftover: true } : {}),
+    ...(typeof value.runtimeContractVersion === 'string' ? { runtimeContractVersion: value.runtimeContractVersion } : {}),
   }
 }
 

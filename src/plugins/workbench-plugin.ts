@@ -1,4 +1,5 @@
 import { Service, type Context } from '@deepseek-ai/cordis'
+import { CORE_KNOWN_SEAMS, type ArchitectureInventory } from '../domain/resolution/index.js'
 import { WorkbenchService, type CandidateWorkbench, type WorkbenchServiceOptions } from '../domain/workbench/index.js'
 import { registerWorkbenchTools } from './workbench-tools.js'
 
@@ -58,6 +59,7 @@ export const WORKBENCH_CONVERSATION_GUIDANCE = [
 export const name = 'dsh-assistant-workbench'
 export const inject = [
   'capabilityResolution',
+  'capabilityRegistry',
   'candidateWorkspace',
   'candidateValidation',
   'independentReview',
@@ -74,7 +76,12 @@ export async function apply(ctx: Context, config: WorkbenchPluginConfig = {}) {
     ctx.candidateValidation,
     ctx.independentReview,
     ctx.extensionGovernance,
-    { restore: config.restore, persist: config.persist },
+    {
+      restore: config.restore,
+      persist: config.persist,
+      inventory: config.inventory ?? { snapshot: () => hostOwnedArchitectureInventory(ctx.capabilityRegistry) },
+      registry: ctx.capabilityRegistry,
+    },
   )
   await ctx.plugin(class extends CandidateWorkbenchService {
     constructor(scope: Context) {
@@ -87,4 +94,11 @@ export async function apply(ctx: Context, config: WorkbenchPluginConfig = {}) {
     text: WORKBENCH_CONVERSATION_GUIDANCE,
   })
   ctx.effect(() => registerWorkbenchTools(ctx.tools, workbench, { inspectOnly: config.inspectOnly }))
+}
+
+function hostOwnedArchitectureInventory(registry: { list(): readonly { runtimeSeams: readonly string[] }[] }): ArchitectureInventory {
+  return {
+    complete: true,
+    seams: [...new Set([...CORE_KNOWN_SEAMS, ...registry.list().flatMap((record) => record.runtimeSeams)])],
+  }
 }

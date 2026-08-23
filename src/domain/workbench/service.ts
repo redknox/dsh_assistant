@@ -1,8 +1,8 @@
 import { closeSync, existsSync, lstatSync, openSync, opendirSync, readFileSync, readSync, statSync } from 'node:fs'
 import { createHash } from 'node:crypto'
 import path from 'node:path'
+import { contractDigestExtras } from '../candidate/digest.js'
 import { defaultProvenance } from '../candidate/manifest.js'
-import { DEFAULT_RESOLUTION_INVENTORY } from '../resolution/inventory.js'
 import { resolveInsideRoot } from '../candidate/paths.js'
 import { SealedCandidateError } from '../candidate/errors.js'
 import type { CandidateManifest, CandidateManifestInput, CandidateRecord, CandidateValidation, CandidateWorkspace } from '../candidate/types.js'
@@ -16,7 +16,7 @@ import {
   boundListLimit,
   candidateStates,
   candidateStep,
-  isLeftoverRepair,
+  encodeListCursor,
   parseListCursor,
   type WorkbenchListView,
 } from './listing.js'
@@ -44,6 +44,8 @@ interface Binding {
   readonly planId: string
   readonly parentId?: string
   readonly parentDigest?: string
+  readonly leftover?: boolean
+  readonly runtimeContractVersion?: string
 }
 
 export class WorkbenchService implements CandidateWorkbench {
@@ -68,17 +70,20 @@ export class WorkbenchService implements CandidateWorkbench {
         planId: binding.planId,
         parentId: binding.parentId,
         parentDigest: binding.parentDigest,
+        leftover: binding.leftover,
+        runtimeContractVersion: binding.runtimeContractVersion,
       })
     }
   }
 
   plan(input: { capability: string; need: string; behavior?: string }): WorkbenchPlanView {
-    const review = this.resolution.review({
+    const inventory = this.options.inventory?.snapshot()
+    const review = failClosedDiscovery(this.resolution.review({
       capability: input.capability,
       need: input.need,
       behavior: input.behavior,
-      inventory: { complete: true, seams: DEFAULT_RESOLUTION_INVENTORY.seams },
-    })
+      ...(inventory === undefined ? {} : { inventory }),
+    }), inventory?.complete === true)
     return this.rememberPlan(review)
   }
 
@@ -110,7 +115,7 @@ export class WorkbenchService implements CandidateWorkbench {
       version: identity.version,
       baseVersion: identity.baseVersion,
       provenance: defaultProvenance(plan.review, identity.owner),
-      manifest: input.manifest,
+      manifest: { ...input.manifest, runtimeContractVersion: '' },
     })
     this.bindings.set(record.id, { planId: plan.id })
     this.flush()
@@ -152,8 +157,8 @@ export class WorkbenchService implements CandidateWorkbench {
       diff: this.workspace.diff(record.id),
       requestEligibility: this.governance.requestEligibility(record.id),
       step: this.stepOf(record.id),
-      leftover: this.leftoverOf(record),
-      contractVersion: readContractVersion(record.workspaceRoot),
+      leftover: binding?.leftover === true,
+      contractVersion: binding?.runtimeContractVersion ?? record.manifest.runtimeContractVersion,
     }
   }
 
@@ -191,13 +196,22 @@ export class WorkbenchService implements CandidateWorkbench {
       }
     }
     for (const [relative, content] of Object.entries(files)) {
+      if (relative === AUTHORING_CONTRACT_STAMP) {
+        this.workspace.writeFile(record.id, relative, content)
+        continue
+      }
       this.writeFile(record.id, relative, content)
     }
-    this.setManifest(record.id, {
+    this.workspace.setManifest(record.id, mergeManifestPatch(this.workspace.get(record.id).manifest, {
       capabilities: record.manifest.capabilities.length > 0 ? [...record.manifest.capabilities] : [capability],
       tools: record.manifest.tools.length > 0 ? [...record.manifest.tools] : [names.toolName],
       entryPoints: record.manifest.entryPoints.length > 0 ? [...record.manifest.entryPoints] : ['src/plugin.js'],
-    })
+    }, authoringContractV1().id))
+    const binding = this.bindings.get(record.id)
+    if (binding) {
+      this.bindings.set(record.id, { ...binding, runtimeContractVersion: authoringContractV1().id })
+    }
+    this.flush()
     return this.inspect(record.id)
   }
 
@@ -207,7 +221,7 @@ export class WorkbenchService implements CandidateWorkbench {
 
   list(input: WorkbenchListInput = {}): WorkbenchListView {
     const limit = boundListLimit(input.limit)
-    const offset = parseListCursor(input.cursor)
+    const cursor = parseListCursor(input.cursor)
     const plans = [...this.plans.values()].map((plan) => ({
       planId: plan.id,
       kind: plan.review.kind,
@@ -226,7 +240,7 @@ export class WorkbenchService implements CandidateWorkbench {
           sealed: record.sealed,
           reviewState: view.review?.state,
           approval: this.governance.inspectApproval(record.id)?.decision,
-          registryStatus: undefined,
+          registryStatus: this.options.registry?.get(record.owner, record.version)?.status,
         }),
         step: view.step,
         planId: view.planId,
@@ -234,11 +248,19 @@ export class WorkbenchService implements CandidateWorkbench {
         leftover: view.leftover,
       }
     })
-    const slice = candidates.slice(offset, offset + limit)
-    const next = offset + limit < candidates.length ? String(offset + limit) : undefined
+    const planSlice = plans.slice(cursor.plans, cursor.plans + limit)
+    const candidateSlice = candidates.slice(cursor.candidates, cursor.candidates + limit)
+    const nextPlans = cursor.plans + limit
+    const nextCandidates = cursor.candidates + limit
+    const next = nextPlans < plans.length || nextCandidates < candidates.length
+      ? encodeListCursor({
+        plans: Math.min(nextPlans, plans.length),
+        candidates: Math.min(nextCandidates, candidates.length),
+      })
+      : undefined
     return {
-      plans: plans.slice(0, limit),
-      candidates: slice,
+      plans: planSlice,
+      candidates: candidateSlice,
       ...(next === undefined ? {} : { nextCursor: next }),
     }
   }
@@ -260,6 +282,9 @@ export class WorkbenchService implements CandidateWorkbench {
 
   writeFile(candidateId: string, relativePath: string, content: string): WorkbenchCandidateView {
     assertRelativePath(relativePath)
+    if (relativePath === AUTHORING_CONTRACT_STAMP || relativePath === 'candidate.manifest.json' || relativePath.startsWith('.dsh/')) {
+      throw new WorkbenchContractError(`candidate write cannot change host-owned path: ${relativePath}`)
+    }
     if (Buffer.byteLength(content, 'utf8') > WORKBENCH_MAX_FILE_BYTES) {
       throw new WorkbenchContractError(`candidate write exceeds the ${WORKBENCH_MAX_FILE_BYTES} byte bound`)
     }
@@ -352,11 +377,14 @@ export class WorkbenchService implements CandidateWorkbench {
           effects: parent.manifest.effects,
           entryPoints: [...parent.manifest.entryPoints],
           riskModel: parent.manifest.riskModel,
+          runtimeContractVersion: parent.manifest.runtimeContractVersion ?? '',
         },
       })
       createdId = created.id
       this.bindings.set(created.id, {
         planId: binding?.planId ?? inheritedPlanId ?? `inherited-${parent.id}`,
+        leftover: false,
+        runtimeContractVersion: parent.manifest.runtimeContractVersion,
         parentId: parent.id,
         parentDigest: parent.digest,
       })
@@ -379,6 +407,8 @@ export class WorkbenchService implements CandidateWorkbench {
         planId: binding.planId,
         ...(binding.parentId === undefined ? {} : { parentId: binding.parentId }),
         ...(binding.parentDigest === undefined ? {} : { parentDigest: binding.parentDigest }),
+        ...(binding.leftover === true ? { leftover: true } : {}),
+        ...(binding.runtimeContractVersion === undefined ? {} : { runtimeContractVersion: binding.runtimeContractVersion }),
       })),
     }
   }
@@ -398,6 +428,8 @@ export class WorkbenchService implements CandidateWorkbench {
       rollbackError = error
     }
     if (rollbackError !== undefined) {
+      const leftover = this.bindings.get(childId)
+      if (leftover) this.bindings.set(childId, { ...leftover, leftover: true })
       try {
         this.flush()
       } catch (error) {
@@ -433,17 +465,6 @@ export class WorkbenchService implements CandidateWorkbench {
     return this.governance.requestApproval(candidateId)
   }
 
-  private leftoverOf(record: CandidateRecord): boolean {
-    const parentId = this.bindings.get(record.id)?.parentId
-    let files: readonly string[] = []
-    try {
-      files = listBoundedFiles(record.workspaceRoot)
-    } catch {
-      return Boolean(parentId)
-    }
-    return isLeftoverRepair(record, parentId, files)
-  }
-
   private stepOf(candidateId: string) {
     const record = this.workspace.get(candidateId)
     return candidateStep({
@@ -452,6 +473,7 @@ export class WorkbenchService implements CandidateWorkbench {
       reviewState: this.independentReview.status({ id: record.id, digest: record.digest }),
       canRequest: this.governance.requestEligibility(record.id).ok,
       approval: this.governance.inspectApproval(record.id)?.decision,
+      registryStatus: this.options.registry?.get(record.owner, record.version)?.status,
     })
   }
 }
@@ -507,7 +529,11 @@ function reviewFromRecord(record: CandidateRecord): ResolutionReview {
   }
 }
 
-function mergeManifestPatch(current: CandidateManifest, patch: CandidateManifestInput): CandidateManifestInput {
+function mergeManifestPatch(
+  current: CandidateManifest,
+  patch: CandidateManifestInput,
+  hostContract?: string,
+): CandidateManifestInput {
   return {
     capabilities: patch.capabilities ?? current.capabilities,
     permissions: patch.permissions ?? current.permissions,
@@ -528,6 +554,23 @@ function mergeManifestPatch(current: CandidateManifest, patch: CandidateManifest
     entryPoints: patch.entryPoints ?? current.entryPoints,
     validationTasks: patch.validationTasks ?? current.validationTasks,
     riskModel: patch.riskModel ?? current.riskModel,
+    runtimeContractVersion: hostContract ?? current.runtimeContractVersion ?? '',
+  }
+}
+
+function failClosedDiscovery(review: ResolutionReview, hostInventoryComplete: boolean): ResolutionReview {
+  if (hostInventoryComplete) return review
+  const status = review.discoveryFacts?.status
+  if (review.kind !== 'new-plugin' || (status !== 'unavailable' && status !== 'incomplete')) return review
+  return {
+    ...review,
+    kind: 'insufficient-information',
+    recommendation: 'Gather discovery or a host-owned complete inventory before treating the capability as new.',
+    rationale: 'Discovery is unavailable or incomplete; unknown is not proof the capability is new.',
+    unresolved: [
+      ...review.unresolved,
+      'Discovery is unavailable or incomplete; Workbench will not treat absence as a new plugin.',
+    ],
   }
 }
 
@@ -567,6 +610,12 @@ function snapshotRepairParent(parent: CandidateRecord): RepairSnapshot {
     hash.update(bytes)
     hash.update('\0')
     files.push({ relative, bytes })
+  }
+  for (const extra of contractDigestExtras(parent.manifest.runtimeContractVersion)) {
+    hash.update(extra.name)
+    hash.update('\0')
+    hash.update(extra.payload)
+    hash.update('\0')
   }
   const digest = hash.digest('hex')
   if (digest !== parent.digest) {
@@ -664,17 +713,6 @@ function tryRead(
 ): string | undefined {
   try {
     return workspace.readFile(candidateId, relativePath)
-  } catch {
-    return undefined
-  }
-}
-
-function readContractVersion(root: string): string | undefined {
-  const dest = path.join(root, AUTHORING_CONTRACT_STAMP)
-  if (!existsSync(dest)) return undefined
-  try {
-    const parsed = JSON.parse(readFileSync(dest, 'utf8')) as { version?: string }
-    return typeof parsed.version === 'string' ? parsed.version : undefined
   } catch {
     return undefined
   }

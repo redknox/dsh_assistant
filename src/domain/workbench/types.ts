@@ -31,6 +31,8 @@ export interface WorkbenchBinding {
   readonly planId: string
   readonly parentId?: string
   readonly parentDigest?: string
+  readonly leftover?: boolean
+  readonly runtimeContractVersion?: string
 }
 
 export interface WorkbenchPersistState {
@@ -106,6 +108,8 @@ export interface WorkbenchListInput {
 export interface WorkbenchServiceOptions {
   readonly restore?: WorkbenchPersistState
   readonly persist?: (state: WorkbenchPersistState) => void
+  readonly inventory?: { snapshot(): import('../resolution/types.js').ArchitectureInventory }
+  readonly registry?: { get(owner: string, version: string): { status: string } | undefined }
 }
 
 export interface CandidateWorkbench {

@@ -22,6 +22,7 @@ import {
 import { WORKBENCH_CONVERSATION_GUIDANCE } from '../src/plugins/workbench-plugin.js'
 import { googleCalendarWriteRiskModel } from '../src/domain/reliability/index.js'
 import { RecoveryRoot } from '../src/domain/governance/index.js'
+import { CatalogDiscovery } from '../src/domain/discovery/index.js'
 import { InMemoryRegistryPersistence, RegistryService, bootstrapCoreInventory } from '../src/domain/registry/index.js'
 import { ResolutionService } from '../src/domain/resolution/index.js'
 import { PolicyReviewerProvider, ReviewService, finding, reviewPackageFromCandidate } from '../src/domain/review/index.js'
@@ -480,8 +481,12 @@ describe('candidate workbench', () => {
     setup.workbench.review(parentId)
     const originalWrite = setup.workspace.writeFile.bind(setup.workspace)
     const originalDiscard = setup.workspace.discard.bind(setup.workspace)
+    let childWrites = 0
     setup.workspace.writeFile = (id: string, relativePath: string, content: string) => {
-      if (id !== parentId) throw new WorkbenchContractError('injected copy failure')
+      if (id !== parentId) {
+        childWrites += 1
+        if (childWrites > 1) throw new WorkbenchContractError('injected copy failure')
+      }
       return originalWrite(id, relativePath, content)
     }
     setup.workspace.discard = () => {
@@ -493,7 +498,8 @@ describe('candidate workbench', () => {
       assert.match(error.message, /disk full/)
       assert.match(error.message, /injected copy failure/)
       assert.equal(setup.workspace.list().some((item) => item.id === error.leftoverCandidateId), true)
-      assert.equal(setup.workbench.exportState().bindings.some((item) => item.candidateId === error.leftoverCandidateId), true)
+      assert.equal(setup.workbench.exportState().bindings.some((item) => item.candidateId === error.leftoverCandidateId && item.leftover === true), true)
+      assert.equal(setup.workbench.list().candidates.find((item) => item.id === error.leftoverCandidateId)?.leftover, true)
       return true
     })
     setup.workspace.writeFile = originalWrite
@@ -552,6 +558,7 @@ describe('candidate workbench', () => {
         entryPoints: ['src/plugin.js'],
       }))
       const id = String(created.id)
+      stampContract(ctx.candidateWorkspace, id)
       parse(await tool(ctx, 'set_candidate_manifest', {
         candidateId: id,
         permissions: ['local.fake.suite'],
@@ -754,6 +761,9 @@ describe('candidate workbench', () => {
       assert.equal(plan.kind, 'new-plugin')
       const created = parse(await tool(ctx, 'create_candidate', { planId: plan.planId }))
       const id = String(created.id)
+      const unscaffolded = parse(await tool(ctx, 'validate_candidate', { candidateId: id }))
+      assert.equal((unscaffolded.validation as { passed: boolean }).passed, false)
+      assert.ok(((unscaffolded.validation as { failed: string[] }).failed).includes('runtime.contract'))
       parse(await tool(ctx, 'scaffold_candidate', {
         candidateId: id,
         toolName: 'text_slugify',
@@ -765,14 +775,46 @@ describe('candidate workbench', () => {
       const pkg = JSON.parse(ctx.candidateWorkbench.readFile(id, 'package.json')) as { scripts?: unknown; dependencies?: unknown }
       assert.equal(pkg.scripts, undefined)
       assert.equal(pkg.dependencies, undefined)
-      assert.equal(ctx.candidateWorkbench.readFile(id, 'generated-extension-api.json').includes(GENERATED_EXTENSION_API_V1), true)
-      ctx.candidateWorkbench.writeFile(id, 'generated-extension-api.json', `${JSON.stringify({ version: 'generated-extension-api/v99' })}\n`)
+      assert.equal((await tool(ctx, 'write_candidate_file', {
+        candidateId: id,
+        path: 'generated-extension-api.json',
+        content: `${JSON.stringify({ version: 'generated-extension-api/v99' })}\n`,
+      })).isError, true)
+      ctx.candidateWorkspace.writeFile(id, 'package.json', `${JSON.stringify({
+        name: 'generated-text-slugify',
+        type: 'module',
+        main: 'src/plugin.js',
+        dependencies: { leftpad: '1.0.0' },
+        scripts: { test: 'node --test' },
+      }, null, 2)}\n`)
+      const deps = parse(await tool(ctx, 'validate_candidate', { candidateId: id }))
+      assert.equal((deps.validation as { passed: boolean }).passed, false)
+      assert.ok(((deps.validation as { failed: string[] }).failed).includes('package.inspect'))
+      const current = ctx.candidateWorkspace.get(id).manifest
+      ctx.candidateWorkspace.setManifest(id, { ...current, runtimeContractVersion: 'generated-extension-api/v99' })
       const failed = parse(await tool(ctx, 'validate_candidate', { candidateId: id }))
       assert.equal((failed.validation as { passed: boolean }).passed, false)
       assert.ok(((failed.validation as { failed: string[] }).failed).includes('runtime.contract'))
       assert.equal(ctx.capabilityRegistry.get('generated/text-slugify', '0.1.0'), undefined)
       const inventory = JSON.stringify([...PRODUCT_TOOL_NAMES, ...Object.keys(ctx.tools)])
       assert.doesNotMatch(inventory, /approve_extension|activate_extension|rollback_extension|shell|sandbox-root/)
+      const missing = isolatedWorkbench()
+      const blocked = missing.workbench.plan({ capability: 'text.slugify', need: 'slug' })
+      assert.equal(blocked.kind, 'insufficient-information')
+      const closed = isolatedUnavailableDiscovery().workbench.plan({ capability: 'text.slugify', need: 'slug' })
+      assert.equal(closed.kind, 'insufficient-information')
+      const incomplete = isolatedUnavailableDiscovery('incomplete').workbench.plan({ capability: 'text.slugify', need: 'slug' })
+      assert.equal(incomplete.kind, 'insufficient-information')
+      assert.equal((await tool(ctx, 'list_workbench', { cursor: 'nope' })).isError, true)
+      const paging = isolatedWorkbench()
+      paging.workbench.rememberPlan(paging.review)
+      paging.workbench.rememberPlan(paging.review)
+      const firstPage = paging.workbench.list({ limit: 1 })
+      assert.equal(firstPage.plans.length, 1)
+      assert.ok(firstPage.nextCursor)
+      const nextPage = paging.workbench.list({ limit: 1, cursor: firstPage.nextCursor })
+      assert.equal(nextPage.plans.length, 1)
+      assert.notEqual(nextPage.plans[0]?.planId, firstPage.plans[0]?.planId)
     } finally {
       await ctx.fiber.dispose()
     }
@@ -795,7 +837,15 @@ describe('candidate workbench', () => {
           startedAt: '2026-08-23T00:00:00.000Z',
           endedAt: '2026-08-23T00:00:00.000Z',
           evidence: 'Implemented',
-          diagnostics: `/Users/konghaifeng/secret/candidate/src/bad.ts TOKEN=supersecret ${'x'.repeat(4000)}`,
+          diagnostics: `/Users/konghaifeng/secret/candidate/src/bad.ts TOKEN=supersecret ${'x'.repeat(1800)}`,
+        }, {
+          name: 'tests',
+          status: 'failed',
+          summary: 'Candidate tests failed.',
+          startedAt: '2026-08-23T00:00:00.000Z',
+          endedAt: '2026-08-23T00:00:00.000Z',
+          evidence: 'Implemented',
+          diagnostics: 'file:///workspace/root/src/plugin.js and /root/secret and C:\\\\Users\\\\x\\\\src\\\\plugin.js and /usr/bin/node',
         }],
       },
     })
@@ -805,6 +855,10 @@ describe('candidate workbench', () => {
     assert.equal(view.truncated, true)
     assert.match(view.stages[0]?.diagnostic ?? '', /\[truncated\]/)
     assert.equal(view.stages[0]?.file, 'src/bad.ts')
+    assert.equal(view.stages[1]?.name, 'tests')
+    assert.equal(view.stages[1]?.status, 'failed')
+    assert.doesNotMatch(JSON.stringify(view.stages[1]), /\/workspace|\/root\/secret|C:\\\\Users|\/usr\/bin/)
+    assert.equal(view.stages[1]?.file, 'src/plugin.js')
 
     const policy = new PolicyReviewerProvider((pkg) => [finding({
       reviewedDigest: pkg.candidate.digest,
@@ -875,9 +929,20 @@ function authorR0(ctx: Awaited<ReturnType<typeof bootAssistantControl>>['ctx']):
     planId: plan.planId,
     manifest: { capabilities: ['r0.workbench.ping'], tools: ['r0_workbench_ping'], entryPoints: ['src/plugin.js'] },
   })
+  stampContract(ctx.candidateWorkspace, created.id)
   ctx.candidateWorkbench.writeFile(created.id, 'src/plugin.js', R0_SOURCE)
   ctx.candidateWorkbench.writeFile(created.id, 'package.json', `${JSON.stringify({ name: 'dsh-generated-r0-workbench', type: 'module', main: 'src/plugin.js' }, null, 2)}\n`)
   return created.id
+}
+
+function stampContract(workspace: { get(id: string): { manifest: { capabilities: readonly string[]; tools: readonly string[]; entryPoints: readonly string[] } }; setManifest(id: string, manifest: Record<string, unknown>): unknown }, id: string) {
+  const manifest = workspace.get(id).manifest
+  workspace.setManifest(id, {
+    capabilities: [...manifest.capabilities],
+    tools: [...manifest.tools],
+    entryPoints: [...manifest.entryPoints],
+    runtimeContractVersion: GENERATED_EXTENSION_API_V1,
+  })
 }
 
 function snapshotWorkbench(setup: ReturnType<typeof isolatedWorkbench>) {
@@ -907,6 +972,7 @@ function draftIsolated(setup: ReturnType<typeof isolatedWorkbench>): string {
     planId: setup.workbench.rememberPlan(setup.review).planId,
     manifest: { capabilities: ['r0.workbench.ping'], tools: ['r0_workbench_ping'], entryPoints: ['src/plugin.js'] },
   })
+  stampContract(setup.workspace, created.id)
   setup.workbench.writeFile(created.id, 'src/plugin.js', R0_SOURCE)
   setup.workbench.writeFile(created.id, 'package.json', `${JSON.stringify({ name: 'dsh-r0', type: 'module', main: 'src/plugin.js' }, null, 2)}\n`)
   return created.id
@@ -936,7 +1002,20 @@ function isolatedWorkbench(provider?: PolicyReviewerProvider, options: { persist
     workspace,
     independent,
     root.service,
-    { persist: options.persist },
+    { persist: options.persist, registry },
   )
   return { workbench, workspace, review, governance: root.service, registry, independent }
+}
+
+function isolatedUnavailableDiscovery(status: 'unavailable' | 'incomplete' = 'unavailable') {
+  const setup = isolatedWorkbench()
+  const workbench = new WorkbenchService(
+    new ResolutionService(setup.registry, new CatalogDiscovery({ status })),
+    setup.workspace,
+    setup.workspace,
+    setup.independent,
+    setup.governance,
+    { registry: setup.registry },
+  )
+  return { ...setup, workbench }
 }

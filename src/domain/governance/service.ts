@@ -1,5 +1,5 @@
 import { existsSync } from 'node:fs'
-import { digestFiles } from '../candidate/digest.js'
+import { contractDigestExtras, digestFiles } from '../candidate/digest.js'
 import { listSourceFiles } from '../candidate/files.js'
 import { isolatedRuntimeOwner, requiresIsolatedGeneratedRuntime } from '../generated-runtime/trust.js'
 import type { CapabilityRegistry, RegistryRegisterInput } from '../registry/types.js'
@@ -503,7 +503,11 @@ export class GovernanceService implements ExtensionGovernance, ExtensionActivati
   private verifySealedArtifact(record: CandidateRecord): string | undefined {
     if (!existsSync(record.workspaceRoot)) return `missing-active-artifact:${record.id}`
     if (record.digest === undefined) return `digest-mismatch:${record.id}`
-    const digest = digestFiles(record.workspaceRoot, listSourceFiles(record.workspaceRoot))
+    const digest = digestFiles(
+      record.workspaceRoot,
+      listSourceFiles(record.workspaceRoot),
+      contractDigestExtras(record.manifest.runtimeContractVersion),
+    )
     if (digest !== record.digest) return `digest-mismatch:${record.id}`
     return undefined
   }
@@ -560,7 +564,11 @@ export class GovernanceService implements ExtensionGovernance, ExtensionActivati
     if (record.digest === undefined || record.validation?.digest !== record.digest) {
       denials.push({ reason: 'digest-mismatch', detail: 'validation digest does not match the sealed artifact' })
     } else if (existsSync(record.workspaceRoot)) {
-      const live = digestFiles(record.workspaceRoot, listSourceFiles(record.workspaceRoot))
+      const live = digestFiles(
+        record.workspaceRoot,
+        listSourceFiles(record.workspaceRoot),
+        contractDigestExtras(record.manifest.runtimeContractVersion),
+      )
       if (live !== record.digest) {
         denials.push({ reason: 'digest-mismatch', detail: 'sealed artifact no longer matches the approved digest' })
       }
@@ -705,6 +713,7 @@ export class GovernanceService implements ExtensionGovernance, ExtensionActivati
       permissions: record.manifest.permissions,
       provenanceKind: record.provenance.kind,
       origin: record.provenance.origin,
+      runtimeContractVersion: record.manifest.runtimeContractVersion,
     }
   }
 

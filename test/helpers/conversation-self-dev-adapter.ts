@@ -25,16 +25,24 @@ export function apply(ctx) {
 }
 `
 
-/** Scripted model for the conversation self-development slice. Fake LLM; real DSH loop/tools. */
+/** Scripted model fixture. Fake LLM; real DSH loop/tools. Not a product adapter. */
 export class ConversationSelfDevAdapter extends LlmAdapter {
+  private turns = 0
+
   async *stream(options: GenerateOptions): AsyncGenerator<StreamChunk> {
     if (options.signal?.aborted) throw options.signal.reason
+    this.turns += 1
+    if (this.turns > 12) {
+      yield* emitText('Conversation fixture stopped after too many model turns.')
+      return
+    }
     const parsed = toolJsons(options.messages)
     const plan = parsed.find((item) => typeof item.planId === 'string' && item.kind === 'new-plugin')
     const views = parsed.filter((item) => typeof item.id === 'string' && typeof item.owner === 'string')
     const candidate = views.at(-1)
-    const stamped = views.filter((item) => item.contractVersion === 'generated-extension-api/v1')
     const validation = [...views].reverse().find((item) => item.validation && typeof item.validation === 'object')
+    const diagnostics = parsed.filter((item) => Array.isArray(item.stages))
+    const last = parsed.at(-1)
     const reviewed = parsed.find((item) => item.state === 'review-complete')
     const requested = parsed.find((item) => item.decision === 'approval-requested')
 
@@ -54,9 +62,15 @@ export class ConversationSelfDevAdapter extends LlmAdapter {
       yield* emitToolCalls([{ name: 'seal_candidate', arguments: { candidateId: candidate.id } }])
       return
     }
-    if (candidate && validation && !validationPassed(validation)) {
+    if (candidate && last && Array.isArray(last.stages)) {
+      const stages = last.stages as { name?: string; file?: string }[]
+      const implementation = stages.find((item) => item.file === 'src/plugin.js')
+      const tests = stages.find((item) => item.name === 'tests' || item.file?.includes('plugin.test'))
+      if (implementation === undefined && tests === undefined) {
+        yield* emitText('Validation diagnostics did not identify a retryable source file.')
+        return
+      }
       yield* emitToolCalls([
-        { name: 'inspect_validation_diagnostics', arguments: { candidateId: candidate.id } },
         {
           name: 'write_candidate_file',
           arguments: { candidateId: candidate.id, path: 'src/plugin.js', content: SLUGIFY_IMPLEMENTATION },
@@ -65,15 +79,12 @@ export class ConversationSelfDevAdapter extends LlmAdapter {
       ])
       return
     }
-    if (candidate && stamped.length >= 2 && !validation) {
-      yield* emitToolCalls([{ name: 'validate_candidate', arguments: { candidateId: candidate.id } }])
+    if (candidate && validation && !validationPassed(validation) && diagnostics.length === 0) {
+      yield* emitToolCalls([{ name: 'inspect_validation_diagnostics', arguments: { candidateId: candidate.id } }])
       return
     }
-    if (candidate && stamped.length === 1 && !validation) {
-      yield* emitToolCalls([{
-        name: 'write_candidate_file',
-        arguments: { candidateId: candidate.id, path: 'src/plugin.js', content: SLUGIFY_IMPLEMENTATION },
-      }])
+    if (candidate && candidate.contractVersion === 'generated-extension-api/v1' && !validation) {
+      yield* emitToolCalls([{ name: 'validate_candidate', arguments: { candidateId: candidate.id } }])
       return
     }
     if (candidate) {

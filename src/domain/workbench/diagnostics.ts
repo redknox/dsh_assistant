@@ -1,7 +1,8 @@
+import { pathToFileURL } from 'node:url'
 import type { CandidateRecord, ValidationStageResult } from '../candidate/types.js'
 
 export const WORKBENCH_DIAGNOSTIC_STAGE_CHARS = 512
-export const WORKBENCH_DIAGNOSTIC_TOTAL_CHARS = 2048
+export const WORKBENCH_DIAGNOSTIC_TOTAL_BYTES = 4096
 
 export interface ValidationStageDiagnostic {
   readonly name: string
@@ -21,53 +22,63 @@ export interface ValidationDiagnosticsView {
   readonly truncated: boolean
 }
 
-const ABS_PATH = /(?:^|[\s"'`=(])(\/(?:Users|home|tmp|var|etc|private)[^\s"'`)>\]]+)/g
+const POSIX_ABS = /(?:^|[^\w./-])((?:file:\/\/)?\/[^\s"'`)>\]]+)/g
+const WIN_ABS = /(?:^|[^\w./-])((?:file:\/\/\/)?[A-Za-z]:\\[^\s"'`)>\]]+)/g
+const WIN_FWD = /(?:^|[^\w./-])((?:file:\/\/\/)?[A-Za-z]:\/[^\s"'`)>\]]+)/g
 const SECRETISH = /(?:api[_-]?key|token|secret|password|authorization)\s*[:=]\s*\S+/gi
+const RELATIVE_FILE = /(?:src\/[A-Za-z0-9._/-]+\.(?:js|ts|mjs|cjs)|package\.json|generated-extension-api\.json)/
 
 export function projectValidationDiagnostics(
   record: Pick<CandidateRecord, 'id' | 'workspaceRoot' | 'validation'>,
 ): ValidationDiagnosticsView {
-  const stages: ValidationStageDiagnostic[] = []
-  let used = 0
-  let truncated = false
-  for (const stage of record.validation?.stages ?? []) {
-    const raw = sanitizeDiagnostic(stage.diagnostics ?? stage.summary, record.workspaceRoot)
-    const budget = Math.max(0, WORKBENCH_DIAGNOSTIC_TOTAL_CHARS - used)
-    const { text, truncated: stageTruncated } = boundText(raw, Math.min(WORKBENCH_DIAGNOSTIC_STAGE_CHARS, budget))
-    if (raw.length > 0 && budget === 0) {
-      truncated = true
-      break
-    }
-    used += text.length
-    truncated = truncated || stageTruncated
-    stages.push({
-      name: stage.name,
-      status: stage.status,
-      summary: sanitizeDiagnostic(stage.summary, record.workspaceRoot).slice(0, 240),
-      ...(text ? { diagnostic: text } : {}),
-      ...(inferRelativeFile(raw, record.workspaceRoot) ? { file: inferRelativeFile(raw, record.workspaceRoot) } : {}),
-      retryable: stage.status === 'failed' || stage.status === 'unresolved',
-      ...(stage.status === 'unresolved' ? { unresolved: stage.summary } : {}),
-      truncated: stageTruncated,
-    })
-  }
-  return {
+  const stages = (record.validation?.stages ?? []).map((stage) => projectStage(stage, record.workspaceRoot))
+  return boundDiagnosticsView({
     candidateId: record.id,
     passed: record.validation?.passed === true,
     stages,
-    truncated,
-  }
+    truncated: stages.some((item) => item.truncated),
+  })
 }
 
 export function sanitizeDiagnostic(text: string, workspaceRoot?: string): string {
   let out = text.replaceAll('\0', '')
-  if (workspaceRoot) {
-    out = out.split(workspaceRoot).join('')
-    out = out.split(workspaceRoot.replaceAll('\\', '/')).join('')
+  for (const variant of rootVariants(workspaceRoot)) {
+    out = out.split(variant).join('')
   }
-  out = out.replace(ABS_PATH, ' [path]')
+  out = replaceAbs(out, POSIX_ABS, workspaceRoot)
+  out = replaceAbs(out, WIN_ABS, workspaceRoot)
+  out = replaceAbs(out, WIN_FWD, workspaceRoot)
   out = out.replace(SECRETISH, '[redacted]')
   return out.replaceAll(/\/{2,}/g, '/').trim()
+}
+
+function projectStage(stage: ValidationStageResult, workspaceRoot?: string): ValidationStageDiagnostic {
+  const raw = sanitizeDiagnostic(stage.diagnostics ?? '', workspaceRoot)
+  const { text, truncated } = boundText(raw, WORKBENCH_DIAGNOSTIC_STAGE_CHARS)
+  return {
+    name: stage.name,
+    status: stage.status,
+    summary: sanitizeDiagnostic(stage.summary, workspaceRoot).slice(0, 240),
+    ...(text ? { diagnostic: text } : {}),
+    ...(inferRelativeFile(`${stage.summary} ${raw}`, workspaceRoot) ? { file: inferRelativeFile(`${stage.summary} ${raw}`, workspaceRoot) } : {}),
+    retryable: stage.status === 'failed' || stage.status === 'unresolved',
+    ...(stage.status === 'unresolved' ? { unresolved: sanitizeDiagnostic(stage.summary, workspaceRoot).slice(0, 240) } : {}),
+    truncated,
+  }
+}
+
+function boundDiagnosticsView(view: ValidationDiagnosticsView): ValidationDiagnosticsView {
+  let stages = [...view.stages]
+  let truncated = view.truncated
+  while (Buffer.byteLength(JSON.stringify({ ...view, stages }), 'utf8') > WORKBENCH_DIAGNOSTIC_TOTAL_BYTES && stages.some((item) => item.diagnostic)) {
+    truncated = true
+    const index = stages.map((item) => item.diagnostic?.length ?? 0).reduce((best, length, i, all) => length >= (all[best] ?? 0) ? i : best, 0)
+    const current = stages[index]
+    if (!current?.diagnostic) break
+    const next = current.diagnostic.length <= 12 ? undefined : `${current.diagnostic.slice(0, Math.max(12, current.diagnostic.length - 64))}[truncated]`
+    stages[index] = { ...current, diagnostic: next, truncated: true }
+  }
+  return { ...view, stages, truncated }
 }
 
 function boundText(text: string, max: number): { text: string; truncated: boolean } {
@@ -76,11 +87,30 @@ function boundText(text: string, max: number): { text: string; truncated: boolea
   return { text: `${text.slice(0, max - 12)}[truncated]`, truncated: true }
 }
 
+function replaceAbs(text: string, pattern: RegExp, workspaceRoot?: string): string {
+  return text.replace(pattern, (match, abs: string) => match.replace(abs, inferRelativeFile(abs, workspaceRoot) ?? '[path]'))
+}
+
 function inferRelativeFile(text: string, workspaceRoot?: string): string | undefined {
-  const match = text.match(/(src\/[A-Za-z0-9._/-]+\.(?:js|ts|mjs|cjs)|package\.json|generated-extension-api\.json)/)
-  if (match?.[1]) return match[1]
+  const match = text.match(RELATIVE_FILE)
+  if (match?.[0]) return match[0]
   if (!workspaceRoot) return undefined
-  const escaped = workspaceRoot.replaceAll(/[.*+?^${}()|[\]\\]/g, '\\$&')
-  const rooted = text.match(new RegExp(`${escaped}[/\\\\]([^\\s:'\"]+)`))
-  return rooted?.[1]?.replaceAll('\\', '/')
+  for (const variant of rootVariants(workspaceRoot)) {
+    const escaped = variant.replaceAll(/[.*+?^${}()|[\]\\]/g, '\\$&')
+    const rooted = text.match(new RegExp(`${escaped}[/\\\\]([^\\s:'\"]+)`))
+    if (rooted?.[1]) return rooted[1].replaceAll('\\', '/')
+  }
+  return undefined
+}
+
+function rootVariants(workspaceRoot?: string): readonly string[] {
+  if (!workspaceRoot) return []
+  const posix = workspaceRoot.replaceAll('\\', '/')
+  const variants = [workspaceRoot, posix]
+  try {
+    variants.push(pathToFileURL(workspaceRoot).href)
+  } catch {
+    // ignore invalid roots
+  }
+  return [...new Set(variants)]
 }

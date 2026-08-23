@@ -1,6 +1,7 @@
-import type { CandidateLifecycle, CandidateRecord } from '../candidate/types.js'
+import type { CandidateLifecycle } from '../candidate/types.js'
 import type { ApprovalDecision } from '../governance/types.js'
 import type { ReviewState } from '../review/types.js'
+import { WorkbenchContractError } from './errors.js'
 
 export const WORKBENCH_LIST_DEFAULT = 20
 export const WORKBENCH_LIST_MAX = 50
@@ -51,17 +52,36 @@ export interface WorkbenchListView {
   readonly nextCursor?: string
 }
 
+export interface WorkbenchListCursor {
+  readonly plans: number
+  readonly candidates: number
+}
+
 export function boundListLimit(limit?: number): number {
   if (limit === undefined) return WORKBENCH_LIST_DEFAULT
-  if (!Number.isInteger(limit) || limit < 1) return WORKBENCH_LIST_DEFAULT
+  if (!Number.isInteger(limit) || limit < 1) {
+    throw new WorkbenchContractError('list limit must be a positive integer')
+  }
   return Math.min(limit, WORKBENCH_LIST_MAX)
 }
 
-export function parseListCursor(cursor?: string): number {
-  if (cursor === undefined || cursor === '') return 0
-  const offset = Number(cursor)
-  if (!Number.isInteger(offset) || offset < 0) return 0
-  return offset
+export function parseListCursor(cursor?: string): WorkbenchListCursor {
+  if (cursor === undefined || cursor === '') return { plans: 0, candidates: 0 }
+  try {
+    const parsed = JSON.parse(cursor) as { plans?: unknown; candidates?: unknown }
+    const plans = parsed.plans
+    const candidates = parsed.candidates
+    if (!Number.isInteger(plans) || !Number.isInteger(candidates) || Number(plans) < 0 || Number(candidates) < 0) {
+      throw new Error('invalid')
+    }
+    return { plans: Number(plans), candidates: Number(candidates) }
+  } catch {
+    throw new WorkbenchContractError('list cursor is invalid')
+  }
+}
+
+export function encodeListCursor(cursor: WorkbenchListCursor): string {
+  return JSON.stringify(cursor)
 }
 
 export function candidateStates(input: {
@@ -80,7 +100,9 @@ export function candidateStates(input: {
   }
   if (input.reviewState === 'changes-required') states.push('changes-required')
   if (input.approval === 'approval-requested') states.push('approval-requested')
-  if (input.approval === 'superseded' || input.registryStatus === 'retired') states.push('superseded')
+  if (input.approval === 'superseded' || input.registryStatus === 'retired' || input.registryStatus === 'disabled') {
+    states.push('superseded')
+  }
   if (input.registryStatus === 'active') states.push('active')
   return states
 }
@@ -101,10 +123,4 @@ export function candidateStep(input: {
   if (input.lifecycle === 'validation-failed' || input.lifecycle === 'validation-incomplete') return 'validate'
   if (!input.sealed) return 'author'
   return 'review'
-}
-
-export function isLeftoverRepair(record: CandidateRecord, parentId?: string, files: readonly string[] = []): boolean {
-  if (!parentId) return false
-  if (record.lifecycle === 'planned') return true
-  return !files.some((file) => file === 'src/plugin.js' || file === 'src/plugin.ts')
 }

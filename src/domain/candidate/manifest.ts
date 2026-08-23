@@ -84,7 +84,14 @@ export function normalizeManifest(
       script: task.script,
     })),
     riskModel: input.riskModel,
+    runtimeContractVersion: resolveRuntimeContractVersion(provenance.kind, input.runtimeContractVersion),
   }
+}
+
+function resolveRuntimeContractVersion(provenanceKind: string, requested?: string): string | undefined {
+  if (requested === '') return undefined
+  if (requested !== undefined) return requested
+  return provenanceKind === 'generated' ? 'generated-extension-api/v1' : undefined
 }
 
 export function emptyOperationalEffects(): OperationalEffects {
