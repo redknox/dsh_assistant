@@ -1,6 +1,8 @@
 # TARS-NG
 
-A personal assistant **product** on [DeepSeek Harness (DSH)](https://github.com/deepseek-ai/deepseek-harness) public seams. Operators install and run `tars-ng`; they do not assemble DSH packages by hand or keep secrets in the repository.
+A governed AI-native product foundation on [DeepSeek Harness (DSH)](https://github.com/deepseek-ai/deepseek-harness) public seams. Its current reference product is a personal assistant; its long-term purpose is to let domain professionals describe, construct, test, approve, and operate their own professional AI systems without granting generated code authority over itself.
+
+Operators install and run `tars-ng`; they do not assemble DSH packages by hand or keep secrets in the repository.
 
 Package name: `dsh-assistant` (private). Product command: **`tars-ng`**. DSH compatibility: **0.1.0-rc.8**. Node: **>=22**.
 
@@ -49,14 +51,34 @@ Operator manual: [docs/operator.md](./docs/operator.md). Soak / feature freeze: 
 
 ## What this is
 
-A personal-assistant product layer: TARS-NG personality, Mission-Control workspace, memory, knowledge, trust/policy, integrations, governed Self-Extension, and operator lifecycle (`start` / `status` / `doctor`).
+A governed AI-native product layer and reference assistant: TARS-NG personality, Mission-Control workspace, memory, knowledge, trust/policy, integrations, governed Self-Extension, and operator lifecycle (`start` / `status` / `doctor`).
 
 DSH owns agent loop, sessions, tool execution, events, LLM/provider seams, jobs, lifecycle, and plugin composition. This project **composes and extends** those public APIs. It does not reimplement them.
+
+The current product validates the lower half of a future domain-professional authoring stack:
+
+```text
+Natural-language intent
+        ↓
+Specification / capability construction       (future domain-facing layer)
+        ↓
+Candidate authoring / validation / review      (current Workbench)
+        ↓
+Exact approval / activation / rollback         (current governance layer)
+        ↓
+DSH Agent Runtime                              (Harness)
+```
+
+The goal is not merely to give one assistant more tools. The goal is to make new capabilities safely constructible and composable, so future Finance, HR, Legal, or Operations kits can expose domain vocabulary, templates, policies, tests, and UI components above the same governed runtime.
+
+Product thesis and stage boundaries: [docs/product-vision.md](./docs/product-vision.md).
 
 ## What this is not
 
 - Not a fork of DSH core, and not a custom Agent Loop.
 - Not a general multi-agent framework.
+- Not yet a general-purpose no-code or domain-professional authoring product.
+- Not permission for generated code to approve, activate, or certify itself.
 - Not a dump of business logic into model-callable tools.
 - Not a place to commit credentials or real personal data.
 - Not a fixture Calendar/Search presented as live user data.
@@ -129,5 +151,6 @@ npm run pack:inspect
 | [docs/self-extension.md](./docs/self-extension.md) | Self-Extension contract |
 | [docs/tars-ng-personality.md](./docs/tars-ng-personality.md) | Personality contract |
 | [docs/mission-control-workspace.md](./docs/mission-control-workspace.md) | Mission-Control IA |
+| [docs/product-vision.md](./docs/product-vision.md) | Product thesis, target users, boundaries, and post-v0.4 direction |
 | [docs/RELEASE.md](./docs/RELEASE.md) | 0.3.0 Product Soak status |
 | [docs/v0.3.0-seal.md](./docs/v0.3.0-seal.md) | Seal drill evidence and soak config |
