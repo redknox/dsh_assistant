@@ -143,6 +143,7 @@ export interface WorkbenchProjection {
   readonly blockingFindings?: number
   readonly blockerClaims?: readonly string[]
   readonly diff?: CandidateDiff
+  readonly effectSummary?: readonly string[]
   readonly canRequestApproval: boolean
   readonly requestDenials?: readonly string[]
 }

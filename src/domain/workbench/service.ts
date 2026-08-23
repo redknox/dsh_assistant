@@ -1,6 +1,6 @@
-import { existsSync, lstatSync, opendirSync, readFileSync, statSync } from 'node:fs'
+import { closeSync, existsSync, lstatSync, openSync, opendirSync, readFileSync, readSync, statSync } from 'node:fs'
+import { createHash } from 'node:crypto'
 import path from 'node:path'
-import { digestFiles } from '../candidate/digest.js'
 import { defaultProvenance } from '../candidate/manifest.js'
 import { resolveInsideRoot } from '../candidate/paths.js'
 import { SealedCandidateError } from '../candidate/errors.js'
@@ -219,40 +219,48 @@ export class WorkbenchService implements CandidateWorkbench {
     if (last?.state !== 'changes-required') {
       throw new WorkbenchContractError('repair requires Independent Review changes-required on the parent')
     }
-    assertParentIntact(parent)
+    const files = preflightRepairParent(parent)
     const binding = this.bindings.get(parent.id)
     const plan = binding?.planId === undefined ? undefined : this.plans.get(binding.planId)
     const review = plan?.review ?? reviewFromRecord(parent)
+    const inheritedPlanId = binding?.planId === undefined ? `inherited-${parent.id}` : undefined
     const nextVersion = bumpPatch(parent.version)
-    const created = this.workspace.create({
-      review,
-      owner: parent.owner,
-      version: nextVersion,
-      baseVersion: parent.baseVersion,
-      provenance: { kind: parent.provenance.kind, origin: 'assistant' },
-      manifest: {
-        capabilities: [...parent.manifest.capabilities],
-        permissions: [...parent.manifest.permissions],
-        runtimeSeams: [...parent.manifest.runtimeSeams],
-        tools: [...parent.manifest.tools],
-        services: [...parent.manifest.services],
-        providers: [...parent.manifest.providers],
-        secrets: [...parent.manifest.secrets],
-        configRequired: [...parent.manifest.configRequired],
-        effects: parent.manifest.effects,
-        entryPoints: [...parent.manifest.entryPoints],
-        riskModel: parent.manifest.riskModel,
-      },
-    })
-    this.bindings.set(created.id, {
-      planId: binding?.planId ?? `inherited-${parent.id}`,
-      parentId: parent.id,
-      parentDigest: parent.digest,
-    })
-    if (binding?.planId === undefined) this.plans.set(`inherited-${parent.id}`, { id: `inherited-${parent.id}`, review })
-    this.copyParentWorkspace(parent, created.id)
-    this.flush()
-    return this.inspect(created.id)
+    let createdId: string | undefined
+    try {
+      const created = this.workspace.create({
+        review,
+        owner: parent.owner,
+        version: nextVersion,
+        baseVersion: parent.baseVersion,
+        provenance: { kind: parent.provenance.kind, origin: 'assistant' },
+        manifest: {
+          capabilities: [...parent.manifest.capabilities],
+          permissions: [...parent.manifest.permissions],
+          runtimeSeams: [...parent.manifest.runtimeSeams],
+          tools: [...parent.manifest.tools],
+          services: [...parent.manifest.services],
+          providers: [...parent.manifest.providers],
+          secrets: [...parent.manifest.secrets],
+          configRequired: [...parent.manifest.configRequired],
+          effects: parent.manifest.effects,
+          entryPoints: [...parent.manifest.entryPoints],
+          riskModel: parent.manifest.riskModel,
+        },
+      })
+      createdId = created.id
+      this.bindings.set(created.id, {
+        planId: binding?.planId ?? inheritedPlanId ?? `inherited-${parent.id}`,
+        parentId: parent.id,
+        parentDigest: parent.digest,
+      })
+      if (inheritedPlanId !== undefined) this.plans.set(inheritedPlanId, { id: inheritedPlanId, review })
+      this.copyParentWorkspace(parent, created.id, files)
+      this.flush()
+      return this.inspect(created.id)
+    } catch (error) {
+      if (createdId !== undefined) this.rollbackRepair(createdId, inheritedPlanId)
+      throw error
+    }
   }
 
   exportState(): WorkbenchPersistState {
@@ -268,13 +276,22 @@ export class WorkbenchService implements CandidateWorkbench {
     }
   }
 
-  private copyParentWorkspace(parent: CandidateRecord, childId: string): void {
-    assertParentIntact(parent)
-    for (const relative of listBoundedFiles(parent.workspaceRoot)) {
+  private copyParentWorkspace(parent: CandidateRecord, childId: string, files: readonly string[]): void {
+    for (const relative of files) {
       if (relative === 'candidate.manifest.json') continue
-      const content = readBoundedFile(parent.workspaceRoot, relative)
-      this.writeFile(childId, relative, content)
+      this.workspace.writeFile(childId, relative, readBoundedFile(parent.workspaceRoot, relative))
     }
+  }
+
+  private rollbackRepair(childId: string, inheritedPlanId?: string): void {
+    try {
+      this.workspace.discard(childId)
+    } catch {
+      // Host state must still drop the failed child binding.
+    }
+    this.bindings.delete(childId)
+    if (inheritedPlanId !== undefined) this.plans.delete(inheritedPlanId)
+    this.flush()
   }
 
   private flush(): void {
@@ -337,15 +354,65 @@ function reviewFromRecord(record: CandidateRecord): ResolutionReview {
   }
 }
 
-function assertParentIntact(parent: CandidateRecord): void {
+function preflightRepairParent(parent: CandidateRecord): readonly string[] {
   if (parent.digest === undefined) {
     throw new WorkbenchContractError('repair requires a sealed parent with a host digest')
   }
   const files = listBoundedFiles(parent.workspaceRoot)
-  const live = digestFiles(parent.workspaceRoot, files)
+  let total = 0
+  for (const relative of files) {
+    const dest = resolveInsideRoot(parent.workspaceRoot, relative)
+    const stat = lstatSync(dest)
+    if (stat.isSymbolicLink()) {
+      throw new WorkbenchContractError(`symlink is not allowed in a candidate workspace: ${relative}`)
+    }
+    if (stat.size > WORKBENCH_MAX_FILE_BYTES) {
+      throw new WorkbenchContractError(`candidate file exceeds the ${WORKBENCH_MAX_FILE_BYTES} byte bound`)
+    }
+    total += stat.size
+    if (total > WORKBENCH_MAX_WORKSPACE_BYTES) {
+      throw new WorkbenchContractError(`candidate workspace exceeds the ${WORKBENCH_MAX_WORKSPACE_BYTES} byte bound`)
+    }
+  }
+  const live = digestBoundedFiles(parent.workspaceRoot, files)
   if (live !== parent.digest) {
     throw new WorkbenchContractError('parent candidate digest no longer matches the sealed revision')
   }
+  return files
+}
+
+function digestBoundedFiles(root: string, relativePaths: readonly string[]): string {
+  const hash = createHash('sha256')
+  const chunk = Buffer.alloc(64 * 1024)
+  for (const relative of [...relativePaths].sort()) {
+    hash.update(relative)
+    hash.update('\0')
+    const dest = resolveInsideRoot(root, relative)
+    const stat = lstatSync(dest)
+    if (stat.isSymbolicLink()) {
+      throw new WorkbenchContractError(`symlink is not allowed in a candidate workspace: ${relative}`)
+    }
+    if (stat.size > WORKBENCH_MAX_FILE_BYTES) {
+      throw new WorkbenchContractError(`candidate file exceeds the ${WORKBENCH_MAX_FILE_BYTES} byte bound`)
+    }
+    const fd = openSync(dest, 'r')
+    try {
+      let offset = 0
+      while (offset < stat.size) {
+        const n = readSync(fd, chunk, 0, Math.min(chunk.length, stat.size - offset), offset)
+        if (n === 0) break
+        offset += n
+        if (offset > WORKBENCH_MAX_FILE_BYTES) {
+          throw new WorkbenchContractError(`candidate file exceeds the ${WORKBENCH_MAX_FILE_BYTES} byte bound`)
+        }
+        hash.update(chunk.subarray(0, n))
+      }
+    } finally {
+      closeSync(fd)
+    }
+    hash.update('\0')
+  }
+  return hash.digest('hex')
 }
 
 function assertRelativePath(relativePath: string): void {

@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { mkdirSync, mkdtempSync, symlinkSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { describe, it } from 'node:test'
@@ -269,6 +269,7 @@ describe('candidate workbench', () => {
       assert.equal(projected?.canRequestApproval, true)
       assert.equal(projected?.owner, 'generated/r0-workbench-ping')
       assert.ok(projected?.diff?.capabilities.added.includes('r0.workbench.ping'))
+      assert.ok(projected?.effectSummary?.includes('remote-side-effect none') || projected?.effectSummary?.some((item) => item.startsWith('remote-side-effect')))
       assert.equal(ctx.capabilityRegistry.get('generated/r0-workbench-ping', '0.1.0'), undefined)
       assert.throws(() => ctx.extensionGovernance.recordUntrustedApproval({ approved: true }))
       assert.equal('activate' in ctx.extensionGovernance, false)
@@ -354,7 +355,7 @@ describe('candidate workbench', () => {
     const tamperedId = authorIsolated(tampered)
     tampered.workbench.review(tamperedId)
     writeFileSync(path.join(tampered.workspace.get(tamperedId).workspaceRoot, 'src/plugin.js'), 'tampered\n')
-    assert.throws(() => tampered.workbench.repair(tamperedId), /digest/)
+    assertRepairLeavesState(tampered, () => tampered.workbench.repair(tamperedId), /digest/)
 
     const linked = isolatedWorkbench(blocker)
     const linkedId = authorIsolated(linked)
@@ -362,7 +363,7 @@ describe('candidate workbench', () => {
     const hostSecret = path.join(mkdtempSync(path.join(tmpdir(), 'dsh-wb-secret-')), 'secret.txt')
     writeFileSync(hostSecret, 'host-secret\n')
     symlinkSync(hostSecret, path.join(linked.workspace.get(linkedId).workspaceRoot, 'leaked.txt'))
-    assert.throws(() => linked.workbench.repair(linkedId), /symlink|digest/)
+    assertRepairLeavesState(linked, () => linked.workbench.repair(linkedId), /symlink|digest/)
 
     const deep = isolatedWorkbench(blocker)
     const deepDraft = draftIsolated(deep)
@@ -372,7 +373,7 @@ describe('candidate workbench', () => {
     deep.workbench.validate(deepDraft)
     deep.workbench.seal(deepDraft)
     deep.workbench.review(deepDraft)
-    assert.throws(() => deep.workbench.repair(deepDraft), WorkbenchContractError)
+    assertRepairLeavesState(deep, () => deep.workbench.repair(deepDraft), WorkbenchContractError)
 
     const counted = isolatedWorkbench(blocker)
     const countedDraft = draftIsolated(counted)
@@ -382,7 +383,7 @@ describe('candidate workbench', () => {
     counted.workbench.validate(countedDraft)
     counted.workbench.seal(countedDraft)
     counted.workbench.review(countedDraft)
-    assert.throws(() => counted.workbench.repair(countedDraft), WorkbenchContractError)
+    assertRepairLeavesState(counted, () => counted.workbench.repair(countedDraft), WorkbenchContractError)
 
     const heavy = isolatedWorkbench(blocker)
     const heavyDraft = draftIsolated(heavy)
@@ -390,7 +391,37 @@ describe('candidate workbench', () => {
     heavy.workbench.validate(heavyDraft)
     heavy.workbench.seal(heavyDraft)
     heavy.workbench.review(heavyDraft)
-    assert.throws(() => heavy.workbench.repair(heavyDraft), WorkbenchContractError)
+    assertRepairLeavesState(heavy, () => heavy.workbench.repair(heavyDraft), WorkbenchContractError)
+  })
+
+  it('rolls back a failed repair copy and can retry the same parent', () => {
+    const blocker = new PolicyReviewerProvider((pkg) => [finding({
+      reviewedDigest: pkg.candidate.digest,
+      severity: 'BLOCKER',
+      category: 'acceptance-contract',
+      claim: 'needs-repair',
+      location: 'policy',
+      evidence: 'forced',
+      whyItMatters: 'repair path',
+      requiredRemediation: 'fix',
+      status: 'open',
+    })])
+    const setup = isolatedWorkbench(blocker)
+    const parentId = authorIsolated(setup)
+    setup.workbench.review(parentId)
+    const before = snapshotWorkbench(setup)
+    const original = setup.workspace.writeFile.bind(setup.workspace)
+    setup.workspace.writeFile = (id: string, relativePath: string, content: string) => {
+      if (id !== parentId) throw new WorkbenchContractError('injected copy failure')
+      return original(id, relativePath, content)
+    }
+    assert.throws(() => setup.workbench.repair(parentId), /injected copy failure/)
+    setup.workspace.writeFile = original
+    assert.deepEqual(snapshotWorkbench(setup), before)
+    const repaired = setup.workbench.repair(parentId)
+    assert.notEqual(repaired.id, parentId)
+    assert.equal(setup.workspace.list().some((item) => item.id === repaired.id), true)
+    assert.equal(existsSync(setup.workspace.get(repaired.id).workspaceRoot), true)
   })
 
   it('denies request after invalid validation or a stale review', () => {
@@ -531,6 +562,28 @@ function authorR0(ctx: Awaited<ReturnType<typeof bootAssistantControl>>['ctx']):
   ctx.candidateWorkbench.writeFile(created.id, 'src/plugin.js', R0_SOURCE)
   ctx.candidateWorkbench.writeFile(created.id, 'package.json', `${JSON.stringify({ name: 'dsh-generated-r0-workbench', type: 'module', main: 'src/plugin.js' }, null, 2)}\n`)
   return created.id
+}
+
+function snapshotWorkbench(setup: ReturnType<typeof isolatedWorkbench>) {
+  const records = setup.workspace.list()
+  const area = records[0] === undefined ? undefined : path.dirname(records[0].workspaceRoot)
+  return {
+    ids: records.map((item) => item.id).sort(),
+    state: structuredClone(setup.workbench.exportState()),
+    dirs: area === undefined || !existsSync(area) ? [] : readdirSync(area).sort(),
+  }
+}
+
+function assertRepairLeavesState(
+  setup: ReturnType<typeof isolatedWorkbench>,
+  act: () => unknown,
+  error: RegExp | typeof WorkbenchContractError,
+): void {
+  const before = snapshotWorkbench(setup)
+  assert.throws(act, error)
+  assert.deepEqual(snapshotWorkbench(setup), before)
+  assert.throws(act, error)
+  assert.deepEqual(snapshotWorkbench(setup), before)
 }
 
 function draftIsolated(setup: ReturnType<typeof isolatedWorkbench>): string {

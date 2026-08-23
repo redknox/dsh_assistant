@@ -3,7 +3,7 @@ import { SessionId, isAppendSurfaceEvent, type SessionEvent } from '@deepseek-ai
 import type { Context } from '@deepseek-ai/cordis'
 import { humorSuppressed } from '../personality/effective.js'
 import type { TarsPersonality } from '../personality/types.js'
-import { flattenEffects } from './effects.js'
+import { flattenEffects, summarizeCandidateEffects } from './effects.js'
 import type { MissionControlView, ObjectiveView, WorkspaceSnapshotInput } from './types.js'
 import { projectMissionControl } from './project.js'
 
@@ -220,6 +220,7 @@ function workbenchCandidates(ctx: Context): WorkspaceSnapshotInput['candidates']
         blockingFindings: view.review?.blockingFindings,
         blockerClaims: last?.lastReport(view.id)?.findings.filter((finding) => finding.blocking && finding.status === 'open').map((finding) => finding.claim),
         diff: view.diff,
+        effectSummary: view.diff === undefined ? undefined : summarizeCandidateEffects(view.diff.effects),
         canRequestApproval: view.requestEligibility.ok,
         requestDenials: view.requestEligibility.denials.map((item) => item.reason),
       }
@@ -230,6 +231,7 @@ function workbenchCandidates(ctx: Context): WorkspaceSnapshotInput['candidates']
   return workspace.list().map((record) => {
     const eligibility = governance?.requestEligibility(record.id)
     const last = review?.lastReport(record.id)
+    const diff = workspace.diff?.(record.id)
     return {
       id: record.id,
       owner: record.owner,
@@ -244,7 +246,8 @@ function workbenchCandidates(ctx: Context): WorkspaceSnapshotInput['candidates']
       reviewState: review?.status({ id: record.id, digest: record.digest }),
       blockingFindings: last?.findings.filter((item) => item.blocking && item.status === 'open').length,
       blockerClaims: last?.findings.filter((item) => item.blocking && item.status === 'open').map((item) => item.claim),
-      diff: workspace.diff?.(record.id),
+      diff,
+      effectSummary: diff === undefined ? undefined : summarizeCandidateEffects(diff.effects),
       canRequestApproval: eligibility?.ok === true,
       requestDenials: eligibility?.denials.map((item) => item.reason),
     }

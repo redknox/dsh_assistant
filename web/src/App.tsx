@@ -382,7 +382,7 @@ function WorkbenchPanel(props: { readonly candidates: readonly WorkbenchProjecti
               permissions {formatDiff(item.diff?.permissions.added ?? [], item.diff?.permissions.removed ?? [])}
             </div>
             <div className="workbench-diff">
-              effects {item.diff?.effects.network?.join(', ') || item.diff?.effects.filesystem?.join(', ') || 'none'}
+              effects {item.effectSummary?.length ? item.effectSummary.join('; ') : 'none'}
             </div>
             <div className="workbench-request" data-can-request={item.canRequestApproval ? 'yes' : 'no'}>
               {item.canRequestApproval ? 'can request approval' : `cannot request${item.requestDenials?.length ? `: ${item.requestDenials.join(', ')}` : ''}`}

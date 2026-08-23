@@ -649,6 +649,14 @@ export function apply(ctx) {
           reviewState: 'review-complete',
           blockingFindings: 0,
           canRequestApproval: true,
+          effectSummary: [
+            'remote-side-effect mutate',
+            'calendar.google',
+            'workspace/notes',
+            'https://example.com',
+            'child_process',
+            'secret-access CALENDAR_TOKEN',
+          ],
           diff: {
             owner: 'generated/r0-workbench-ping',
             candidateVersion: '0.1.0',
@@ -659,12 +667,12 @@ export function apply(ctx) {
             providers: { added: [], removed: [], changed: [] },
             runtimeSeams: { added: [], removed: [], changed: [] },
             effects: {
-              filesystem: [],
-              network: [],
-              process: [],
-              secrets: [],
-              externalSystems: [],
-              remoteSideEffect: 'none',
+              filesystem: ['workspace/notes'],
+              network: ['https://example.com'],
+              process: ['child_process'],
+              secrets: ['CALENDAR_TOKEN'],
+              externalSystems: ['calendar.google'],
+              remoteSideEffect: 'mutate',
             },
           },
         }],
@@ -684,6 +692,12 @@ export function apply(ctx) {
     assert.match(workbench, /r0.workbench.ping/)
     assert.match(workbench, /can request approval/)
     assert.match(workbench, /\+r0.workbench.ping/)
+    assert.match(workbench, /remote-side-effect mutate/)
+    assert.match(workbench, /workspace\/notes/)
+    assert.match(workbench, /https:\/\/example.com/)
+    assert.match(workbench, /child_process/)
+    assert.match(workbench, /secret-access CALENDAR_TOKEN/)
+    assert.match(workbench, /calendar.google/)
 
     const degraded = renderToStaticMarkup(createElement(MissionControlScreen, {
       view: fixtureView({
