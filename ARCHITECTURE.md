@@ -1,6 +1,6 @@
 # Architecture
 
-Target architecture for the personal assistant product layer on DeepSeek Harness (DSH). Runtime scaffold, personal services, and the UI projection/control surface in this repository are **Implemented**.
+Target architecture for the governed AI-native product layer on DeepSeek Harness (DSH). The current personal assistant is the reference product used to validate that architecture. Runtime scaffold, personal services, and the UI projection/control surface in this repository are **Implemented**.
 
 Normative contributor rules: [ENGINEERING.md](./ENGINEERING.md). Product boundary: [README.md](./README.md).
 
@@ -9,9 +9,12 @@ Normative contributor rules: [ENGINEERING.md](./ENGINEERING.md). Product boundar
 | Owner | Owns | Does not own |
 | --- | --- | --- |
 | **DSH** | Generic Harness/runtime: agent loop, sessions, tool execution, events, LLM/provider seams, jobs, lifecycle, plugin composition | Personal persona, user memory, personal knowledge product, trust policy for this assistant, personal integrations, product UI |
-| **This repository** | Personal-assistant product: persona, memory, knowledge, personal tools, trust/policy, integrations, proactive workflows, UI/product experience | Replacing DSH Agent Loop, forking DSH internals, becoming a generic multi-agent framework |
+| **This repository** | Reference assistant plus governed capability construction/control: persona, memory, knowledge, tools, trust/policy, integrations, Candidate Workbench, approval, activation/recovery, UI/product experience | Replacing DSH Agent Loop, forking DSH internals, becoming a generic multi-agent framework |
+| **Future domain kits / products** | Finance, HR, Legal, or Operations vocabulary, schemas, rules, templates, tests, adapters, and UI components | Modifying DSH core; bypassing TARS-NG governance; granting generated code authority over approval or recovery |
 
 **DSH is the Harness runtime, not the business/domain layer.** Domain rules belong in this repository's personal services (or in adapters that this repository owns), not in DSH core.
+
+**TARS-NG is the governed construction and product layer, not merely a collection of assistant features.** Its current personal-assistant capabilities are a proving ground. A future professional system should add its domain semantics above TARS-NG and keep authoritative enterprise transactions behind typed, policy-controlled adapters.
 
 ## Layers and dependency direction
 
@@ -20,9 +23,11 @@ Dependencies point **downward only**. Upper layers may call lower layers; lower 
 ```text
 UI / Channels
       ↓
-Personal Assistant Product Layer
+Domain Product / Personal Assistant Layer
       ↓
-Personal Services (memory / knowledge / policy / tools / integrations)
+TARS-NG Construction + Governance Layer
+      ↓
+Domain / Personal Services (memory / knowledge / policy / tools / integrations)
       ↓
 DSH public services, providers, tools, events, jobs, session APIs
       ↓
@@ -32,8 +37,9 @@ LLMs / storage / external systems
 | Layer | Responsibility |
 | --- | --- |
 | **UI / Channels** | Local Mission-Control Web UI plus CLI. Presentation and channel adapters only. No home for domain rules. |
-| **Personal Assistant Product Layer** | Product orchestration: persona, turn-level product behavior, which personal services participate. Independent of any one UI. |
-| **Personal Services** | Durable capabilities: memory, knowledge, policy, personal tool facades, integrations. Usable without a model and without a UI. |
+| **Domain Product / Personal Assistant Layer** | Product orchestration and domain experience: user intent, vocabulary, workflows, UI, and which services participate. Independent of any one model. |
+| **TARS-NG Construction + Governance Layer** | Capability resolution, candidate authoring, validation, independent review, exact approval, isolated activation, rollback, Safe Mode, and recovery. It turns proposed behavior into governed runtime capability; it cannot self-authorize. |
+| **Domain / Personal Services** | Durable capabilities: domain rules, memory, knowledge, policy, thin tool facades, and integrations. Usable without a model and without a UI where practical. |
 | **DSH public APIs** | Plugin composition, public services/providers, tools, events, jobs, session APIs. The **only** allowed coupling to Harness. |
 | **LLMs / storage / external systems** | Models, stores, third-party APIs. Reached through adapters. DTOs and vendor details stay behind those adapters. |
 
@@ -95,6 +101,25 @@ v0.4.0 target = Self-Developing Product Baseline
 ```
 
 Self-development is allowed; self-authorization is not. Generated candidates activate only through the isolated runner. The Candidate Workbench is a bounded conversation-to-review loop, not autonomous install.
+
+## Long-term product direction
+
+The intended evolution is from a governed self-developing assistant to a foundation on which domain professionals can construct AI-native systems. The architectural compilation boundary is:
+
+```text
+professional intent
+  -> explicit specification and acceptance examples
+  -> capability resolution and reuse decision
+  -> generated candidate
+  -> validation and independent review
+  -> exact human approval
+  -> isolated activation
+  -> observable operation and recoverable rollback
+```
+
+Natural-language intent is never itself execution authority. Dynamic Agent planning may decide how to pursue a goal, select tools, request missing information, and react to results. It may not rewrite policy, bypass approval, expand permissions, certify its own output, or directly own authoritative payment/identity/recording rules.
+
+The current v0.4.0 target covers the governed construction/control substrate. Domain-facing authoring, reusable domain kits, generated product UI, and composition of multiple capabilities into a complete professional application are later milestones and remain **Designed**, not Implemented. See [docs/product-vision.md](./docs/product-vision.md).
 
 ## Evidence
 
