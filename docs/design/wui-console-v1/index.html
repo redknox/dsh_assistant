@@ -1,0 +1,144 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>TARS-NG Mission Control — Visual Design Reference</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <!--
+      Static visual reference only.
+      Production data remains authoritative in MissionControlView and the existing HTTP/SSE surface.
+    -->
+    <div class="console" data-system-state="READY">
+      <header class="topbar" aria-label="System header">
+        <div class="brand-block">
+          <span class="brand">TARS-NG</span>
+          <span class="divider" aria-hidden="true">/</span>
+          <span class="product-area">MISSION CONTROL</span>
+        </div>
+        <div class="system-state" role="status" aria-label="System state ready">
+          <span class="status-lamp status-lamp--ready" aria-hidden="true"></span>
+          <span>READY</span>
+        </div>
+      </header>
+
+      <div class="workspace-grid">
+        <aside class="nav-panel instrument-panel" aria-label="Workspace navigation">
+          <div class="panel-code">
+            <span>NAV 01</span>
+            <span>LOCAL / PRIMARY</span>
+          </div>
+
+          <nav class="primary-nav" aria-label="Primary">
+            <a class="nav-item nav-item--active" href="#today" aria-current="page">
+              <span class="nav-index">01</span><span>TODAY</span>
+            </a>
+            <a class="nav-item" href="#conversations"><span class="nav-index">02</span><span>CONVERSATIONS</span></a>
+            <a class="nav-item" href="#calendar"><span class="nav-index">03</span><span>CALENDAR</span></a>
+            <a class="nav-item" href="#memory"><span class="nav-index">04</span><span>MEMORY</span></a>
+            <a class="nav-item" href="#capabilities"><span class="nav-index">05</span><span>CAPABILITIES</span></a>
+          </nav>
+
+          <section class="recent" aria-labelledby="recent-title">
+            <div class="section-label" id="recent-title"><span>LOG 02</span><span>RECENT</span></div>
+            <button class="conversation-link conversation-link--active" type="button">
+              <span class="conversation-title">Project Review Prep</span>
+              <span class="conversation-time">09:12</span>
+              <span class="conversation-preview">Schedule tomorrow and share…</span>
+            </button>
+            <button class="conversation-link" type="button">
+              <span class="conversation-title">Q2 Planning Outline</span>
+              <span class="conversation-time">08:47</span>
+              <span class="conversation-preview">Draft the outline and key…</span>
+            </button>
+          </section>
+
+          <div class="panel-coordinates" aria-label="Local runtime marker">
+            <span>SYS 03</span>
+            <span>127.0.0.1</span>
+          </div>
+        </aside>
+
+        <main class="conversation-panel" id="today">
+          <div class="conversation-scroll">
+            <article class="message message--user">
+              <div class="message-meta"><span>YOU</span><time datetime="09:12">09:12</time></div>
+              <div class="message-body">Schedule a project review for tomorrow from 2 to 3 PM and invite Maya, Jordan, and Alex.</div>
+            </article>
+
+            <article class="message message--assistant">
+              <div class="assistant-mark" aria-hidden="true">T</div>
+              <div>
+                <div class="message-meta"><span>TARS-NG</span><time datetime="09:12">09:12</time></div>
+                <div class="message-body message-body--plain">
+                  I can schedule that for tomorrow from 14:00–15:00 and invite Maya, Jordan, and Alex. Shall I go ahead?
+                </div>
+
+                <section class="approval-card" aria-labelledby="approval-title">
+                  <header class="approval-header">
+                    <span class="approval-symbol" aria-hidden="true">▣</span>
+                    <h1 id="approval-title">CREATE CALENDAR EVENT</h1>
+                  </header>
+                  <dl class="approval-facts">
+                    <div><dt>TIME</dt><dd>Tomorrow 14:00–15:00</dd></div>
+                    <div><dt>TITLE</dt><dd>Project Review</dd></div>
+                    <div><dt>INVITEES</dt><dd>Maya Patel, Jordan Lee, Alex Kim</dd></div>
+                  </dl>
+                  <div class="effect-line">
+                    <span class="effect-icon" aria-hidden="true">i</span>
+                    <span><strong>EFFECT</strong> Google Calendar will be modified</span>
+                  </div>
+                  <div class="approval-actions">
+                    <button class="button button--secondary" type="button">REJECT</button>
+                    <button class="button button--approval" type="button">APPROVE</button>
+                  </div>
+                </section>
+              </div>
+            </article>
+          </div>
+
+          <form class="composer" aria-label="Send a message">
+            <label class="sr-only" for="message">Message TARS-NG</label>
+            <textarea id="message" rows="1" placeholder="Message TARS-NG…"></textarea>
+            <button class="attach-button" type="button" aria-label="Attach file">+</button>
+            <button class="send-button" type="submit" aria-label="Send message">SEND</button>
+          </form>
+        </main>
+
+        <aside class="ops-panel instrument-panel" aria-label="Operational state">
+          <div class="panel-code"><span>OPS 04</span><span>AUTHORITATIVE</span></div>
+
+          <section class="activity-section" aria-labelledby="activity-title">
+            <h2 id="activity-title">ACTIVITY</h2>
+            <ol class="activity-list">
+              <li class="activity-item activity-item--done"><span class="activity-node"></span><span>PLANNED</span><time>09:12:10</time></li>
+              <li class="activity-item activity-item--done"><span class="activity-node"></span><span>RUNNING</span><time>09:12:11</time></li>
+              <li class="activity-item"><span class="activity-node"></span><span>WAITING</span><time>09:12:13</time></li>
+              <li class="activity-item activity-item--approval"><span class="activity-node">!</span><span>APPROVAL REQUIRED</span><time>09:12:16</time></li>
+              <li class="activity-item activity-item--muted"><span class="activity-node"></span><span>COMPLETED</span><time>—</time></li>
+            </ol>
+          </section>
+
+          <section class="capability-section" id="capabilities" aria-labelledby="capability-title">
+            <h2 id="capability-title">CAPABILITY STATUS</h2>
+            <dl class="capability-list">
+              <div><dt>Calendar</dt><dd data-capability-state="active">ACTIVE</dd></div>
+              <div><dt>Memory</dt><dd data-capability-state="active">ACTIVE</dd></div>
+              <div><dt>Self-Extension</dt><dd data-capability-state="governed">GOVERNED</dd></div>
+              <div><dt>Search</dt><dd data-capability-state="unavailable">UNAVAILABLE</dd></div>
+            </dl>
+          </section>
+        </aside>
+      </div>
+
+      <footer class="control-strip" aria-label="Runtime status">
+        <div><span class="strip-label">MODEL</span><strong>DEEPSEEK V4 FLASH</strong></div>
+        <div><span class="strip-label">SAFE MODE</span><strong>OFF</strong></div>
+        <div><span class="strip-label">APPROVALS</span><strong class="amber">1</strong></div>
+        <div><span class="strip-label">LOCAL</span><strong>127.0.0.1</strong></div>
+      </footer>
+    </div>
+  </body>
+</html>
