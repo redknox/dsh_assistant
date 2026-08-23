@@ -55,6 +55,13 @@ export function projectActivity(input: WorkspaceSnapshotInput): readonly Activit
       summary: input.recoveryWhy,
       source: 'extensionRecovery',
     })
+  } else if (input.activation?.state === 'activation-failed' && input.activation.lastFailure) {
+    items.push({
+      id: 'activation-failure',
+      kind: 'FAILED',
+      summary: `Activation failed at ${input.activation.lastFailure.phase}: ${input.activation.lastFailure.diagnostics}`,
+      source: 'extensionActivation',
+    })
   }
   return items
 }

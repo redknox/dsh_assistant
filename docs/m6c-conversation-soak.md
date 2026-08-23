@@ -1,6 +1,6 @@
 # M6C conversation soak record
 
-Status: **unresolved**. Issue #70 stays open. This conversation-operable Workbench slice is **Implemented** only; it is not Verified and does not satisfy #70 Definition of done.
+Status: **unresolved**. Issues #70 and #72 stay open. The conversation-operable Workbench slice and WUI activation path are **Implemented** only; they are not Verified and do not satisfy those issues' Definition of done.
 
 This implementation environment has no configured `DEEPSEEK_API_KEY` / `deepseek-official` soak route. Packed `tars-ng doctor` / `start --once` remain covered by `test/packaging.test.ts`. Do not treat that as a live-model soak.
 

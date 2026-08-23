@@ -75,6 +75,8 @@ export class GovernanceService implements ExtensionGovernance, ExtensionActivati
   private phase?: ActivationPhase
   private pendingCandidateId?: string
   interruptAfter?: ActivationInterrupt
+  failActivation?: { phase: ActivationPhase; diagnostics: string }
+  holdActivation?: Promise<void>
   private readonly persistHook?: () => void
   private readonly beginAuthorityCommit?: () => void
   private readonly finishAuthorityCommit?: () => void
@@ -250,6 +252,7 @@ export class GovernanceService implements ExtensionGovernance, ExtensionActivati
     const previousGood = this.lastKnownGood ?? this.captureSnapshot()
     this.rollbackTarget = previousGood
     this.flush()
+    if (this.holdActivation) await this.holdActivation
     await this.maybeInterrupt('activation-pending')
     let phase: ActivationPhase = 'capture-lkg'
     try {
@@ -257,6 +260,7 @@ export class GovernanceService implements ExtensionGovernance, ExtensionActivati
       phase = 'prepare'
       const prepared = await this.runtime.prepare(candidateId, this.prepareContext(record))
       if (!prepared.ok) throw new Error(prepared.diagnostics ?? 'prepare failed')
+      if (this.failActivation?.phase === 'prepare') throw new Error(this.failActivation.diagnostics)
       this.flush()
       await this.maybeInterrupt('prepare')
       phase = 'health'
@@ -266,11 +270,13 @@ export class GovernanceService implements ExtensionGovernance, ExtensionActivati
         ...record.manifest.services,
       ])
       if (!health.ok) throw new Error(health.diagnostics ?? 'health failed')
+      if (this.failActivation?.phase === 'health') throw new Error(this.failActivation.diagnostics)
       phase = 'commit'
       this.beginAuthorityCommit?.()
       this.commitRegistry(record)
       await this.maybeInterrupt('registry-commit')
       await this.runtime.commit(candidateId)
+      if (this.failActivation?.phase === 'commit') throw new Error(this.failActivation.diagnostics)
       this.current = this.captureSnapshot()
       this.lastKnownGood = this.current
       this.state = 'active'

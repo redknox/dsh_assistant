@@ -13,6 +13,9 @@ export function renderMissionControlAsText(view: MissionControlView): string {
   const lines = [
     `${view.identity}    ${view.objective?.text ?? '(no objective)'}    ${view.systemState}`,
     view.recovery ? `SAFE/RECOVERY  ${view.recovery.why}` : '',
+    view.activationFailure
+      ? `ACTIVATION FAILED  ${view.activationFailure.phase}  ${view.activationFailure.summary}  rollback=${view.activationFailure.rollbackSucceeded}  active=${view.activationFailure.registryActive}`
+      : '',
     '',
     '# Context',
     ...view.memory.slice(0, 5).map((item) => `- Memory  ${item.topicKey}: ${item.statement}`),
@@ -51,6 +54,12 @@ export function renderMissionControlAsText(view: MissionControlView): string {
 
 /** Desktop-first HTML prototype. Original industrial language; not a movie UI. */
 export function renderMissionControlAsHtml(view: MissionControlView): string {
+  const activationFailure = view.activationFailure
+    ? `<section id="activation-failure" data-activation-failed="true" data-phase="${escapeHtml(view.activationFailure.phase)}" data-candidate-id="${escapeHtml(view.activationFailure.candidateId)}">
+        <p>Activation failed at ${escapeHtml(view.activationFailure.phase)}: ${escapeHtml(view.activationFailure.summary)}</p>
+        <p>Rollback ${view.activationFailure.rollbackSucceeded ? 'succeeded' : 'failed'}; registry active ${view.activationFailure.registryActive ? 'yes' : 'no'}</p>
+      </section>`
+    : ''
   const recovery = view.recovery
     ? `<section id="recovery" data-state="${escapeHtml(view.systemState)}">
         <h1>TARS-NG — ${escapeHtml(view.systemState)}</h1>
@@ -106,6 +115,7 @@ export function renderMissionControlAsHtml(view: MissionControlView): string {
     <div id="system-state">${escapeHtml(view.systemState)}</div>
   </header>
   ${recovery}
+  ${activationFailure}
   <div id="layout">
     <aside id="context"><h1>Context</h1><ul>${context}</ul></aside>
     <main id="work">

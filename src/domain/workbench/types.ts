@@ -79,6 +79,7 @@ export interface WorkbenchCandidateView {
   }
   readonly governanceApproval?: string
   readonly activationState?: 'inactive' | 'activating' | 'active' | 'failed'
+  readonly activationFailureSummary?: string
   readonly diff?: CandidateDiff
   readonly requestEligibility: EligibilityResult
   readonly step: WorkbenchStep
@@ -115,7 +116,7 @@ export interface WorkbenchServiceOptions {
     inspect(): {
       state?: string
       pendingCandidateId?: string
-      lastFailure?: { candidateId?: string }
+      lastFailure?: { candidateId?: string; diagnostics?: string }
     }
   }
 }

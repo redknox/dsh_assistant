@@ -3,7 +3,9 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { ActivationDeniedError } from '../domain/governance/errors.js'
+import { SimulatedCrashError } from '../domain/governance/service.js'
 import type { RecoveryRoot } from '../domain/governance/root.js'
+import { boundActivationDiagnostics } from '../domain/workspace/failure.js'
 import { AssistantControlSurface } from '../ui/controller.js'
 import type { ActivationCard, ApprovalCard, MissionControlView } from '../domain/workspace/types.js'
 import { PRODUCT_UI_SESSION_ID } from './constants.js'
@@ -157,6 +159,14 @@ export function startWebUiServer(options: WebUiServerOptions): Promise<WebUiServ
     return { card }
   }
 
+  let activationBusy = false
+
+  const activationInFlight = () => {
+    if (activationBusy) return true
+    const state = options.recoveryRoot.inspect().state
+    return state === 'activating' || state === 'activation-pending'
+  }
+
   const bindActivation = (body: {
     id?: unknown
     candidateId?: unknown
@@ -290,23 +300,65 @@ export function startWebUiServer(options: WebUiServerOptions): Promise<WebUiServ
           sendJson(res, 409, { error: 'confirmation-required' })
           return
         }
+        if (activationInFlight()) {
+          sendJson(res, 409, { error: 'activation-in-flight', view: snapshot(), webUi: url })
+          return
+        }
         const bound = bindActivation(body, snapshot().activations)
         if ('error' in bound) {
           sendJson(res, bound.error === 'malformed' ? 400 : 409, { error: bound.error })
           return
         }
         const human = options.recoveryRoot.issueAuthority({ kind: 'human-control', source: 'application-ui' })
+        activationBusy = true
         try {
-          await options.recoveryRoot.activate(bound.card.candidateId, human)
+          const status = await options.recoveryRoot.activate(bound.card.candidateId, human)
+          if (status.state === 'activation-failed' || status.state === 'safe-mode') {
+            const failure = status.lastFailure
+            sendJson(res, 409, {
+              error: 'activation-failed',
+              phase: failure?.phase,
+              diagnostics: failure?.diagnostics ? boundActivationDiagnostics(failure.diagnostics) : 'activation failed',
+              rollbackSucceeded: failure?.rollbackSucceeded === true,
+              recoveryRequired: status.recoveryRequired,
+              safeMode: status.safeMode,
+              active: false,
+              view: snapshot(),
+              webUi: url,
+            })
+            broadcast()
+            return
+          }
+          sendJson(res, 200, envelope())
+          broadcast()
         } catch (error) {
           if (error instanceof ActivationDeniedError) {
             sendJson(res, 409, { error: 'activation-denied', denials: error.denials, view: snapshot(), webUi: url })
+            broadcast()
             return
           }
-          throw error
+          if (error instanceof SimulatedCrashError) {
+            sendJson(res, 409, {
+              error: 'activation-interrupted',
+              phase: error.message.replace('simulated crash after ', ''),
+              diagnostics: boundActivationDiagnostics(error.message),
+              view: snapshot(),
+              webUi: url,
+            })
+            broadcast()
+            return
+          }
+          const message = error instanceof Error ? error.message : 'activation failed'
+          sendJson(res, 409, {
+            error: 'activation-error',
+            diagnostics: boundActivationDiagnostics(message),
+            view: snapshot(),
+            webUi: url,
+          })
+          broadcast()
+        } finally {
+          activationBusy = false
         }
-        sendJson(res, 200, envelope())
-        broadcast()
         return
       }
       if (req.method === 'POST' && requestUrl.pathname === '/api/recovery') {

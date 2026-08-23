@@ -21,6 +21,7 @@ import {
   type WorkbenchListView,
 } from './listing.js'
 import { parseWorkbenchRiskModel } from './risk-model.js'
+import { boundActivationDiagnostics } from '../workspace/failure.js'
 import { activationViewOf, extensionLifecycleOf } from '../workspace/lifecycle.js'
 import { parseScaffoldNames, scaffoldFiles } from './scaffold.js'
 import {
@@ -478,7 +479,7 @@ export class WorkbenchService implements CandidateWorkbench {
     })
   }
 
-  private lifecycleOf(record: CandidateRecord): Pick<WorkbenchCandidateView, 'governanceApproval' | 'activationState'> {
+  private lifecycleOf(record: CandidateRecord): Pick<WorkbenchCandidateView, 'governanceApproval' | 'activationState' | 'activationFailureSummary'> {
     const decision = this.governance.inspectApproval(record.id)?.decision
     const inspected = this.options.activation?.inspect()
     const lifecycle = extensionLifecycleOf({
@@ -492,6 +493,9 @@ export class WorkbenchService implements CandidateWorkbench {
     return {
       governanceApproval: decision ?? 'none',
       activationState: activationViewOf(lifecycle),
+      ...(lifecycle === 'ACTIVATION_FAILED' && inspected?.lastFailure
+        ? { activationFailureSummary: boundActivationDiagnostics(inspected.lastFailure.diagnostics ?? '') }
+        : {}),
     }
   }
 }

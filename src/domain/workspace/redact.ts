@@ -76,6 +76,9 @@ export function sanitizeMissionControlView(view: MissionControlView): MissionCon
     ...(view.recovery
       ? { recovery: { ...view.recovery, why: redactText(view.recovery.why) } }
       : {}),
+    ...(view.activationFailure
+      ? { activationFailure: { ...view.activationFailure, summary: redactText(view.activationFailure.summary) } }
+      : {}),
     controlStrip: {
       ...view.controlStrip,
       ...(view.controlStrip.degradation ? { degradation: redactText(view.controlStrip.degradation) } : {}),

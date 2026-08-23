@@ -51,6 +51,7 @@ async function withServer(
     surface: AssistantControlSurface,
     agent: Awaited<ReturnType<typeof createAssistantAgent>>,
     ctx: Awaited<ReturnType<typeof bootAssistantControl>>['ctx'],
+    recoveryRoot: Awaited<ReturnType<typeof bootAssistantControl>>['recoveryRoot'],
   ) => Promise<void>,
 ) {
   const control = await boot()
@@ -68,7 +69,7 @@ async function withServer(
   })
   const detach = attachWebUiBroadcast(control.ctx, () => web.notify())
   try {
-    await run(web.url, surface, agent, control.ctx)
+    await run(web.url, surface, agent, control.ctx, control.recoveryRoot)
   } finally {
     detach()
     await web.close()
@@ -88,6 +89,64 @@ async function cookieHeader(url: string): Promise<string> {
 
 function authHeaders(cookie: string, extra: Record<string, string> = {}): Record<string, string> {
   return { cookie, ...extra }
+}
+
+function generatedPlugin(toolName: string): string {
+  return `export const name = 'generated-${toolName.replaceAll('_', '-')}'
+export function apply(ctx) {
+  const dispose = ctx.tools.register({
+    name: '${toolName}',
+    description: 'Workbench generated ping',
+    parameters: { text: { type: 'string', required: true } },
+    output: { schema: { type: 'string' }, render(_a, v) { return [{ type: 'text', text: String(v) }] } },
+    async execute(args) { return String(args.text ?? '').toUpperCase() },
+  })
+  ctx.effect(() => dispose)
+}
+`
+}
+
+function authorGenerated(ctx: Awaited<ReturnType<typeof bootAssistantControl>>['ctx'], capability: string) {
+  const toolName = capability.replaceAll('.', '_')
+  const plan = ctx.candidateWorkbench.rememberPlan(ctx.capabilityResolution.review({
+    capability,
+    need: 'WUI activation path',
+    inventory: { complete: true, seams: [] },
+  }))
+  const created = ctx.candidateWorkbench.create({
+    planId: plan.planId,
+    manifest: { capabilities: [capability], tools: [toolName], entryPoints: ['src/plugin.js'] },
+  })
+  const manifest = ctx.candidateWorkspace.get(created.id).manifest
+  ctx.candidateWorkspace.setManifest(created.id, {
+    capabilities: [...manifest.capabilities],
+    tools: [...manifest.tools],
+    entryPoints: [...manifest.entryPoints],
+    runtimeContractVersion: GENERATED_EXTENSION_API_V1,
+  })
+  ctx.candidateWorkbench.writeFile(created.id, 'src/plugin.js', generatedPlugin(toolName))
+  ctx.candidateWorkbench.writeFile(created.id, 'package.json', `${JSON.stringify({ name: `dsh-generated-${toolName}`, type: 'module', main: 'src/plugin.js' }, null, 2)}\n`)
+  ctx.candidateWorkbench.validate(created.id)
+  const sealed = ctx.candidateWorkbench.seal(created.id)
+  ctx.candidateWorkbench.review(sealed.id)
+  const requested = ctx.extensionGovernance.requestApproval(sealed.id)
+  return { id: sealed.id, owner: created.owner, requested }
+}
+
+async function approveActivationCard(url: string, cookie: string, candidateId: string) {
+  const before = await fetch(`${url}/api/view`).then((res) => res.json()) as { view: MissionControlView }
+  const approval = before.view.approvals.find((item) => item.candidateId === candidateId)
+  assert.ok(approval)
+  const approved = await fetch(`${url}/api/approve`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', ...authHeaders(cookie) },
+    body: JSON.stringify({ id: approval.id, candidateId: approval.candidateId, fingerprint: approval.fingerprint }),
+  })
+  assert.equal(approved.status, 200)
+  const after = await approved.json() as { view: MissionControlView }
+  const card = after.view.activations.find((item) => item.candidateId === candidateId)
+  assert.ok(card)
+  return card
 }
 
 describe('local Mission-Control Web UI', () => {
@@ -587,6 +646,185 @@ export function apply(ctx) {
         body: JSON.stringify({ id: card.id, candidateId: card.candidateId, digest: card.digest, fingerprint: card.fingerprint, confirm: true }),
       })
       assert.equal(replay.status, 409)
+    })
+  })
+
+  it('returns bounded diagnostics for failed, interrupted, duplicate, and stale-eligibility WUI activation', async () => {
+    await withServer(bootAssistantControl, 'web-ui-activate-fail', async (url, _surface, _agent, ctx, recoveryRoot) => {
+      const cookie = await cookieHeader(url)
+      const leak = 'prepare failed at /Users/secret/home/.tars-ng/candidates/x Bearer sk-ui-secret-value-123456'
+
+      const prepared = authorGenerated(ctx, 'r0.wui.prepare')
+      const prepareCard = await approveActivationCard(url, cookie, prepared.id)
+      const priorOwners = recoveryRoot.inspect().lastKnownGood?.owners.map((item) => `${item.owner}@${item.version}`).sort() ?? []
+      recoveryRoot.service.failActivation = { phase: 'prepare', diagnostics: leak }
+      const prepareFail = await fetch(`${url}/api/activate`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', ...authHeaders(cookie) },
+        body: JSON.stringify({
+          id: prepareCard.id,
+          candidateId: prepareCard.candidateId,
+          digest: prepareCard.digest,
+          fingerprint: prepareCard.fingerprint,
+          confirm: true,
+        }),
+      })
+      assert.equal(prepareFail.status, 409)
+      const prepareBody = await prepareFail.json() as {
+        error: string
+        phase?: string
+        diagnostics?: string
+        rollbackSucceeded?: boolean
+        recoveryRequired?: boolean
+        view: MissionControlView
+      }
+      assert.equal(prepareBody.error, 'activation-failed')
+      assert.equal(prepareBody.phase, 'prepare')
+      assert.equal(prepareBody.rollbackSucceeded, true)
+      assert.equal(prepareBody.recoveryRequired, false)
+      assert.match(prepareBody.diagnostics ?? '', /prepare failed/)
+      assert.doesNotMatch(JSON.stringify(prepareBody), /sk-ui-secret-value-123456|\/Users\/secret\/home/)
+      assert.equal(prepareBody.view.activationFailure?.phase, 'prepare')
+      assert.equal(prepareBody.view.activationFailure?.registryActive, false)
+      assert.equal(prepareBody.view.activationFailure?.rollbackSucceeded, true)
+      assert.ok(prepareBody.view.activity.some((item) => item.kind === 'FAILED' && item.summary.includes('prepare')))
+      assert.equal(prepareBody.view.candidates?.find((item) => item.id === prepared.id)?.activationState, 'failed')
+      assert.equal(ctx.capabilityRegistry.get(prepared.owner, '0.1.0'), undefined)
+      assert.deepEqual(
+        recoveryRoot.inspect().lastKnownGood?.owners.map((item) => `${item.owner}@${item.version}`).sort() ?? [],
+        priorOwners,
+      )
+      const refreshed = await fetch(`${url}/api/view`).then((res) => res.json()) as { view: MissionControlView }
+      assert.equal(refreshed.view.activationFailure?.candidateId, prepared.id)
+      assert.equal(refreshed.view.systemState === 'READY' || refreshed.view.systemState === 'DEGRADED', true)
+      recoveryRoot.service.failActivation = undefined
+
+      const health = authorGenerated(ctx, 'r0.wui.health')
+      const healthCard = await approveActivationCard(url, cookie, health.id)
+      recoveryRoot.service.failActivation = { phase: 'health', diagnostics: 'post-activation health verification failed' }
+      const healthFail = await fetch(`${url}/api/activate`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', ...authHeaders(cookie) },
+        body: JSON.stringify({
+          id: healthCard.id,
+          candidateId: healthCard.candidateId,
+          digest: healthCard.digest,
+          fingerprint: healthCard.fingerprint,
+          confirm: true,
+        }),
+      })
+      assert.equal(healthFail.status, 409)
+      const healthBody = await healthFail.json() as { error: string; phase?: string; view: MissionControlView }
+      assert.equal(healthBody.error, 'activation-failed')
+      assert.equal(healthBody.phase, 'health')
+      assert.notEqual(ctx.capabilityRegistry.get(health.owner, '0.1.0')?.status, 'active')
+      recoveryRoot.service.failActivation = undefined
+
+      const commit = authorGenerated(ctx, 'r0.wui.commit')
+      const commitCard = await approveActivationCard(url, cookie, commit.id)
+      recoveryRoot.service.failActivation = { phase: 'commit', diagnostics: 'authority commit failed' }
+      const commitFail = await fetch(`${url}/api/activate`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', ...authHeaders(cookie) },
+        body: JSON.stringify({
+          id: commitCard.id,
+          candidateId: commitCard.candidateId,
+          digest: commitCard.digest,
+          fingerprint: commitCard.fingerprint,
+          confirm: true,
+        }),
+      })
+      assert.equal(commitFail.status, 409)
+      const commitBody = await commitFail.json() as { error: string; phase?: string; rollbackSucceeded?: boolean; view: MissionControlView }
+      assert.equal(commitBody.error, 'activation-failed')
+      assert.equal(commitBody.phase, 'commit')
+      assert.equal(commitBody.rollbackSucceeded, true)
+      assert.notEqual(ctx.capabilityRegistry.get(commit.owner, '0.1.0')?.status, 'active')
+      recoveryRoot.service.failActivation = undefined
+
+      const interrupted = authorGenerated(ctx, 'r0.wui.interrupt')
+      const interruptCard = await approveActivationCard(url, cookie, interrupted.id)
+      recoveryRoot.simulateInterrupt('prepare')
+      const crashed = await fetch(`${url}/api/activate`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', ...authHeaders(cookie) },
+        body: JSON.stringify({
+          id: interruptCard.id,
+          candidateId: interruptCard.candidateId,
+          digest: interruptCard.digest,
+          fingerprint: interruptCard.fingerprint,
+          confirm: true,
+        }),
+      })
+      assert.equal(crashed.status, 409)
+      const crashBody = await crashed.json() as { error: string; view: MissionControlView }
+      assert.equal(crashBody.error, 'activation-interrupted')
+      assert.notEqual(recoveryRoot.inspect().state, 'active')
+      recoveryRoot.completeInterruptedActivation()
+      recoveryRoot.service.interruptAfter = undefined
+
+      const duplicate = authorGenerated(ctx, 'r0.wui.duplicate')
+      const duplicateCard = await approveActivationCard(url, cookie, duplicate.id)
+      let release!: () => void
+      recoveryRoot.service.holdActivation = new Promise<void>((resolve) => {
+        release = resolve
+      })
+      const first = fetch(`${url}/api/activate`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', ...authHeaders(cookie) },
+        body: JSON.stringify({
+          id: duplicateCard.id,
+          candidateId: duplicateCard.candidateId,
+          digest: duplicateCard.digest,
+          fingerprint: duplicateCard.fingerprint,
+          confirm: true,
+        }),
+      })
+      for (let i = 0; i < 50 && recoveryRoot.inspect().state !== 'activation-pending'; i += 1) {
+        await new Promise((resolve) => setTimeout(resolve, 20))
+      }
+      assert.equal(recoveryRoot.inspect().state, 'activation-pending')
+      const second = await fetch(`${url}/api/activate`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', ...authHeaders(cookie) },
+        body: JSON.stringify({
+          id: duplicateCard.id,
+          candidateId: duplicateCard.candidateId,
+          digest: duplicateCard.digest,
+          fingerprint: duplicateCard.fingerprint,
+          confirm: true,
+        }),
+      })
+      assert.equal(second.status, 409)
+      const secondBody = await second.json() as { error: string }
+      assert.equal(secondBody.error, 'activation-in-flight')
+      release()
+      const firstRes = await first
+      assert.equal(firstRes.status, 200, await firstRes.clone().text())
+      assert.equal(ctx.capabilityRegistry.get(duplicate.owner, '0.1.0')?.status, 'active')
+      recoveryRoot.service.holdActivation = undefined
+
+      const stale = authorGenerated(ctx, 'r0.wui.stale')
+      const staleCard = await approveActivationCard(url, cookie, stale.id)
+      const human = recoveryRoot.issueAuthority({ kind: 'human-control', source: 'application-ui' })
+      recoveryRoot.enterSafeMode(human)
+      const denied = await fetch(`${url}/api/activate`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', ...authHeaders(cookie) },
+        body: JSON.stringify({
+          id: staleCard.id,
+          candidateId: staleCard.candidateId,
+          digest: staleCard.digest,
+          fingerprint: staleCard.fingerprint,
+          confirm: true,
+        }),
+      })
+      assert.equal(denied.status, 409)
+      const deniedBody = await denied.json() as { error: string; denials?: { reason: string }[]; view: MissionControlView }
+      assert.equal(deniedBody.error, 'activation-denied')
+      assert.ok(deniedBody.denials?.some((item) => item.reason === 'safe-mode'))
+      assert.notEqual(deniedBody.view.systemState === 'SAFE_MODE' ? 'SAFE_MODE' : '', '')
+      assert.notEqual(ctx.capabilityRegistry.get(stale.owner, '0.1.0')?.status, 'active')
     })
   })
 

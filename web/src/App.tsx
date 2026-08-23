@@ -457,6 +457,7 @@ function WorkbenchPanel(props: { readonly candidates: readonly WorkbenchProjecti
             </div>
             <div className="workbench-meta" data-activation-state={item.activationState ?? 'inactive'}>
               activationState {item.activationState ?? 'inactive'}
+              {item.activationFailureSummary ? ` · ${item.activationFailureSummary}` : ''}
             </div>
             <div className="workbench-meta" data-approval-state={item.approvalState ?? 'not-ready'} data-extension-lifecycle={item.extensionLifecycle ?? 'APPROVAL_REQUIRED'}>
               {item.extensionLifecycle === 'ACTIVE' ? 'approved and active'

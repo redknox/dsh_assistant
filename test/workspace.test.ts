@@ -226,6 +226,43 @@ describe('TARS-NG mission-control workspace', () => {
     assert.match(renderMissionControlAsHtml(view), /data-activation-id="apr-2"/)
   })
 
+  it('G3. activation failure stays visible after a successful rollback', () => {
+    const view = projectMissionControl(snapshot({
+      activation: {
+        state: 'activation-failed',
+        lastFailureCandidateId: 'cand-obsidian',
+        lastFailure: {
+          candidateId: 'cand-obsidian',
+          phase: 'health',
+          diagnostics: 'post-activation health verification failed',
+          rollbackSucceeded: true,
+          safeModeRequired: false,
+        },
+      },
+      extensionApprovals: [{
+        id: 'apr-2',
+        candidateId: 'cand-obsidian',
+        fingerprint: 'fp-ext',
+        decision: 'approved-for-exact-diff',
+        owner: 'generated/obsidian-vault',
+        candidateVersion: '0.1.0',
+        digest: 'abc123',
+        capabilitiesAdded: ['obsidian.read'],
+        capabilitiesRemoved: [],
+        permissionsAdded: [],
+        permissionsRemoved: [],
+        effects: [],
+      }],
+    }))
+    assert.equal(view.activations.length, 0)
+    assert.equal(view.activationFailure?.phase, 'health')
+    assert.equal(view.activationFailure?.rollbackSucceeded, true)
+    assert.equal(view.activationFailure?.registryActive, false)
+    assert.ok(view.activity.some((item) => item.kind === 'FAILED' && item.summary.includes('health')))
+    assert.match(renderMissionControlAsText(view), /ACTIVATION FAILED/)
+    assert.match(renderMissionControlAsHtml(view), /data-activation-failed="true"/)
+  })
+
   it('H. Safe Mode is a dedicated comprehensible product state', () => {
     const view = projectMissionControl(snapshot({
       safeMode: true,

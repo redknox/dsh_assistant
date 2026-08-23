@@ -152,6 +152,14 @@ export interface MissionControlView {
   }
   readonly developmentControlPlaneSeparated: true
   readonly candidates?: readonly WorkbenchProjection[]
+  readonly activationFailure?: {
+    readonly candidateId: string
+    readonly phase: string
+    readonly summary: string
+    readonly rollbackSucceeded: boolean
+    readonly recoveryRequired: boolean
+    readonly registryActive: boolean
+  }
 }
 
 export interface WorkbenchProjection {
@@ -180,6 +188,7 @@ export interface WorkbenchProjection {
   readonly governanceApproval?: string
   readonly activationState?: ActivationViewState
   readonly extensionLifecycle?: ExtensionLifecycleState
+  readonly activationFailureSummary?: string
 }
 
 export interface WorkspaceSnapshotInput {
@@ -239,6 +248,13 @@ export interface WorkspaceSnapshotInput {
     readonly state: string
     readonly pendingCandidateId?: string
     readonly lastFailureCandidateId?: string
+    readonly lastFailure?: {
+      readonly candidateId: string
+      readonly phase: string
+      readonly diagnostics: string
+      readonly rollbackSucceeded: boolean
+      readonly safeModeRequired: boolean
+    }
   }
   readonly candidates?: readonly WorkbenchProjection[]
   readonly memory: readonly WorkspaceMemoryItem[]

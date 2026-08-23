@@ -4,6 +4,7 @@ import type { Context } from '@deepseek-ai/cordis'
 import { humorSuppressed } from '../personality/effective.js'
 import type { TarsPersonality } from '../personality/types.js'
 import { flattenEffects, summarizeCandidateEffects } from './effects.js'
+import { boundActivationDiagnostics } from './failure.js'
 import { activationViewOf, approvalStateOf, extensionLifecycleOf } from './lifecycle.js'
 import type { MissionControlView, ObjectiveView, WorkspaceSnapshotInput } from './types.js'
 import { projectMissionControl } from './project.js'
@@ -25,17 +26,28 @@ export function gatherWorkspaceSnapshot(input: GatherWorkspaceInput): WorkspaceS
       recoveryRequired?: boolean
       state?: string
       pendingCandidateId?: string
-      lastFailure?: { diagnostics: string; candidateId?: string }
+      lastFailure?: {
+        diagnostics: string
+        candidateId?: string
+        phase?: string
+        rollbackSucceeded?: boolean
+        safeModeRequired?: boolean
+      }
     }
   } | undefined
   const activation = recovery?.inspect()
   const safeMode = Boolean(activation?.safeMode)
-  const lastFailure = activation?.lastFailure?.diagnostics
+  const lastFailure = activation?.lastFailure
+  const boundedFailure = lastFailure?.diagnostics ? boundActivationDiagnostics(lastFailure.diagnostics) : undefined
   return {
     agentStatus: agent?.status,
     safeMode,
     recoveryRequired: Boolean(activation?.recoveryRequired),
-    ...(lastFailure ? { recoveryWhy: lastFailure } : safeMode ? { recoveryWhy: 'Generated capabilities are disabled. Trusted core is available.' } : {}),
+    ...(activation?.recoveryRequired && boundedFailure
+      ? { recoveryWhy: boundedFailure }
+      : safeMode
+        ? { recoveryWhy: 'Generated capabilities are disabled. Trusted core is available.' }
+        : {}),
     pendingConfirmations: (ctx.get('actionPolicy') as { policy: { confirmations(): WorkspaceSnapshotInput['pendingConfirmations'] } } | undefined)
       ?.policy.confirmations() ?? [],
     jobs: (ctx.get('assistantJobs') as { service: { list(): { name: string; lastRun?: { status: string } }[] } } | undefined)
@@ -63,7 +75,18 @@ export function gatherWorkspaceSnapshot(input: GatherWorkspaceInput): WorkspaceS
     activation: {
       state: activation?.state ?? 'idle',
       ...(activation?.pendingCandidateId ? { pendingCandidateId: activation.pendingCandidateId } : {}),
-      ...(activation?.lastFailure?.candidateId ? { lastFailureCandidateId: activation.lastFailure.candidateId } : {}),
+      ...(lastFailure?.candidateId ? { lastFailureCandidateId: lastFailure.candidateId } : {}),
+      ...(lastFailure && boundedFailure
+        ? {
+          lastFailure: {
+            candidateId: lastFailure.candidateId ?? '',
+            phase: lastFailure.phase ?? 'prepare',
+            diagnostics: boundedFailure,
+            rollbackSucceeded: lastFailure.rollbackSucceeded === true,
+            safeModeRequired: lastFailure.safeModeRequired === true,
+          },
+        }
+        : {}),
     },
     candidates: workbenchCandidates(ctx),
     memory: (ctx.get('personalMemory') as { query(): { records: { id: string; statement: string; topicKey: string; status: string }[] } } | undefined)
@@ -247,7 +270,11 @@ function workbenchCandidates(ctx: Context): WorkspaceSnapshotInput['candidates']
             ?.inspectApproval?.(view.id)?.decision,
           registry: ctx.get('capabilityRegistry') as { get(owner: string, version: string): { status: string } | undefined } | undefined,
           activation: ctx.get('extensionRecovery') as {
-            inspect(): { state?: string; pendingCandidateId?: string; lastFailure?: { candidateId?: string } }
+            inspect(): {
+              state?: string
+              pendingCandidateId?: string
+              lastFailure?: { candidateId?: string; diagnostics?: string }
+            }
           } | undefined,
         }),
       }
@@ -345,8 +372,14 @@ function projectedLifecycle(input: {
   readonly canRequest: boolean
   readonly decision?: string
   readonly registry?: { get(owner: string, version: string): { status: string } | undefined }
-  readonly activation?: { inspect(): { state?: string; pendingCandidateId?: string; lastFailure?: { candidateId?: string } } }
-}): Pick<import('./types.js').WorkbenchProjection, 'approvalState' | 'governanceApproval' | 'activationState' | 'extensionLifecycle'> {
+  readonly activation?: {
+    inspect(): {
+      state?: string
+      pendingCandidateId?: string
+      lastFailure?: { candidateId?: string; diagnostics?: string }
+    }
+  }
+}): Pick<import('./types.js').WorkbenchProjection, 'approvalState' | 'governanceApproval' | 'activationState' | 'extensionLifecycle' | 'activationFailureSummary'> {
   const inspected = input.activation?.inspect()
   const lifecycle = extensionLifecycleOf({
     registryStatus: input.registry?.get(input.owner, input.version)?.status,
@@ -362,10 +395,14 @@ function projectedLifecycle(input: {
     else if (input.canRequest) approvalState = 'ready-for-approval'
     else approvalState = 'not-ready'
   }
+  const failure = inspected?.lastFailure
   return {
     approvalState,
     governanceApproval: input.decision,
     activationState: activationViewOf(lifecycle),
     extensionLifecycle: lifecycle,
+    ...(lifecycle === 'ACTIVATION_FAILED' && failure?.diagnostics
+      ? { activationFailureSummary: boundActivationDiagnostics(failure.diagnostics) }
+      : {}),
   }
 }
