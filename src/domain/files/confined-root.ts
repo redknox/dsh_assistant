@@ -1,4 +1,4 @@
-import { existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs'
+import { existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, realpathSync, unlinkSync, writeFileSync } from 'node:fs'
 import path from 'node:path'
 
 export class ConfinedRootError extends Error {
@@ -68,7 +68,7 @@ export function listConfinedTextFiles(root: string, prefix = '', extension = '.m
       const stat = lstatSync(full)
       if (stat.isSymbolicLink()) continue
       if (stat.isDirectory()) walk(full, relative)
-      else if (stat.isFile() && relative.endsWith(extension)) files.push(relative)
+      else if (stat.isFile() && (extension === '' || relative.endsWith(extension))) files.push(relative)
     }
   }
   const start = prefix === '' ? rootReal : resolveConfined(root, prefix)
@@ -89,4 +89,12 @@ export function writeConfinedText(root: string, relativePath: string, content: s
   mkdirSync(parent, { recursive: true })
   assertInside(rootReal, realpathSync(parent))
   writeFileSync(dest, content)
+}
+
+export function deleteConfinedText(root: string, relativePath: string): void {
+  const dest = resolveConfined(root, relativePath)
+  if (!existsSync(dest) || !lstatSync(dest).isFile()) {
+    throw new ConfinedRootError(`file not found: ${relativePath}`)
+  }
+  unlinkSync(dest)
 }

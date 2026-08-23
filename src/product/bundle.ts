@@ -82,9 +82,12 @@ export const PRODUCT_TOOL_NAMES = [
   'calendar_propose_event',
   'mail_list_messages',
   'tasks_propose_create',
+  'files_list',
+  'files_read',
   'integration_status',
   'calendar_create_event',
   'tasks_create',
+  'files_write',
   'files_delete',
   'confirm_action',
 ] as const

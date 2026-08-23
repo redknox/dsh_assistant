@@ -1,4 +1,5 @@
 import { existsSync } from 'node:fs'
+import { inspectSandboxRoot } from '../domain/files/sandbox-root.js'
 import { generatedRuntimeDiagnosis, type GeneratedRuntimeDiagnosis } from '../domain/generated-runtime/index.js'
 import type { OperatorStatus } from '../domain/self-extension/status.js'
 import { inspectCompatibility, type CompatibilityReport } from './compatibility.js'
@@ -75,6 +76,37 @@ export function searchDiagnosis(): IntegrationDiagnosis {
   }
 }
 
+export function sandboxDiagnosis(allowFixtures: boolean): IntegrationDiagnosis {
+  const inspected = inspectSandboxRoot(process.env.DSH_ASSISTANT_SANDBOX_ROOT)
+  if (inspected.configured && inspected.ok) {
+    return {
+      capability: 'sandbox',
+      mode: 'live',
+      note: `Confined files and tasks at ${inspected.root}. Writes use existing policy; deletes stay L4.`,
+    }
+  }
+  if (inspected.configured) {
+    return {
+      capability: 'sandbox',
+      mode: 'unavailable',
+      note: inspected.reason,
+    }
+  }
+  if (allowFixtures) {
+    return {
+      capability: 'sandbox',
+      mode: 'fake',
+      note: 'Fixture files/tasks are explicit. Results are not the operator sandbox.',
+    }
+  }
+  return {
+    capability: 'sandbox',
+    mode: 'unavailable',
+    missing: ['DSH_ASSISTANT_SANDBOX_ROOT'],
+    note: 'Not configured. Set DSH_ASSISTANT_SANDBOX_ROOT to an existing directory that is not a symlink.',
+  }
+}
+
 export function collectStaticDoctor(input: {
   readonly layout: ProductHomeLayout
   readonly envFiles: readonly EnvFileLoad[]
@@ -93,7 +125,7 @@ export function collectStaticDoctor(input: {
     credentials,
     missingConfiguration: missingCredentialNames(credentials),
     allowFixtures: input.allowFixtures,
-    integrations: [calendarDiagnosis(input.allowFixtures), searchDiagnosis()],
+    integrations: [calendarDiagnosis(input.allowFixtures), sandboxDiagnosis(input.allowFixtures), searchDiagnosis()],
     lastStartup: input.lastStartup,
     logFile: input.layout.logFile,
     generatedRuntime: generatedRuntimeDiagnosis(),

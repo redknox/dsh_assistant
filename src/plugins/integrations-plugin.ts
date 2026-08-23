@@ -1,6 +1,9 @@
 import { Service, type Context } from '@deepseek-ai/cordis'
 import { FakeIntegrationSuite } from '../adapters/integrations/fake-providers.js'
 import { createGoogleCalendarProvider, createHostGoogleCalendarTransport } from '../adapters/integrations/google-calendar.js'
+import { createSandboxFilesProvider } from '../adapters/integrations/sandbox-files.js'
+import { createSandboxTasksProvider } from '../adapters/integrations/sandbox-tasks.js'
+import { inspectSandboxRoot } from '../domain/files/sandbox-root.js'
 import { IntegrationHub } from '../domain/integrations/hub.js'
 import type { BoundedGoogleCalendarTransport } from '../domain/integrations/google-api.js'
 import { registerIntegrationTools } from './integration-tools.js'
@@ -50,6 +53,14 @@ export async function apply(ctx: Context, config: IntegrationsPluginConfig = {})
       allowCreate: true,
     }))
   }
+  const sandbox = inspectSandboxRoot(process.env.DSH_ASSISTANT_SANDBOX_ROOT)
+  if (sandbox.configured && sandbox.ok) {
+    fakes.hub.replaceFiles(createSandboxFilesProvider(sandbox.root))
+    fakes.hub.replaceTasks(createSandboxTasksProvider(sandbox.root))
+  } else if (sandbox.configured && config.allowFixtures === false) {
+    fakes.state.unavailable.files = sandbox.reason
+    fakes.state.unavailable.tasks = sandbox.reason
+  }
   await ctx.plugin(class extends IntegrationsService {
     constructor(scope: Context) {
       super(scope, fakes.hub, googleCalendarTransport)
@@ -58,7 +69,9 @@ export async function apply(ctx: Context, config: IntegrationsPluginConfig = {})
   ctx.systemPrompt.section({
     name: 'product:integrations',
     order: 40,
-    text: 'Personal integrations are provider-neutral. Prefer read tools for lookup. Mutation tools only propose drafts; do not treat a proposal as executed.',
+    text: sandbox.configured && sandbox.ok
+      ? `Personal integrations are provider-neutral. Files and tasks are confined to the operator sandbox at ${sandbox.root}. Use sandbox-relative paths only. Absolute paths and parent traversal are rejected. Prefer read tools for lookup. Mutation tools only propose drafts; do not treat a proposal as executed.`
+      : 'Personal integrations are provider-neutral. Prefer read tools for lookup. Mutation tools only propose drafts; do not treat a proposal as executed.',
   })
   ctx.effect(() => registerIntegrationTools(ctx.tools, fakes.hub))
 }

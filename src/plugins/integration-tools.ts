@@ -135,6 +135,36 @@ export function registerIntegrationTools(tools: Pick<ToolRuntime, 'register'>, h
       },
     })),
     tools.register(defineTool({
+      name: 'files_list',
+      description: 'Read-only: list files inside the operator sandbox. Paths are sandbox-relative. Does not write or delete.',
+      parameters: {
+        path: { type: 'string' },
+        limit: { type: 'integer' },
+        cursor: { type: 'string' },
+      },
+      output: textOutput(),
+      async execute(args, exec) {
+        return runJson(() => hub.files().listFiles({
+          path: args.path,
+          limit: args.limit,
+          cursor: args.cursor,
+          signal: exec.signal,
+        }))
+      },
+    })),
+    tools.register(defineTool({
+      name: 'files_read',
+      description: 'Read-only: read a text file inside the operator sandbox. Path is sandbox-relative. Does not write or delete.',
+      parameters: {
+        path: { type: 'string', required: true },
+      },
+      output: textOutput(),
+      async execute(args, exec) {
+        exec.signal.throwIfAborted()
+        return runJson(() => hub.files().readText({ root: '', path: args.path }))
+      },
+    })),
+    tools.register(defineTool({
       name: 'integration_status',
       description: 'Read-only: report availability of personal integration capabilities.',
       parameters: {},

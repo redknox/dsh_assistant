@@ -132,6 +132,22 @@ export class IntegrationHub {
     }
   }
 
+  replaceFiles(provider: FilesProvider): () => void {
+    const previous = this.providers.files
+    this.providers = { ...this.providers, files: provider }
+    return () => {
+      this.providers = { ...this.providers, files: previous }
+    }
+  }
+
+  replaceTasks(provider: TasksProvider): () => void {
+    const previous = this.providers.tasks
+    this.providers = { ...this.providers, tasks: provider }
+    return () => {
+      this.providers = { ...this.providers, tasks: previous }
+    }
+  }
+
   status(): Record<IntegrationCapability, Availability> {
     return {
       calendar: this.providers.calendar.availability(),

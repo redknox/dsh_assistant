@@ -6,6 +6,7 @@ import { describe, it } from 'node:test'
 import { ConfinedRootFiles } from '../src/adapters/integrations/confined-root-files.js'
 import {
   ConfinedRootError,
+  deleteConfinedText,
   listConfinedTextFiles,
   readConfinedText,
   writeConfinedText,
@@ -44,6 +45,22 @@ describe('confined-root files seam', () => {
     const vault = mkdtempSync(path.join(tmpdir(), 'confined-write-'))
     writeConfinedText(vault, 'People/Bob.md', 'ok\n')
     assert.equal(readConfinedText(vault, 'People/Bob.md'), 'ok\n')
+  })
+
+  it('lists every regular file when the extension filter is empty', () => {
+    const vault = mkdtempSync(path.join(tmpdir(), 'confined-all-'))
+    writeFileSync(path.join(vault, 'note.md'), 'md\n')
+    writeFileSync(path.join(vault, 'readme.txt'), 'txt\n')
+    assert.deepEqual(listConfinedTextFiles(vault, '', ''), ['note.md', 'readme.txt'])
+  })
+
+  it('deletes only a real file inside the root', () => {
+    const vault = mkdtempSync(path.join(tmpdir(), 'confined-del-'))
+    writeConfinedText(vault, 'note.md', 'bye\n')
+    deleteConfinedText(vault, 'note.md')
+    assert.deepEqual(listConfinedTextFiles(vault), [])
+    assert.throws(() => deleteConfinedText(vault, 'note.md'), ConfinedRootError)
+    assert.throws(() => deleteConfinedText(vault, '../outside.md'), ConfinedRootError)
   })
 
   it('records confined access on the public files adapter', async () => {

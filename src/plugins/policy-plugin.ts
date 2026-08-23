@@ -38,6 +38,11 @@ export async function apply(ctx: Context, config: PolicyPluginConfig = {}) {
   policy.registerExecutor('tasks', 'create', (payload, signal) => hub.tasks().createTask({
     title: String(payload.title ?? ''),
   }, signal))
+  policy.registerExecutor('files', 'write', (payload) => hub.files().writeText({
+    root: '',
+    path: String(payload.path ?? ''),
+    content: String(payload.content ?? ''),
+  }))
   policy.registerExecutor('files', 'delete', (payload, signal) => hub.files().deleteFile(String(payload.id ?? ''), signal))
 
   await ctx.plugin(class extends ActionPolicyService {
