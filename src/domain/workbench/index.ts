@@ -1,4 +1,5 @@
 export { WorkbenchContractError, WorkbenchRepairRollbackError } from './errors.js'
+export { parseWorkbenchRiskModel, riskModelToolSchema } from './risk-model.js'
 export { WorkbenchService } from './service.js'
 export type {
   CandidateWorkbench,

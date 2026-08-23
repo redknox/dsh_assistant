@@ -14,6 +14,7 @@ import {
   WorkbenchContractError,
   WorkbenchRepairRollbackError,
   WorkbenchService,
+  parseWorkbenchRiskModel,
   type WorkbenchPersistState,
 } from '../src/domain/workbench/index.js'
 import { googleCalendarWriteRiskModel } from '../src/domain/reliability/index.js'
@@ -427,6 +428,37 @@ describe('candidate workbench', () => {
     assert.equal(existsSync(setup.workspace.get(repaired.id).workspaceRoot), true)
   })
 
+  it('copies the preflight snapshot even if the sealed parent is mutated during repair', () => {
+    const blocker = new PolicyReviewerProvider((pkg) => [finding({
+      reviewedDigest: pkg.candidate.digest,
+      severity: 'BLOCKER',
+      category: 'acceptance-contract',
+      claim: 'needs-repair',
+      location: 'policy',
+      evidence: 'forced',
+      whyItMatters: 'repair path',
+      requiredRemediation: 'fix',
+      status: 'open',
+    })])
+    const setup = isolatedWorkbench(blocker)
+    const parentId = authorIsolated(setup)
+    setup.workbench.review(parentId)
+    const parentRoot = setup.workspace.get(parentId).workspaceRoot
+    const originalWrite = setup.workspace.writeFile.bind(setup.workspace)
+    setup.workspace.writeFile = (id: string, relativePath: string, content: string) => {
+      if (id !== parentId) {
+        writeFileSync(path.join(parentRoot, 'src/plugin.js'), `MUTATED-${'x'.repeat(1024)}\n`)
+        writeFileSync(path.join(parentRoot, 'package.json'), `${'y'.repeat(2048)}\n`)
+      }
+      return originalWrite(id, relativePath, content)
+    }
+    const repaired = setup.workbench.repair(parentId)
+    setup.workspace.writeFile = originalWrite
+    assert.equal(setup.workbench.readFile(repaired.id, 'src/plugin.js'), R0_SOURCE)
+    assert.match(setup.workbench.readFile(repaired.id, 'package.json'), /dsh-r0/)
+    assert.notEqual(setup.workspace.readFile(parentId, 'src/plugin.js'), R0_SOURCE)
+  })
+
   it('does not pretend a leftover repair child was rolled back when discard fails', () => {
     const blocker = new PolicyReviewerProvider((pkg) => [finding({
       reviewedDigest: pkg.candidate.digest,
@@ -462,6 +494,43 @@ describe('candidate workbench', () => {
     })
     setup.workspace.writeFile = originalWrite
     setup.workspace.discard = originalDiscard
+  })
+
+  it('rejects malformed Risk Models instead of casting model JSON', async () => {
+    const valid = googleCalendarWriteRiskModel()
+    assert.doesNotThrow(() => parseWorkbenchRiskModel(valid))
+    assert.throws(() => parseWorkbenchRiskModel({ ...valid, sideEffects: undefined }), /sideEffects is required/)
+    assert.throws(() => parseWorkbenchRiskModel({ ...valid, declaredClass: 'R9' }), /declaredClass/)
+    assert.throws(() => parseWorkbenchRiskModel({ ...valid, trustBoundaries: [] }), /trustBoundaries must be an object/)
+    assert.throws(() => parseWorkbenchRiskModel({ ...valid, extra: true }), /unknown field extra/)
+    const { ctx } = await bootAssistantControl()
+    try {
+      const plan = ctx.candidateWorkbench.rememberPlan(ctx.capabilityResolution.review({
+        capability: 'r0.workbench.ping',
+        need: 'uppercase text',
+        inventory: { complete: true, seams: [] },
+      }))
+      const created = parse(await tool(ctx, 'create_candidate', { planId: plan.planId, capabilities: ['r0.workbench.ping'] }))
+      const missing = { ...valid } as Record<string, unknown>
+      delete missing.sideEffects
+      const omitted = await tool(ctx, 'set_candidate_manifest', { candidateId: created.id, riskModel: missing })
+      assert.equal(omitted.isError, true)
+      assert.match(JSON.stringify(omitted), /sideEffects/)
+      const wrongEnum = await tool(ctx, 'set_candidate_manifest', {
+        candidateId: created.id,
+        riskModel: { ...valid, retryPolicy: { ...valid.retryPolicy, writes: 'always' } },
+      })
+      assert.equal(wrongEnum.isError, true)
+      assert.match(JSON.stringify(wrongEnum), /retryPolicy.writes|writes/)
+      const wrongContainer = await tool(ctx, 'set_candidate_manifest', {
+        candidateId: created.id,
+        riskModel: { ...valid, sideEffects: 'not-an-array' },
+      })
+      assert.equal(wrongContainer.isError, true)
+      assert.match(JSON.stringify(wrongContainer), /sideEffects/)
+    } finally {
+      await ctx.fiber.dispose()
+    }
   })
 
   it('patches allowlisted manifest fields without wiping omitted governance declarations', async () => {

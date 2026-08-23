@@ -9,6 +9,7 @@ import type { ExtensionGovernance } from '../governance/types.js'
 import type { CapabilityResolution, ResolutionReview } from '../resolution/types.js'
 import type { IndependentReview, ReviewReport } from '../review/types.js'
 import { WorkbenchContractError, WorkbenchRepairRollbackError } from './errors.js'
+import { parseWorkbenchRiskModel } from './risk-model.js'
 import {
   WORKBENCH_CHANGE_KINDS,
   WORKBENCH_MAX_FILE_BYTES,
@@ -174,6 +175,7 @@ export class WorkbenchService implements CandidateWorkbench {
     if (manifest.validationTasks?.some((task) => task.argv !== undefined || task.script !== undefined)) {
       throw new WorkbenchContractError('candidate manifest cannot include argv, scripts, or a shell runner')
     }
+    if (manifest.riskModel !== undefined) parseWorkbenchRiskModel(manifest.riskModel)
     const current = this.workspace.get(candidateId).manifest
     this.workspace.setManifest(candidateId, mergeManifestPatch(current, manifest))
     this.flush()
@@ -220,7 +222,7 @@ export class WorkbenchService implements CandidateWorkbench {
     if (last?.state !== 'changes-required') {
       throw new WorkbenchContractError('repair requires Independent Review changes-required on the parent')
     }
-    const files = preflightRepairParent(parent)
+    const snapshot = snapshotRepairParent(parent)
     const binding = this.bindings.get(parent.id)
     const plan = binding?.planId === undefined ? undefined : this.plans.get(binding.planId)
     const review = plan?.review ?? reviewFromRecord(parent)
@@ -255,7 +257,7 @@ export class WorkbenchService implements CandidateWorkbench {
         parentDigest: parent.digest,
       })
       if (inheritedPlanId !== undefined) this.plans.set(inheritedPlanId, { id: inheritedPlanId, review })
-      this.copyParentWorkspace(parent, created.id, files)
+      this.copyParentWorkspace(created.id, snapshot)
       this.flush()
       return this.inspect(created.id)
     } catch (error) {
@@ -277,10 +279,10 @@ export class WorkbenchService implements CandidateWorkbench {
     }
   }
 
-  private copyParentWorkspace(parent: CandidateRecord, childId: string, files: readonly string[]): void {
-    for (const relative of files) {
-      if (relative === 'candidate.manifest.json') continue
-      this.workspace.writeFile(childId, relative, readBoundedFile(parent.workspaceRoot, relative))
+  private copyParentWorkspace(childId: string, snapshot: RepairSnapshot): void {
+    for (const file of snapshot.files) {
+      if (file.relative === 'candidate.manifest.json') continue
+      this.workspace.writeFile(childId, file.relative, file.bytes.toString('utf8'))
     }
   }
 
@@ -407,13 +409,20 @@ function describeError(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
 }
 
-function preflightRepairParent(parent: CandidateRecord): readonly string[] {
+interface RepairSnapshot {
+  readonly digest: string
+  readonly files: readonly { readonly relative: string; readonly bytes: Buffer }[]
+}
+
+function snapshotRepairParent(parent: CandidateRecord): RepairSnapshot {
   if (parent.digest === undefined) {
     throw new WorkbenchContractError('repair requires a sealed parent with a host digest')
   }
-  const files = listBoundedFiles(parent.workspaceRoot)
+  const names = listBoundedFiles(parent.workspaceRoot)
+  const files: { relative: string; bytes: Buffer }[] = []
+  const hash = createHash('sha256')
   let total = 0
-  for (const relative of files) {
+  for (const relative of names) {
     const dest = resolveInsideRoot(parent.workspaceRoot, relative)
     const stat = lstatSync(dest)
     if (stat.isSymbolicLink()) {
@@ -426,46 +435,42 @@ function preflightRepairParent(parent: CandidateRecord): readonly string[] {
     if (total > WORKBENCH_MAX_WORKSPACE_BYTES) {
       throw new WorkbenchContractError(`candidate workspace exceeds the ${WORKBENCH_MAX_WORKSPACE_BYTES} byte bound`)
     }
-  }
-  const live = digestBoundedFiles(parent.workspaceRoot, files)
-  if (live !== parent.digest) {
-    throw new WorkbenchContractError('parent candidate digest no longer matches the sealed revision')
-  }
-  return files
-}
-
-function digestBoundedFiles(root: string, relativePaths: readonly string[]): string {
-  const hash = createHash('sha256')
-  const chunk = Buffer.alloc(64 * 1024)
-  for (const relative of [...relativePaths].sort()) {
+    const bytes = readBoundedBytes(dest, relative, stat.size)
     hash.update(relative)
     hash.update('\0')
-    const dest = resolveInsideRoot(root, relative)
-    const stat = lstatSync(dest)
-    if (stat.isSymbolicLink()) {
-      throw new WorkbenchContractError(`symlink is not allowed in a candidate workspace: ${relative}`)
-    }
-    if (stat.size > WORKBENCH_MAX_FILE_BYTES) {
-      throw new WorkbenchContractError(`candidate file exceeds the ${WORKBENCH_MAX_FILE_BYTES} byte bound`)
-    }
-    const fd = openSync(dest, 'r')
-    try {
-      let offset = 0
-      while (offset < stat.size) {
-        const n = readSync(fd, chunk, 0, Math.min(chunk.length, stat.size - offset), offset)
-        if (n === 0) break
-        offset += n
-        if (offset > WORKBENCH_MAX_FILE_BYTES) {
-          throw new WorkbenchContractError(`candidate file exceeds the ${WORKBENCH_MAX_FILE_BYTES} byte bound`)
-        }
-        hash.update(chunk.subarray(0, n))
-      }
-    } finally {
-      closeSync(fd)
-    }
+    hash.update(bytes)
     hash.update('\0')
+    files.push({ relative, bytes })
   }
-  return hash.digest('hex')
+  const digest = hash.digest('hex')
+  if (digest !== parent.digest) {
+    throw new WorkbenchContractError('parent candidate digest no longer matches the sealed revision')
+  }
+  return { digest, files }
+}
+
+function readBoundedBytes(dest: string, relative: string, expectedSize: number): Buffer {
+  if (lstatSync(dest).isSymbolicLink()) {
+    throw new WorkbenchContractError(`symlink is not allowed in a candidate workspace: ${relative}`)
+  }
+  const fd = openSync(dest, 'r')
+  try {
+    const out = Buffer.alloc(Math.min(expectedSize, WORKBENCH_MAX_FILE_BYTES))
+    const chunk = Buffer.alloc(64 * 1024)
+    let offset = 0
+    while (offset < out.length) {
+      const n = readSync(fd, chunk, 0, Math.min(chunk.length, out.length - offset), offset)
+      if (n === 0) break
+      chunk.copy(out, offset, 0, n)
+      offset += n
+      if (offset > WORKBENCH_MAX_FILE_BYTES) {
+        throw new WorkbenchContractError(`candidate file exceeds the ${WORKBENCH_MAX_FILE_BYTES} byte bound`)
+      }
+    }
+    return out.subarray(0, offset)
+  } finally {
+    closeSync(fd)
+  }
 }
 
 function assertRelativePath(relativePath: string): void {

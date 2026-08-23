@@ -1,8 +1,7 @@
 import { defineTool, type ToolRuntime } from '@deepseek-ai/dsh-tools'
 import type { CandidateManifestInput, OperationalEffects } from '../domain/candidate/index.js'
-import type { RiskModel } from '../domain/reliability/index.js'
 import { REMOTE_SIDE_EFFECTS } from '../domain/candidate/index.js'
-import type { CandidateWorkbench } from '../domain/workbench/index.js'
+import { parseWorkbenchRiskModel, riskModelToolSchema, type CandidateWorkbench } from '../domain/workbench/index.js'
 
 function textOutput() {
   return {
@@ -216,7 +215,7 @@ function manifestParameters() {
         remoteSideEffect: { type: 'string' as const },
       },
     },
-    riskModel: { type: 'json' as const },
+    riskModel: riskModelToolSchema(),
   }
 }
 
@@ -253,10 +252,9 @@ function parseEffects(value: unknown): Partial<OperationalEffects> | undefined {
   }
 }
 
-function parseRiskModel(value: unknown): RiskModel | undefined {
+function parseRiskModel(value: unknown) {
   if (value === undefined || value === null) return undefined
-  if (typeof value !== 'object' || Array.isArray(value)) return undefined
-  return value as RiskModel
+  return parseWorkbenchRiskModel(value)
 }
 
 function asStringList(value: unknown): string[] | undefined {
