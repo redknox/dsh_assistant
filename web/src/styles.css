@@ -8,12 +8,12 @@
 
 :root {
   color-scheme: light;
-  --panel-ivory: #e8e1d3;
-  --panel-ivory-light: #f2ede3;
-  --panel-ivory-deep: #d8d0c1;
-  --instrument-black: #171b1a;
-  --instrument-raised: #202523;
-  --ink: #171a19;
+  --panel-ivory: #dcd3c0;
+  --panel-ivory-light: #e8dfcd;
+  --panel-ivory-deep: #cfc4b0;
+  --instrument-black: #0d0f0e;
+  --instrument-raised: #161816;
+  --ink: #141210;
   --ink-inverse: #eeeadf;
   --muted: #777268;
   --muted-inverse: #a8aca6;
@@ -32,7 +32,7 @@
 * { box-sizing: border-box; }
 html, body, #root { margin: 0; height: 100%; }
 body {
-  background: #bcb6aa;
+  background: #8f8778;
   color: var(--ink);
   font-family: var(--font-reading);
   font-size: 15px;
@@ -53,22 +53,35 @@ button { color: inherit; }
 
 .chassis {
   height: 100%;
-  padding: 10px 12px 8px;
+  padding: 18px 20px 16px;
   position: relative;
-  background: #d8d0c1;
+  background: #c7b89f;
 }
 .rivet {
   position: absolute;
-  width: 9px;
-  height: 9px;
+  z-index: 3;
+  width: 13px;
+  height: 13px;
   border-radius: 50%;
-  background: radial-gradient(circle at 35% 30%, #f3ece1, #9a9182 70%);
-  box-shadow: inset 0 -1px 1px #6d675c;
+  background:
+    linear-gradient(118deg, transparent 45%, #2c2a26 45% 55%, transparent 55%),
+    radial-gradient(circle at 30% 28%, #d8d0c2, #7a7468 58%, #3a3732);
+  box-shadow:
+    0 0 0 1px #2a2823,
+    inset 0 1px 1px #efe8dc,
+    inset 0 -2px 2px #2f2c28,
+    0 1px 1px rgb(20 16 10 / 28%);
 }
-.rivet--tl { top: 6px; left: 7px; }
-.rivet--tr { top: 6px; right: 7px; }
-.rivet--bl { bottom: 6px; left: 7px; }
-.rivet--br { bottom: 6px; right: 7px; }
+.rivet--tl { top: 5px; left: 6px; }
+.rivet--tr { top: 5px; right: 6px; }
+.rivet--bl { bottom: 5px; left: 6px; }
+.rivet--br { bottom: 5px; right: 6px; }
+.rivet--ml { top: 50%; left: 6px; transform: translateY(-50%); }
+.rivet--mr { top: 50%; right: 6px; transform: translateY(-50%); }
+.rivet--ctl { top: 12px; left: 14px; }
+.rivet--ctr { top: 12px; right: 14px; }
+.rivet--cbl { bottom: 10px; left: 14px; }
+.rivet--cbr { bottom: 10px; right: 14px; }
 .grille { display: none; }
 
 .console {
@@ -92,7 +105,7 @@ button { color: inherit; }
   gap: 16px;
   padding: 0 34px;
   border-bottom: 3px solid var(--line);
-  background: #efe9dc;
+  background: #e2d6c0;
 }
 .brand-block, .system-state { display: flex; align-items: center; }
 .brand-block { gap: 18px; font-family: var(--font-instrument); letter-spacing: .08em; }
@@ -274,7 +287,7 @@ button { color: inherit; }
   border: 2px solid var(--line);
   border-radius: 10px;
   overflow: hidden;
-  background: #ede7db;
+  background: #e4d8c6;
 }
 .approval-header { display: flex; align-items: center; gap: 12px; padding: 16px 20px; border-bottom: 1px solid var(--line-soft); }
 .approval-header h2 { margin: 0; font: 700 18px/1.2 var(--font-instrument); letter-spacing: .04em; }
@@ -309,7 +322,7 @@ button { color: inherit; }
   padding: 8px;
   border: 2px solid var(--line);
   border-radius: 9px;
-  background: #eee8dc;
+  background: #e4d8c4;
 }
 .composer textarea {
   width: 100%;
@@ -373,7 +386,7 @@ button { color: inherit; }
   margin: 10px 32px;
   border: 2px solid var(--line-soft);
   border-radius: 8px;
-  background: #ded7ca;
+  background: #d6c9b4;
 }
 .control-strip > div, .control-strip-row {
   display: contents;

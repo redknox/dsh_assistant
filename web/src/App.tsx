@@ -388,6 +388,12 @@ export function MissionControlScreen(props: {
       <span className="rivet rivet--tr" aria-hidden="true" />
       <span className="rivet rivet--bl" aria-hidden="true" />
       <span className="rivet rivet--br" aria-hidden="true" />
+      <span className="rivet rivet--ml" aria-hidden="true" />
+      <span className="rivet rivet--mr" aria-hidden="true" />
+      <span className="rivet rivet--ctl" aria-hidden="true" />
+      <span className="rivet rivet--ctr" aria-hidden="true" />
+      <span className="rivet rivet--cbl" aria-hidden="true" />
+      <span className="rivet rivet--cbr" aria-hidden="true" />
     <div className="console" data-system-state={view.systemState} data-connected={props.connected ? 'yes' : 'no'}>
       <SystemHeader
         identity={view.identity}
