@@ -1,4 +1,7 @@
 import { defineTool, type ToolRuntime } from '@deepseek-ai/dsh-tools'
+import type { CandidateManifestInput, OperationalEffects } from '../domain/candidate/index.js'
+import type { RiskModel } from '../domain/reliability/index.js'
+import { REMOTE_SIDE_EFFECTS } from '../domain/candidate/index.js'
 import type { CandidateWorkbench } from '../domain/workbench/index.js'
 
 function textOutput() {
@@ -38,19 +41,13 @@ export function registerWorkbenchTools(
     description: 'Create a candidate workspace from a host-owned plan. Owner, version, and provenance come from the plan.',
     parameters: {
       planId: { type: 'string', required: true },
-      capabilities: { type: 'array', items: { type: 'string' } },
-      tools: { type: 'array', items: { type: 'string' } },
-      entryPoints: { type: 'array', items: { type: 'string' } },
+      ...manifestParameters(),
     },
     output: textOutput(),
     async execute(args) {
       return JSON.stringify(workbench.create({
         planId: String(args.planId),
-        manifest: {
-          capabilities: asStringList(args.capabilities),
-          tools: asStringList(args.tools),
-          entryPoints: asStringList(args.entryPoints),
-        },
+        manifest: manifestFromArgs(args),
       }))
     },
   }))
@@ -107,19 +104,11 @@ export function registerWorkbenchTools(
     description: 'Update candidate manifest fields. Cannot change owner, provenance, or attach a shell/install runner.',
     parameters: {
       candidateId: { type: 'string', required: true },
-      capabilities: { type: 'array', items: { type: 'string' } },
-      permissions: { type: 'array', items: { type: 'string' } },
-      tools: { type: 'array', items: { type: 'string' } },
-      entryPoints: { type: 'array', items: { type: 'string' } },
+      ...manifestParameters(),
     },
     output: textOutput(),
     async execute(args) {
-      return JSON.stringify(workbench.setManifest(String(args.candidateId), {
-        capabilities: asStringList(args.capabilities),
-        permissions: asStringList(args.permissions),
-        tools: asStringList(args.tools),
-        entryPoints: asStringList(args.entryPoints),
-      }))
+      return JSON.stringify(workbench.setManifest(String(args.candidateId), manifestFromArgs(args)))
     },
   }))
 
@@ -201,6 +190,73 @@ export function registerWorkbenchTools(
     disposeInspectReview()
     disposeRepair()
   }
+}
+
+function manifestParameters() {
+  const strings = { type: 'array' as const, items: { type: 'string' as const } }
+  return {
+    capabilities: strings,
+    permissions: strings,
+    runtimeSeams: strings,
+    tools: strings,
+    services: strings,
+    providers: strings,
+    secrets: strings,
+    configRequired: strings,
+    entryPoints: strings,
+    effects: {
+      type: 'object' as const,
+      additionalProperties: false,
+      properties: {
+        filesystem: strings,
+        network: strings,
+        process: strings,
+        secrets: strings,
+        externalSystems: strings,
+        remoteSideEffect: { type: 'string' as const },
+      },
+    },
+    riskModel: { type: 'json' as const },
+  }
+}
+
+function manifestFromArgs(args: Record<string, unknown>): CandidateManifestInput {
+  return {
+    capabilities: asStringList(args.capabilities),
+    permissions: asStringList(args.permissions),
+    runtimeSeams: asStringList(args.runtimeSeams),
+    tools: asStringList(args.tools),
+    services: asStringList(args.services),
+    providers: asStringList(args.providers),
+    secrets: asStringList(args.secrets),
+    configRequired: asStringList(args.configRequired),
+    effects: parseEffects(args.effects),
+    entryPoints: asStringList(args.entryPoints),
+    riskModel: parseRiskModel(args.riskModel),
+  }
+}
+
+function parseEffects(value: unknown): Partial<OperationalEffects> | undefined {
+  if (value === undefined || value === null) return undefined
+  if (typeof value !== 'object' || Array.isArray(value)) return undefined
+  const input = value as Record<string, unknown>
+  const remote = input.remoteSideEffect
+  return {
+    filesystem: asStringList(input.filesystem),
+    network: asStringList(input.network),
+    process: asStringList(input.process),
+    secrets: asStringList(input.secrets),
+    externalSystems: asStringList(input.externalSystems),
+    remoteSideEffect: typeof remote === 'string' && (REMOTE_SIDE_EFFECTS as readonly string[]).includes(remote)
+      ? remote as OperationalEffects['remoteSideEffect']
+      : undefined,
+  }
+}
+
+function parseRiskModel(value: unknown): RiskModel | undefined {
+  if (value === undefined || value === null) return undefined
+  if (typeof value !== 'object' || Array.isArray(value)) return undefined
+  return value as RiskModel
 }
 
 function asStringList(value: unknown): string[] | undefined {

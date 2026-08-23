@@ -1,4 +1,4 @@
-export { WorkbenchContractError } from './errors.js'
+export { WorkbenchContractError, WorkbenchRepairRollbackError } from './errors.js'
 export { WorkbenchService } from './service.js'
 export type {
   CandidateWorkbench,

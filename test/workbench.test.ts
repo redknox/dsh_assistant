@@ -12,9 +12,11 @@ import {
   WORKBENCH_MAX_TRAVERSAL_ENTRIES,
   WORKBENCH_MAX_WORKSPACE_BYTES,
   WorkbenchContractError,
+  WorkbenchRepairRollbackError,
   WorkbenchService,
   type WorkbenchPersistState,
 } from '../src/domain/workbench/index.js'
+import { googleCalendarWriteRiskModel } from '../src/domain/reliability/index.js'
 import { RecoveryRoot } from '../src/domain/governance/index.js'
 import { InMemoryRegistryPersistence, RegistryService, bootstrapCoreInventory } from '../src/domain/registry/index.js'
 import { ResolutionService } from '../src/domain/resolution/index.js'
@@ -139,6 +141,7 @@ describe('candidate workbench', () => {
       assert.throws(() => empty.workbench.listFiles(listed.id), WorkbenchContractError)
       assert.equal(ctx.tools.get('remember_plan'), undefined)
       assert.doesNotMatch(JSON.stringify(ctx.tools.get('write_candidate_file') ?? {}), /"argv"|npm run|postinstall/)
+      assert.doesNotMatch(JSON.stringify(ctx.tools.get('set_candidate_manifest') ?? {}), /"argv"|"script"/)
     } finally {
       await ctx.fiber.dispose()
     }
@@ -422,6 +425,114 @@ describe('candidate workbench', () => {
     assert.notEqual(repaired.id, parentId)
     assert.equal(setup.workspace.list().some((item) => item.id === repaired.id), true)
     assert.equal(existsSync(setup.workspace.get(repaired.id).workspaceRoot), true)
+  })
+
+  it('does not pretend a leftover repair child was rolled back when discard fails', () => {
+    const blocker = new PolicyReviewerProvider((pkg) => [finding({
+      reviewedDigest: pkg.candidate.digest,
+      severity: 'BLOCKER',
+      category: 'acceptance-contract',
+      claim: 'needs-repair',
+      location: 'policy',
+      evidence: 'forced',
+      whyItMatters: 'repair path',
+      requiredRemediation: 'fix',
+      status: 'open',
+    })])
+    const setup = isolatedWorkbench(blocker)
+    const parentId = authorIsolated(setup)
+    setup.workbench.review(parentId)
+    const originalWrite = setup.workspace.writeFile.bind(setup.workspace)
+    const originalDiscard = setup.workspace.discard.bind(setup.workspace)
+    setup.workspace.writeFile = (id: string, relativePath: string, content: string) => {
+      if (id !== parentId) throw new WorkbenchContractError('injected copy failure')
+      return originalWrite(id, relativePath, content)
+    }
+    setup.workspace.discard = () => {
+      throw new Error('disk full')
+    }
+    assert.throws(() => setup.workbench.repair(parentId), (error: unknown) => {
+      assert.ok(error instanceof WorkbenchRepairRollbackError)
+      assert.match(error.message, /leftover candidate/)
+      assert.match(error.message, /disk full/)
+      assert.match(error.message, /injected copy failure/)
+      assert.equal(setup.workspace.list().some((item) => item.id === error.leftoverCandidateId), true)
+      assert.equal(setup.workbench.exportState().bindings.some((item) => item.candidateId === error.leftoverCandidateId), true)
+      return true
+    })
+    setup.workspace.writeFile = originalWrite
+    setup.workspace.discard = originalDiscard
+  })
+
+  it('patches allowlisted manifest fields without wiping omitted governance declarations', async () => {
+    const { ctx } = await bootAssistantControl()
+    try {
+      const plan = ctx.candidateWorkbench.rememberPlan(ctx.capabilityResolution.review({
+        capability: 'r0.workbench.ping',
+        need: 'uppercase text',
+        inventory: { complete: true, seams: [] },
+      }))
+      const created = parse(await tool(ctx, 'create_candidate', {
+        planId: plan.planId,
+        capabilities: ['r0.workbench.ping'],
+        tools: ['r0_workbench_ping'],
+        entryPoints: ['src/plugin.js'],
+      }))
+      const id = String(created.id)
+      parse(await tool(ctx, 'set_candidate_manifest', {
+        candidateId: id,
+        permissions: ['local.fake.suite'],
+        runtimeSeams: ['integrations.calendar'],
+        services: ['calendar'],
+        providers: ['google-calendar'],
+        secrets: ['CALENDAR_TOKEN'],
+        configRequired: ['GOOGLE_CALENDAR_ACCOUNT'],
+        effects: {
+          filesystem: ['workspace/notes'],
+          network: ['https://www.googleapis.com/calendar/v3'],
+          process: ['child_process'],
+          secrets: ['CALENDAR_TOKEN'],
+          externalSystems: ['google-calendar-v3'],
+          remoteSideEffect: 'mutate',
+        },
+        riskModel: googleCalendarWriteRiskModel(),
+      }))
+      parse(await tool(ctx, 'set_candidate_manifest', {
+        candidateId: id,
+        capabilities: ['r0.workbench.ping'],
+      }))
+      const manifest = ctx.candidateWorkspace.get(id).manifest
+      assert.deepEqual([...manifest.secrets], ['CALENDAR_TOKEN'])
+      assert.deepEqual([...manifest.providers], ['google-calendar'])
+      assert.deepEqual([...manifest.effects.filesystem], ['workspace/notes'])
+      assert.deepEqual([...manifest.effects.network], ['https://www.googleapis.com/calendar/v3'])
+      assert.deepEqual([...manifest.effects.process], ['child_process'])
+      assert.equal(manifest.effects.remoteSideEffect, 'mutate')
+      assert.equal(manifest.riskModel?.declaredClass, 'R3')
+      await tool(ctx, 'write_candidate_file', { candidateId: id, path: 'src/plugin.js', content: R0_SOURCE })
+      await tool(ctx, 'write_candidate_file', {
+        candidateId: id,
+        path: 'package.json',
+        content: `${JSON.stringify({ name: 'dsh-generated-r0-workbench', type: 'module', main: 'src/plugin.js' }, null, 2)}\n`,
+      })
+      const validated = parse(await tool(ctx, 'validate_candidate', { candidateId: id }))
+      assert.equal(validated.validation && (validated.validation as { passed: boolean }).passed, true, JSON.stringify(validated.validation))
+      parse(await tool(ctx, 'seal_candidate', { candidateId: id }))
+      const reviewed = parse(await tool(ctx, 'review_candidate', { candidateId: id }))
+      assert.equal(reviewed.state, 'review-complete', JSON.stringify(reviewed))
+      const requested = parse(await tool(ctx, 'request_extension_approval', { candidateId: id }))
+      assert.equal(requested.decision, 'approval-requested')
+      const projected = projectMissionControl(gatherWorkspaceSnapshot({ ctx, sessionId: 'wb-manifest' }))
+        .candidates?.find((item) => item.id === id)
+      assert.ok(projected?.effectSummary?.includes('remote-side-effect mutate'))
+      assert.ok(projected?.effectSummary?.includes('workspace/notes'))
+      assert.ok(projected?.effectSummary?.includes('https://www.googleapis.com/calendar/v3'))
+      assert.ok(projected?.effectSummary?.includes('child_process'))
+      assert.ok(projected?.effectSummary?.some((item) => item.includes('CALENDAR_TOKEN') || item.includes('secret-access')))
+      assert.ok(projected?.effectSummary?.includes('google-calendar-v3'))
+    } finally {
+      await ctx.fiber.dispose()
+    }
   })
 
   it('denies request after invalid validation or a stale review', () => {

@@ -4,11 +4,11 @@ import path from 'node:path'
 import { defaultProvenance } from '../candidate/manifest.js'
 import { resolveInsideRoot } from '../candidate/paths.js'
 import { SealedCandidateError } from '../candidate/errors.js'
-import type { CandidateManifestInput, CandidateRecord, CandidateValidation, CandidateWorkspace } from '../candidate/types.js'
+import type { CandidateManifest, CandidateManifestInput, CandidateRecord, CandidateValidation, CandidateWorkspace } from '../candidate/types.js'
 import type { ExtensionGovernance } from '../governance/types.js'
 import type { CapabilityResolution, ResolutionReview } from '../resolution/types.js'
 import type { IndependentReview, ReviewReport } from '../review/types.js'
-import { WorkbenchContractError } from './errors.js'
+import { WorkbenchContractError, WorkbenchRepairRollbackError } from './errors.js'
 import {
   WORKBENCH_CHANGE_KINDS,
   WORKBENCH_MAX_FILE_BYTES,
@@ -174,7 +174,8 @@ export class WorkbenchService implements CandidateWorkbench {
     if (manifest.validationTasks?.some((task) => task.argv !== undefined || task.script !== undefined)) {
       throw new WorkbenchContractError('candidate manifest cannot include argv, scripts, or a shell runner')
     }
-    this.workspace.setManifest(candidateId, manifest)
+    const current = this.workspace.get(candidateId).manifest
+    this.workspace.setManifest(candidateId, mergeManifestPatch(current, manifest))
     this.flush()
     return this.inspect(candidateId)
   }
@@ -258,7 +259,7 @@ export class WorkbenchService implements CandidateWorkbench {
       this.flush()
       return this.inspect(created.id)
     } catch (error) {
-      if (createdId !== undefined) this.rollbackRepair(createdId, inheritedPlanId)
+      if (createdId !== undefined) this.rollbackRepair(createdId, inheritedPlanId, error)
       throw error
     }
   }
@@ -283,15 +284,39 @@ export class WorkbenchService implements CandidateWorkbench {
     }
   }
 
-  private rollbackRepair(childId: string, inheritedPlanId?: string): void {
+  private rollbackRepair(childId: string, inheritedPlanId: string | undefined, copyError: unknown): never {
+    let rollbackError: unknown
     try {
       this.workspace.discard(childId)
-    } catch {
-      // Host state must still drop the failed child binding.
+    } catch (error) {
+      rollbackError = error
+    }
+    if (rollbackError !== undefined) {
+      try {
+        this.flush()
+      } catch (error) {
+        rollbackError = error
+      }
+      throw new WorkbenchRepairRollbackError(
+        `repair rollback failed for leftover candidate ${childId}: ${describeError(rollbackError)}; original: ${describeError(copyError)}`,
+        copyError,
+        rollbackError,
+        childId,
+      )
     }
     this.bindings.delete(childId)
     if (inheritedPlanId !== undefined) this.plans.delete(inheritedPlanId)
-    this.flush()
+    try {
+      this.flush()
+    } catch (error) {
+      throw new WorkbenchRepairRollbackError(
+        `repair rollback persist failed after discarding ${childId}: ${describeError(error)}; original: ${describeError(copyError)}`,
+        copyError,
+        error,
+        childId,
+      )
+    }
+    throw copyError instanceof Error ? copyError : new WorkbenchContractError(String(copyError))
   }
 
   private flush(): void {
@@ -352,6 +377,34 @@ function reviewFromRecord(record: CandidateRecord): ResolutionReview {
     registryFacts: { exact: { kind: 'unknown', capability: record.manifest.resolutionCapability }, domainOwners: [], conflicts: [] },
     target: { owner: record.owner, version: record.baseVersion },
   }
+}
+
+function mergeManifestPatch(current: CandidateManifest, patch: CandidateManifestInput): CandidateManifestInput {
+  return {
+    capabilities: patch.capabilities ?? current.capabilities,
+    permissions: patch.permissions ?? current.permissions,
+    runtimeSeams: patch.runtimeSeams ?? current.runtimeSeams,
+    tools: patch.tools ?? current.tools,
+    services: patch.services ?? current.services,
+    providers: patch.providers ?? current.providers,
+    secrets: patch.secrets ?? current.secrets,
+    configRequired: patch.configRequired ?? current.configRequired,
+    effects: {
+      filesystem: patch.effects?.filesystem ?? current.effects.filesystem,
+      network: patch.effects?.network ?? current.effects.network,
+      process: patch.effects?.process ?? current.effects.process,
+      secrets: patch.effects?.secrets ?? current.effects.secrets,
+      externalSystems: patch.effects?.externalSystems ?? current.effects.externalSystems,
+      remoteSideEffect: patch.effects?.remoteSideEffect ?? current.effects.remoteSideEffect,
+    },
+    entryPoints: patch.entryPoints ?? current.entryPoints,
+    validationTasks: patch.validationTasks ?? current.validationTasks,
+    riskModel: patch.riskModel ?? current.riskModel,
+  }
+}
+
+function describeError(error: unknown): string {
+  return error instanceof Error ? error.message : String(error)
 }
 
 function preflightRepairParent(parent: CandidateRecord): readonly string[] {
