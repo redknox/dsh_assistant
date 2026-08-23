@@ -3,6 +3,7 @@ import { digestFiles } from '../candidate/digest.js'
 import { listSourceFiles } from '../candidate/files.js'
 import { isolatedRuntimeOwner, requiresIsolatedGeneratedRuntime } from '../generated-runtime/trust.js'
 import type { CapabilityRegistry, RegistryRegisterInput } from '../registry/types.js'
+import { REVIEW_POLICY_VERSION, type IndependentReview } from '../review/index.js'
 import type { CandidateRecord, CandidateWorkspace } from '../candidate/types.js'
 import { ActivationDeniedError, GovernanceAuthorityError, GovernanceContractError } from './errors.js'
 import { approvalSummary, fingerprintFromCandidate } from './fingerprint.js'
@@ -76,6 +77,7 @@ export class GovernanceService implements ExtensionGovernance, ExtensionActivati
   private readonly persistHook?: () => void
   private readonly beginAuthorityCommit?: () => void
   private readonly finishAuthorityCommit?: () => void
+  private readonly independentReview?: IndependentReview
 
   constructor(
     private readonly registry: CapabilityRegistry,
@@ -87,11 +89,13 @@ export class GovernanceService implements ExtensionGovernance, ExtensionActivati
       hydrate?: GovernanceHydrate
       beginAuthorityCommit?: () => void
       finishAuthorityCommit?: () => void
+      independentReview?: IndependentReview
     } = {},
   ) {
     this.persistHook = options.persist
     this.beginAuthorityCommit = options.beginAuthorityCommit
     this.finishAuthorityCommit = options.finishAuthorityCommit
+    this.independentReview = options.independentReview
     if (options.hydrate && (options.hydrate.generation > 0 || options.hydrate.current !== undefined)) {
       this.applyHydrate(options.hydrate)
     } else {
@@ -120,6 +124,11 @@ export class GovernanceService implements ExtensionGovernance, ExtensionActivati
   }
 
   requestApproval(candidateId: string): ApprovalRecord {
+    const gate = this.requestEligibility(candidateId)
+    if (!gate.ok) {
+      const first = gate.denials[0]
+      throw new GovernanceContractError(`${first?.reason ?? 'review-required'}: ${first?.detail ?? candidateId}`)
+    }
     const { record, diff, fingerprint } = this.facts(candidateId)
     const existing = this.approvals.get(candidateId)
     if (existing?.decision === 'approved-for-exact-diff' && existing.fingerprint === fingerprint) {
@@ -152,9 +161,27 @@ export class GovernanceService implements ExtensionGovernance, ExtensionActivati
 
   eligibility(candidateId: string): EligibilityResult {
     const denials = this.denials(candidateId)
-    const fingerprint = denials.some((item) => item.reason === 'unknown-candidate')
-      ? undefined
-      : this.facts(candidateId).fingerprint
+    let fingerprint: string | undefined
+    if (!denials.some((item) => item.reason === 'unknown-candidate')) {
+      try {
+        fingerprint = this.facts(candidateId).fingerprint
+      } catch {
+        fingerprint = undefined
+      }
+    }
+    return { ok: denials.length === 0, candidateId, fingerprint, denials }
+  }
+
+  requestEligibility(candidateId: string): EligibilityResult {
+    const denials = this.approvalRequestDenials(candidateId)
+    let fingerprint: string | undefined
+    if (!denials.some((item) => item.reason === 'unknown-candidate')) {
+      try {
+        fingerprint = this.facts(candidateId).fingerprint
+      } catch {
+        fingerprint = undefined
+      }
+    }
     return { ok: denials.length === 0, candidateId, fingerprint, denials }
   }
 
@@ -518,7 +545,7 @@ export class GovernanceService implements ExtensionGovernance, ExtensionActivati
     return { record, diff, fingerprint }
   }
 
-  private denials(candidateId: string): EligibilityDenial[] {
+  private approvalRequestDenials(candidateId: string): EligibilityDenial[] {
     let record: CandidateRecord
     try {
       record = this.workspace.get(candidateId)
@@ -526,7 +553,7 @@ export class GovernanceService implements ExtensionGovernance, ExtensionActivati
       return [{ reason: 'unknown-candidate', detail: candidateId }]
     }
     const denials: EligibilityDenial[] = []
-    if (!record.sealed) denials.push({ reason: 'not-sealed', detail: 'candidate must be sealed before activation' })
+    if (!record.sealed) denials.push({ reason: 'not-sealed', detail: 'candidate must be sealed before approval can be requested' })
     if (record.lifecycle !== 'validated' || record.validation?.passed !== true) {
       denials.push({ reason: 'not-validated', detail: `lifecycle is ${record.lifecycle}` })
     }
@@ -537,6 +564,54 @@ export class GovernanceService implements ExtensionGovernance, ExtensionActivati
       if (live !== record.digest) {
         denials.push({ reason: 'digest-mismatch', detail: 'sealed artifact no longer matches the approved digest' })
       }
+    }
+    if (record.baseVersion !== undefined) {
+      const active = this.registry.list({ owner: record.owner, status: 'active' })[0]
+      if (active === undefined) {
+        denials.push({
+          reason: 'base-changed',
+          detail: `no active owner for ${record.owner}; proposal assumed ${record.baseVersion}`,
+        })
+      } else if (active.version !== record.baseVersion) {
+        denials.push({ reason: 'base-changed', detail: `active base is ${active.version}, proposal assumed ${record.baseVersion}` })
+      }
+    }
+    denials.push(...this.reviewDenials(record))
+    return denials
+  }
+
+  private reviewDenials(record: CandidateRecord): EligibilityDenial[] {
+    if (this.independentReview === undefined) {
+      return [{ reason: 'review-required', detail: 'Independent Review is required before approval can be requested' }]
+    }
+    const state = this.independentReview.status({ id: record.id, digest: record.digest })
+    if (state === 'not-reviewed') {
+      return [{ reason: 'review-required', detail: 'Independent Review is required before approval can be requested' }]
+    }
+    if (state === 'stale') {
+      return [{ reason: 'review-stale', detail: 'Independent Review does not bind the current sealed digest' }]
+    }
+    if (state === 'changes-required' || state === 'reviewing') {
+      return [{ reason: 'review-changes-required', detail: 'blocking Independent Review findings remain open' }]
+    }
+    const last = this.independentReview.lastReport(record.id)
+    if (last === undefined || last.digest !== record.digest || last.policyVersion !== REVIEW_POLICY_VERSION) {
+      return [{ reason: 'review-stale', detail: 'Independent Review does not bind the current digest and pinned policy' }]
+    }
+    if (last.findings.some((item) => item.blocking && item.status === 'open')) {
+      return [{ reason: 'review-changes-required', detail: 'inherited or open blocking findings remain' }]
+    }
+    return []
+  }
+
+  private denials(candidateId: string): EligibilityDenial[] {
+    const denials = this.approvalRequestDenials(candidateId)
+    if (denials.some((item) => item.reason === 'unknown-candidate')) return denials
+    let record: CandidateRecord
+    try {
+      record = this.workspace.get(candidateId)
+    } catch {
+      return denials
     }
     const approval = this.approvals.get(candidateId)
     if (approval === undefined || approval.decision === 'unreviewed' || approval.decision === 'approval-requested') {
@@ -553,12 +628,6 @@ export class GovernanceService implements ExtensionGovernance, ExtensionActivati
         }
       } catch {
         denials.push({ reason: 'approval-stale', detail: 'cannot recompute fingerprint' })
-      }
-    }
-    if (record.baseVersion !== undefined) {
-      const active = this.registry.list({ owner: record.owner, status: 'active' })[0]
-      if (active !== undefined && active.version !== record.baseVersion) {
-        denials.push({ reason: 'base-changed', detail: `active base is ${active.version}, proposal assumed ${record.baseVersion}` })
       }
     }
     const conflicts = this.registry.conflicts()

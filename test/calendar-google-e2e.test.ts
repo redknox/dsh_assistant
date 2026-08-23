@@ -93,6 +93,7 @@ async function activateReadOnly(ctx: Awaited<ReturnType<typeof bootAssistantCont
   const sealed = ctx.candidateWorkspace.seal(created.id)
   const summary = ctx.extensionGovernance.inspectSummary(sealed.id)
   const human = recoveryRoot.issueAuthority({ kind: 'human-control', source: 'application-ui' })
+  ctx.independentReview.reviewCandidate(sealed.id)
   const requested = ctx.extensionGovernance.requestApproval(sealed.id)
   recoveryRoot.recordApproval(human, {
     candidateId: sealed.id,
@@ -256,6 +257,7 @@ describe.skip('Calendar Self-Extension vertical slice (quarantined: needs isolat
       assert.ok(ctx.extensionGovernance.eligibility(sealed.id).denials.length > 0)
       await assert.rejects(() => recoveryRoot.activate(sealed.id, human), ActivationDeniedError)
 
+      ctx.independentReview.reviewCandidate(sealed.id)
       const requested = ctx.extensionGovernance.requestApproval(sealed.id)
       recoveryRoot.recordApproval(human, {
         candidateId: sealed.id,

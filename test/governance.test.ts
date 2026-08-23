@@ -25,6 +25,8 @@ import type { ResolutionReview } from '../src/domain/resolution/index.js'
 import * as candidatePlugin from '../src/plugins/candidate-plugin.js'
 import * as governancePlugin from '../src/plugins/governance-plugin.js'
 import * as registryPlugin from '../src/plugins/registry-plugin.js'
+import * as reviewPlugin from '../src/plugins/review-plugin.js'
+import type { IndependentReview } from '../src/domain/review/index.js'
 import { bootAssistantControl, bootSafeModeRuntime } from '../src/runtime/boot.js'
 
 function review(overrides: Partial<ResolutionReview> = {}): ResolutionReview {
@@ -44,13 +46,16 @@ function review(overrides: Partial<ResolutionReview> = {}): ResolutionReview {
   }
 }
 
+const reviewsByWorkspace = new WeakMap<CandidateService, IndependentReview>()
+
 function seeded(runtime = new InMemoryActivationRuntime()) {
   const registry = new RegistryService(new InMemoryRegistryPersistence())
   bootstrapCoreInventory((input) => registry.register(input))
   const workspace = new CandidateService(registry, mkdtempSync(path.join(tmpdir(), 'dsh-gov-')))
   const root = new RecoveryRoot(registry, workspace, runtime)
   const human = root.issueAuthority({ kind: 'human-control', source: 'application-ui' })
-  return { registry, workspace, governance: root.service, root, human, runtime }
+  reviewsByWorkspace.set(workspace, root.independentReview)
+  return { registry, workspace, governance: root.service, root, human, runtime, review: root.independentReview }
 }
 
 async function listCalendar(ctx: Context) {
@@ -70,7 +75,7 @@ async function listCalendar(ctx: Context) {
 
 function ready(
   workspace: CandidateService,
-  input: { owner?: string; version?: string; permissions?: string[]; capabilities?: string[] } = {},
+  input: { owner?: string; version?: string; permissions?: string[]; capabilities?: string[]; review?: IndependentReview; skipReview?: boolean } = {},
 ) {
   const candidate = workspace.create({
     review: input.owner?.startsWith('generated/')
@@ -88,7 +93,12 @@ function ready(
   })
   workspace.writeFile(candidate.id, 'src/ok.ts', 'export const value: string = "ok"\n')
   workspace.validate(candidate.id)
-  return workspace.seal(candidate.id)
+  const sealed = workspace.seal(candidate.id)
+  if (input.skipReview !== true) {
+    const review = input.review ?? reviewsByWorkspace.get(workspace)
+    review?.reviewCandidate(sealed.id)
+  }
+  return sealed
 }
 
 describe('extension governance and recovery', () => {
@@ -121,23 +131,15 @@ describe('extension governance and recovery', () => {
 
   it('C. treats a changed candidate digest as a stale approval', () => {
     const { workspace, governance, human } = seeded()
-    const candidate = workspace.create({
-      review: review(),
-      owner: 'managed/integrations',
-      version: '0.2.0',
-      baseVersion: '0.1.0',
-      manifest: { capabilities: ['calendar.read'] },
-    })
-    workspace.writeFile(candidate.id, 'src/ok.ts', 'export const value: string = "ok"\n')
-    workspace.validate(candidate.id)
+    const candidate = ready(workspace)
     const fingerprint = governance.requestApproval(candidate.id).fingerprint
     governance.recordApproval(human, { candidateId: candidate.id, fingerprint, decision: 'approved-for-exact-diff' })
-    workspace.writeFile(candidate.id, 'src/ok.ts', 'export const value: string = "changed"\n')
-    workspace.validate(candidate.id)
-    workspace.seal(candidate.id)
-    const gate = governance.eligibility(candidate.id)
+    assert.throws(() => workspace.writeFile(candidate.id, 'src/ok.ts', 'export const value: string = "changed"\n'))
+    const mutated = ready(workspace, { version: '0.3.0' })
+    assert.equal(governance.eligibility(candidate.id).ok, true)
+    const gate = governance.eligibility(mutated.id)
     assert.equal(gate.ok, false)
-    assert.ok(gate.denials.some((item) => item.reason === 'approval-stale'))
+    assert.ok(gate.denials.some((item) => item.reason === 'approval-required' || item.reason === 'approval-stale'))
   })
 
   it('D. does not let an old approval authorize a permission expansion', () => {
@@ -311,6 +313,7 @@ describe('governance plugin', () => {
     await ctx.plugin(ToolRuntime)
     await ctx.plugin(registryPlugin)
     await ctx.plugin(candidatePlugin, { workspaceRoot: mkdtempSync(path.join(tmpdir(), 'dsh-gov-plug-')) })
+    await ctx.plugin(reviewPlugin)
     await ctx.plugin(governancePlugin)
     try {
       assert.ok(ctx.extensionGovernance)
@@ -397,6 +400,7 @@ export function apply(ctx) {
 `)
       ctx.candidateValidation.validate(candidate.id)
       const sealed = ctx.candidateWorkspace.seal(candidate.id)
+      ctx.independentReview.reviewCandidate(sealed.id)
       const human = recoveryRoot.issueAuthority({ kind: 'human-control', source: 'application-ui' })
       const fingerprint = ctx.extensionGovernance.requestApproval(sealed.id).fingerprint
       recoveryRoot.recordApproval(human, { candidateId: sealed.id, fingerprint, decision: 'approved-for-exact-diff' })
@@ -440,6 +444,7 @@ export function apply() {}
 `)
       ctx.candidateValidation.validate(candidate.id)
       const sealed = ctx.candidateWorkspace.seal(candidate.id)
+      ctx.independentReview.reviewCandidate(sealed.id)
       const human = recoveryRoot.issueAuthority({ kind: 'human-control', source: 'application-ui' })
       const fingerprint = ctx.extensionGovernance.requestApproval(sealed.id).fingerprint
       recoveryRoot.recordApproval(human, { candidateId: sealed.id, fingerprint, decision: 'approved-for-exact-diff' })
@@ -509,6 +514,7 @@ export function apply(ctx) {
 `)
       ctx.candidateValidation.validate(candidate.id)
       const sealed = ctx.candidateWorkspace.seal(candidate.id)
+      ctx.independentReview.reviewCandidate(sealed.id)
       const human = recoveryRoot.issueAuthority({ kind: 'human-control', source: 'application-ui' })
       const fingerprint = ctx.extensionGovernance.requestApproval(sealed.id).fingerprint
       recoveryRoot.recordApproval(human, { candidateId: sealed.id, fingerprint, decision: 'approved-for-exact-diff' })
@@ -555,7 +561,8 @@ describe('safe mode bootstrap', () => {
     const { ctx, recoveryRoot } = await bootSafeModeRuntime()
     try {
       assert.ok(ctx.tools.get('inspect_extension_governance'))
-      assert.ok(ctx.tools.get('request_extension_approval'))
+      assert.equal(ctx.tools.get('request_extension_approval'), undefined)
+      assert.equal(ctx.tools.get('create_candidate'), undefined)
       assert.ok(ctx.capabilityRegistry)
       assert.ok(ctx.extensionRecovery.inspect())
       assert.equal(ctx.tools.get('calendar_list_events'), undefined)

@@ -4,6 +4,7 @@ import type { CandidateRecord } from '../candidate/types.js'
 import type { GovernanceHydrate } from '../governance/service.js'
 import type { CapabilityRegistry } from '../registry/types.js'
 import { DurableReviewLineage } from './review-lineage.js'
+import { DurableWorkbenchStore } from './workbench-store.js'
 import { DurableAuthorityStore } from './authority-store.js'
 import { DurableCandidateIndex } from './candidate-index.js'
 import { PersistenceIntegrityError, PersistenceSchemaError } from './errors.js'
@@ -14,6 +15,7 @@ export interface DurableSelfExtension {
   readonly authority: DurableAuthorityStore
   readonly candidates: DurableCandidateIndex
   readonly reviews: DurableReviewLineage
+  readonly workbench: DurableWorkbenchStore
 }
 
 export interface DurableOpenResult {
@@ -34,6 +36,7 @@ export function openDurableSelfExtension(explicitHome?: string): DurableOpenResu
         authority,
         candidates: new DurableCandidateIndex(home),
         reviews: new DurableReviewLineage(home, authority),
+        workbench: new DurableWorkbenchStore(home),
       },
       diagnostics: [],
     }

@@ -21,6 +21,8 @@ import * as reviewPlugin from '../plugins/review-plugin.js'
 import type { ReviewPluginConfig } from '../plugins/review-plugin.js'
 import * as governancePlugin from '../plugins/governance-plugin.js'
 import type { GovernancePluginConfig } from '../plugins/governance-plugin.js'
+import * as workbenchPlugin from '../plugins/workbench-plugin.js'
+import type { WorkbenchPluginConfig } from '../plugins/workbench-plugin.js'
 
 export const name = 'dsh-assistant'
 export const inject = ['systemPrompt', 'agents']
@@ -39,6 +41,7 @@ export interface AssistantBundleConfig {
   /** When true, skip optional/generated product plugins and boot the recovery core only. */
   readonly safeMode?: boolean
   readonly governance?: GovernancePluginConfig
+  readonly workbench?: WorkbenchPluginConfig
 }
 
 /** Bundle entry: compose product plugins through public Cordis lifecycle. */
@@ -48,8 +51,12 @@ export async function apply(ctx: Context, config: AssistantBundleConfig = {}) {
   await ctx.plugin(candidatePlugin, config.candidate)
   await ctx.plugin(reviewPlugin, config.review)
   await ctx.plugin(personalityPlugin, config.personality)
-  await ctx.plugin(governancePlugin, config.governance)
+  await ctx.plugin(governancePlugin, {
+    ...config.governance,
+    allowRequestTool: config.safeMode !== true,
+  })
   if (config.safeMode) return
+  await ctx.plugin(workbenchPlugin, config.workbench)
   await ctx.plugin(memoryPlugin, config.memory)
   await ctx.plugin(knowledgePlugin, config.knowledge)
   await ctx.plugin(integrationsPlugin, config.integrations)
@@ -63,7 +70,6 @@ export const SAFE_MODE_TOOL_NAMES = [
   'lookup_capability',
   'review_capability_resolution',
   'inspect_extension_governance',
-  'request_extension_approval',
 ] as const
 
 export const PRODUCT_TOOL_NAMES = [
@@ -90,4 +96,16 @@ export const PRODUCT_TOOL_NAMES = [
   'files_write',
   'files_delete',
   'confirm_action',
+  'plan_capability_change',
+  'create_candidate',
+  'inspect_candidate',
+  'list_candidate_files',
+  'read_candidate_file',
+  'write_candidate_file',
+  'set_candidate_manifest',
+  'validate_candidate',
+  'seal_candidate',
+  'review_candidate',
+  'inspect_candidate_review',
+  'repair_candidate',
 ] as const

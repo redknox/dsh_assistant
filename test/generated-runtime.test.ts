@@ -72,6 +72,7 @@ async function activateGenerated(ctx: Awaited<ReturnType<typeof bootAssistantCon
   ctx.candidateWorkspace.writeFile(created.id, 'src/plugin.js', input.source)
   ctx.candidateValidation.validate(created.id)
   const sealed = ctx.candidateWorkspace.seal(created.id)
+  ctx.independentReview.reviewCandidate(sealed.id)
   const human = recoveryRoot.issueAuthority({ kind: 'human-control', source: 'application-ui' })
   const fingerprint = ctx.extensionGovernance.requestApproval(sealed.id).fingerprint
   recoveryRoot.recordApproval(human, { candidateId: sealed.id, fingerprint, decision: 'approved-for-exact-diff' })
@@ -303,6 +304,7 @@ describe('isolated generated-extension runtime', () => {
       ctx.candidateWorkspace.writeFile(created.id, 'src/plugin.js', R0)
       ctx.candidateValidation.validate(created.id)
       const sealed = ctx.candidateWorkspace.seal(created.id)
+      ctx.independentReview.reviewCandidate(sealed.id)
       const human = recoveryRoot.issueAuthority({ kind: 'human-control', source: 'application-ui' })
       const fingerprint = ctx.extensionGovernance.requestApproval(sealed.id).fingerprint
       recoveryRoot.recordApproval(human, { candidateId: sealed.id, fingerprint, decision: 'approved-for-exact-diff' })

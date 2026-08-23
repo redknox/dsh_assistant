@@ -15,6 +15,13 @@ export function secretAccessLabel(ref: string): string {
   return `secret-access ${trimmed}`
 }
 
+export function summarizeCandidateEffects(
+  effects: OperationalEffectFields & { readonly remoteSideEffect: string },
+  declaredSecrets: readonly string[] = [],
+): readonly string[] {
+  return [`remote-side-effect ${effects.remoteSideEffect}`, ...flattenEffects(effects, declaredSecrets)]
+}
+
 export function flattenEffects(
   effects: OperationalEffectFields,
   declaredSecrets: readonly string[] = [],

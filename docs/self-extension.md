@@ -21,7 +21,7 @@ v0.3.0 = Governance + Mission-Control product baseline
 v0.4.0 target = Self-Developing Product Baseline
 ```
 
-Self-development is allowed; self-authorization is not. This does not claim that the Candidate Workbench is complete.
+Self-development is allowed; self-authorization is not. The Candidate Workbench is a bounded authoring/review/request loop; it is not self-approval or arbitrary software development.
 
 The v0.1.0 Assistant Core MVP remains the stable product/runtime baseline underneath Self-Extension. Self-Extension sits beside that baseline; it does not replace it. v0.2.0 is the Governed Self-Extension baseline. v0.3.0 is the historical Governance + Mission-Control baseline.
 
@@ -232,7 +232,7 @@ Capability Resolution Review:
 
 **Verified** by the Obsidian Vault slice (`test/obsidian-e2e.test.ts`, [docs/obsidian-self-extension.md](./obsidian-self-extension.md)). Still **Unsupported**:
 
-- Autonomous plugin-writing engine
+- Arbitrary software development, host shell, or package installers
 - Runtime loader / version manager
 - Automatic install, upgrade, or remove
 - Sandbox or container execution framework

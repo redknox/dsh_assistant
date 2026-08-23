@@ -404,6 +404,7 @@ describe('operator sandbox root', () => {
       ctx.candidateWorkspace.writeFile(created.id, 'src/plugin.js', source)
       ctx.candidateValidation.validate(created.id)
       const sealed = ctx.candidateWorkspace.seal(created.id)
+      ctx.independentReview.reviewCandidate(sealed.id)
       const human = recoveryRoot.issueAuthority({ kind: 'human-control', source: 'application-ui' })
       const fingerprint = ctx.extensionGovernance.requestApproval(sealed.id).fingerprint
       recoveryRoot.recordApproval(human, { candidateId: sealed.id, fingerprint, decision: 'approved-for-exact-diff' })

@@ -11,6 +11,7 @@ export {
   type ArtifactRetention,
 } from './candidate-index.js'
 export { DurableReviewLineage, parseReviewLineageFile } from './review-lineage.js'
+export { DurableWorkbenchStore, parseWorkbenchFile } from './workbench-store.js'
 export { openDurableSelfExtension, hydrateFromAuthority, persistGovernance } from './durable.js'
 export { reconstructCommittedExtensions } from './reconstruct.js'
 export { operatorStatus, formatOperatorStatus, type OperatorStatus } from './status.js'

@@ -13,6 +13,8 @@ review-complete != approved
 review-complete != active
 ```
 
+The Candidate Workbench can request this review and inspect findings. Human approval cannot be requested until the current sealed digest is `review-complete` against the pinned review policy. Repair creates a new revision; the sealed parent stays immutable and inherited BLOCKERs cannot be omitted.
+
 ## Roles
 
 | Role | Produces | Must not do |

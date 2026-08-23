@@ -126,6 +126,7 @@ describe.skip('Obsidian Self-Extension vertical slice (quarantined: needs isolat
       const human = recoveryRoot.issueAuthority({ kind: 'human-control', source: 'application-ui' })
       await assert.rejects(() => recoveryRoot.activate(sealed.id, human), ActivationDeniedError)
 
+      ctx.independentReview.reviewCandidate(sealed.id)
       const requested = ctx.extensionGovernance.requestApproval(sealed.id)
       recoveryRoot.recordApproval(human, {
         candidateId: sealed.id,
@@ -221,19 +222,33 @@ describe.skip('Obsidian Self-Extension vertical slice (quarantined: needs isolat
       })
       copyCandidateSources(ctx.candidateWorkspace, created.id)
       ctx.candidateValidation.validate(created.id)
+      const sealed = ctx.candidateWorkspace.seal(created.id)
+      ctx.independentReview.reviewCandidate(sealed.id)
       const human = recoveryRoot.issueAuthority({ kind: 'human-control', source: 'application-ui' })
-      const first = ctx.extensionGovernance.requestApproval(created.id)
+      const first = ctx.extensionGovernance.requestApproval(sealed.id)
       recoveryRoot.recordApproval(human, {
-        candidateId: created.id,
+        candidateId: sealed.id,
         fingerprint: first.fingerprint,
         decision: 'approved-for-exact-diff',
       })
-      ctx.candidateWorkspace.writeFile(created.id, 'src/extra.js', 'export const mutated = true\n')
-      const report = ctx.candidateValidation.validate(created.id)
-      const sealed = ctx.candidateWorkspace.seal(created.id)
-      assert.notEqual(report.digest, undefined)
-      assert.ok(ctx.extensionGovernance.eligibility(sealed.id).denials.some((item) => item.reason === 'approval-stale'))
-      await assert.rejects(() => recoveryRoot.activate(sealed.id, human), ActivationDeniedError)
+      assert.throws(() => ctx.candidateWorkspace.writeFile(sealed.id, 'src/extra.js', 'export const mutated = true\n'))
+      const next = ctx.candidateWorkspace.create({
+        review,
+        owner: 'generated/obsidian-vault',
+        version: '0.1.1',
+        manifest: {
+          capabilities: ['obsidian.notes.read'],
+          tools: ['obsidian_notes_read'],
+          entryPoints: ['src/plugin.js'],
+        },
+      })
+      copyCandidateSources(ctx.candidateWorkspace, next.id)
+      ctx.candidateWorkspace.writeFile(next.id, 'src/extra.js', 'export const mutated = true\n')
+      ctx.candidateValidation.validate(next.id)
+      const nextSealed = ctx.candidateWorkspace.seal(next.id)
+      ctx.independentReview.reviewCandidate(nextSealed.id)
+      assert.ok(ctx.extensionGovernance.eligibility(nextSealed.id).denials.some((item) => item.reason === 'approval-required' || item.reason === 'approval-stale'))
+      await assert.rejects(() => recoveryRoot.activate(nextSealed.id, human), ActivationDeniedError)
       assert.equal(ctx.capabilityRegistry.get('generated/obsidian-vault', '0.1.0'), undefined)
     } finally {
       await ctx.fiber.dispose()
@@ -264,6 +279,7 @@ export function apply() { throw new Error('obsidian candidate exploded') }
 `)
       ctx.candidateValidation.validate(created.id)
       const sealed = ctx.candidateWorkspace.seal(created.id)
+      ctx.independentReview.reviewCandidate(sealed.id)
       const human = recoveryRoot.issueAuthority({ kind: 'human-control', source: 'application-ui' })
       const fingerprint = ctx.extensionGovernance.requestApproval(sealed.id).fingerprint
       recoveryRoot.recordApproval(human, { candidateId: sealed.id, fingerprint, decision: 'approved-for-exact-diff' })

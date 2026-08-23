@@ -300,6 +300,7 @@ export function apply(ctx) {
 `)
     control.ctx.candidateValidation.validate(created.id)
     const sealed = control.ctx.candidateWorkspace.seal(created.id)
+    control.ctx.independentReview.reviewCandidate(sealed.id)
     const human = control.recoveryRoot.issueAuthority({ kind: 'human-control', source: 'application-ui' })
     const fingerprint = control.ctx.extensionGovernance.requestApproval(sealed.id).fingerprint
     control.recoveryRoot.recordApproval(human, { candidateId: sealed.id, fingerprint, decision: 'approved-for-exact-diff' })
@@ -393,6 +394,7 @@ export function apply(ctx) {
       ctx.candidateWorkspace.writeFile(created.id, 'src/ok.ts', 'export const value: string = "ok"\n')
       ctx.candidateValidation.validate(created.id)
       const sealed = ctx.candidateWorkspace.seal(created.id)
+      ctx.independentReview.reviewCandidate(sealed.id)
       const requested = ctx.extensionGovernance.requestApproval(sealed.id)
       const cookie = await cookieHeader(url)
       const view = await fetch(`${url}/api/view`).then((res) => res.json()) as { view: MissionControlView }
@@ -448,6 +450,7 @@ export function apply(ctx) {
       ctx.candidateWorkspace.writeFile(second.id, 'src/ok.ts', 'export const value: string = "ok"\n')
       ctx.candidateValidation.validate(second.id)
       const sealedSecond = ctx.candidateWorkspace.seal(second.id)
+      ctx.independentReview.reviewCandidate(sealedSecond.id)
       const requestedSecond = ctx.extensionGovernance.requestApproval(sealedSecond.id)
       const secondView = await fetch(`${url}/api/view`).then((res) => res.json()) as { view: MissionControlView }
       const secondCard = secondView.view.approvals.find((item) => item.candidateId === sealedSecond.id)
@@ -631,6 +634,70 @@ export function apply(ctx) {
     assert.match(extension, /data-candidate-id="cand-1"/)
     assert.match(extension, /data-fingerprint="fp-ext"/)
     assert.match(extension, /not self-authorization/)
+
+    const workbench = renderToStaticMarkup(createElement(MissionControlScreen, {
+      view: fixtureView({
+        candidates: [{
+          id: 'cand-wb',
+          owner: 'generated/r0-workbench-ping',
+          version: '0.1.0',
+          lifecycle: 'validated',
+          resolutionKind: 'new-plugin',
+          resolutionCapability: 'r0.workbench.ping',
+          sealed: true,
+          validationPassed: true,
+          reviewState: 'review-complete',
+          blockingFindings: 0,
+          canRequestApproval: true,
+          effectSummary: [
+            'remote-side-effect mutate',
+            'calendar.google',
+            'workspace/notes',
+            'https://example.com',
+            'child_process',
+            'secret-access CALENDAR_TOKEN',
+          ],
+          diff: {
+            owner: 'generated/r0-workbench-ping',
+            candidateVersion: '0.1.0',
+            capabilities: { added: ['r0.workbench.ping'], removed: [], changed: [] },
+            permissions: { added: [], removed: [], changed: [] },
+            tools: { added: ['r0_workbench_ping'], removed: [], changed: [] },
+            services: { added: [], removed: [], changed: [] },
+            providers: { added: [], removed: [], changed: [] },
+            runtimeSeams: { added: [], removed: [], changed: [] },
+            effects: {
+              filesystem: ['workspace/notes'],
+              network: ['https://example.com'],
+              process: ['child_process'],
+              secrets: ['CALENDAR_TOKEN'],
+              externalSystems: ['calendar.google'],
+              remoteSideEffect: 'mutate',
+            },
+          },
+        }],
+      }),
+      connected: true,
+      sending: false,
+      draft: '',
+      onDraft() {},
+      onSend() {},
+      onApprove() {},
+      onReject() {},
+      onRecovery() {},
+    }))
+    assert.match(workbench, /data-workbench="true"/)
+    assert.match(workbench, /data-candidate-id="cand-wb"/)
+    assert.match(workbench, /generated\/r0-workbench-ping@0.1.0/)
+    assert.match(workbench, /r0.workbench.ping/)
+    assert.match(workbench, /can request approval/)
+    assert.match(workbench, /\+r0.workbench.ping/)
+    assert.match(workbench, /remote-side-effect mutate/)
+    assert.match(workbench, /workspace\/notes/)
+    assert.match(workbench, /https:\/\/example.com/)
+    assert.match(workbench, /child_process/)
+    assert.match(workbench, /secret-access CALENDAR_TOKEN/)
+    assert.match(workbench, /calendar.google/)
 
     const degraded = renderToStaticMarkup(createElement(MissionControlScreen, {
       view: fixtureView({

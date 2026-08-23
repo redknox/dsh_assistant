@@ -27,6 +27,7 @@ export * from './domain/governance/index.js'
 export * from './domain/self-extension/index.js'
 export * from './domain/personality/index.js'
 export * from './domain/workspace/index.js'
+export * from './domain/workbench/index.js'
 export { FakeClock, IntervalScheduler } from './adapters/jobs/interval-scheduler.js'
 export {
   AssistantControlSurface,

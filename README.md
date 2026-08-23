@@ -93,6 +93,7 @@ See [ARCHITECTURE.md](./ARCHITECTURE.md) for layers. See [ENGINEERING.md](./ENGI
 | Self-Extension governance | no | **Verified** | Operator: `tars-ng self-extension` / [docs/self-extension-operations.md](./docs/self-extension-operations.md) |
 | Capability Registry / Resolution / Discovery | no | **Verified** | See docs/capability-*.md |
 | Candidate workspace + reliability + independent review | no | **Verified** | `review-complete` is not approval |
+| Candidate Workbench (plan/author/validate/review/request) | no | **Implemented** | Bounded model tools; not self-approval or arbitrary software development |
 | TARS-NG personality + Mission-Control workspace | no | **Verified** | [docs/tars-ng-personality.md](./docs/tars-ng-personality.md) |
 | Production persistence, public npm publish | no | **Unsupported** | Package is `private` |
 
