@@ -16,6 +16,11 @@ export interface ActivationPrepareContext {
   readonly origin?: string
 }
 
+export interface IsolatedRuntimeFailure {
+  readonly candidateId: string
+  readonly diagnostics: string
+}
+
 export interface ActivationRuntime {
   snapshot(generation: number, owners: ActivationSnapshot['owners']): ActivationSnapshot
   prepare(candidateId: string, context?: ActivationPrepareContext): Promise<{ ok: boolean; diagnostics?: string }>
@@ -24,6 +29,7 @@ export interface ActivationRuntime {
   restore(snapshot: ActivationSnapshot): Promise<void>
   mounted(): readonly string[]
   unloadGenerated(): Promise<void>
+  bindIsolatedFailure(handler: (failure: IsolatedRuntimeFailure) => void): void
 }
 
 export class InMemoryActivationRuntime implements ActivationRuntime {
@@ -64,4 +70,6 @@ export class InMemoryActivationRuntime implements ActivationRuntime {
   }
 
   async unloadGenerated(): Promise<void> {}
+
+  bindIsolatedFailure(_handler: (failure: IsolatedRuntimeFailure) => void): void {}
 }

@@ -1,3 +1,4 @@
+import { isolatedRuntimeOwner } from '../generated-runtime/trust.js'
 import { candidateDirName } from '../candidate/paths.js'
 import type { CandidateRecord } from '../candidate/types.js'
 import type { GovernanceHydrate } from '../governance/service.js'
@@ -92,7 +93,7 @@ export function persistCandidates(
 ): void {
   const active = new Set(
     registry.list({ status: 'active' })
-      .filter((record) => record.owner.startsWith('generated/'))
+      .filter((record) => isolatedRuntimeOwner(record))
       .map((record) => candidateDirName(record.owner, record.version)),
   )
   index.save(records, active)

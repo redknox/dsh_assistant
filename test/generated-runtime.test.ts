@@ -6,7 +6,7 @@ import path from 'node:path'
 import { describe, it } from 'node:test'
 import { CallId } from '@deepseek-ai/dsh-llm'
 import { resolveChildMain } from '../src/adapters/activation/generated-runner.js'
-import { generatedRuntimeDiagnosis } from '../src/domain/generated-runtime/index.js'
+import { GENERATED_MAX_MESSAGE_BYTES, generatedRuntimeDiagnosis } from '../src/domain/generated-runtime/index.js'
 import type { ExtensionProvenance } from '../src/domain/registry/index.js'
 import type { ResolutionKind, ResolutionReview } from '../src/domain/resolution/index.js'
 import { bootAssistantControl } from '../src/runtime/boot.js'
@@ -440,17 +440,28 @@ describe('isolated generated-extension runtime', () => {
   })
 }
 `
-    const { ctx, recoveryRoot } = await bootAssistantControl()
+    const home = mkdtempSync(path.join(tmpdir(), 'tars-ng-hang-gov-'))
+    const first = await bootAssistantControl({ home })
     try {
-      const { status } = await activateGenerated(ctx, recoveryRoot, { owner: 'generated/r0-hang-exec', tool: 'r0_hang_exec', source })
+      const { status } = await activateGenerated(first.ctx, first.recoveryRoot, { owner: 'generated/r0-hang-exec', tool: 'r0_hang_exec', source })
       assert.equal(status.state, 'active', status.lastFailure?.diagnostics)
       const during = generatedRuntimeDiagnosis().activeProcesses
-      const result = await execTool(ctx, 'r0_hang_exec')
+      const result = await execTool(first.ctx, 'r0_hang_exec')
       assert.equal(result.isError, true)
-      assert.equal(ctx.tools.get('r0_hang_exec'), undefined)
+      assert.equal(first.ctx.tools.get('r0_hang_exec'), undefined)
       assert.equal(generatedRuntimeDiagnosis().activeProcesses, during - 1)
+      assert.notEqual(first.recoveryRoot.inspect().state, 'active')
+      assert.equal(first.ctx.capabilityRegistry.get('generated/r0-hang-exec', '0.1.0')?.status, 'disabled')
     } finally {
-      await ctx.fiber.dispose()
+      await first.ctx.fiber.dispose()
+    }
+    const second = await bootAssistantControl({ home })
+    try {
+      assert.equal(second.ctx.tools.get('r0_hang_exec'), undefined)
+      assert.notEqual(second.recoveryRoot.inspect().state, 'active')
+      assert.notEqual(second.ctx.capabilityRegistry.get('generated/r0-hang-exec', '0.1.0')?.status, 'active')
+    } finally {
+      await second.ctx.fiber.dispose()
     }
   })
 
@@ -488,6 +499,135 @@ describe('isolated generated-extension runtime', () => {
       assert.match(status.lastFailure?.diagnostics ?? '', /mismatch|missing/)
       assert.equal(ctx.tools.get('r0_transform'), undefined)
       assert.equal(ctx.tools.get('r0_other'), undefined)
+    } finally {
+      await ctx.fiber.dispose()
+    }
+  })
+
+  it('rejects a missing required proxy argument on the reconstructed schema', async () => {
+    const { ctx, recoveryRoot } = await bootAssistantControl()
+    try {
+      const { status } = await activateGenerated(ctx, recoveryRoot, { tool: 'r0_transform', source: R0 })
+      assert.equal(status.state, 'active', status.lastFailure?.diagnostics)
+      const required = await execTool(ctx, 'r0_transform', {})
+      assert.equal(required.isError, true)
+    } finally {
+      await ctx.fiber.dispose()
+    }
+  })
+
+  it('preserves nested parameter types and structured object output through the proxy', async () => {
+    const source = `export function apply(ctx) {
+  ctx.tools.register({
+    name: 'r0_struct',
+    description: 'Structured proxy',
+    parameters: {
+      count: { type: 'number', required: true },
+      nested: {
+        type: 'object',
+        additionalProperties: false,
+        required: true,
+        properties: { label: { type: 'string', required: true } },
+      },
+    },
+    output: {
+      schema: {
+        type: 'object',
+        additionalProperties: false,
+        properties: { total: { type: 'number' }, label: { type: 'string' } },
+      },
+      render(_args, value) { return [{ type: 'text', text: JSON.stringify(value) }] },
+    },
+    async execute(args) { return { total: args.count, label: args.nested.label } },
+  })
+}
+`
+    const { ctx, recoveryRoot } = await bootAssistantControl()
+    try {
+      const { status } = await activateGenerated(ctx, recoveryRoot, { owner: 'generated/r0-struct', tool: 'r0_struct', source })
+      assert.equal(status.state, 'active', status.lastFailure?.diagnostics)
+      const tool = ctx.tools.get('r0_struct') as { parameters?: unknown } | undefined
+      const schema = JSON.stringify(tool?.parameters ?? {})
+      assert.match(schema, /"type":"number"/)
+      assert.match(schema, /"type":"object"/)
+      assert.match(schema, /"required":\["count","nested"\]/)
+      const result = await execTool(ctx, 'r0_struct', { count: 2, nested: { label: 'ok' } })
+      assert.equal(result.isError, false, String(result.value))
+      assert.deepEqual(result.value, { total: 2, label: 'ok' })
+    } finally {
+      await ctx.fiber.dispose()
+    }
+  })
+
+  it('remounts durable assistant-origin managed owners and withholds them after Safe Mode', async () => {
+    const home = mkdtempSync(path.join(tmpdir(), 'tars-ng-managed-iso-'))
+    const first = await bootAssistantControl({ home })
+    try {
+      const { status } = await activateGenerated(first.ctx, first.recoveryRoot, {
+        owner: 'managed/assistant-durable',
+        tool: 'r0_transform',
+        source: R0,
+        provenance: { kind: 'managed', origin: 'assistant' },
+        reviewKind: 'evolve-owner',
+      })
+      assert.equal(status.state, 'active', status.lastFailure?.diagnostics)
+    } finally {
+      await first.ctx.fiber.dispose()
+    }
+    const second = await bootAssistantControl({ home })
+    try {
+      assert.ok(second.ctx.tools.get('r0_transform'), 'assistant-origin managed owner must remount as a proxy')
+      const result = await execTool(second.ctx, 'r0_transform', { text: 'boot' })
+      assert.equal(result.isError, false, String(result.value))
+      assert.equal(String(result.value), 'BOOT')
+      const human = second.recoveryRoot.issueAuthority({ kind: 'human-control', source: 'application-ui' })
+      second.recoveryRoot.enterSafeMode(human)
+      assert.equal(second.ctx.tools.get('r0_transform'), undefined)
+    } finally {
+      await second.ctx.fiber.dispose()
+    }
+    const third = await bootAssistantControl({ home })
+    try {
+      assert.equal(third.ctx.tools.get('r0_transform'), undefined)
+    } finally {
+      await third.ctx.fiber.dispose()
+    }
+  })
+
+  it('fail-closes an oversize protocol line and a no-newline flood', async () => {
+    const oversize = `export function apply(ctx) {
+  ctx.tools.register({
+    name: 'r0_oversize',
+    parameters: {},
+    output: { schema: { type: 'string' }, render(_a, v) { return [{ type: 'text', text: String(v) }] } },
+    async execute() { return 'x'.repeat(${GENERATED_MAX_MESSAGE_BYTES + 1024}) },
+  })
+}
+`
+    const flood = `export function apply(ctx) {
+  ctx.tools.register({
+    name: 'r0_flood',
+    parameters: {},
+    output: { schema: { type: 'string' }, render(_a, v) { return [{ type: 'text', text: String(v) }] } },
+    async execute() {
+      process.stdout.write('x'.repeat(${GENERATED_MAX_MESSAGE_BYTES + 1024}))
+      await new Promise(() => {})
+    },
+  })
+}
+`
+    const { ctx, recoveryRoot } = await bootAssistantControl()
+    try {
+      const first = await activateGenerated(ctx, recoveryRoot, { owner: 'generated/r0-oversize', tool: 'r0_oversize', source: oversize })
+      assert.equal(first.status.state, 'active', first.status.lastFailure?.diagnostics)
+      const oversized = await execTool(ctx, 'r0_oversize')
+      assert.equal(oversized.isError, true)
+      assert.equal(ctx.tools.get('r0_oversize'), undefined)
+      const second = await activateGenerated(ctx, recoveryRoot, { owner: 'generated/r0-flood', tool: 'r0_flood', source: flood })
+      assert.equal(second.status.state, 'active', second.status.lastFailure?.diagnostics)
+      const flooded = await execTool(ctx, 'r0_flood')
+      assert.equal(flooded.isError, true)
+      assert.equal(ctx.tools.get('r0_flood'), undefined)
     } finally {
       await ctx.fiber.dispose()
     }

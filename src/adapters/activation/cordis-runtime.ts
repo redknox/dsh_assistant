@@ -1,8 +1,9 @@
 import { pathToFileURL } from 'node:url'
 import type { Context, Plugin } from '@deepseek-ai/cordis'
-import { defineTool } from '@deepseek-ai/dsh-tools'
-import type { ActivationPrepareContext, ActivationRuntime } from '../../domain/governance/runtime.js'
+import { defineTool, type ParameterSchemaSpec, type ValueSchemaSpec } from '@deepseek-ai/dsh-tools'
+import type { ActivationPrepareContext, ActivationRuntime, IsolatedRuntimeFailure } from '../../domain/governance/runtime.js'
 import type { ActivationSnapshot } from '../../domain/governance/types.js'
+import { projectParameterSchema, projectValueSchema } from '../../domain/generated-runtime/schema.js'
 import { requiresIsolatedGeneratedRuntime } from '../../domain/generated-runtime/trust.js'
 import type { GeneratedToolDescriptor } from '../../domain/generated-runtime/types.js'
 import { resolveCandidateEntry } from './candidate-entry.js'
@@ -96,6 +97,7 @@ export class CordisActivationRuntime implements ActivationRuntime {
   private readonly proxyDisposers = new Map<string, Array<() => void>>()
   private currentMounted: string[] = []
   private lastContext?: ActivationPrepareContext
+  private isolatedFailure?: (failure: IsolatedRuntimeFailure) => void
 
   constructor(private readonly ctx: Context) {
     ctx.effect(() => () => {
@@ -225,6 +227,10 @@ export class CordisActivationRuntime implements ActivationRuntime {
     return this.currentMounted
   }
 
+  bindIsolatedFailure(handler: (failure: IsolatedRuntimeFailure) => void): void {
+    this.isolatedFailure = handler
+  }
+
   private async prepareGenerated(candidateId: string, context: ActivationPrepareContext): Promise<{ ok: boolean; diagnostics?: string }> {
     if (context.services.length > 0 || context.providers.length > 0) {
       return { ok: false, diagnostics: 'generated runtime does not proxy services or providers' }
@@ -273,8 +279,9 @@ export class CordisActivationRuntime implements ActivationRuntime {
       return { ok: false, diagnostics: error instanceof Error ? error.message : String(error) }
     }
     this.proxyDisposers.set(candidateId, disposers)
-    runner.onFatal = () => {
+    runner.onFatal = (reason) => {
       this.dropGenerated(candidateId, runner)
+      this.isolatedFailure?.({ candidateId, diagnostics: reason })
     }
     return { ok: true }
   }
@@ -302,33 +309,21 @@ export class CordisActivationRuntime implements ActivationRuntime {
   }
 }
 
-function proxyParameters(raw: Record<string, unknown>): Record<string, { type: 'string' }> {
-  const props = raw.properties !== undefined && typeof raw.properties === 'object' && !Array.isArray(raw.properties)
-    ? raw.properties as Record<string, unknown>
-    : raw
-  const skip = new Set(['type', 'properties', 'required', 'additionalProperties', 'description'])
-  const out: Record<string, { type: 'string' }> = {}
-  for (const key of Object.keys(props)) {
-    if (skip.has(key)) continue
-    out[key] = { type: 'string' }
-  }
-  return out
-}
-
 function defineProxyTool(descriptor: GeneratedToolDescriptor, runner: IsolatedGeneratedRunner) {
+  const parameters = projectParameterSchema(descriptor.parameters) as unknown as ParameterSchemaSpec
+  const schema = projectValueSchema(descriptor.output) as unknown as ValueSchemaSpec
   return defineTool({
     name: descriptor.name,
     description: descriptor.description,
-    parameters: proxyParameters(descriptor.parameters),
+    parameters,
     output: {
-      schema: { type: 'string' as const },
-      render(_args: unknown, value: unknown) {
-        return [{ type: 'text' as const, text: String(value) }]
+      schema,
+      render(_args, value) {
+        return [{ type: 'text' as const, text: typeof value === 'string' ? value : JSON.stringify(value) }]
       },
     },
     async execute(args, exec) {
-      const value = await runner.call(descriptor.name, (args ?? {}) as Record<string, unknown>, exec.signal)
-      return typeof value === 'string' ? value : JSON.stringify(value)
+      return await runner.call(descriptor.name, (args ?? {}) as Record<string, unknown>, exec.signal) as never
     },
   })
 }

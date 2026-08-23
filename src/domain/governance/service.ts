@@ -1,7 +1,7 @@
 import { existsSync } from 'node:fs'
 import { digestFiles } from '../candidate/digest.js'
 import { listSourceFiles } from '../candidate/files.js'
-import { requiresIsolatedGeneratedRuntime } from '../generated-runtime/trust.js'
+import { isolatedRuntimeOwner, requiresIsolatedGeneratedRuntime } from '../generated-runtime/trust.js'
 import type { CapabilityRegistry, RegistryRegisterInput } from '../registry/types.js'
 import type { CandidateRecord, CandidateWorkspace } from '../candidate/types.js'
 import { ActivationDeniedError, GovernanceAuthorityError, GovernanceContractError } from './errors.js'
@@ -99,6 +99,7 @@ export class GovernanceService implements ExtensionGovernance, ExtensionActivati
       this.lastKnownGood = this.current
       if (options.hydrate?.approvals.length) this.applyHydrate({ ...options.hydrate, current: this.current, lastKnownGood: this.lastKnownGood, generation: this.generation })
     }
+    this.runtime.bindIsolatedFailure((failure) => this.noteIsolatedRuntimeFailure(failure))
   }
 
   exportHydrate(): GovernanceHydrate {
@@ -286,7 +287,7 @@ export class GovernanceService implements ExtensionGovernance, ExtensionActivati
   enterSafeMode(credential: TrustedAuthorityCredential): ActivationStatus {
     this.assertCredential(credential)
     for (const record of this.registry.list({ status: 'active' })) {
-      if (record.owner.startsWith('generated/')) {
+      if (isolatedRuntimeOwner(record)) {
         this.registry.transitionStatus(record.owner, record.version, 'disabled')
       }
     }
@@ -321,12 +322,14 @@ export class GovernanceService implements ExtensionGovernance, ExtensionActivati
     const diagnostics: string[] = []
     if (this.safeMode) return diagnostics
     const snapshot = this.committedActivationSnapshot()
-    const targets = (snapshot?.owners ?? []).filter(
-      (item) => item.owner.startsWith('generated/') && item.status === 'active',
-    )
+    const targets = (snapshot?.owners ?? []).filter((item) => {
+      if (item.status !== 'active') return false
+      const record = this.registry.get(item.owner, item.version)
+      return isolatedRuntimeOwner(record ?? { owner: item.owner })
+    })
     const committed = new Set(targets.map((item) => `${item.owner}@${item.version}`))
     for (const record of this.registry.list({ status: 'active' })) {
-      if (!record.owner.startsWith('generated/')) continue
+      if (!isolatedRuntimeOwner(record)) continue
       const key = `${record.owner}@${record.version}`
       if (!committed.has(key)) diagnostics.push(`inconsistent-active-owner:${key}`)
     }
@@ -374,7 +377,7 @@ export class GovernanceService implements ExtensionGovernance, ExtensionActivati
 
   private async failClosedSafeMode(diagnostics: readonly string[]): Promise<void> {
     for (const record of this.registry.list({ status: 'active' })) {
-      if (record.owner.startsWith('generated/')) {
+      if (isolatedRuntimeOwner(record)) {
         this.registry.transitionStatus(record.owner, record.version, 'disabled')
       }
     }
@@ -382,6 +385,7 @@ export class GovernanceService implements ExtensionGovernance, ExtensionActivati
     this.state = 'safe-mode'
     this.integrityVerified = false
     this.current = this.captureSnapshot()
+    void this.runtime.unloadGenerated()
     this.lastFailure = {
       candidateId: this.pendingCandidateId ?? 'restart',
       version: '',
@@ -456,7 +460,7 @@ export class GovernanceService implements ExtensionGovernance, ExtensionActivati
     for (const owner of snapshot.owners) {
       const record = this.registry.get(owner.owner, owner.version)
       if (record === undefined || record.status !== 'active') return false
-      if (!owner.owner.startsWith('generated/')) continue
+      if (!isolatedRuntimeOwner(record)) continue
       const candidate = this.workspace.list().find((item) => item.owner === owner.owner && item.version === owner.version)
       if (candidate === undefined) return false
       if (this.verifySealedArtifact(candidate) !== undefined) return false
@@ -564,6 +568,31 @@ export class GovernanceService implements ExtensionGovernance, ExtensionActivati
       denials.push({ reason: 'safe-mode', detail: 'generated extensions are excluded in Safe Mode' })
     }
     return denials
+  }
+
+  private noteIsolatedRuntimeFailure(failure: { readonly candidateId: string; readonly diagnostics: string }): void {
+    const record = this.workspace.list().find((item) => item.id === failure.candidateId)
+    if (record !== undefined) {
+      const active = this.registry.get(record.owner, record.version)
+      if (active?.status === 'active') {
+        this.registry.transitionStatus(record.owner, record.version, 'disabled')
+      }
+    }
+    this.state = 'activation-failed'
+    this.lastFailure = {
+      candidateId: failure.candidateId,
+      version: record?.version ?? '',
+      digest: record?.digest ?? '',
+      phase: 'health',
+      diagnostics: failure.diagnostics,
+      rollbackAttempted: false,
+      rollbackSucceeded: false,
+      safeModeRequired: false,
+    }
+    this.current = this.captureSnapshot()
+    this.lastKnownGood = this.current
+    this.integrityVerified = true
+    this.flush()
   }
 
   private prepareContext(record: CandidateRecord): ActivationPrepareContext {

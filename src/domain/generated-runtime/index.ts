@@ -1,5 +1,6 @@
 export { approvedHostCapabilities, assertBrokerAllowed, executeHostBroker, GeneratedBrokerError } from './broker.js'
-export { requiresIsolatedGeneratedRuntime } from './trust.js'
+export { projectParameterSchema, projectValueSchema } from './schema.js'
+export { isolatedRuntimeOwner, requiresIsolatedGeneratedRuntime } from './trust.js'
 export {
   generatedIsolation,
   generatedRuntimeDiagnosis,

@@ -1,3 +1,4 @@
+import { isolatedRuntimeOwner } from '../generated-runtime/trust.js'
 import type { CandidateRecord } from '../candidate/types.js'
 import type { ActivationStatus } from '../governance/types.js'
 import type { RegistryRecord } from '../registry/types.js'
@@ -28,7 +29,7 @@ function generatedActive(input: {
     record.owner === candidate.owner
     && record.version === candidate.version
     && record.status === 'active'
-    && record.owner.startsWith('generated/')
+    && isolatedRuntimeOwner(record)
   )))
 }
 

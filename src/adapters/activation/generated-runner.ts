@@ -2,7 +2,6 @@ import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process'
 import { copyFileSync, existsSync, mkdtempSync, realpathSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
-import { createInterface } from 'node:readline'
 import { fileURLToPath } from 'node:url'
 import { detectOsNetworkSandbox } from '../../domain/candidate/os-sandbox.js'
 import { listSourceFiles } from '../../domain/candidate/files.js'
@@ -39,6 +38,7 @@ export class IsolatedGeneratedRunner {
   private exited = Promise.resolve()
   private resolveExit?: () => void
   private fatal = false
+  private stdoutBuffer = ''
   onFatal?: (reason: string) => void
   readonly tools: string[] = []
   descriptors: GeneratedToolDescriptor[] = []
@@ -102,9 +102,9 @@ export class IsolatedGeneratedRunner {
         this.stderr = `${this.stderr}${chunk}`.slice(-GENERATED_MAX_STDERR_BYTES)
       })
       const ready = this.waitForReady()
-      const lines = createInterface({ input: child.stdout })
-      lines.on('line', (line) => {
-        void this.onLine(line)
+      child.stdout.setEncoding('utf8')
+      child.stdout.on('data', (chunk: string) => {
+        this.onStdoutChunk(chunk)
       })
       child.on('exit', (code) => {
         const reason = sanitizeGeneratedDiagnostic(`generated process exited (${code ?? 'null'}): ${this.stderr || 'no-stderr'}`)
@@ -208,6 +208,31 @@ export class IsolatedGeneratedRunner {
     })
     this.descriptors = parsed
     this.tools.splice(0, this.tools.length, ...parsed.map((item) => item.name))
+  }
+
+  private onStdoutChunk(chunk: string): void {
+    if (this.fatal) return
+    let offset = 0
+    while (offset < chunk.length) {
+      const newline = chunk.indexOf('\n', offset)
+      if (newline === -1) {
+        const rest = chunk.slice(offset)
+        if (Buffer.byteLength(this.stdoutBuffer) + Buffer.byteLength(rest) > GENERATED_MAX_MESSAGE_BYTES) {
+          this.failClosed('generated protocol message exceeded the size bound')
+          return
+        }
+        this.stdoutBuffer += rest
+        return
+      }
+      const line = `${this.stdoutBuffer}${chunk.slice(offset, newline)}`
+      this.stdoutBuffer = ''
+      offset = newline + 1
+      if (Buffer.byteLength(line) > GENERATED_MAX_MESSAGE_BYTES) {
+        this.failClosed('generated protocol message exceeded the size bound')
+        return
+      }
+      void this.onLine(line)
+    }
   }
 
   private async onLine(line: string): Promise<void> {

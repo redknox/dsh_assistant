@@ -9,3 +9,14 @@ export function requiresIsolatedGeneratedRuntime(input: {
   if (input.origin === 'assistant' || input.origin === 'import') return true
   return false
 }
+
+export function isolatedRuntimeOwner(record: {
+  readonly owner: string
+  readonly provenance?: { readonly kind?: string; readonly origin?: string }
+}): boolean {
+  return requiresIsolatedGeneratedRuntime({
+    owner: record.owner,
+    provenanceKind: record.provenance?.kind,
+    origin: record.provenance?.origin,
+  })
+}
