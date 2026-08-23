@@ -407,18 +407,21 @@ button { color: inherit; }
 .control-strip {
   flex: 0 0 auto;
   margin: 0;
+  padding-block: 10px;
 }
 .control-strip-row {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
   align-items: stretch;
+  border: 1px solid #7c7466;
+  border-radius: 8px;
 }
 .control-strip-row > div {
   display: flex;
   align-items: center;
   justify-content: center;
   gap: 10px;
-  min-height: 76px;
+  min-height: 54px;
   padding: 12px 10px;
   border-right: 1px solid rgb(90 80 64 / 22%);
   font-family: var(--font-instrument);
