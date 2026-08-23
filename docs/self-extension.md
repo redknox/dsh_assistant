@@ -14,9 +14,16 @@ Three principles are normative. A later implementation that violates them is out
 
 Self-Extension is extension through **public DSH** plugin, service, provider, tool, event, profile, and bundle seams. It is not unrestricted self-modification of the running product, and it must not patch or depend on DSH package-internal Agent Loop / `src/*` internals.
 
-Assistant-generated code has **no privileged runtime path**. It uses the same public DSH plugin contract as human-authored code.
+Assistant-generated code has **no privileged runtime path**. Human-maintained `managed/*` product plugins may use the in-process Cordis lifecycle. `generated/*` candidates are not imported into the TARS-NG process and do not receive the live Cordis context; they run in a fail-closed isolated runner with a host-owned proxy and capability broker.
 
-The v0.1.0 Assistant Core MVP remains the stable product/runtime baseline underneath Self-Extension. Self-Extension sits beside that baseline; it does not replace it. v0.2.0 is the Governed Self-Extension baseline. The current product release is v0.3.0 (Product Soak baseline).
+```text
+v0.3.0 = Governance + Mission-Control product baseline
+v0.4.0 target = Self-Developing Product Baseline
+```
+
+Self-development is allowed; self-authorization is not. This does not claim that the Candidate Workbench is complete.
+
+The v0.1.0 Assistant Core MVP remains the stable product/runtime baseline underneath Self-Extension. Self-Extension sits beside that baseline; it does not replace it. v0.2.0 is the Governed Self-Extension baseline. v0.3.0 is the historical Governance + Mission-Control baseline.
 
 ## Three separate questions
 
@@ -35,7 +42,7 @@ Visibility is not a change proposal. A change proposal is not authorization. Aut
 
 ## Provenance model
 
-All plugins — human-maintained and assistant-generated — share one DSH plugin/runtime model: Cordis load/unload, public inject/provide, profile/bundle rows. Provenance is **metadata and management state**, not a second loader or a privileged fiber.
+Human-maintained plugins share the in-process DSH plugin/runtime model: Cordis load/unload, public inject/provide, profile/bundle rows. Generated candidates share the same **governance** model (registry, review, exact approval, transactional activation) but not the same **execution trust**: they are isolated. Provenance is management state, not a privilege grant.
 
 Logical prefixes (management paths, not a required filesystem layout in this issue):
 

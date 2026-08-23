@@ -290,6 +290,9 @@ describe('product package and profile', () => {
     assert.doesNotMatch(doctor, /\btsx\b/)
     assert.doesNotMatch(doctor, /Team standup/)
     assert.match(doctor, /calendar: unavailable|calendar: live/)
+    assert.match(doctor, /generated-runtime: (available|unavailable)/)
+    assert.match(doctor, /isolation: /)
+    assert.match(doctor, /active generated processes: /)
 
     const pidFile = join(productHome, 'state', 'tars-ng.pid')
     const failedOnce = spawnSync(bin, ['start', '--once', '--home', productHome], { encoding: 'utf8', env })

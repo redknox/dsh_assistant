@@ -6,10 +6,12 @@ export interface ActivationPrepareContext {
   readonly owner: string
   readonly resolutionKind: string
   readonly baseVersion?: string
+  readonly digest?: string
   readonly tools: readonly string[]
   readonly services: readonly string[]
   readonly providers: readonly string[]
   readonly runtimeSeams: readonly string[]
+  readonly permissions?: readonly string[]
 }
 
 export interface ActivationRuntime {
@@ -19,6 +21,7 @@ export interface ActivationRuntime {
   commit(candidateId: string): Promise<void>
   restore(snapshot: ActivationSnapshot): Promise<void>
   mounted(): readonly string[]
+  unloadGenerated(): Promise<void>
 }
 
 export class InMemoryActivationRuntime implements ActivationRuntime {
@@ -57,4 +60,6 @@ export class InMemoryActivationRuntime implements ActivationRuntime {
   mounted(): readonly string[] {
     return this.currentMounted
   }
+
+  async unloadGenerated(): Promise<void> {}
 }

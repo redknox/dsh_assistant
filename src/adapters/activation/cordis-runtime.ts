@@ -1,9 +1,10 @@
-import { existsSync, readFileSync } from 'node:fs'
-import path from 'node:path'
 import { pathToFileURL } from 'node:url'
 import type { Context, Plugin } from '@deepseek-ai/cordis'
+import { defineTool } from '@deepseek-ai/dsh-tools'
 import type { ActivationPrepareContext, ActivationRuntime } from '../../domain/governance/runtime.js'
 import type { ActivationSnapshot } from '../../domain/governance/types.js'
+import { resolveCandidateEntry } from './candidate-entry.js'
+import { IsolatedGeneratedRunner } from './generated-runner.js'
 
 interface SurfaceSnapshot {
   readonly tools: readonly string[]
@@ -29,59 +30,7 @@ const OWNER_PLUGIN_NAMES: Readonly<Record<string, string>> = {
 
 const SWAP_KINDS = new Set(['evolve-owner', 'configure', 'adopt-existing', 'implement-provider'])
 
-function packageEntries(root: string): string[] {
-  const pkgPath = path.join(root, 'package.json')
-  if (!existsSync(pkgPath)) return []
-  try {
-    const pkg = JSON.parse(readFileSync(pkgPath, 'utf8')) as {
-      main?: string
-      exports?: string | { '.'?: string | { import?: string; default?: string } }
-    }
-    const found: string[] = []
-    if (typeof pkg.exports === 'string') found.push(pkg.exports)
-    if (pkg.exports && typeof pkg.exports === 'object') {
-      const exp = pkg.exports['.']
-      if (typeof exp === 'string') found.push(exp)
-      if (exp && typeof exp === 'object') {
-        if (exp.import) found.push(exp.import)
-        if (exp.default) found.push(exp.default)
-      }
-    }
-    if (pkg.main) found.push(pkg.main)
-    return found
-  } catch {
-    return []
-  }
-}
-
-/** Resolve a sealed candidate's plugin entry from workspace/manifest/package metadata. */
-export function resolveCandidateEntry(workspaceRoot: string, entryPoints: readonly string[] = []): string {
-  const relatives = [
-    ...entryPoints,
-    ...packageEntries(workspaceRoot),
-    'src/index.js',
-    'src/plugin.js',
-    'index.js',
-    'plugin.js',
-    'src/index.ts',
-    'src/plugin.ts',
-  ]
-  const seen = new Set<string>()
-  const root = path.resolve(workspaceRoot)
-  for (const rel of relatives) {
-    if (rel === undefined || rel === '' || seen.has(rel)) continue
-    seen.add(rel)
-    const unix = rel.replaceAll('\\', '/')
-    if (path.isAbsolute(rel) || unix.split('/').some((part) => part === '' || part === '.' || part === '..')) {
-      continue
-    }
-    const abs = path.resolve(root, ...unix.split('/'))
-    const inside = abs === root || abs.startsWith(`${root}${path.sep}`)
-    if (!inside || !existsSync(abs)) continue
-    return abs
-  }
-  throw new Error('candidate workspace has no mountable plugin entry')
-}
+export { resolveCandidateEntry } from './candidate-entry.js'
 
 function hasService(ctx: Context, name: string): boolean {
   try {
@@ -136,15 +85,25 @@ function capturePriorOwner(ctx: Context, owner: string): { mounts: PriorOwnerMou
   return { mounts, fibers }
 }
 
-/** Production adapter: mount/unmount the sealed candidate artifact through Cordis. */
+function isGeneratedOwner(owner: string): boolean {
+  return owner.startsWith('generated/')
+}
+
+/** Production adapter: managed owners stay in-process; generated owners use the isolated runner. */
 export class CordisActivationRuntime implements ActivationRuntime {
   private readonly fibers = new Map<string, { dispose: () => Promise<unknown> }>()
   private readonly baselines = new Map<string, SurfaceSnapshot>()
   private readonly priorOwners = new Map<string, PriorOwnerMount[]>()
+  private readonly generated = new Map<string, IsolatedGeneratedRunner>()
+  private readonly proxyDisposers = new Map<string, Array<() => void>>()
   private currentMounted: string[] = []
   private lastContext?: ActivationPrepareContext
 
-  constructor(private readonly ctx: Context) {}
+  constructor(private readonly ctx: Context) {
+    ctx.effect(() => () => {
+      this.unloadGenerated()
+    })
+  }
 
   snapshot(generation: number, owners: ActivationSnapshot['owners']): ActivationSnapshot {
     return {
@@ -158,9 +117,12 @@ export class CordisActivationRuntime implements ActivationRuntime {
 
   async prepare(candidateId: string, context?: ActivationPrepareContext): Promise<{ ok: boolean; diagnostics?: string }> {
     this.lastContext = context
-    if (this.fibers.has(candidateId)) return { ok: true }
+    if (this.fibers.has(candidateId) || this.generated.has(candidateId)) return { ok: true }
     if (context === undefined || context.workspaceRoot === '') {
       return { ok: false, diagnostics: 'candidate workspace metadata is required to mount the artifact' }
+    }
+    if (isGeneratedOwner(context.owner)) {
+      return this.prepareGenerated(candidateId, context)
     }
     let swapped: PriorOwnerMount[] = []
     try {
@@ -190,6 +152,16 @@ export class CordisActivationRuntime implements ActivationRuntime {
   async verifyHealth(candidateId: string, expected: readonly string[]): Promise<{ ok: boolean; diagnostics?: string }> {
     const declared = this.lastContext
     if (declared === undefined) return { ok: false, diagnostics: 'no candidate mount context' }
+    const generated = this.generated.get(candidateId)
+    if (generated !== undefined) {
+      const produced = await generated.health()
+      const missing = declared.tools.filter((name) => name !== '' && !produced.includes(name))
+      if (missing.length > 0) return { ok: false, diagnostics: missing.map((name) => `tool:${name} missing after candidate mount`).join('; ') }
+      if (declared.tools.length + declared.services.length + declared.providers.length === 0) {
+        return { ok: false, diagnostics: 'candidate declared no tools, services, or providers to verify' }
+      }
+      return { ok: true }
+    }
     if (!this.fibers.has(candidateId)) return { ok: false, diagnostics: 'candidate artifact is not mounted' }
     const before = this.baselines.get(candidateId) ?? { tools: [], services: [], providers: [] }
     const after = snapshotDeclared(this.ctx, declared)
@@ -218,11 +190,67 @@ export class CordisActivationRuntime implements ActivationRuntime {
       this.baselines.delete(id)
       await this.restorePriorOwner(id, this.priorOwners.get(id) ?? [])
     }
+    for (const [id, runner] of this.generated) {
+      if (snapshot.mounted.includes(id)) continue
+      this.dropGenerated(id, runner)
+    }
     this.currentMounted = [...snapshot.mounted]
+  }
+
+  async unloadGenerated(): Promise<void> {
+    for (const [id, runner] of this.generated) this.dropGenerated(id, runner)
   }
 
   mounted(): readonly string[] {
     return this.currentMounted
+  }
+
+  private async prepareGenerated(candidateId: string, context: ActivationPrepareContext): Promise<{ ok: boolean; diagnostics?: string }> {
+    const runner = new IsolatedGeneratedRunner({
+      candidateId,
+      workspaceRoot: context.workspaceRoot,
+      entryPoints: context.entryPoints,
+      owner: context.owner,
+      digest: context.digest,
+      tools: context.tools,
+      permissions: context.permissions ?? [],
+    })
+    const started = await runner.start()
+    if (!started.ok) {
+      runner.kill()
+      return started
+    }
+    this.generated.set(candidateId, runner)
+    this.baselines.set(candidateId, snapshotDeclared(this.ctx, context))
+    const disposers: Array<() => void> = []
+    for (const name of context.tools) {
+      if (name === '' || this.ctx.tools.get(name) !== undefined) continue
+      disposers.push(this.ctx.tools.register(defineTool({
+        name,
+        description: `Isolated generated proxy for ${name}`,
+        parameters: {},
+        output: {
+          schema: { type: 'string' },
+          render(_args: unknown, value: unknown) {
+            return [{ type: 'text' as const, text: String(value) }]
+          },
+        },
+        async execute(args, exec) {
+          const value = await runner.call(name, args as Record<string, unknown>, exec.signal)
+          return typeof value === 'string' ? value : JSON.stringify(value)
+        },
+      })))
+    }
+    this.proxyDisposers.set(candidateId, disposers)
+    return { ok: true }
+  }
+
+  private dropGenerated(candidateId: string, runner: IsolatedGeneratedRunner): void {
+    for (const dispose of this.proxyDisposers.get(candidateId) ?? []) dispose()
+    this.proxyDisposers.delete(candidateId)
+    runner.kill()
+    this.generated.delete(candidateId)
+    this.baselines.delete(candidateId)
   }
 
   private async restorePriorOwner(candidateId: string, mounts: readonly PriorOwnerMount[]): Promise<void> {

@@ -1,4 +1,5 @@
 import { existsSync } from 'node:fs'
+import { generatedRuntimeDiagnosis, type GeneratedRuntimeDiagnosis } from '../domain/generated-runtime/index.js'
 import type { OperatorStatus } from '../domain/self-extension/status.js'
 import { inspectCompatibility, type CompatibilityReport } from './compatibility.js'
 import { PRODUCT_NAME } from './constants.js'
@@ -33,6 +34,7 @@ export interface DoctorReport {
   readonly lastStartup?: unknown
   readonly logFile: string
   readonly llm?: LlmDiagnosis
+  readonly generatedRuntime?: GeneratedRuntimeDiagnosis
 }
 
 export function calendarDiagnosis(allowFixtures: boolean): IntegrationDiagnosis {
@@ -94,6 +96,7 @@ export function collectStaticDoctor(input: {
     integrations: [calendarDiagnosis(input.allowFixtures), searchDiagnosis()],
     lastStartup: input.lastStartup,
     logFile: input.layout.logFile,
+    generatedRuntime: generatedRuntimeDiagnosis(),
   }
 }
 
@@ -111,6 +114,7 @@ export function attachRuntimeDoctor(report: DoctorReport, input: {
     recoveryRequired: input.recoveryRequired,
     operator: input.operator,
     llm: input.llm,
+    generatedRuntime: generatedRuntimeDiagnosis(),
   }
 }
 
@@ -147,6 +151,10 @@ export function formatDoctorReport(report: DoctorReport): string {
     `persistence: ${report.persistence ?? 'not-booted'}`,
     `safe-mode: ${report.safeMode ?? 'not-booted'}`,
     `recovery-required: ${report.recoveryRequired ?? 'not-booted'}`,
+    report.generatedRuntime ? `generated-runtime: ${report.generatedRuntime.state}` : 'generated-runtime: unavailable',
+    report.generatedRuntime ? `isolation: ${report.generatedRuntime.isolation}` : undefined,
+    report.generatedRuntime ? `active generated processes: ${report.generatedRuntime.activeProcesses}` : undefined,
+    report.generatedRuntime?.lastFailure ? `last runner failure: ${report.generatedRuntime.lastFailure}` : undefined,
     report.operator ? `activation: ${report.operator.activationState}` : 'activation: not-booted',
     report.operator ? `active: ${report.operator.active.join(', ') || '(none)'}` : undefined,
     report.operator?.lastFailure ? `last-failure: ${report.operator.lastFailure}` : undefined,

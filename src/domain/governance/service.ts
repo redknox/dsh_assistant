@@ -227,10 +227,12 @@ export class GovernanceService implements ExtensionGovernance, ExtensionActivati
         owner: record.owner,
         resolutionKind: record.manifest.resolutionKind,
         baseVersion: record.baseVersion,
+        digest: record.digest,
         tools: record.manifest.tools,
         services: record.manifest.services,
         providers: record.manifest.providers,
         runtimeSeams: record.manifest.runtimeSeams,
+        permissions: record.manifest.permissions,
       })
       if (!prepared.ok) throw new Error(prepared.diagnostics ?? 'prepare failed')
       this.flush()
@@ -302,6 +304,7 @@ export class GovernanceService implements ExtensionGovernance, ExtensionActivati
     this.safeMode = true
     this.state = 'safe-mode'
     this.current = this.captureSnapshot()
+    void this.runtime.unloadGenerated()
     this.flush()
     return this.status()
   }
@@ -363,10 +366,12 @@ export class GovernanceService implements ExtensionGovernance, ExtensionActivati
         owner: candidate.owner,
         resolutionKind: candidate.manifest.resolutionKind,
         baseVersion: candidate.baseVersion,
+        digest: candidate.digest,
         tools: candidate.manifest.tools,
         services: candidate.manifest.services,
         providers: candidate.manifest.providers,
         runtimeSeams: candidate.manifest.runtimeSeams,
+        permissions: candidate.manifest.permissions,
       })
       if (!prepared.ok) {
         diagnostics.push(prepared.diagnostics ?? `prepare-failed:${candidate.id}`)
@@ -541,6 +546,11 @@ export class GovernanceService implements ExtensionGovernance, ExtensionActivati
     }
     if (record.digest === undefined || record.validation?.digest !== record.digest) {
       denials.push({ reason: 'digest-mismatch', detail: 'validation digest does not match the sealed artifact' })
+    } else if (existsSync(record.workspaceRoot)) {
+      const live = digestFiles(record.workspaceRoot, listSourceFiles(record.workspaceRoot))
+      if (live !== record.digest) {
+        denials.push({ reason: 'digest-mismatch', detail: 'sealed artifact no longer matches the approved digest' })
+      }
     }
     const approval = this.approvals.get(candidateId)
     if (approval === undefined || approval.decision === 'unreviewed' || approval.decision === 'approval-requested') {
