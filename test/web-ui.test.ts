@@ -187,7 +187,7 @@ describe('local Mission-Control Web UI', () => {
   })
 
   it('approves and rejects through the existing policy path', async () => {
-    await withServer(bootAssistantControl, 'web-ui-approve', async (url, surface) => {
+    await withServer(bootAssistantControl, 'web-ui-approve', async (url, surface, agent) => {
       const pending = surface.requestExecute('calendar', 'create_event', {
         calendarId: 'Personal',
         title: 'Team review',
@@ -212,6 +212,9 @@ describe('local Mission-Control Web UI', () => {
       const after = denied.view.approvals.find((item) => item.id === pending.confirmationId)
       assert.equal(after?.status, 'denied')
       assert.notEqual(after?.status, 'pending')
+      await agent.agent.whenIdle()
+      const talked = await fetch(`${url}/api/view`).then((res) => res.json()) as { view: MissionControlView }
+      assert.equal(talked.view.conversation.some((item) => item.kind === 'user-message' && item.text.includes(pending.confirmationId) && item.text.includes('deny')), true)
     })
   })
 

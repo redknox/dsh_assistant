@@ -3,7 +3,7 @@ import { allowedApprovalPayload } from './redact.js'
 
 export function projectApprovalCards(input: WorkspaceSnapshotInput): readonly ApprovalCard[] {
   const cards: ApprovalCard[] = []
-  for (const ticket of input.pendingConfirmations.filter((item) => item.status === 'pending' || item.status === 'denied' || item.status === 'cancelled' || item.status === 'consumed')) {
+  for (const ticket of input.pendingConfirmations.filter((item) => item.status === 'pending' || item.status === 'denied' || item.status === 'cancelled' || item.status === 'consumed' || item.status === 'failed')) {
     cards.push(sideEffectCard(ticket))
   }
   for (const approval of input.extensionApprovals ?? []) {
