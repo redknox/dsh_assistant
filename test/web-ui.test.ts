@@ -780,6 +780,7 @@ export function apply(ctx) {
     assert.match(css, /\.activity-item \{[^}]*font:[^;]*14px/)
     assert.match(css, /\.activity-item \.activity-summary \{[^}]*font-size:\s*14px/)
     assert.match(css, /\.capability-list dd \{[^}]*font:[^;]*14px/)
+    assert.match(css, /\.capability-action \{[^}]*font:[^;]*14px/)
     assert.match(css, /\.strip-label \{[^}]*font-size:\s*14px/)
     assert.match(css, /\.control-strip strong \{[^}]*font-size:\s*14px/)
     assert.match(css, /\.nav-item:focus-visible \{[^}]*outline:\s*2px solid/)

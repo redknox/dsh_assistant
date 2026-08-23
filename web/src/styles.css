@@ -414,6 +414,9 @@ button { color: inherit; }
 .capability-list { margin: 0; }
 .capability-list div { display: flex; justify-content: space-between; gap: 15px; padding: 14px 22px; border-top: 1px solid #555a56; }
 .capability-list dt, .capability-list dd { margin: 0; }
+.capability-list dt { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.capability-area { font: 650 14px/1.3 var(--font-instrument); }
+.capability-action { color: var(--muted-inverse); font: 500 14px/1.3 var(--font-instrument); letter-spacing: .02em; }
 .capability-list dd { font: 650 14px/1.5 var(--font-instrument); }
 [data-capability-state="active"] { color: var(--status-green); }
 [data-capability-state="governed"] { color: var(--signal-amber); }
