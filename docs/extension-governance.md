@@ -31,7 +31,7 @@ Activation layer switches version transactionally
 Recovery root can revert independently of Assistant
 ```
 
-There is no `approve(candidateId)` that accepts model input. Trusted approval requires a credential issued only by the Recovery Root.
+There is no `approve(candidateId)` that accepts model input. Trusted approval requires a credential issued only by the Recovery Root. A conversation that reaches `request_extension_approval` is still **NOT APPROVED** until a human records an exact-diff decision.
 
 ## Approval fingerprint
 

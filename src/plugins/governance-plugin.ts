@@ -57,7 +57,7 @@ export interface GovernancePluginConfig {
 }
 
 export const name = 'dsh-assistant-governance'
-export const inject = ['capabilityRegistry', 'candidateWorkspace', 'independentReview', 'tools']
+export const inject = ['capabilityRegistry', 'candidateWorkspace', 'candidateValidation', 'independentReview', 'tools']
 
 /** Inspect/request only on ctx. Trusted minting stays on the bootstrap RecoveryRoot. */
 export async function apply(ctx: Context, config: GovernancePluginConfig = {}) {
@@ -72,6 +72,7 @@ export async function apply(ctx: Context, config: GovernancePluginConfig = {}) {
       finishAuthorityCommit: config.finishAuthorityCommit,
       durableHome: config.durableHome,
       independentReview: ctx.independentReview,
+      validation: ctx.candidateValidation,
     },
   )
   config.attachRecoveryRoot?.(root)

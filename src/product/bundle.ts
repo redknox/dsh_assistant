@@ -55,8 +55,11 @@ export async function apply(ctx: Context, config: AssistantBundleConfig = {}) {
     ...config.governance,
     allowRequestTool: config.safeMode !== true,
   })
+  await ctx.plugin(workbenchPlugin, {
+    ...config.workbench,
+    inspectOnly: config.safeMode === true,
+  })
   if (config.safeMode) return
-  await ctx.plugin(workbenchPlugin, config.workbench)
   await ctx.plugin(memoryPlugin, config.memory)
   await ctx.plugin(knowledgePlugin, config.knowledge)
   await ctx.plugin(integrationsPlugin, config.integrations)
@@ -70,6 +73,11 @@ export const SAFE_MODE_TOOL_NAMES = [
   'lookup_capability',
   'review_capability_resolution',
   'inspect_extension_governance',
+  'inspect_authoring_contract',
+  'list_workbench',
+  'inspect_candidate',
+  'inspect_candidate_review',
+  'inspect_validation_diagnostics',
 ] as const
 
 export const PRODUCT_TOOL_NAMES = [
@@ -98,7 +106,11 @@ export const PRODUCT_TOOL_NAMES = [
   'confirm_action',
   'plan_capability_change',
   'create_candidate',
+  'scaffold_candidate',
+  'inspect_authoring_contract',
   'inspect_candidate',
+  'inspect_validation_diagnostics',
+  'list_workbench',
   'list_candidate_files',
   'read_candidate_file',
   'write_candidate_file',

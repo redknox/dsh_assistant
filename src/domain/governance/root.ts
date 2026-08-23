@@ -35,6 +35,7 @@ export class RecoveryRoot {
       finishAuthorityCommit?: () => void
       durableHome?: string
       independentReview?: IndependentReview
+      validation?: import('../candidate/types.js').CandidateValidation
     } = {},
   ) {
     this.independentReview = options.independentReview ?? new ReviewService(undefined, (id) => workspace.get(id), { hostLineage: true })
@@ -90,6 +91,10 @@ export class RecoveryRoot {
 
   disable(credential: TrustedAuthorityCredential, owner: string, version: string) {
     return this.service.disable(credential, owner, version)
+  }
+
+  migrateAuthoringContract(credential: TrustedAuthorityCredential, candidateId: string) {
+    return this.service.migrateAuthoringContract(credential, candidateId)
   }
 
   backup(credential: TrustedAuthorityCredential, dest: string): SelfExtensionBackupManifest {

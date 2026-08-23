@@ -24,6 +24,7 @@ export type ValidationStageStatus = (typeof VALIDATION_STAGE_STATUSES)[number]
 export const ALLOWED_VALIDATION_TASKS = [
   'manifest.validate',
   'package.inspect',
+  'runtime.contract',
   'source.boundary',
   'typecheck',
   'tests',
@@ -75,6 +76,7 @@ export interface CandidateManifest {
   readonly entryPoints: readonly string[]
   readonly validationTasks: readonly ValidationTaskRequest[]
   readonly riskModel?: RiskModel
+  readonly runtimeContractVersion?: string
 }
 
 export interface CandidateManifestInput {
@@ -90,6 +92,7 @@ export interface CandidateManifestInput {
   readonly entryPoints?: readonly string[]
   readonly validationTasks?: readonly ValidationTaskRequest[]
   readonly riskModel?: RiskModel
+  readonly runtimeContractVersion?: string
 }
 
 export interface CandidateIdentity {
@@ -131,6 +134,7 @@ export interface CandidateDiff {
   readonly providers: NamedDiff
   readonly runtimeSeams: NamedDiff
   readonly effects: OperationalEffects
+  readonly runtimeContractVersion?: string
 }
 
 export interface ValidationStageResult {

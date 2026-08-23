@@ -275,6 +275,7 @@ export class CordisActivationRuntime implements ActivationRuntime {
       digest: context.digest,
       tools: context.tools,
       permissions: context.permissions ?? [],
+      runtimeContractVersion: context.runtimeContractVersion,
     })
     const fail = async (diagnostics: string) => {
       runner.kill()

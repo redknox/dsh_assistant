@@ -1,4 +1,7 @@
+export { GENERATED_EXTENSION_API_V1, authoringContractV1 } from './authoring-contract.js'
+export { projectValidationDiagnostics, WORKBENCH_DIAGNOSTIC_STAGE_CHARS, WORKBENCH_DIAGNOSTIC_TOTAL_BYTES } from './diagnostics.js'
 export { WorkbenchContractError, WorkbenchRepairRollbackError } from './errors.js'
+export { WORKBENCH_LIST_DEFAULT, WORKBENCH_LIST_MAX, encodeListCursor } from './listing.js'
 export { parseWorkbenchRiskModel, riskModelToolSchema } from './risk-model.js'
 export { WorkbenchService } from './service.js'
 export type {
@@ -6,9 +9,11 @@ export type {
   WorkbenchBinding,
   WorkbenchCandidateView,
   WorkbenchCreateInput,
+  WorkbenchListInput,
   WorkbenchPersistState,
   WorkbenchPlan,
   WorkbenchPlanView,
+  WorkbenchScaffoldInput,
   WorkbenchServiceOptions,
 } from './types.js'
 export {

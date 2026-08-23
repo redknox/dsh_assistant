@@ -2,6 +2,9 @@ import type { CandidateDiff, CandidateLifecycle, CandidateManifestInput } from '
 import type { EligibilityResult } from '../governance/types.js'
 import type { ResolutionKind, ResolutionReview } from '../resolution/types.js'
 import type { ReviewReport, ReviewState } from '../review/types.js'
+import type { AuthoringContractV1 } from './authoring-contract.js'
+import type { ValidationDiagnosticsView } from './diagnostics.js'
+import type { WorkbenchListView, WorkbenchStep } from './listing.js'
 
 export const WORKBENCH_CHANGE_KINDS = [
   'configure',
@@ -28,6 +31,8 @@ export interface WorkbenchBinding {
   readonly planId: string
   readonly parentId?: string
   readonly parentDigest?: string
+  readonly leftover?: boolean
+  readonly runtimeContractVersion?: string
 }
 
 export interface WorkbenchPersistState {
@@ -75,6 +80,9 @@ export interface WorkbenchCandidateView {
   }
   readonly diff?: CandidateDiff
   readonly requestEligibility: EligibilityResult
+  readonly step: WorkbenchStep
+  readonly leftover: boolean
+  readonly contractVersion?: string
 }
 
 export interface WorkbenchCreateInput {
@@ -85,9 +93,23 @@ export interface WorkbenchCreateInput {
   readonly provenance?: { readonly kind?: string; readonly origin?: string }
 }
 
+export interface WorkbenchScaffoldInput {
+  readonly candidateId: string
+  readonly toolName?: string
+  readonly toolDescription?: string
+  readonly capability?: string
+}
+
+export interface WorkbenchListInput {
+  readonly limit?: number
+  readonly cursor?: string
+}
+
 export interface WorkbenchServiceOptions {
   readonly restore?: WorkbenchPersistState
   readonly persist?: (state: WorkbenchPersistState) => void
+  readonly inventory?: { snapshot(): import('../resolution/types.js').ArchitectureInventory }
+  readonly registry?: { get(owner: string, version: string): { status: string } | undefined }
 }
 
 export interface CandidateWorkbench {
@@ -96,6 +118,10 @@ export interface CandidateWorkbench {
   getPlan(planId: string): WorkbenchPlan
   create(input: WorkbenchCreateInput): WorkbenchCandidateView
   inspect(candidateId: string): WorkbenchCandidateView
+  inspectAuthoringContract(version?: string): AuthoringContractV1
+  scaffold(input: WorkbenchScaffoldInput): WorkbenchCandidateView
+  inspectValidation(candidateId: string): ValidationDiagnosticsView
+  list(input?: WorkbenchListInput): WorkbenchListView
   listFiles(candidateId: string): readonly string[]
   readFile(candidateId: string, relativePath: string): string
   writeFile(candidateId: string, relativePath: string, content: string): WorkbenchCandidateView

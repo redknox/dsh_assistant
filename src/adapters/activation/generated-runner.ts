@@ -5,7 +5,8 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { detectOsNetworkSandbox } from '../../domain/candidate/os-sandbox.js'
 import { listSourceFiles } from '../../domain/candidate/files.js'
-import { digestFiles } from '../../domain/candidate/digest.js'
+import { contractDigestExtras, digestFiles } from '../../domain/candidate/digest.js'
+import { GENERATED_EXTENSION_API_V1 } from '../../domain/workbench/authoring-contract.js'
 import {
   approvedHostCapabilities,
   executeHostBroker,
@@ -70,9 +71,20 @@ export class IsolatedGeneratedRunner {
       return { ok: false, diagnostics }
     }
     try {
+      if (this.input.owner.startsWith('generated/') && this.input.runtimeContractVersion !== GENERATED_EXTENSION_API_V1) {
+        const diagnostics = this.input.runtimeContractVersion === undefined
+          ? 'generated activation refused: missing host-owned authoring contract'
+          : `generated activation refused: unsupported authoring contract ${this.input.runtimeContractVersion}`
+        recordGeneratedRuntimeFailure(diagnostics)
+        return { ok: false, diagnostics }
+      }
       const artifact = existsSync(this.input.workspaceRoot) ? realpathSync(this.input.workspaceRoot) : path.resolve(this.input.workspaceRoot)
       if (this.input.digest !== undefined && this.input.digest !== '') {
-        const digest = digestFiles(artifact, listSourceFiles(artifact))
+        const digest = digestFiles(
+          artifact,
+          listSourceFiles(artifact),
+          contractDigestExtras(this.input.runtimeContractVersion),
+        )
         if (digest !== this.input.digest) {
           const diagnostics = 'generated artifact digest does not match the approved sealed digest'
           recordGeneratedRuntimeFailure(diagnostics)

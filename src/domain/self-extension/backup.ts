@@ -1,6 +1,6 @@
 import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, statSync } from 'node:fs'
 import path from 'node:path'
-import { digestFiles } from '../candidate/digest.js'
+import { contractDigestExtras, digestFiles } from '../candidate/digest.js'
 import { listSourceFiles } from '../candidate/files.js'
 import { writeJsonAtomic } from '../persistence/atomic.js'
 import { parseAuthorityFile, type AuthorityFile } from './authority-store.js'
@@ -108,7 +108,11 @@ function verifyCandidateDigest(area: string, row: CandidateIndexRow): void {
   if (row.record.digest === undefined) {
     throw new PersistenceIntegrityError(`missing-candidate-digest:${row.record.id}`)
   }
-  const digest = digestFiles(artifactRoot, listSourceFiles(artifactRoot))
+  const digest = digestFiles(
+    artifactRoot,
+    listSourceFiles(artifactRoot),
+    contractDigestExtras(row.record.manifest.runtimeContractVersion),
+  )
   if (digest !== row.record.digest) {
     throw new PersistenceIntegrityError(`digest-mismatch:${row.record.id}`)
   }

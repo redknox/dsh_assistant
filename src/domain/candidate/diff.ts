@@ -23,5 +23,6 @@ export function diffAgainstBase(manifest: CandidateManifest, base?: RegistryReco
     providers: namedDiff(base?.providers ?? [], manifest.providers),
     runtimeSeams: namedDiff(base?.runtimeSeams ?? [], manifest.runtimeSeams),
     effects: manifest.effects,
+    ...(manifest.runtimeContractVersion === undefined ? {} : { runtimeContractVersion: manifest.runtimeContractVersion }),
   }
 }
