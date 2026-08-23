@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState, type FormEvent } from 'react'
-import type { ApprovalCard, MissionControlView } from '../../src/domain/workspace/types'
+import type { ApprovalCard, MissionControlView, UserCapabilityStatus, WorkObjectKind } from '../../src/domain/workspace/types'
 import {
   decideApproval,
   establishSession,
@@ -11,6 +11,375 @@ import {
   sendMessage,
   type UiEnvelope,
 } from './api'
+import { Glyph } from './icons'
+
+function isPendingApproval(status: string): boolean {
+  return status === 'pending' || status === 'approval-requested' || status === 'unreviewed'
+}
+
+function isUserMessage(kind: WorkObjectKind): boolean {
+  return kind === 'user-message'
+}
+
+function lampModifier(state: MissionControlView['systemState'], connected: boolean): string {
+  if (!connected) return 'offline'
+  if (state === 'READY') return 'ready'
+  if (state === 'WORKING') return 'working'
+  if (state === 'WAITING') return 'waiting'
+  if (state === 'NEEDS_APPROVAL') return 'approval'
+  if (state === 'DEGRADED') return 'degraded'
+  if (state === 'BLOCKED') return 'blocked'
+  return 'fault'
+}
+
+function capabilitySignal(status: UserCapabilityStatus): 'active' | 'governed' | 'unavailable' {
+  if (status === 'active') return 'active'
+  if (status === 'approval-required') return 'governed'
+  return 'unavailable'
+}
+
+function activityModifier(kind: string): string {
+  if (kind === 'APPROVAL_REQUIRED') return ' activity-item--approval'
+  if (kind === 'COMPLETED' || kind === 'RECOVERED') return ' activity-item--done'
+  if (kind === 'BLOCKED' || kind === 'FAILED') return ' activity-item--fault'
+  if (kind === 'WAITING' || kind === 'PLANNED') return ''
+  return ''
+}
+
+function previewText(text: string, limit = 72): string {
+  const compact = text.replace(/\s+/g, ' ').trim()
+  return compact.length > limit ? `${compact.slice(0, limit - 1)}…` : compact
+}
+
+function PlateRivets() {
+  return (
+    <>
+      <span className="rivet rivet--tl" aria-hidden="true" />
+      <span className="rivet rivet--tr" aria-hidden="true" />
+      <span className="rivet rivet--bl" aria-hidden="true" />
+      <span className="rivet rivet--br" aria-hidden="true" />
+    </>
+  )
+}
+
+function SystemHeader(props: {
+  readonly identity: string
+  readonly systemState: MissionControlView['systemState']
+  readonly objective?: string
+  readonly connected: boolean
+}) {
+  return (
+    <header className="faceplate topbar" aria-label="System header">
+      <PlateRivets />
+      <div className="topbar-well">
+        <div className="brand-block">
+          <span className="brand">{props.identity}</span>
+          <span className="divider" aria-hidden="true">/</span>
+          <span className="product-area">MISSION CONTROL</span>
+          {props.objective ? <span className="objective">{props.objective}</span> : null}
+        </div>
+        <div className="system-state" role="status" aria-label={`System state ${props.systemState}${props.connected ? '' : ', disconnected'}`}>
+          <span className={`status-lamp status-lamp--${lampModifier(props.systemState, props.connected)}`} aria-hidden="true"></span>
+          <span>{props.systemState}</span>
+        </div>
+      </div>
+    </header>
+  )
+}
+
+function WorkspaceNavigation(props: { readonly view: MissionControlView }) {
+  const recentMemory = props.view.memory.slice(0, 8)
+  const recentKnowledge = props.view.knowledge.slice(0, 4)
+  const current = [...props.view.conversation].reverse().find((item) => isUserMessage(item.kind))
+    ?? props.view.conversation[0]
+  return (
+    <aside className="nav-panel instrument-panel" aria-label="Workspace navigation">
+      <div className="panel-code">
+        <span>NAV 01</span>
+        <span>LOCAL / PRIMARY</span>
+      </div>
+      <nav className="primary-nav" aria-label="Primary">
+        <a className="nav-item nav-item--active" href="#today" aria-current="page">
+          <Glyph name="today" /><span>TODAY</span>
+        </a>
+        <a className="nav-item" href="#today">
+          <Glyph name="conversations" /><span>CONVERSATIONS</span>
+        </a>
+        <span className="nav-item nav-item--idle" aria-disabled="true" title="Calendar management is not available in this soak">
+          <Glyph name="calendar" /><span>CALENDAR</span>
+        </span>
+        <a className="nav-item" href="#memory">
+          <Glyph name="memory" /><span>MEMORY</span>
+        </a>
+        <a className="nav-item" href="#capabilities">
+          <Glyph name="capabilities" /><span>CAPABILITIES</span>
+        </a>
+      </nav>
+      <section className="recent" id="memory" aria-labelledby="recent-title">
+        <div className="section-label" id="recent-title"><span>LOG 02</span><span>RECENT</span></div>
+        {current ? (
+          <div className="conversation-link conversation-link--current">
+            <span className="conversation-title">{props.view.objective?.text ?? 'Current conversation'}</span>
+            <span className="conversation-preview">{previewText(current.text)}</span>
+          </div>
+        ) : null}
+        {recentMemory.map((item) => (
+          <div className="conversation-link" key={item.id}>
+            <span className="conversation-title">{item.topicKey}</span>
+            <span className="conversation-preview">{item.statement}</span>
+          </div>
+        ))}
+        {recentKnowledge.map((item) => (
+          <div className="conversation-link" key={item.sourceUri}>
+            <span className="conversation-title">{item.title ?? item.sourceUri}</span>
+            <span className="conversation-preview">{item.excerpt ?? item.sourceUri}</span>
+          </div>
+        ))}
+        {!current && recentMemory.length === 0 && recentKnowledge.length === 0 ? (
+          <p className="recent-empty">No local memory yet</p>
+        ) : null}
+      </section>
+      <div className="panel-coordinates" aria-label="Local runtime marker">
+        <span>SYS 03</span>
+        <span>127.0.0.1</span>
+      </div>
+    </aside>
+  )
+}
+
+function ApprovalCardView(props: {
+  readonly card: ApprovalCard
+  readonly locked: boolean
+  readonly onApprove: (card: ApprovalCard) => void
+  readonly onReject: (card: ApprovalCard) => void
+}) {
+  const { card } = props
+  const pending = isPendingApproval(card.status)
+  return (
+    <article
+      className="approval-card"
+      data-approval-id={card.id}
+      data-kind={card.kind}
+      data-fingerprint={card.fingerprint}
+      data-candidate-id={card.candidateId ?? ''}
+      aria-labelledby={`approval-title-${card.id}`}
+    >
+      <header className="approval-header">
+        <Glyph name="calendar" className="glyph approval-symbol" />
+        <h2 id={`approval-title-${card.id}`}>{card.title}</h2>
+      </header>
+      <dl className="approval-facts">
+        <div><dt>TARGET</dt><dd>Target {card.target}</dd></div>
+        <div><dt>AUTHORITY</dt><dd>{card.authorityChange}</dd></div>
+        <div><dt>FINGERPRINT</dt><dd>Fingerprint {card.fingerprint}</dd></div>
+        {card.candidateId ? <div><dt>CANDIDATE</dt><dd>{card.candidateId}</dd></div> : null}
+        {card.digest ? <div><dt>DIGEST</dt><dd>{card.digest}</dd></div> : null}
+        {card.details.map((line) => (
+          <div key={line}><dt>DETAIL</dt><dd>{line}</dd></div>
+        ))}
+      </dl>
+      <div className="effect-line">
+        <Glyph name="info" className="glyph effect-icon" />
+        <span><strong>EFFECT</strong> External side effect: {card.sideEffect}</span>
+      </div>
+      {pending ? (
+        <div className="approval-actions">
+          <button type="button" className="button button--secondary" data-approval-action="reject" disabled={props.locked} onClick={() => props.onReject(card)}>REJECT</button>
+          <button type="button" className="button button--approval" data-approval-action="approve" disabled={props.locked} onClick={() => props.onApprove(card)}>APPROVE</button>
+        </div>
+      ) : <p className="approval-status">Status {card.status}</p>}
+    </article>
+  )
+}
+
+function RecoveryPanel(props: {
+  readonly systemState: MissionControlView['systemState']
+  readonly recovery: NonNullable<MissionControlView['recovery']>
+  readonly locked: boolean
+  readonly armedRecovery?: string
+  readonly onRecovery: (action: 'diagnostics' | 'rollback' | 'exit-safe-mode') => void
+}) {
+  return (
+    <section className="recovery-panel" data-recovery="true">
+      <h1>{props.systemState}</h1>
+      <p>{props.recovery.why}</p>
+      <p>Disabled: {props.recovery.disabled.join(', ') || 'generated/optional capabilities'}</p>
+      <div className="recovery-actions">
+        {props.recovery.actions.map((action) => {
+          const mapped = recoveryActionId(action)
+          if (!mapped) {
+            return <button key={action} className="button button--secondary" type="button" disabled title="Not available from this Web UI">{action}</button>
+          }
+          const needsConfirm = mapped !== 'diagnostics'
+          const armed = props.armedRecovery === mapped
+          const label = needsConfirm && armed ? `Confirm ${action}` : action
+          const tone = mapped === 'diagnostics' ? 'button--secondary' : 'button--fault'
+          return (
+            <button
+              key={action}
+              type="button"
+              className={`button ${tone}`}
+              data-recovery-action={mapped}
+              disabled={props.locked}
+              onClick={() => props.onRecovery(mapped)}
+            >
+              {label}
+            </button>
+          )
+        })}
+      </div>
+    </section>
+  )
+}
+
+function ConversationWorkspace(props: {
+  readonly view: MissionControlView
+  readonly connected: boolean
+  readonly sending: boolean
+  readonly draft: string
+  readonly error?: string
+  readonly onDraft: (value: string) => void
+  readonly onSend: () => void
+  readonly onApprove: (card: ApprovalCard) => void
+  readonly onReject: (card: ApprovalCard) => void
+}) {
+  const locked = !props.connected
+  return (
+    <main className="conversation-panel" id="today">
+      <div className="conversation-scroll">
+        {props.view.conversation.map((item, index) => {
+          const user = isUserMessage(item.kind)
+          const alert = item.kind === 'warning' || item.kind === 'failure'
+          return (
+            <article key={`${item.kind}-${index}`} className={`message${user ? ' message--user' : ' message--assistant'}${alert ? ' message--alert' : ''}`} data-kind={item.kind}>
+              {user ? null : (
+                <div className="assistant-mark" aria-hidden="true">
+                  <Glyph name="hex" />
+                  <span>T</span>
+                </div>
+              )}
+              <div>
+                <div className="message-meta">
+                  <span>{user ? 'YOU' : props.view.identity}</span>
+                </div>
+                <div className="message-body" dangerouslySetInnerHTML={{ __html: formatMarkdownLite(item.text) }} />
+              </div>
+            </article>
+          )
+        })}
+        {props.view.approvals.map((card) => (
+          <ApprovalCardView key={card.id} card={card} locked={locked} onApprove={props.onApprove} onReject={props.onReject} />
+        ))}
+      </div>
+      <div>
+        <form className="composer" aria-label="Send a message" onSubmit={(event: FormEvent) => { event.preventDefault(); props.onSend() }}>
+          <label className="sr-only" htmlFor="message">Message TARS-NG</label>
+          <textarea
+            id="message"
+            rows={2}
+            placeholder="Message TARS-NG…"
+            value={props.draft}
+            onChange={(event) => props.onDraft(event.target.value)}
+          />
+          <button
+            className="icon-button"
+            type="button"
+            aria-label="Attach file"
+            title="Attachments are not available in this soak"
+            disabled
+          >
+            <Glyph name="attach" />
+          </button>
+          <button
+            className="send-button"
+            type="submit"
+            aria-label="Send message"
+            disabled={props.sending || locked || props.draft.trim() === ''}
+          >
+            <Glyph name="send" />
+            <span className="sr-only">{props.sending ? 'SENDING' : 'SEND'}</span>
+          </button>
+        </form>
+        {props.error ? <p className="error" role="alert">{props.error}</p> : null}
+      </div>
+    </main>
+  )
+}
+
+function OperationsPanel(props: { readonly view: MissionControlView }) {
+  return (
+    <aside className="ops-panel instrument-panel" id="activity" aria-label="Operational state">
+      <div className="panel-code"><span>OPS 04</span><span>AUTHORITATIVE</span></div>
+      <section className="activity-section" aria-labelledby="activity-title">
+        <h2 id="activity-title">ACTIVITY</h2>
+        <ol className="activity-list">
+          {props.view.activity.map((item) => (
+            <li key={item.id} className={`activity-item${activityModifier(item.kind)}`} data-activity={item.kind}>
+              <span className="activity-node">{item.kind === 'APPROVAL_REQUIRED' ? <Glyph name="warn" /> : null}</span>
+              <span>{item.kind.replaceAll('_', ' ')}</span>
+              <span className="activity-summary">{item.summary}</span>
+            </li>
+          ))}
+        </ol>
+      </section>
+      <section className="capability-section" id="capabilities" aria-labelledby="capability-title">
+        <h2 id="capability-title">CAPABILITY STATUS</h2>
+        <dl className="capability-list">
+          {props.view.capabilities.map((item) => (
+            <div key={`${item.area}-${item.action}`}>
+              <dt>{item.area}</dt>
+              <dd data-status={item.status} data-capability-state={capabilitySignal(item.status)}>
+                {item.status.replaceAll('-', ' ').toUpperCase()}
+              </dd>
+            </div>
+          ))}
+        </dl>
+      </section>
+    </aside>
+  )
+}
+
+function ControlStripView(props: {
+  readonly view: MissionControlView
+  readonly connected: boolean
+}) {
+  const strip = props.view.controlStrip
+  const safe = props.view.systemState === 'SAFE_MODE' || props.view.systemState === 'RECOVERY'
+  return (
+    <footer className="faceplate control-strip" aria-label="Runtime status" data-control-plane="user-workspace">
+      <PlateRivets />
+      <div className="control-strip-row">
+        <div>
+          <Glyph name="chip" />
+          <span className="strip-copy">
+            <span className="strip-label">MODE</span>
+            <strong>{strip.mode}</strong>
+            {strip.degradation ? <span className="sr-only">{strip.degradation}</span> : null}
+          </span>
+        </div>
+        <div>
+          <Glyph name="shield" />
+          <span className="strip-copy"><span className="strip-label">SAFE MODE</span><strong>{safe ? 'ON' : 'OFF'}</strong></span>
+        </div>
+        <div>
+          <Glyph name="check" />
+          <span className="strip-copy">
+            <span className="strip-label">APPROVALS</span>
+            <strong className={strip.pendingApprovals > 0 ? 'amber' : undefined}>{strip.pendingApprovals}</strong>
+          </span>
+        </div>
+        <div>
+          <Glyph name="terminal" />
+          <span className="strip-copy">
+            <span className="strip-label">{props.connected ? 'LOCAL' : 'TRANSPORT'}</span>
+            <strong>{props.connected ? '127.0.0.1' : 'DISCONNECTED'}</strong>
+            {strip.backgroundJobs > 0 ? <span className="sr-only">JOBS {strip.backgroundJobs}</span> : null}
+          </span>
+        </div>
+      </div>
+    </footer>
+  )
+}
 
 export function MissionControlScreen(props: {
   readonly view: MissionControlView
@@ -27,111 +396,43 @@ export function MissionControlScreen(props: {
 }) {
   const { view } = props
   const safe = view.systemState === 'SAFE_MODE' || view.systemState === 'RECOVERY'
+  const locked = !props.connected
   return (
-    <div className={`shell${safe ? ' shell-safe' : ''}`} data-system-state={view.systemState} data-connected={props.connected ? 'yes' : 'no'}>
-      <header>
-        <strong>{view.identity}</strong>
-        <span className="objective">{view.objective?.text ?? 'No active objective'}</span>
-        <span className={`state state-${view.systemState}`}>{view.systemState}</span>
-      </header>
+    <div className="chassis">
+    <div className="console" data-system-state={view.systemState} data-connected={props.connected ? 'yes' : 'no'}>
+      <SystemHeader
+        identity={view.identity}
+        systemState={view.systemState}
+        objective={view.objective?.text}
+        connected={props.connected}
+      />
       {!props.connected ? <p className="transport" role="status">Disconnected from local runtime</p> : null}
       {safe && view.recovery ? (
-        <section className="recovery" data-recovery="true">
-          <h1>{view.systemState}</h1>
-          <p>{view.recovery.why}</p>
-          <p>Disabled: {view.recovery.disabled.join(', ') || 'generated/optional capabilities'}</p>
-          <div className="recovery-actions">
-            {view.recovery.actions.map((action) => {
-              const mapped = recoveryActionId(action)
-              if (!mapped) {
-                return <button key={action} type="button" disabled title="Not available from this Web UI">{action}</button>
-              }
-              const needsConfirm = mapped !== 'diagnostics'
-              const armed = props.armedRecovery === mapped
-              const label = needsConfirm && armed ? `Confirm ${action}` : action
-              return (
-                <button key={action} type="button" data-recovery-action={mapped} onClick={() => props.onRecovery(mapped)}>
-                  {label}
-                </button>
-              )
-            })}
-          </div>
-        </section>
+        <RecoveryPanel
+          systemState={view.systemState}
+          recovery={view.recovery}
+          locked={locked}
+          armedRecovery={props.armedRecovery}
+          onRecovery={props.onRecovery}
+        />
       ) : null}
-      <div id="layout">
-        <aside id="context">
-          <h2>Context</h2>
-          <h3>Memory</h3>
-          <ul>
-            {view.memory.slice(0, 8).map((item) => (
-              <li key={item.id}>{item.topicKey}: {item.statement}</li>
-            ))}
-          </ul>
-          <h3>Knowledge</h3>
-          <ul>
-            {view.knowledge.slice(0, 8).map((item) => (
-              <li key={item.sourceUri}>{item.title ?? item.sourceUri}</li>
-            ))}
-          </ul>
-          <h3>Capabilities</h3>
-          <ul>
-            {view.capabilities.map((item) => (
-              <li key={`${item.area}-${item.action}`} data-status={item.status}>
-                {item.area} — {item.status}
-              </li>
-            ))}
-          </ul>
-        </aside>
-        <main>
-          <h2>Conversation / Work</h2>
-          <ol className="conversation">
-            {view.conversation.map((item, index) => (
-              <li key={`${item.kind}-${index}`} data-kind={item.kind} dangerouslySetInnerHTML={{ __html: formatMarkdownLite(item.text) }} />
-            ))}
-          </ol>
-          {view.approvals.map((card) => (
-            <article key={card.id} className="approval" data-approval-id={card.id} data-kind={card.kind} data-fingerprint={card.fingerprint} data-candidate-id={card.candidateId ?? ''}>
-              <h3>{card.title}</h3>
-              <p>Target {card.target}</p>
-              <p>External side effect: {card.sideEffect}</p>
-              <p>Authority change: {card.authorityChange}</p>
-              <p>Fingerprint {card.fingerprint}</p>
-              <ul>{card.details.map((line) => <li key={line}>{line}</li>)}</ul>
-              {card.status === 'pending' || card.status === 'approval-requested' || card.status === 'unreviewed' ? (
-                <div>
-                  <button type="button" onClick={() => props.onApprove(card)}>Approve</button>
-                  <button type="button" onClick={() => props.onReject(card)}>Reject</button>
-                </div>
-              ) : <p>Status {card.status}</p>}
-            </article>
-          ))}
-          <form onSubmit={(event: FormEvent) => { event.preventDefault(); props.onSend() }}>
-            <label>
-              Message
-              <textarea value={props.draft} onChange={(event) => props.onDraft(event.target.value)} rows={3} />
-            </label>
-            <button type="submit" disabled={props.sending || !props.connected || props.draft.trim() === ''}>
-              {props.sending ? 'Sending' : 'Send'}
-            </button>
-          </form>
-          {props.error ? <p className="error" role="alert">{props.error}</p> : null}
-        </main>
-        <aside id="activity">
-          <h2>Activity</h2>
-          <ul>
-            {view.activity.map((item) => (
-              <li key={item.id} data-activity={item.kind}>{item.kind} — {item.summary}</li>
-            ))}
-          </ul>
-        </aside>
+      <div className="workspace-grid">
+        <WorkspaceNavigation view={view} />
+        <ConversationWorkspace
+          view={view}
+          connected={props.connected}
+          sending={props.sending}
+          draft={props.draft}
+          error={props.error}
+          onDraft={props.onDraft}
+          onSend={props.onSend}
+          onApprove={props.onApprove}
+          onReject={props.onReject}
+        />
+        <OperationsPanel view={view} />
       </div>
-      <footer>
-        <span>Provider / mode {view.controlStrip.mode}</span>
-        <span>Pending {view.controlStrip.pendingApprovals}</span>
-        <span>Jobs {view.controlStrip.backgroundJobs}</span>
-        {view.controlStrip.degradation ? <span>{view.controlStrip.degradation}</span> : null}
-        <span data-control-plane="user-workspace">workspace</span>
-      </footer>
+      <ControlStripView view={view} connected={props.connected} />
+    </div>
     </div>
   )
 }

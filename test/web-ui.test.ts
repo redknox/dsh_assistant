@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, it } from 'node:test'
@@ -489,8 +489,14 @@ export function apply(ctx) {
       onRecovery() {},
     }))
     assert.match(ready, /data-system-state="READY"/)
+    assert.match(ready, /class="console"/)
     assert.match(ready, /Hello/)
-    assert.doesNotMatch(ready, /reasoning_content|sk-secret/)
+    assert.match(ready, /TARS-NG/)
+    assert.match(ready, /COMPLETED/)
+    assert.match(ready, /Calendar inspected/)
+    assert.match(ready, /MEMORY|Memory/)
+    assert.match(ready, /data-control-plane="user-workspace"/)
+    assert.doesNotMatch(ready, /reasoning_content|sk-secret|chain-of-thought/)
 
     const working = renderToStaticMarkup(createElement(MissionControlScreen, {
       view: fixtureView({
@@ -536,8 +542,13 @@ export function apply(ctx) {
       onRecovery() {},
     }))
     assert.match(approval, /fp-calendar/)
-    assert.match(approval, /Approve/)
-    assert.match(approval, /Reject/)
+    assert.match(approval, /data-approval-id="c1"/)
+    assert.match(approval, /data-fingerprint="fp-calendar"/)
+    assert.match(approval, /data-approval-action="approve"/)
+    assert.match(approval, /data-approval-action="reject"/)
+    assert.match(approval, /APPROVE/)
+    assert.match(approval, /REJECT/)
+    assert.doesNotMatch(approval, /data-approval-action="approve" disabled/)
 
     const rejected = renderToStaticMarkup(createElement(MissionControlScreen, {
       view: fixtureView({
@@ -563,7 +574,7 @@ export function apply(ctx) {
       onRecovery() {},
     }))
     assert.match(rejected, /Status denied/)
-    assert.doesNotMatch(rejected, />Approve</)
+    assert.doesNotMatch(rejected, />APPROVE</)
 
     const extension = renderToStaticMarkup(createElement(MissionControlScreen, {
       view: fixtureView({
@@ -591,6 +602,8 @@ export function apply(ctx) {
       onRecovery() {},
     }))
     assert.match(extension, /fp-ext/)
+    assert.match(extension, /data-candidate-id="cand-1"/)
+    assert.match(extension, /data-fingerprint="fp-ext"/)
     assert.match(extension, /not self-authorization/)
 
     const degraded = renderToStaticMarkup(createElement(MissionControlScreen, {
@@ -634,10 +647,38 @@ export function apply(ctx) {
     assert.match(safe, /SAFE_MODE/)
     assert.match(safe, /integrity/)
     assert.match(safe, /disabled/)
+    assert.match(safe, /data-recovery="true"/)
+    assert.match(safe, /data-recovery-action="diagnostics"/)
+    assert.match(safe, /data-recovery-action="rollback"/)
+    assert.match(safe, /data-recovery-action="exit-safe-mode"/)
+    assert.match(safe, /Disable candidate/)
+    assert.match(safe, /title="Not available from this Web UI"/)
 
-    const disconnected = renderToStaticMarkup(createElement(MissionControlScreen, {
-      view: fixtureView({ systemState: 'READY' }),
-      connected: false,
+    const armed = renderToStaticMarkup(createElement(MissionControlScreen, {
+      view: fixtureView({
+        systemState: 'SAFE_MODE',
+        recovery: {
+          why: 'Generated Calendar artifact failed integrity verification.',
+          disabled: ['generated/google-calendar@0.1.0'],
+          actions: ['Diagnostics', 'Rollback', 'Exit Safe Mode'],
+        },
+        controlStrip: { pendingApprovals: 0, backgroundJobs: 0, mode: 'SAFE_MODE' },
+      }),
+      connected: true,
+      sending: false,
+      draft: '',
+      armedRecovery: 'rollback',
+      onDraft() {},
+      onSend() {},
+      onApprove() {},
+      onReject() {},
+      onRecovery() {},
+    }))
+    assert.match(armed, /Confirm Rollback/)
+
+    const waiting = renderToStaticMarkup(createElement(MissionControlScreen, {
+      view: fixtureView({ systemState: 'WAITING', controlStrip: { pendingApprovals: 0, backgroundJobs: 0, mode: 'WAITING' } }),
+      connected: true,
       sending: false,
       draft: '',
       onDraft() {},
@@ -646,8 +687,46 @@ export function apply(ctx) {
       onReject() {},
       onRecovery() {},
     }))
+    assert.match(waiting, /data-system-state="WAITING"/)
+    assert.match(waiting, /status-lamp--waiting/)
+
+    const disconnected = renderToStaticMarkup(createElement(MissionControlScreen, {
+      view: fixtureView({
+        systemState: 'READY',
+        approvals: [{
+          id: 'c1',
+          kind: 'calendar-create',
+          title: 'CREATE CALENDAR EVENT',
+          target: 'Personal',
+          sideEffect: 'yes',
+          authorityChange: 'none',
+          details: ['Title Team review'],
+          fingerprint: 'fp-calendar',
+          status: 'pending',
+        }],
+        recovery: {
+          why: 'historical lastFailure must not become current blocking copy',
+          disabled: [],
+          actions: ['Rollback'],
+        },
+      }),
+      connected: false,
+      sending: false,
+      draft: 'queued',
+      onDraft() {},
+      onSend() {},
+      onApprove() {},
+      onReject() {},
+      onRecovery() {},
+    }))
     assert.match(disconnected, /Disconnected from local runtime/)
     assert.match(disconnected, /data-system-state="READY"/)
+    assert.match(disconnected, /data-connected="no"/)
+    assert.match(disconnected, /data-approval-action="approve" disabled/)
+    assert.match(disconnected, /data-approval-action="reject" disabled/)
+    assert.match(disconnected, /aria-label="Send message" disabled/)
+    assert.doesNotMatch(disconnected, /data-recovery="true"/)
+    assert.doesNotMatch(disconnected, /historical lastFailure/)
 
     const longText = 'Paragraph '.repeat(80)
     const longForm = renderToStaticMarkup(createElement(MissionControlScreen, {
@@ -663,5 +742,25 @@ export function apply(ctx) {
     }))
     assert.ok(longForm.includes('Paragraph'))
     assert.doesNotMatch(longForm, /chain-of-thought|sk-secret/)
+    assert.match(ready, /href="#memory"/)
+    assert.match(ready, /id="memory"/)
+  })
+
+  it('keeps essential WUI text readable and narrow-screen Memory reachable', () => {
+    const css = readFileSync(join(import.meta.dirname, '../web/src/styles.css'), 'utf8')
+    assert.match(css, /--muted:\s*#4f4a40/)
+    assert.match(css, /--text-amber:\s*#7a4500/)
+    assert.match(css, /\.approval-facts dt \{[^}]*font:[^;]*14px/)
+    assert.match(css, /\.activity-item \{[^}]*font:[^;]*14px/)
+    assert.match(css, /\.activity-item \.activity-summary \{[^}]*font-size:\s*14px/)
+    assert.match(css, /\.capability-list dd \{[^}]*font:[^;]*14px/)
+    assert.match(css, /\.strip-label \{[^}]*font-size:\s*14px/)
+    assert.match(css, /\.control-strip strong \{[^}]*font-size:\s*14px/)
+    assert.match(css, /\.nav-item:focus-visible \{[^}]*outline:\s*2px solid/)
+    assert.doesNotMatch(css, /\.nav-item:focus-visible \{[^}]*outline:\s*none/)
+    const narrow = css.slice(css.indexOf('@media (max-width: 820px)'))
+    assert.match(narrow, /\.nav-item \{[^}]*font-size:\s*14px/)
+    assert.doesNotMatch(narrow, /\.recent[^{]*\{/)
+    assert.match(narrow, /\.panel-coordinates, \.nav-panel \.panel-code \{ display: none; \}/)
   })
 })
