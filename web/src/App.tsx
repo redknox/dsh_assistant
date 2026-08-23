@@ -71,7 +71,7 @@ function SystemHeader(props: {
   return (
     <header className="faceplate topbar" aria-label="System header">
       <PlateRivets />
-      <div className="plate-well topbar-well">
+      <div className="topbar-well">
         <div className="brand-block">
           <span className="brand">{props.identity}</span>
           <span className="divider" aria-hidden="true">/</span>
@@ -348,7 +348,7 @@ function ControlStripView(props: {
   return (
     <footer className="faceplate control-strip" aria-label="Runtime status" data-control-plane="user-workspace">
       <PlateRivets />
-      <div className="plate-well control-strip-row">
+      <div className="control-strip-row">
         <div>
           <Glyph name="chip" />
           <span className="strip-copy">
