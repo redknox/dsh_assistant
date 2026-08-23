@@ -312,7 +312,9 @@ export function startWebUiServer(options: WebUiServerOptions): Promise<WebUiServ
 }
 
 export function attachWebUiBroadcast(ctx: { on(event: string, listener: (...args: never[]) => void): unknown }, push: () => void): () => void {
-  const names = ['agent/status', 'session/event', 'session/flush', 'tools/pre-execute']
+  // Observe-only. tools/pre-execute is a waterfall gate; a void listener returns
+  // undefined and every tool then fails with "Cannot read properties of undefined (reading 'kind')".
+  const names = ['agent/status', 'session/event', 'session/flush', 'tools/result']
   const offs = names.map((name) => ctx.on(name, push))
   return () => {
     for (const off of offs) {

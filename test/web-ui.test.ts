@@ -3,6 +3,7 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, it } from 'node:test'
+import { CallId } from '@deepseek-ai/dsh-llm'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { createElement } from 'react'
 import { FakeReplyAdapter } from '../src/adapters/llm/fake-reply-adapter.js'
@@ -160,6 +161,28 @@ describe('local Mission-Control Web UI', () => {
         body: '{}',
       })
       assert.equal(unknown.status, 404)
+    })
+  })
+
+  it('keeps read-only tools executable after Web UI broadcast is attached', async () => {
+    await withServer(bootAssistantControl, 'web-ui-tools', async (_url, _surface, _agent, ctx) => {
+      const listed = await ctx.tools.execute({
+        callId: CallId('web-ui-list-capabilities'),
+        name: 'list_capabilities',
+        arguments: {},
+        signal: AbortSignal.timeout(5000),
+      })
+      assert.equal(listed.isError, false, String(listed.value ?? listed.content))
+      assert.doesNotMatch(String(listed.value), /Cannot read properties of undefined/)
+
+      const status = await ctx.tools.execute({
+        callId: CallId('web-ui-integration-status'),
+        name: 'integration_status',
+        arguments: {},
+        signal: AbortSignal.timeout(5000),
+      })
+      assert.equal(status.isError, false, String(status.value ?? status.content))
+      assert.match(String(status.value), /"trust":"read"/)
     })
   })
 
