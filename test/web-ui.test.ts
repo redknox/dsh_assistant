@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, it } from 'node:test'
@@ -742,5 +742,25 @@ export function apply(ctx) {
     }))
     assert.ok(longForm.includes('Paragraph'))
     assert.doesNotMatch(longForm, /chain-of-thought|sk-secret/)
+    assert.match(ready, /href="#memory"/)
+    assert.match(ready, /id="memory"/)
+  })
+
+  it('keeps essential WUI text readable and narrow-screen Memory reachable', () => {
+    const css = readFileSync(join(import.meta.dirname, '../web/src/styles.css'), 'utf8')
+    assert.match(css, /--muted:\s*#4f4a40/)
+    assert.match(css, /--text-amber:\s*#7a4500/)
+    assert.match(css, /\.approval-facts dt \{[^}]*font:[^;]*14px/)
+    assert.match(css, /\.activity-item \{[^}]*font:[^;]*14px/)
+    assert.match(css, /\.activity-item \.activity-summary \{[^}]*font-size:\s*14px/)
+    assert.match(css, /\.capability-list dd \{[^}]*font:[^;]*14px/)
+    assert.match(css, /\.strip-label \{[^}]*font-size:\s*14px/)
+    assert.match(css, /\.control-strip strong \{[^}]*font-size:\s*14px/)
+    assert.match(css, /\.nav-item:focus-visible \{[^}]*outline:\s*2px solid/)
+    assert.doesNotMatch(css, /\.nav-item:focus-visible \{[^}]*outline:\s*none/)
+    const narrow = css.slice(css.indexOf('@media (max-width: 820px)'))
+    assert.match(narrow, /\.nav-item \{[^}]*font-size:\s*14px/)
+    assert.doesNotMatch(narrow, /\.recent[^{]*\{/)
+    assert.match(narrow, /\.panel-coordinates, \.nav-panel \.panel-code \{ display: none; \}/)
   })
 })
