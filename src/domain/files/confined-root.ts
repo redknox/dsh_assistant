@@ -1,9 +1,10 @@
-import { existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, realpathSync, unlinkSync, writeFileSync } from 'node:fs'
+import { existsSync, lstatSync, mkdirSync, opendirSync, readFileSync, realpathSync, unlinkSync, writeFileSync } from 'node:fs'
 import path from 'node:path'
 
 /** Hard bounds on the model-facing confined-file seam. Fail during the walk, not after collection. */
 export const SANDBOX_MAX_FILE_BYTES = 256 * 1024
 export const SANDBOX_MAX_LIST_ENTRIES = 200
+export const SANDBOX_MAX_TRAVERSAL_ENTRIES = 200
 export const SANDBOX_MAX_LIST_DEPTH = 8
 export const SANDBOX_MAX_TASK_TITLE_CHARS = 200
 export const SANDBOX_MAX_TASK_BODY_CHARS = 8 * 1024
@@ -68,22 +69,31 @@ export function listConfinedTextFiles(root: string, prefix = '', extension = '.m
     throw new ConfinedRootError('confined root itself must not be a symlink')
   }
   const files: string[] = []
-  const walk = (dir: string, rel: string, depth: number) => {
+  let visited = 0
+  const walk = (dirPath: string, rel: string, depth: number) => {
     if (depth > SANDBOX_MAX_LIST_DEPTH) {
       throw new ConfinedRootError(`sandbox listing exceeded the depth bound of ${SANDBOX_MAX_LIST_DEPTH}`)
     }
-    for (const entry of readdirSync(dir)) {
-      const relative = rel === '' ? entry : `${rel}/${entry}`
-      const full = path.join(dir, entry)
-      const stat = lstatSync(full)
-      if (stat.isSymbolicLink()) continue
-      if (stat.isDirectory()) walk(full, relative, depth + 1)
-      else if (stat.isFile() && (extension === '' || relative.endsWith(extension))) {
-        if (files.length >= SANDBOX_MAX_LIST_ENTRIES) {
-          throw new ConfinedRootError(`sandbox listing exceeded the entry bound of ${SANDBOX_MAX_LIST_ENTRIES}`)
+    const dir = opendirSync(dirPath)
+    try {
+      for (let entry = dir.readSync(); entry !== null; entry = dir.readSync()) {
+        visited += 1
+        if (visited > SANDBOX_MAX_TRAVERSAL_ENTRIES) {
+          throw new ConfinedRootError(`sandbox listing exceeded the traversal bound of ${SANDBOX_MAX_TRAVERSAL_ENTRIES}`)
         }
-        files.push(relative)
+        const relative = rel === '' ? entry.name : `${rel}/${entry.name}`
+        const full = path.join(dirPath, entry.name)
+        if (entry.isSymbolicLink()) continue
+        if (entry.isDirectory()) walk(full, relative, depth + 1)
+        else if (entry.isFile() && (extension === '' || relative.endsWith(extension))) {
+          if (files.length >= SANDBOX_MAX_LIST_ENTRIES) {
+            throw new ConfinedRootError(`sandbox listing exceeded the entry bound of ${SANDBOX_MAX_LIST_ENTRIES}`)
+          }
+          files.push(relative)
+        }
       }
+    } finally {
+      dir.closeSync()
     }
   }
   const start = prefix === '' ? rootReal : resolveConfined(root, prefix)

@@ -11,6 +11,7 @@ import {
   SANDBOX_MAX_LIST_DEPTH,
   SANDBOX_MAX_LIST_ENTRIES,
   SANDBOX_MAX_TASK_TITLE_CHARS,
+  SANDBOX_MAX_TRAVERSAL_ENTRIES,
 } from '../src/domain/files/confined-root.js'
 import { approvedHostCapabilities } from '../src/domain/generated-runtime/index.js'
 import { IntegrationError } from '../src/domain/integrations/types.js'
@@ -260,6 +261,25 @@ describe('operator sandbox root', () => {
     )
     await assert.rejects(
       () => tasks.createTask({ title: 't'.repeat(SANDBOX_MAX_TASK_TITLE_CHARS + 1) }),
+      (error: unknown) => error instanceof IntegrationError && error.code === 'invalid_request',
+    )
+    const emptyRoot = isolatedSandbox()
+    const emptyFiles = createSandboxFilesProvider(emptyRoot)
+    for (let i = 0; i < SANDBOX_MAX_TRAVERSAL_ENTRIES + 1; i += 1) {
+      mkdirSync(path.join(emptyRoot, `d${i}`))
+    }
+    await assert.rejects(
+      () => emptyFiles.listFiles({}),
+      (error: unknown) => error instanceof IntegrationError && error.code === 'invalid_request',
+    )
+    const taskRoot = isolatedSandbox()
+    const taskProvider = createSandboxTasksProvider(taskRoot)
+    mkdirSync(path.join(taskRoot, 'tasks'))
+    for (let i = 0; i < SANDBOX_MAX_TRAVERSAL_ENTRIES + 1; i += 1) {
+      writeFileSync(path.join(taskRoot, 'tasks', `n${i}.txt`), 'ok\n')
+    }
+    await assert.rejects(
+      () => taskProvider.listTasks({}),
       (error: unknown) => error instanceof IntegrationError && error.code === 'invalid_request',
     )
   })
