@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { execFileSync, spawn, spawnSync } from 'node:child_process'
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, it } from 'node:test'
@@ -234,6 +234,12 @@ describe('product package and profile', () => {
     const uiIndex = readFileSync(join(pkgRoot, 'dist', 'web', 'index.html'), 'utf8')
     assert.doesNotMatch(uiIndex, /\btsx\b/)
     assert.doesNotMatch(uiIndex, /@vitejs\/plugin-react/)
+    const uiCss = readdirSync(join(pkgRoot, 'dist', 'web', 'assets')).find((name) => name.endsWith('.css'))
+    assert.ok(uiCss)
+    const packedCss = readFileSync(join(pkgRoot, 'dist', 'web', 'assets', uiCss), 'utf8')
+    assert.match(packedCss, /--instrument-black/)
+    assert.match(packedCss, /\.console/)
+    assert.match(packedCss, /--signal-amber/)
     assert.equal(existsSync(join(installDir, 'node_modules', '@deepseek-ai', 'dsh-llm-deepseek')), true)
     assert.equal(existsSync(join(installDir, 'node_modules', '@deepseek-ai', 'dsh-agent-default-model')), true)
     const binSource = readFileSync(join(pkgRoot, 'dist', 'product', 'bin.js'), 'utf8')
