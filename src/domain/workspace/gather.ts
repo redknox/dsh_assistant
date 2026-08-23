@@ -57,6 +57,7 @@ export function gatherWorkspaceSnapshot(input: GatherWorkspaceInput): WorkspaceS
         ...(record.providers ? { providers: [...record.providers] } : {}),
       })) ?? [],
     extensionApprovals: extensionApprovals(ctx),
+    candidates: workbenchCandidates(ctx),
     memory: (ctx.get('personalMemory') as { query(): { records: { id: string; statement: string; topicKey: string; status: string }[] } } | undefined)
       ?.query().records.map((record) => ({
         id: record.id,
@@ -168,6 +169,55 @@ function toolEventsFromSession(events: readonly SessionEvent[]): WorkspaceSnapsh
     }
   }
   return items
+}
+
+function workbenchCandidates(ctx: Context): WorkspaceSnapshotInput['candidates'] {
+  const workbench = ctx.get('candidateWorkbench') as { inspect(id: string): {
+    id: string
+    owner: string
+    version: string
+    lifecycle: string
+    resolutionKind?: string
+    sealed: boolean
+    validation?: { passed: boolean; failed: readonly string[] }
+    review?: { state: string; blockingFindings: number }
+    requestEligibility: { ok: boolean }
+  }; listFiles?(id: string): unknown } | undefined
+  const workspace = ctx.get('candidateWorkspace') as { list(): { id: string }[] } | undefined
+  if (!workspace) return []
+  if (workbench) {
+    return workspace.list().map((item) => {
+      const view = workbench.inspect(item.id)
+      return {
+        id: view.id,
+        owner: view.owner,
+        version: view.version,
+        lifecycle: view.lifecycle,
+        resolutionKind: view.resolutionKind,
+        sealed: view.sealed,
+        validationPassed: view.validation?.passed,
+        validationFailed: view.validation?.failed,
+        reviewState: view.review?.state,
+        blockingFindings: view.review?.blockingFindings,
+        canRequestApproval: view.requestEligibility.ok,
+      }
+    })
+  }
+  const review = ctx.get('independentReview') as { status(input: { id: string; digest?: string }): string; lastReport(id: string): { findings: { blocking: boolean; status: string }[] } | undefined } | undefined
+  const governance = ctx.get('extensionGovernance') as { requestEligibility(id: string): { ok: boolean } } | undefined
+  return (workspace.list() as { id: string; owner: string; version: string; lifecycle: string; sealed: boolean; digest?: string; manifest?: { resolutionKind?: string }; validation?: { passed: boolean; stages: { name: string; status: string }[] } }[]).map((record) => ({
+    id: record.id,
+    owner: record.owner,
+    version: record.version,
+    lifecycle: record.lifecycle,
+    resolutionKind: record.manifest?.resolutionKind,
+    sealed: record.sealed,
+    validationPassed: record.validation?.passed,
+    validationFailed: record.validation?.stages.filter((item) => item.status === 'failed' || item.status === 'blocked').map((item) => item.name),
+    reviewState: review?.status({ id: record.id, digest: record.digest }),
+    blockingFindings: review?.lastReport(record.id)?.findings.filter((item) => item.blocking && item.status === 'open').length,
+    canRequestApproval: governance?.requestEligibility(record.id).ok === true,
+  }))
 }
 
 function extensionApprovals(ctx: Context): WorkspaceSnapshotInput['extensionApprovals'] {

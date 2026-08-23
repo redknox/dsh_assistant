@@ -72,6 +72,7 @@ async function prepareCandidate(home: string, activate: boolean) {
   first.ctx.candidateWorkspace.writeFile(created.id, 'src/plugin.js', PLUGIN)
   first.ctx.candidateValidation.validate(created.id)
   first.ctx.candidateWorkspace.seal(created.id)
+  first.ctx.independentReview.reviewCandidate(created.id)
   const human = first.recoveryRoot.issueAuthority({ kind: 'human-control', source: 'application-ui' })
   const fingerprint = first.ctx.extensionGovernance.requestApproval(created.id).fingerprint
   first.recoveryRoot.recordApproval(human, { candidateId: created.id, fingerprint, decision: 'approved-for-exact-diff' })

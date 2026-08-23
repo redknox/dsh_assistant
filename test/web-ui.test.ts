@@ -300,6 +300,7 @@ export function apply(ctx) {
 `)
     control.ctx.candidateValidation.validate(created.id)
     const sealed = control.ctx.candidateWorkspace.seal(created.id)
+    control.ctx.independentReview.reviewCandidate(sealed.id)
     const human = control.recoveryRoot.issueAuthority({ kind: 'human-control', source: 'application-ui' })
     const fingerprint = control.ctx.extensionGovernance.requestApproval(sealed.id).fingerprint
     control.recoveryRoot.recordApproval(human, { candidateId: sealed.id, fingerprint, decision: 'approved-for-exact-diff' })
@@ -393,6 +394,7 @@ export function apply(ctx) {
       ctx.candidateWorkspace.writeFile(created.id, 'src/ok.ts', 'export const value: string = "ok"\n')
       ctx.candidateValidation.validate(created.id)
       const sealed = ctx.candidateWorkspace.seal(created.id)
+      ctx.independentReview.reviewCandidate(sealed.id)
       const requested = ctx.extensionGovernance.requestApproval(sealed.id)
       const cookie = await cookieHeader(url)
       const view = await fetch(`${url}/api/view`).then((res) => res.json()) as { view: MissionControlView }
@@ -448,6 +450,7 @@ export function apply(ctx) {
       ctx.candidateWorkspace.writeFile(second.id, 'src/ok.ts', 'export const value: string = "ok"\n')
       ctx.candidateValidation.validate(second.id)
       const sealedSecond = ctx.candidateWorkspace.seal(second.id)
+      ctx.independentReview.reviewCandidate(sealedSecond.id)
       const requestedSecond = ctx.extensionGovernance.requestApproval(sealedSecond.id)
       const secondView = await fetch(`${url}/api/view`).then((res) => res.json()) as { view: MissionControlView }
       const secondCard = secondView.view.approvals.find((item) => item.candidateId === sealedSecond.id)

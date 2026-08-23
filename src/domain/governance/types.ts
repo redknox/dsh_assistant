@@ -127,6 +127,7 @@ export interface ExtensionGovernance {
   inspectApproval(candidateId: string): ApprovalRecord | undefined
   inspectSummary(candidateId: string): ApprovalSummary
   eligibility(candidateId: string): EligibilityResult
+  requestEligibility(candidateId: string): EligibilityResult
   recordUntrustedApproval(input: { approved?: boolean; authority?: string }): never
   rewriteRecoveryRoot(): never
 }

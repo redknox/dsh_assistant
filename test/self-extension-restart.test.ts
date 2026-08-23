@@ -75,6 +75,7 @@ async function prepareCandidate(home: string) {
   first.ctx.candidateWorkspace.writeFile(created.id, 'src/plugin.js', PLUGIN)
   first.ctx.candidateValidation.validate(created.id)
   first.ctx.candidateWorkspace.seal(created.id)
+  first.ctx.independentReview.reviewCandidate(created.id)
   const human = first.recoveryRoot.issueAuthority({ kind: 'human-control', source: 'application-ui' })
   const fingerprint = first.ctx.extensionGovernance.requestApproval(created.id).fingerprint
   first.recoveryRoot.recordApproval(human, { candidateId: created.id, fingerprint, decision: 'approved-for-exact-diff' })
@@ -107,6 +108,7 @@ async function prepareSecondCandidate(booted: Awaited<ReturnType<typeof bootAssi
   booted.ctx.candidateWorkspace.writeFile(created.id, 'src/plugin.js', PLUGIN_B)
   booted.ctx.candidateValidation.validate(created.id)
   booted.ctx.candidateWorkspace.seal(created.id)
+  booted.ctx.independentReview.reviewCandidate(created.id)
   const human = booted.recoveryRoot.issueAuthority({ kind: 'human-control', source: 'application-ui' })
   const fingerprint = booted.ctx.extensionGovernance.requestApproval(created.id).fingerprint
   booted.recoveryRoot.recordApproval(human, { candidateId: created.id, fingerprint, decision: 'approved-for-exact-diff' })

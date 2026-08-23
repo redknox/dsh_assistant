@@ -101,7 +101,6 @@ Historical Assistant Core MVP baseline. These remain true and are not rewritten 
 - Vector DB, crawler, hosted production persistence
 - Durable user-level reminders (prefer a future official DSH Schedule seam)
 - Public npm publish from this repository
-- Model-facing Candidate Workbench create/write/validate tools (blocked until the isolated generated runtime is the only production activation path)
 - Automatic install/upgrade/remove or self-authorization
 - OAuth refresh for Google Calendar (replace the expiring access token manually)
 - New Google Search product wiring (credentials are diagnosed by name only)

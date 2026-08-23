@@ -103,4 +103,4 @@ RecoveryRoot (boot return) issueAuthority, recordApproval, activate, rollback, S
 
 `issueAuthority` is not on `ctx`. Ordinary plugins share Cordis context and have no supported public path to mint a trusted credential. `bootAssistantControl()` / `bootSafeModeRuntime()` return the Recovery Root to the bootstrap/UI caller only.
 
-Model-facing tools `inspect_extension_governance` and `request_extension_approval` are read/request only.
+Model-facing tools `inspect_extension_governance` and `request_extension_approval` are read/request only. `request_extension_approval` uses the same host rule as Workbench: sealed + validated + current-digest Independent Review `review-complete` (not `review-required`, `review-stale`, or `review-changes-required`). `review-complete` remains **NOT APPROVED**. The request tool is omitted in Safe Mode.

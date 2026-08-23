@@ -94,7 +94,7 @@ v0.3.0 = Governance + Mission-Control product baseline
 v0.4.0 target = Self-Developing Product Baseline
 ```
 
-Self-development is allowed; self-authorization is not. Generated candidates activate only through the isolated runner. This does not claim the Candidate Workbench is complete.
+Self-development is allowed; self-authorization is not. Generated candidates activate only through the isolated runner. The Candidate Workbench is a bounded conversation-to-review loop, not autonomous install.
 
 ## Evidence
 

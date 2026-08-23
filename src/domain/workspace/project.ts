@@ -45,6 +45,7 @@ export function projectMissionControl(input: WorkspaceSnapshotInput): MissionCon
       humorSuppressed: humorSuppressed({ kind: systemState === 'SAFE_MODE' || systemState === 'RECOVERY' ? 'safety' : 'normal', systemState }),
     },
     developmentControlPlaneSeparated: true,
+    ...(input.candidates ? { candidates: input.candidates } : {}),
   })
 }
 

@@ -14,6 +14,7 @@ export type {
   WorkspaceKnowledgeItem,
   WorkspaceMemoryItem,
   WorkspaceSnapshotInput,
+  WorkbenchProjection,
 } from './types.js'
 export { ACTIVITY_KINDS, OBJECTIVE_STATUSES, USER_CAPABILITY_AREAS, USER_CAPABILITY_STATUSES, WORK_OBJECT_KINDS } from './types.js'
 export { deriveSystemState } from './state.js'

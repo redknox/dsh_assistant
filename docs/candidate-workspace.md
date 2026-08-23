@@ -94,9 +94,10 @@ A candidate becomes `validated` only when every required stage is `passed` or ex
 ctx.candidateWorkspace.create / writeFile / diff / seal / discard
 ctx.candidateValidation.validate
 ctx.independentReview.review / reviewCandidate / status
+ctx.candidateWorkbench.plan / create / writeFile / validate / seal / review / repair
 ```
 
-There is no model-facing install, approve, or mount tool. Orchestrators may call these services after a trusted Resolution Review.
+Model-facing Workbench tools (`plan_capability_change`, `create_candidate`, `write_candidate_file`, `validate_candidate`, `seal_candidate`, `review_candidate`, `repair_candidate`) author only the selected managed candidate workspace. They do not install, approve, activate, or use the operator sandbox as a build area. Owner, version, and provenance come from a host-owned plan, never from caller-supplied review facts. See [docs/extension-governance.md](./extension-governance.md).
 
 ## Relationship to Registry
 

@@ -21,6 +21,7 @@ export class ExtensionGovernanceService extends Service implements ExtensionGove
   inspectApproval(candidateId: string) { return this.store.inspectApproval(candidateId) }
   inspectSummary(candidateId: string) { return this.store.inspectSummary(candidateId) }
   eligibility(candidateId: string) { return this.store.eligibility(candidateId) }
+  requestEligibility(candidateId: string) { return this.store.requestEligibility(candidateId) }
   recordUntrustedApproval(input: { approved?: boolean; authority?: string }): never {
     return this.store.recordUntrustedApproval(input)
   }
@@ -51,10 +52,12 @@ export interface GovernancePluginConfig {
   readonly beginAuthorityCommit?: () => void
   readonly finishAuthorityCommit?: () => void
   readonly durableHome?: string
+  /** Safe Mode omits the request tool; inspect remains. */
+  readonly allowRequestTool?: boolean
 }
 
 export const name = 'dsh-assistant-governance'
-export const inject = ['capabilityRegistry', 'candidateWorkspace', 'tools']
+export const inject = ['capabilityRegistry', 'candidateWorkspace', 'independentReview', 'tools']
 
 /** Inspect/request only on ctx. Trusted minting stays on the bootstrap RecoveryRoot. */
 export async function apply(ctx: Context, config: GovernancePluginConfig = {}) {
@@ -68,6 +71,7 @@ export async function apply(ctx: Context, config: GovernancePluginConfig = {}) {
       beginAuthorityCommit: config.beginAuthorityCommit,
       finishAuthorityCommit: config.finishAuthorityCommit,
       durableHome: config.durableHome,
+      independentReview: ctx.independentReview,
     },
   )
   config.attachRecoveryRoot?.(root)
@@ -80,5 +84,7 @@ export async function apply(ctx: Context, config: GovernancePluginConfig = {}) {
   await ctx.plugin(class extends ExtensionRecoveryService {
     constructor(scope: Context) { super(scope, root.recovery()) }
   })
-  ctx.effect(() => registerGovernanceTools(ctx.tools, root.governance()))
+  ctx.effect(() => registerGovernanceTools(ctx.tools, root.governance(), {
+    allowRequest: config.allowRequestTool !== false,
+  }))
 }

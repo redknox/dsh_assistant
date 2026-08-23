@@ -124,6 +124,21 @@ export interface MissionControlView {
     readonly humorSuppressed: boolean
   }
   readonly developmentControlPlaneSeparated: true
+  readonly candidates?: readonly WorkbenchProjection[]
+}
+
+export interface WorkbenchProjection {
+  readonly id: string
+  readonly owner: string
+  readonly version: string
+  readonly lifecycle: string
+  readonly resolutionKind?: string
+  readonly sealed: boolean
+  readonly validationPassed?: boolean
+  readonly validationFailed?: readonly string[]
+  readonly reviewState?: string
+  readonly blockingFindings?: number
+  readonly canRequestApproval: boolean
 }
 
 export interface WorkspaceSnapshotInput {
@@ -174,6 +189,7 @@ export interface WorkspaceSnapshotInput {
     readonly permissionsRemoved: readonly string[]
     readonly effects: readonly string[]
   }[]
+  readonly candidates?: readonly WorkbenchProjection[]
   readonly memory: readonly WorkspaceMemoryItem[]
   readonly knowledge: readonly WorkspaceKnowledgeItem[]
   readonly objective?: ObjectiveView

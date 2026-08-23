@@ -272,6 +272,7 @@ describe('TARS-NG mission-control workspace', () => {
       ctx.candidateWorkspace.writeFile(created.id, 'src/ok.ts', 'export const value: string = "ok"\n')
       ctx.candidateValidation.validate(created.id)
       const sealed = ctx.candidateWorkspace.seal(created.id)
+      ctx.independentReview.reviewCandidate(sealed.id)
       const requested = ctx.extensionGovernance.requestApproval(sealed.id)
       assert.equal(requested.decision, 'approval-requested')
       assert.ok(ctx.extensionGovernance.inspectSummary(sealed.id).effects.secrets.includes('google.calendar.oauth'))

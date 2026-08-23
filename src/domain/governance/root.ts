@@ -1,5 +1,6 @@
 import type { CapabilityRegistry } from '../registry/types.js'
 import type { CandidateWorkspace } from '../candidate/types.js'
+import { ReviewService, type IndependentReview } from '../review/index.js'
 import { backupSelfExtension, restoreSelfExtension, type SelfExtensionBackupManifest } from '../self-extension/backup.js'
 import { GovernanceAuthorityError, GovernanceContractError } from './errors.js'
 import { InMemoryActivationRuntime, type ActivationRuntime } from './runtime.js'
@@ -19,6 +20,7 @@ import { TrustedAuthorityCredential } from './types.js'
  */
 export class RecoveryRoot {
   readonly service: GovernanceService
+  readonly independentReview: IndependentReview
   private readonly rootId = Symbol('recovery-root')
   private readonly durableHome?: string
 
@@ -32,9 +34,14 @@ export class RecoveryRoot {
       beginAuthorityCommit?: () => void
       finishAuthorityCommit?: () => void
       durableHome?: string
+      independentReview?: IndependentReview
     } = {},
   ) {
-    this.service = new GovernanceService(registry, workspace, runtime, this.rootId, options)
+    this.independentReview = options.independentReview ?? new ReviewService(undefined, (id) => workspace.get(id), { hostLineage: true })
+    this.service = new GovernanceService(registry, workspace, runtime, this.rootId, {
+      ...options,
+      independentReview: this.independentReview,
+    })
     this.durableHome = options.durableHome
   }
 

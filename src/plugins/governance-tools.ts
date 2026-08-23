@@ -14,6 +14,7 @@ function textOutput() {
 export function registerGovernanceTools(
   tools: Pick<ToolRuntime, 'register'>,
   governance: ExtensionGovernance,
+  options: { readonly allowRequest?: boolean } = {},
 ): () => void {
   const disposeInspect = tools.register(defineTool({
     name: 'inspect_extension_governance',
@@ -28,24 +29,27 @@ export function registerGovernanceTools(
         summary: governance.inspectSummary(candidateId),
         approval: governance.inspectApproval(candidateId),
         eligibility: governance.eligibility(candidateId),
+        requestEligibility: governance.requestEligibility(candidateId),
       })
     },
   }))
 
-  const disposeRequest = tools.register(defineTool({
-    name: 'request_extension_approval',
-    description: 'Request human approval for a sealed validated candidate. Does not approve or activate.',
-    parameters: {
-      candidateId: { type: 'string', required: true },
-    },
-    output: textOutput(),
-    async execute(args) {
-      return JSON.stringify(governance.requestApproval(String(args.candidateId)))
-    },
-  }))
+  const disposeRequest = options.allowRequest === false
+    ? undefined
+    : tools.register(defineTool({
+      name: 'request_extension_approval',
+      description: 'Request human approval for a sealed, validated, independently reviewed candidate. Does not approve or activate.',
+      parameters: {
+        candidateId: { type: 'string', required: true },
+      },
+      output: textOutput(),
+      async execute(args) {
+        return JSON.stringify(governance.requestApproval(String(args.candidateId)))
+      },
+    }))
 
   return () => {
     disposeInspect()
-    disposeRequest()
+    disposeRequest?.()
   }
 }
