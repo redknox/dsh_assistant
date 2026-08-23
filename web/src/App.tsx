@@ -253,6 +253,9 @@ function ConversationWorkspace(props: {
             </article>
           )
         })}
+        {props.view.conversation.length === 0 && props.view.approvals.length === 0 ? (
+          <div className="viewport-idle" aria-hidden="true"><span>+</span>CHANNEL IDLE</div>
+        ) : null}
         {props.view.approvals.map((card) => (
           <ApprovalCardView key={card.id} card={card} locked={locked} onApprove={props.onApprove} onReject={props.onReject} />
         ))}
@@ -336,7 +339,11 @@ function ControlStripView(props: {
       <div className="control-strip-row">
         <div>
           <Glyph name="chip" />
-          <span className="strip-copy"><span className="strip-label">MODE</span><strong>{strip.mode}</strong></span>
+          <span className="strip-copy">
+            <span className="strip-label">MODE</span>
+            <strong>{strip.mode}</strong>
+            {strip.degradation ? <span className="strip-sub amber">{strip.degradation}</span> : null}
+          </span>
         </div>
         <div>
           <Glyph name="shield" />
@@ -354,11 +361,10 @@ function ControlStripView(props: {
           <span className="strip-copy">
             <span className="strip-label">{props.connected ? 'LOCAL' : 'TRANSPORT'}</span>
             <strong>{props.connected ? '127.0.0.1' : 'DISCONNECTED'}</strong>
+            {strip.backgroundJobs > 0 ? <span className="strip-sub">JOBS {strip.backgroundJobs}</span> : null}
           </span>
         </div>
       </div>
-      {strip.degradation ? <p className="control-strip-note"><span className="strip-label">DEGRADED</span> {strip.degradation}</p> : null}
-      {strip.backgroundJobs > 0 ? <p className="control-strip-note"><span className="strip-label">JOBS</span> {strip.backgroundJobs}</p> : null}
     </footer>
   )
 }
@@ -385,6 +391,8 @@ export function MissionControlScreen(props: {
       <span className="rivet rivet--tr" aria-hidden="true" />
       <span className="rivet rivet--bl" aria-hidden="true" />
       <span className="rivet rivet--br" aria-hidden="true" />
+      <span className="rivet rivet--tm" aria-hidden="true" />
+      <span className="rivet rivet--bm" aria-hidden="true" />
       <span className="grille grille--left" aria-hidden="true" />
       <span className="grille grille--right" aria-hidden="true" />
     <div className="console" data-system-state={view.systemState} data-connected={props.connected ? 'yes' : 'no'}>
