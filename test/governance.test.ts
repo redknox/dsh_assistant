@@ -421,6 +421,7 @@ export function apply(ctx) {
         owner: 'managed/integrations',
         version: '0.2.0',
         baseVersion: '0.1.0',
+        provenance: { kind: 'managed', origin: 'human' },
         manifest: {
           capabilities: ['calendar.read', 'calendar.freebusy'],
           permissions: ['local.fake.suite'],
@@ -466,6 +467,7 @@ export function apply() {}
         owner: 'managed/integrations',
         version: '0.2.0',
         baseVersion: '0.1.0',
+        provenance: { kind: 'managed', origin: 'human' },
         manifest: {
           capabilities: ['calendar.read', 'calendar.freebusy'],
           permissions: ['local.fake.suite'],

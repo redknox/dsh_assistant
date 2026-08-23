@@ -4,6 +4,9 @@ import path from 'node:path'
 
 type Tool = {
   readonly name: string
+  readonly description?: string
+  readonly parameters?: Record<string, unknown>
+  readonly output?: { schema?: Record<string, unknown> }
   execute?(args: Record<string, unknown>): Promise<unknown> | unknown
 }
 
@@ -21,6 +24,17 @@ function brokerRequest(capability: string, args: Record<string, unknown>): Promi
     pending.set(id, { resolve, reject })
     send({ id, op: 'broker-request', capability, args })
   })
+}
+
+function descriptors(): Record<string, unknown>[] {
+  return [...tools.values()]
+    .filter((tool) => tool.name !== '*')
+    .map((tool) => ({
+      name: tool.name,
+      description: tool.description ?? `Isolated generated proxy for ${tool.name}`,
+      parameters: tool.parameters ?? {},
+      output: tool.output?.schema ?? { type: 'string' },
+    }))
 }
 
 function shimContext() {
@@ -85,7 +99,7 @@ async function handle(message: Record<string, unknown>): Promise<void> {
   }
   try {
     if (op === 'health') {
-      send({ id, ok: true, tools: [...tools.keys()].filter((name) => name !== '*') })
+      send({ id, ok: true, tools: descriptors().map((item) => item.name), descriptors: descriptors() })
       return
     }
     if (op === 'call') {
@@ -111,11 +125,10 @@ console.log = (...args: unknown[]) => {
 }
 
 await loadCandidate()
-send({ op: 'ready', tools: [...tools.keys()].filter((name) => name !== '*') })
+send({ op: 'ready', tools: descriptors().map((item) => item.name), descriptors: descriptors() })
 
 const lines = createInterface({ input: process.stdin })
 for await (const line of lines) {
   if (line.trim() === '') continue
-  // Do not await tool calls here: a call may broker back to the host on stdin.
   void handle(JSON.parse(line) as Record<string, unknown>)
 }

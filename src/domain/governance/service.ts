@@ -1,11 +1,12 @@
 import { existsSync } from 'node:fs'
 import { digestFiles } from '../candidate/digest.js'
 import { listSourceFiles } from '../candidate/files.js'
+import { requiresIsolatedGeneratedRuntime } from '../generated-runtime/trust.js'
 import type { CapabilityRegistry, RegistryRegisterInput } from '../registry/types.js'
 import type { CandidateRecord, CandidateWorkspace } from '../candidate/types.js'
 import { ActivationDeniedError, GovernanceAuthorityError, GovernanceContractError } from './errors.js'
 import { approvalSummary, fingerprintFromCandidate } from './fingerprint.js'
-import { InMemoryActivationRuntime, type ActivationRuntime } from './runtime.js'
+import { InMemoryActivationRuntime, type ActivationPrepareContext, type ActivationRuntime } from './runtime.js'
 import type {
   ActivationFailure,
   ActivationPhase,
@@ -221,19 +222,7 @@ export class GovernanceService implements ExtensionGovernance, ExtensionActivati
     try {
       this.state = 'activating'
       phase = 'prepare'
-      const prepared = await this.runtime.prepare(candidateId, {
-        workspaceRoot: record.workspaceRoot,
-        entryPoints: record.manifest.entryPoints,
-        owner: record.owner,
-        resolutionKind: record.manifest.resolutionKind,
-        baseVersion: record.baseVersion,
-        digest: record.digest,
-        tools: record.manifest.tools,
-        services: record.manifest.services,
-        providers: record.manifest.providers,
-        runtimeSeams: record.manifest.runtimeSeams,
-        permissions: record.manifest.permissions,
-      })
+      const prepared = await this.runtime.prepare(candidateId, this.prepareContext(record))
       if (!prepared.ok) throw new Error(prepared.diagnostics ?? 'prepare failed')
       this.flush()
       await this.maybeInterrupt('prepare')
@@ -360,19 +349,7 @@ export class GovernanceService implements ExtensionGovernance, ExtensionActivati
       return diagnostics
     }
     for (const candidate of verified) {
-      const prepared = await this.runtime.prepare(candidate.id, {
-        workspaceRoot: candidate.workspaceRoot,
-        entryPoints: candidate.manifest.entryPoints,
-        owner: candidate.owner,
-        resolutionKind: candidate.manifest.resolutionKind,
-        baseVersion: candidate.baseVersion,
-        digest: candidate.digest,
-        tools: candidate.manifest.tools,
-        services: candidate.manifest.services,
-        providers: candidate.manifest.providers,
-        runtimeSeams: candidate.manifest.runtimeSeams,
-        permissions: candidate.manifest.permissions,
-      })
+      const prepared = await this.runtime.prepare(candidate.id, this.prepareContext(candidate))
       if (!prepared.ok) {
         diagnostics.push(prepared.diagnostics ?? `prepare-failed:${candidate.id}`)
         await this.runtime.restore({
@@ -579,10 +556,32 @@ export class GovernanceService implements ExtensionGovernance, ExtensionActivati
     if (conflicts.length > 0) {
       denials.push({ reason: 'ownership-conflict', detail: conflicts.map((item) => item.capability).join(', ') })
     }
-    if (this.safeMode && record.owner.startsWith('generated/')) {
+    if (this.safeMode && requiresIsolatedGeneratedRuntime({
+      owner: record.owner,
+      provenanceKind: record.provenance.kind,
+      origin: record.provenance.origin,
+    })) {
       denials.push({ reason: 'safe-mode', detail: 'generated extensions are excluded in Safe Mode' })
     }
     return denials
+  }
+
+  private prepareContext(record: CandidateRecord): ActivationPrepareContext {
+    return {
+      workspaceRoot: record.workspaceRoot,
+      entryPoints: record.manifest.entryPoints,
+      owner: record.owner,
+      resolutionKind: record.manifest.resolutionKind,
+      baseVersion: record.baseVersion,
+      digest: record.digest,
+      tools: record.manifest.tools,
+      services: record.manifest.services,
+      providers: record.manifest.providers,
+      runtimeSeams: record.manifest.runtimeSeams,
+      permissions: record.manifest.permissions,
+      provenanceKind: record.provenance.kind,
+      origin: record.provenance.origin,
+    }
   }
 
   private captureSnapshot(): ActivationSnapshot {

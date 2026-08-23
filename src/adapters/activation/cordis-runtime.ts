@@ -3,6 +3,8 @@ import type { Context, Plugin } from '@deepseek-ai/cordis'
 import { defineTool } from '@deepseek-ai/dsh-tools'
 import type { ActivationPrepareContext, ActivationRuntime } from '../../domain/governance/runtime.js'
 import type { ActivationSnapshot } from '../../domain/governance/types.js'
+import { requiresIsolatedGeneratedRuntime } from '../../domain/generated-runtime/trust.js'
+import type { GeneratedToolDescriptor } from '../../domain/generated-runtime/types.js'
 import { resolveCandidateEntry } from './candidate-entry.js'
 import { IsolatedGeneratedRunner } from './generated-runner.js'
 
@@ -85,11 +87,7 @@ function capturePriorOwner(ctx: Context, owner: string): { mounts: PriorOwnerMou
   return { mounts, fibers }
 }
 
-function isGeneratedOwner(owner: string): boolean {
-  return owner.startsWith('generated/')
-}
-
-/** Production adapter: managed owners stay in-process; generated owners use the isolated runner. */
+/** Production adapter: human-maintained managed code stays in-process; assistant-origin code is isolated. */
 export class CordisActivationRuntime implements ActivationRuntime {
   private readonly fibers = new Map<string, { dispose: () => Promise<unknown> }>()
   private readonly baselines = new Map<string, SurfaceSnapshot>()
@@ -121,7 +119,11 @@ export class CordisActivationRuntime implements ActivationRuntime {
     if (context === undefined || context.workspaceRoot === '') {
       return { ok: false, diagnostics: 'candidate workspace metadata is required to mount the artifact' }
     }
-    if (isGeneratedOwner(context.owner)) {
+    if (requiresIsolatedGeneratedRuntime({
+      owner: context.owner,
+      provenanceKind: context.provenanceKind,
+      origin: context.origin,
+    })) {
       return this.prepareGenerated(candidateId, context)
     }
     let swapped: PriorOwnerMount[] = []
@@ -155,9 +157,22 @@ export class CordisActivationRuntime implements ActivationRuntime {
     const generated = this.generated.get(candidateId)
     if (generated !== undefined) {
       const produced = await generated.health()
-      const missing = declared.tools.filter((name) => name !== '' && !produced.includes(name))
-      if (missing.length > 0) return { ok: false, diagnostics: missing.map((name) => `tool:${name} missing after candidate mount`).join('; ') }
-      if (declared.tools.length + declared.services.length + declared.providers.length === 0) {
+      const declaredTools = declared.tools.filter((name) => name !== '')
+      const missing = declaredTools.filter((name) => !produced.includes(name))
+      const extra = produced.filter((name) => !declaredTools.includes(name))
+      if (missing.length > 0 || extra.length > 0) {
+        return {
+          ok: false,
+          diagnostics: [
+            ...missing.map((name) => `tool:${name} missing after candidate mount`),
+            ...extra.map((name) => `descriptor/manifest mismatch: ${name}`),
+          ].join('; '),
+        }
+      }
+      if (declared.services.length > 0 || declared.providers.length > 0) {
+        return { ok: false, diagnostics: 'generated runtime does not proxy services or providers' }
+      }
+      if (declaredTools.length === 0) {
         return { ok: false, diagnostics: 'candidate declared no tools, services, or providers to verify' }
       }
       return { ok: true }
@@ -190,15 +205,20 @@ export class CordisActivationRuntime implements ActivationRuntime {
       this.baselines.delete(id)
       await this.restorePriorOwner(id, this.priorOwners.get(id) ?? [])
     }
+    const waiting: Array<Promise<void>> = []
     for (const [id, runner] of this.generated) {
       if (snapshot.mounted.includes(id)) continue
       this.dropGenerated(id, runner)
+      waiting.push(runner.waitForExit())
     }
+    await Promise.all(waiting)
     this.currentMounted = [...snapshot.mounted]
   }
 
   async unloadGenerated(): Promise<void> {
-    for (const [id, runner] of this.generated) this.dropGenerated(id, runner)
+    const runners = [...this.generated.entries()]
+    for (const [id, runner] of runners) this.dropGenerated(id, runner)
+    await Promise.all(runners.map(([, runner]) => runner.waitForExit()))
   }
 
   mounted(): readonly string[] {
@@ -206,6 +226,9 @@ export class CordisActivationRuntime implements ActivationRuntime {
   }
 
   private async prepareGenerated(candidateId: string, context: ActivationPrepareContext): Promise<{ ok: boolean; diagnostics?: string }> {
+    if (context.services.length > 0 || context.providers.length > 0) {
+      return { ok: false, diagnostics: 'generated runtime does not proxy services or providers' }
+    }
     const runner = new IsolatedGeneratedRunner({
       candidateId,
       workspaceRoot: context.workspaceRoot,
@@ -220,37 +243,51 @@ export class CordisActivationRuntime implements ActivationRuntime {
       runner.kill()
       return started
     }
+    const declaredTools = context.tools.filter((name) => name !== '')
+    const produced = runner.descriptors.map((item) => item.name)
+    const missing = declaredTools.filter((name) => !produced.includes(name))
+    const extra = produced.filter((name) => !declaredTools.includes(name))
+    if (missing.length > 0 || extra.length > 0) {
+      runner.kill()
+      await runner.waitForExit()
+      return {
+        ok: false,
+        diagnostics: [
+          ...missing.map((name) => `tool:${name} missing after candidate mount`),
+          ...extra.map((name) => `descriptor/manifest mismatch: ${name}`),
+        ].join('; ') || 'descriptor/manifest mismatch',
+      }
+    }
     this.generated.set(candidateId, runner)
     this.baselines.set(candidateId, snapshotDeclared(this.ctx, context))
     const disposers: Array<() => void> = []
-    for (const name of context.tools) {
-      if (name === '' || this.ctx.tools.get(name) !== undefined) continue
-      disposers.push(this.ctx.tools.register(defineTool({
-        name,
-        description: `Isolated generated proxy for ${name}`,
-        parameters: {},
-        output: {
-          schema: { type: 'string' },
-          render(_args: unknown, value: unknown) {
-            return [{ type: 'text' as const, text: String(value) }]
-          },
-        },
-        async execute(args, exec) {
-          const value = await runner.call(name, args as Record<string, unknown>, exec.signal)
-          return typeof value === 'string' ? value : JSON.stringify(value)
-        },
-      })))
+    try {
+      for (const descriptor of runner.descriptors) {
+        if (this.ctx.tools.get(descriptor.name) !== undefined) continue
+        disposers.push(this.ctx.tools.register(defineProxyTool(descriptor, runner)))
+      }
+    } catch (error) {
+      for (const dispose of disposers) dispose()
+      runner.kill()
+      await runner.waitForExit()
+      return { ok: false, diagnostics: error instanceof Error ? error.message : String(error) }
     }
     this.proxyDisposers.set(candidateId, disposers)
+    runner.onFatal = () => {
+      this.dropGenerated(candidateId, runner)
+    }
     return { ok: true }
   }
 
   private dropGenerated(candidateId: string, runner: IsolatedGeneratedRunner): void {
-    for (const dispose of this.proxyDisposers.get(candidateId) ?? []) dispose()
+    const disposers = this.proxyDisposers.get(candidateId) ?? []
     this.proxyDisposers.delete(candidateId)
+    for (const dispose of disposers) dispose()
+    runner.onFatal = undefined
     runner.kill()
     this.generated.delete(candidateId)
     this.baselines.delete(candidateId)
+    this.currentMounted = this.currentMounted.filter((id) => id !== candidateId)
   }
 
   private async restorePriorOwner(candidateId: string, mounts: readonly PriorOwnerMount[]): Promise<void> {
@@ -263,4 +300,35 @@ export class CordisActivationRuntime implements ActivationRuntime {
     }
     this.priorOwners.delete(candidateId)
   }
+}
+
+function proxyParameters(raw: Record<string, unknown>): Record<string, { type: 'string' }> {
+  const props = raw.properties !== undefined && typeof raw.properties === 'object' && !Array.isArray(raw.properties)
+    ? raw.properties as Record<string, unknown>
+    : raw
+  const skip = new Set(['type', 'properties', 'required', 'additionalProperties', 'description'])
+  const out: Record<string, { type: 'string' }> = {}
+  for (const key of Object.keys(props)) {
+    if (skip.has(key)) continue
+    out[key] = { type: 'string' }
+  }
+  return out
+}
+
+function defineProxyTool(descriptor: GeneratedToolDescriptor, runner: IsolatedGeneratedRunner) {
+  return defineTool({
+    name: descriptor.name,
+    description: descriptor.description,
+    parameters: proxyParameters(descriptor.parameters),
+    output: {
+      schema: { type: 'string' as const },
+      render(_args: unknown, value: unknown) {
+        return [{ type: 'text' as const, text: String(value) }]
+      },
+    },
+    async execute(args, exec) {
+      const value = await runner.call(descriptor.name, (args ?? {}) as Record<string, unknown>, exec.signal)
+      return typeof value === 'string' ? value : JSON.stringify(value)
+    },
+  })
 }

@@ -17,6 +17,13 @@ export interface GeneratedBrokerRequest {
   readonly args: Record<string, unknown>
 }
 
+export interface GeneratedToolDescriptor {
+  readonly name: string
+  readonly description: string
+  readonly parameters: Record<string, unknown>
+  readonly output: Record<string, unknown>
+}
+
 export interface GeneratedPrepareInput {
   readonly candidateId: string
   readonly workspaceRoot: string

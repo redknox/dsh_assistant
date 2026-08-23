@@ -12,6 +12,8 @@ export interface ActivationPrepareContext {
   readonly providers: readonly string[]
   readonly runtimeSeams: readonly string[]
   readonly permissions?: readonly string[]
+  readonly provenanceKind?: string
+  readonly origin?: string
 }
 
 export interface ActivationRuntime {

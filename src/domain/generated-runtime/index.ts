@@ -1,4 +1,5 @@
 export { approvedHostCapabilities, assertBrokerAllowed, executeHostBroker, GeneratedBrokerError } from './broker.js'
+export { requiresIsolatedGeneratedRuntime } from './trust.js'
 export {
   generatedIsolation,
   generatedRuntimeDiagnosis,
@@ -17,4 +18,5 @@ export {
   type GeneratedIsolation,
   type GeneratedPrepareInput,
   type GeneratedRuntimeDiagnosis,
+  type GeneratedToolDescriptor,
 } from './types.js'

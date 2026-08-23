@@ -1,7 +1,8 @@
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process'
-import { createInterface } from 'node:readline'
-import { existsSync, realpathSync } from 'node:fs'
+import { copyFileSync, existsSync, mkdtempSync, realpathSync } from 'node:fs'
+import { tmpdir } from 'node:os'
 import path from 'node:path'
+import { createInterface } from 'node:readline'
 import { fileURLToPath } from 'node:url'
 import { detectOsNetworkSandbox } from '../../domain/candidate/os-sandbox.js'
 import { listSourceFiles } from '../../domain/candidate/files.js'
@@ -19,6 +20,7 @@ import {
   recordGeneratedRuntimeFailure,
   sanitizeGeneratedDiagnostic,
   type GeneratedPrepareInput,
+  type GeneratedToolDescriptor,
 } from '../../domain/generated-runtime/index.js'
 import { resolveCandidateEntry } from './candidate-entry.js'
 import { wrapGeneratedOsSandbox } from './generated-os-sandbox.js'
@@ -34,7 +36,12 @@ export class IsolatedGeneratedRunner {
   private nextId = 1
   private stderr = ''
   private started = false
+  private exited = Promise.resolve()
+  private resolveExit?: () => void
+  private fatal = false
+  onFatal?: (reason: string) => void
   readonly tools: string[] = []
+  descriptors: GeneratedToolDescriptor[] = []
 
   constructor(private readonly input: GeneratedPrepareInput) {}
 
@@ -62,19 +69,15 @@ export class IsolatedGeneratedRunner {
       }
       const entry = resolveCandidateEntry(artifact, this.input.entryPoints)
       const relativeEntry = path.relative(artifact, entry)
-      const childMain = resolveChildMain()
-      const nodePrefix = path.dirname(path.dirname(process.execPath))
+      const childMain = stageChildMain()
       const nodeArgv = [
         process.execPath,
-        ...(childMain.endsWith('.ts') ? ['--experimental-strip-types'] : []),
+        ...(childMain.file.endsWith('.ts') ? ['--experimental-strip-types'] : []),
         '--permission',
         `--allow-fs-read=${withSep(artifact)}`,
-        `--allow-fs-read=${childMain}`,
-        `--allow-fs-read=${withSep(path.dirname(childMain))}`,
-        `--allow-fs-read=${withSep(path.dirname(process.execPath))}`,
-        `--allow-fs-read=${withSep(nodePrefix)}`,
+        `--allow-fs-read=${withSep(childMain.dir)}`,
         '--no-addons',
-        childMain,
+        childMain.file,
       ]
       const wrapped = wrapGeneratedOsSandbox(sandbox, nodeArgv, artifact, process.execPath)
       const child = spawn(wrapped.file, wrapped.args, {
@@ -90,6 +93,9 @@ export class IsolatedGeneratedRunner {
         stdio: ['pipe', 'pipe', 'pipe'],
       })
       this.child = child
+      this.exited = new Promise((resolve) => {
+        this.resolveExit = resolve
+      })
       recordGeneratedProcessStart()
       child.stderr.setEncoding('utf8')
       child.stderr.on('data', (chunk: string) => {
@@ -101,9 +107,13 @@ export class IsolatedGeneratedRunner {
         void this.onLine(line)
       })
       child.on('exit', (code) => {
-        this.failAll(`generated process exited (${code ?? 'null'}): ${this.stderr || 'no-stderr'}`)
+        const reason = sanitizeGeneratedDiagnostic(`generated process exited (${code ?? 'null'}): ${this.stderr || 'no-stderr'}`)
+        this.failAll(reason)
         this.started = false
+        this.child = undefined
         recordGeneratedProcessStop()
+        this.resolveExit?.()
+        this.onFatal?.(reason)
       })
       await ready
       this.started = true
@@ -118,23 +128,45 @@ export class IsolatedGeneratedRunner {
 
   async health(): Promise<readonly string[]> {
     const reply = await this.request({ op: 'health' }, GENERATED_CALL_TIMEOUT_MS)
-    const names = Array.isArray(reply.tools) ? reply.tools.map((item) => String(item)) : []
-    this.tools.splice(0, this.tools.length, ...names)
-    return names
+    this.ingestDescriptors(reply)
+    return this.tools
   }
 
   async call(tool: string, args: Record<string, unknown>, signal?: AbortSignal): Promise<unknown> {
-    const reply = await this.request({ op: 'call', tool, args }, GENERATED_CALL_TIMEOUT_MS, signal)
-    if (reply.ok !== true) throw new Error(String(reply.error ?? 'generated tool failed'))
-    return reply.value
+    try {
+      const reply = await this.request({ op: 'call', tool, args }, GENERATED_CALL_TIMEOUT_MS, signal)
+      if (reply.ok !== true) throw new Error(String(reply.error ?? 'generated tool failed'))
+      return reply.value
+    } catch (error) {
+      if (this.fatal) await this.waitForExit()
+      throw error
+    }
   }
 
   kill(): void {
-    if (this.child === undefined) return
+    if (this.child === undefined) {
+      this.resolveExit?.()
+      return
+    }
     this.failAll('generated process terminated')
     this.child.kill('SIGKILL')
-    this.child = undefined
-    this.started = false
+  }
+
+  async waitForExit(timeoutMs = 2_000): Promise<void> {
+    await Promise.race([
+      this.exited,
+      new Promise<void>((resolve) => {
+        setTimeout(resolve, timeoutMs)
+      }),
+    ])
+  }
+
+  failClosed(reason: string): void {
+    const diagnostics = sanitizeGeneratedDiagnostic(reason)
+    recordGeneratedRuntimeFailure(diagnostics)
+    this.fatal = true
+    this.failAll(diagnostics)
+    this.kill()
   }
 
   private waitForReady(): Promise<void> {
@@ -145,7 +177,7 @@ export class IsolatedGeneratedRunner {
       this.pending.set('ready', {
         resolve: (message) => {
           clearTimeout(timer)
-          if (Array.isArray(message.tools)) this.tools.splice(0, this.tools.length, ...message.tools.map((item) => String(item)))
+          this.ingestDescriptors(message)
           resolve()
         },
         reject: (error) => {
@@ -156,18 +188,38 @@ export class IsolatedGeneratedRunner {
     })
   }
 
+  private ingestDescriptors(message: Record<string, unknown>): void {
+    const raw = Array.isArray(message.descriptors) ? message.descriptors : []
+    const parsed: GeneratedToolDescriptor[] = raw.flatMap((item) => {
+      if (item === null || typeof item !== 'object') return []
+      const row = item as Record<string, unknown>
+      const name = String(row.name ?? '')
+      if (name === '' || name === '*') return []
+      return [{
+        name,
+        description: String(row.description ?? `Isolated generated proxy for ${name}`),
+        parameters: (row.parameters && typeof row.parameters === 'object' && !Array.isArray(row.parameters))
+          ? row.parameters as Record<string, unknown>
+          : {},
+        output: (row.output && typeof row.output === 'object' && !Array.isArray(row.output))
+          ? row.output as Record<string, unknown>
+          : { type: 'string' },
+      }]
+    })
+    this.descriptors = parsed
+    this.tools.splice(0, this.tools.length, ...parsed.map((item) => item.name))
+  }
+
   private async onLine(line: string): Promise<void> {
     if (Buffer.byteLength(line) > GENERATED_MAX_MESSAGE_BYTES) {
-      this.kill()
-      recordGeneratedRuntimeFailure('generated protocol message exceeded the size bound')
+      this.failClosed('generated protocol message exceeded the size bound')
       return
     }
     let message: Record<string, unknown>
     try {
       message = JSON.parse(line) as Record<string, unknown>
     } catch {
-      this.kill()
-      recordGeneratedRuntimeFailure('generated protocol violation: invalid JSON')
+      this.failClosed('generated protocol violation: invalid JSON')
       return
     }
     if (message.op === 'ready') {
@@ -207,11 +259,13 @@ export class IsolatedGeneratedRunner {
       const timer = setTimeout(() => {
         this.pending.delete(id)
         reject(new Error('generated call timed out'))
+        this.failClosed('generated call timed out')
       }, timeoutMs)
       const onAbort = () => {
         this.pending.delete(id)
         clearTimeout(timer)
         reject(new Error('generated call was cancelled'))
+        this.failClosed('generated call was cancelled')
       }
       signal?.addEventListener('abort', onAbort, { once: true })
       this.pending.set(id, {
@@ -233,7 +287,7 @@ export class IsolatedGeneratedRunner {
   private write(message: Record<string, unknown>): void {
     const line = `${JSON.stringify(message)}\n`
     if (Buffer.byteLength(line) > GENERATED_MAX_MESSAGE_BYTES) {
-      this.kill()
+      this.failClosed('generated protocol message exceeded the size bound')
       throw new Error('generated protocol message exceeded the size bound')
     }
     this.child?.stdin.write(line)
@@ -250,6 +304,15 @@ function withSep(dir: string): string {
   return dir.endsWith(path.sep) ? dir : `${dir}${path.sep}`
 }
 
+function stageChildMain(): { file: string; dir: string } {
+  const source = resolveChildMain()
+  const dir = mkdtempSync(path.join(tmpdir(), 'tars-ng-gen-shim-'))
+  const dest = path.join(dir, path.basename(source))
+  copyFileSync(source, dest)
+  const file = realpathSync(dest)
+  return { file, dir: path.dirname(file) }
+}
+
 export function resolveChildMain(): string {
   const here = path.dirname(fileURLToPath(import.meta.url))
   const js = path.join(here, 'generated-child-main.js')
@@ -258,4 +321,3 @@ export function resolveChildMain(): string {
   if (existsSync(ts)) return ts
   throw new Error('generated child runner is missing')
 }
-
