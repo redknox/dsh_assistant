@@ -11,6 +11,7 @@ import {
   sendMessage,
   type UiEnvelope,
 } from './api'
+import { Glyph } from './icons'
 
 function isPendingApproval(status: string): boolean {
   return status === 'pending' || status === 'approval-requested' || status === 'unreviewed'
@@ -85,19 +86,19 @@ function WorkspaceNavigation(props: { readonly view: MissionControlView }) {
       </div>
       <nav className="primary-nav" aria-label="Primary">
         <a className="nav-item nav-item--active" href="#today" aria-current="page">
-          <span className="nav-index">01</span><span>TODAY</span>
+          <Glyph name="today" /><span>TODAY</span>
         </a>
         <a className="nav-item" href="#today">
-          <span className="nav-index">02</span><span>CONVERSATIONS</span>
+          <Glyph name="conversations" /><span>CONVERSATIONS</span>
         </a>
         <span className="nav-item nav-item--idle" aria-disabled="true" title="Calendar management is not available in this soak">
-          <span className="nav-index">03</span><span>CALENDAR</span>
+          <Glyph name="calendar" /><span>CALENDAR</span>
         </span>
         <a className="nav-item" href="#memory">
-          <span className="nav-index">04</span><span>MEMORY</span>
+          <Glyph name="memory" /><span>MEMORY</span>
         </a>
         <a className="nav-item" href="#capabilities">
-          <span className="nav-index">05</span><span>CAPABILITIES</span>
+          <Glyph name="capabilities" /><span>CAPABILITIES</span>
         </a>
       </nav>
       <section className="recent" id="memory" aria-labelledby="recent-title">
@@ -150,7 +151,7 @@ function ApprovalCardView(props: {
       aria-labelledby={`approval-title-${card.id}`}
     >
       <header className="approval-header">
-        <span className="approval-symbol" aria-hidden="true">▣</span>
+        <Glyph name="calendar" className="glyph approval-symbol" />
         <h2 id={`approval-title-${card.id}`}>{card.title}</h2>
       </header>
       <dl className="approval-facts">
@@ -164,7 +165,7 @@ function ApprovalCardView(props: {
         ))}
       </dl>
       <div className="effect-line">
-        <span className="effect-icon" aria-hidden="true">i</span>
+        <Glyph name="info" className="glyph effect-icon" />
         <span><strong>EFFECT</strong> External side effect: {card.sideEffect}</span>
       </div>
       {pending ? (
@@ -237,7 +238,12 @@ function ConversationWorkspace(props: {
           const alert = item.kind === 'warning' || item.kind === 'failure'
           return (
             <article key={`${item.kind}-${index}`} className={`message${user ? ' message--user' : ' message--assistant'}${alert ? ' message--alert' : ''}`} data-kind={item.kind}>
-              {user ? null : <div className="assistant-mark" aria-hidden="true"><span>T</span></div>}
+              {user ? null : (
+                <div className="assistant-mark" aria-hidden="true">
+                  <Glyph name="hex" />
+                  <span>T</span>
+                </div>
+              )}
               <div>
                 <div className="message-meta">
                   <span>{user ? 'YOU' : props.view.identity}</span>
@@ -262,12 +268,22 @@ function ConversationWorkspace(props: {
             onChange={(event) => props.onDraft(event.target.value)}
           />
           <button
+            className="icon-button"
+            type="button"
+            aria-label="Attach file"
+            title="Attachments are not available in this soak"
+            disabled
+          >
+            <Glyph name="attach" />
+          </button>
+          <button
             className="send-button"
             type="submit"
             aria-label="Send message"
             disabled={props.sending || locked || props.draft.trim() === ''}
           >
-            {props.sending ? 'SENDING' : 'SEND'}
+            <Glyph name="send" />
+            <span className="sr-only">{props.sending ? 'SENDING' : 'SEND'}</span>
           </button>
         </form>
         {props.error ? <p className="error" role="alert">{props.error}</p> : null}
@@ -285,7 +301,7 @@ function OperationsPanel(props: { readonly view: MissionControlView }) {
         <ol className="activity-list">
           {props.view.activity.map((item) => (
             <li key={item.id} className={`activity-item${activityModifier(item.kind)}`} data-activity={item.kind}>
-              <span className="activity-node">{item.kind === 'APPROVAL_REQUIRED' ? '!' : ''}</span>
+              <span className="activity-node">{item.kind === 'APPROVAL_REQUIRED' ? <Glyph name="warn" /> : null}</span>
               <span>{item.kind.replaceAll('_', ' ')}</span>
               <span className="activity-summary">{item.summary}</span>
             </li>
@@ -317,22 +333,32 @@ function ControlStripView(props: {
   const safe = props.view.systemState === 'SAFE_MODE' || props.view.systemState === 'RECOVERY'
   return (
     <footer className="control-strip" aria-label="Runtime status" data-control-plane="user-workspace">
-      <div><span className="strip-label">MODE</span><strong>{strip.mode}</strong></div>
-      <div><span className="strip-label">SAFE MODE</span><strong>{safe ? 'ON' : 'OFF'}</strong></div>
-      <div>
-        <span className="strip-label">APPROVALS</span>
-        <strong className={strip.pendingApprovals > 0 ? 'amber' : undefined}>{strip.pendingApprovals}</strong>
+      <div className="control-strip-row">
+        <div>
+          <Glyph name="chip" />
+          <span className="strip-copy"><span className="strip-label">MODE</span><strong>{strip.mode}</strong></span>
+        </div>
+        <div>
+          <Glyph name="shield" />
+          <span className="strip-copy"><span className="strip-label">SAFE MODE</span><strong>{safe ? 'ON' : 'OFF'}</strong></span>
+        </div>
+        <div>
+          <Glyph name="check" />
+          <span className="strip-copy">
+            <span className="strip-label">APPROVALS</span>
+            <strong className={strip.pendingApprovals > 0 ? 'amber' : undefined}>{strip.pendingApprovals}</strong>
+          </span>
+        </div>
+        <div>
+          <Glyph name="terminal" />
+          <span className="strip-copy">
+            <span className="strip-label">{props.connected ? 'LOCAL' : 'TRANSPORT'}</span>
+            <strong>{props.connected ? '127.0.0.1' : 'DISCONNECTED'}</strong>
+          </span>
+        </div>
       </div>
-      <div>
-        <span className="strip-label">{props.connected ? 'LOCAL' : 'TRANSPORT'}</span>
-        <strong>{props.connected ? '127.0.0.1' : 'DISCONNECTED'}</strong>
-      </div>
-      {strip.degradation ? (
-        <div><span className="strip-label">DEGRADED</span><strong className="amber">{strip.degradation}</strong></div>
-      ) : null}
-      {strip.backgroundJobs > 0 ? (
-        <div><span className="strip-label">JOBS</span><strong>{strip.backgroundJobs}</strong></div>
-      ) : null}
+      {strip.degradation ? <p className="control-strip-note"><span className="strip-label">DEGRADED</span> {strip.degradation}</p> : null}
+      {strip.backgroundJobs > 0 ? <p className="control-strip-note"><span className="strip-label">JOBS</span> {strip.backgroundJobs}</p> : null}
     </footer>
   )
 }
@@ -354,6 +380,13 @@ export function MissionControlScreen(props: {
   const safe = view.systemState === 'SAFE_MODE' || view.systemState === 'RECOVERY'
   const locked = !props.connected
   return (
+    <div className="chassis">
+      <span className="rivet rivet--tl" aria-hidden="true" />
+      <span className="rivet rivet--tr" aria-hidden="true" />
+      <span className="rivet rivet--bl" aria-hidden="true" />
+      <span className="rivet rivet--br" aria-hidden="true" />
+      <span className="grille grille--left" aria-hidden="true" />
+      <span className="grille grille--right" aria-hidden="true" />
     <div className="console" data-system-state={view.systemState} data-connected={props.connected ? 'yes' : 'no'}>
       <SystemHeader
         identity={view.identity}
@@ -387,6 +420,7 @@ export function MissionControlScreen(props: {
         <OperationsPanel view={view} />
       </div>
       <ControlStripView view={view} connected={props.connected} />
+    </div>
     </div>
   )
 }
