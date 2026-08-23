@@ -61,6 +61,24 @@ export const TOOL_ACTIONS: Record<string, ToolActionSpec> = {
     intent: 'execute',
     payload: (args) => pick(args, ['title']),
   },
+  files_list: {
+    capability: 'files',
+    operation: 'list',
+    intent: 'read',
+    payload: (args) => pick(args, ['path', 'limit', 'cursor']),
+  },
+  files_read: {
+    capability: 'files',
+    operation: 'read',
+    intent: 'read',
+    payload: (args) => pick(args, ['path']),
+  },
+  files_write: {
+    capability: 'files',
+    operation: 'write',
+    intent: 'execute',
+    payload: (args) => pick(args, ['path', 'content']),
+  },
   files_delete: {
     capability: 'files',
     operation: 'delete',

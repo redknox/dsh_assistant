@@ -72,6 +72,7 @@ export interface UserCapabilityView {
     readonly owner?: string
     readonly version?: string
     readonly provenance?: string
+    readonly provider?: string
   }
 }
 
@@ -155,6 +156,9 @@ export interface WorkspaceSnapshotInput {
     readonly provenance: string
     readonly status: string
     readonly capabilities: readonly string[]
+    readonly permissions?: readonly string[]
+    readonly provider?: string
+    readonly providers?: readonly string[]
   }[]
   readonly extensionApprovals?: readonly {
     readonly id: string

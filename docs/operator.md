@@ -77,7 +77,7 @@ Classes of configuration:
 | Class | Where | Examples |
 | --- | --- | --- |
 | Product configuration | `config/product.json` | `allowFixtures` |
-| Non-secret integration config | env / env file | `GOOGLE_SEARCH_ENGINE_ID`, `DSH_ASSISTANT_GOOGLE_CALENDAR_MODE` |
+| Non-secret integration config | env / env file | `GOOGLE_SEARCH_ENGINE_ID`, `DSH_ASSISTANT_GOOGLE_CALENDAR_MODE`, `DSH_ASSISTANT_SANDBOX_ROOT` |
 | Secrets | env / chmod 600 env file only | `DEEPSEEK_API_KEY`, `DSH_ASSISTANT_GOOGLE_CALENDAR_ACCESS_TOKEN`, `GOOGLE_SEARCH_API_KEY` |
 | Runtime/durable state | `$TARS_NG_HOME/self-extension/` | authority, candidates, review lineage |
 
@@ -95,6 +95,7 @@ chmod 700 ~/.config/tars-ng
 cat > ~/.config/tars-ng/env <<'EOF'
 DEEPSEEK_API_KEY=...
 DSH_ASSISTANT_GOOGLE_CALENDAR_ACCESS_TOKEN=...
+DSH_ASSISTANT_SANDBOX_ROOT=~/tars-ng
 GOOGLE_SEARCH_API_KEY=...
 GOOGLE_SEARCH_ENGINE_ID=...
 EOF
@@ -132,6 +133,25 @@ Calendar in the core product is **unavailable** unless you explicitly opt in:
 Missing token: live transport fails with `DSH_ASSISTANT_GOOGLE_CALENDAR_ACCESS_TOKEN is missing` and does not call Google. Expired/invalid token: `Calendar access token expired or invalid; replace DSH_ASSISTANT_GOOGLE_CALENDAR_ACCESS_TOKEN`. Messages are sanitized; values are not logged.
 
 A generated Google Calendar provider still requires the existing M1–M4 approval/activation path. `review-complete` is not approval.
+
+## Operator sandbox (files / tasks)
+
+Files and tasks stay **unavailable** unless you opt in with an existing directory:
+
+```sh
+mkdir -p ~/tars-ng
+chmod 700 ~/tars-ng
+```
+
+| Mode | How | Operator meaning |
+| --- | --- | --- |
+| unavailable (default) | `DSH_ASSISTANT_SANDBOX_ROOT` unset | `files` / `tasks` report not configured. Fixture notes/tasks are not returned as live data. |
+| fake | `--allow-fixtures` or `TARS_NG_ALLOW_FIXTURES=1` | Explicit fixture. Not the operator sandbox. |
+| live | `DSH_ASSISTANT_SANDBOX_ROOT` set to an existing directory | Confined-root files and markdown tasks under that directory only. |
+
+`~` is expanded. The directory must already exist and must not be a symlink. TARS-NG does not create it. Absolute paths, `..`, and symlink escapes are rejected.
+
+Tasks are stored as `tasks/*.md` inside the sandbox. `tasks_create` follows the existing L3 policy (may auto-execute). `files_write` and `files_delete` stay L4 and always need confirmation. This is not a host-wide filesystem.
 
 ## Start / stop / status / doctor
 
@@ -195,6 +215,7 @@ Backups exclude secrets, credentials, personal memory, env files, and unsealed w
 | `… is outside the supported DSH release` | Reinstall this tarball; do not mix newer RCs |
 | Calendar fixture events in daily use | Unset `TARS_NG_ALLOW_FIXTURES`; do not pass `--allow-fixtures` |
 | Calendar unavailable after live mode | Replace `DSH_ASSISTANT_GOOGLE_CALENDAR_ACCESS_TOKEN`; it expires |
+| Files/tasks not configured | Create the sandbox directory, set `DSH_ASSISTANT_SANDBOX_ROOT`, restart |
 | Safe Mode | Web UI recovery controls or `tars-ng doctor` then Recovery Root runbook; do not mint approval from the model |
 | Web UI will not bind | Another process owns the port, or `TARS_NG_UI_HOST` is not loopback; start fails clearly |
 | Env file insecure | `chmod 600` the file |

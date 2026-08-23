@@ -413,6 +413,7 @@ function bootstrapCapabilities(): string[] {
     'tasks.propose',
     'tasks.create',
     'files.read',
+    'files.write',
     'files.delete',
     'contacts.read',
   ]

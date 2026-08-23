@@ -6,6 +6,10 @@ import { describe, it } from 'node:test'
 import { ConfinedRootFiles } from '../src/adapters/integrations/confined-root-files.js'
 import {
   ConfinedRootError,
+  SANDBOX_MAX_LIST_DEPTH,
+  SANDBOX_MAX_LIST_ENTRIES,
+  SANDBOX_MAX_TRAVERSAL_ENTRIES,
+  deleteConfinedText,
   listConfinedTextFiles,
   readConfinedText,
   writeConfinedText,
@@ -44,6 +48,49 @@ describe('confined-root files seam', () => {
     const vault = mkdtempSync(path.join(tmpdir(), 'confined-write-'))
     writeConfinedText(vault, 'People/Bob.md', 'ok\n')
     assert.equal(readConfinedText(vault, 'People/Bob.md'), 'ok\n')
+  })
+
+  it('lists every regular file when the extension filter is empty', () => {
+    const vault = mkdtempSync(path.join(tmpdir(), 'confined-all-'))
+    writeFileSync(path.join(vault, 'note.md'), 'md\n')
+    writeFileSync(path.join(vault, 'readme.txt'), 'txt\n')
+    assert.deepEqual(listConfinedTextFiles(vault, '', ''), ['note.md', 'readme.txt'])
+  })
+
+  it('deletes only a real file inside the root', () => {
+    const vault = mkdtempSync(path.join(tmpdir(), 'confined-del-'))
+    writeConfinedText(vault, 'note.md', 'bye\n')
+    deleteConfinedText(vault, 'note.md')
+    assert.deepEqual(listConfinedTextFiles(vault), [])
+    assert.throws(() => deleteConfinedText(vault, 'note.md'), ConfinedRootError)
+    assert.throws(() => deleteConfinedText(vault, '../outside.md'), ConfinedRootError)
+  })
+
+  it('fails listing when the entry or depth bound is crossed during the walk', () => {
+    const vault = mkdtempSync(path.join(tmpdir(), 'confined-bound-'))
+    for (let i = 0; i < SANDBOX_MAX_LIST_ENTRIES + 1; i += 1) writeFileSync(path.join(vault, `n${i}.md`), 'ok\n')
+    assert.throws(() => listConfinedTextFiles(vault), /traversal bound|entry bound/)
+    const deep = mkdtempSync(path.join(tmpdir(), 'confined-depth-'))
+    let current = deep
+    for (let i = 0; i < SANDBOX_MAX_LIST_DEPTH + 1; i += 1) {
+      current = path.join(current, `d${i}`)
+      mkdirSync(current)
+    }
+    writeFileSync(path.join(current, 'leaf.md'), 'ok\n')
+    assert.throws(() => listConfinedTextFiles(deep), /depth bound/)
+  })
+
+  it('counts non-matching files and empty directories against the traversal bound', () => {
+    const extras = mkdtempSync(path.join(tmpdir(), 'confined-nomatch-'))
+    for (let i = 0; i < SANDBOX_MAX_TRAVERSAL_ENTRIES + 1; i += 1) {
+      writeFileSync(path.join(extras, `n${i}.txt`), 'ok\n')
+    }
+    assert.throws(() => listConfinedTextFiles(extras, '', '.md'), /traversal bound/)
+    const empty = mkdtempSync(path.join(tmpdir(), 'confined-emptydir-'))
+    for (let i = 0; i < SANDBOX_MAX_TRAVERSAL_ENTRIES + 1; i += 1) {
+      mkdirSync(path.join(empty, `d${i}`))
+    }
+    assert.throws(() => listConfinedTextFiles(empty), /traversal bound/)
   })
 
   it('records confined access on the public files adapter', async () => {

@@ -52,6 +52,20 @@ export function registerPolicyTools(tools: Pick<ToolRuntime, 'register'>, policy
       },
     })),
     tools.register(defineTool({
+      name: 'files_write',
+      description: 'Execute writing a text file inside the operator sandbox. L4: always requires confirmation bound to this exact path and content. Never auto-executes.',
+      parameters: {
+        path: { type: 'string', required: true },
+        content: { type: 'string', required: true },
+        confirmationId: { type: 'string' },
+      },
+      output: textOutput(),
+      async execute(args, exec) {
+        const request = requestFromTool('files_write', asRecord(args), exec.signal)
+        return JSON.stringify(await policy.apply(request!))
+      },
+    })),
+    tools.register(defineTool({
       name: 'files_delete',
       description: 'Execute deleting a file. L4: always requires confirmation bound to this exact file id. Never auto-executes.',
       parameters: {

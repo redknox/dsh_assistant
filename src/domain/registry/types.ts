@@ -70,6 +70,13 @@ export interface OwnershipConflict {
   readonly records: readonly RegistryRecord[]
 }
 
+export interface RegistryRevisePatch {
+  readonly capabilities?: readonly CapabilityClaim[]
+  readonly permissions?: readonly string[]
+  readonly provider?: string
+  readonly providers?: readonly string[]
+}
+
 export interface RegistryRegisterInput {
   readonly owner: string
   readonly version: string
@@ -93,4 +100,5 @@ export interface CapabilityRegistry {
   listCapabilities(owner: string, version: string): readonly string[]
   conflicts(): readonly OwnershipConflict[]
   transitionStatus(owner: string, version: string, status: LifecycleStatus): RegistryRecord
+  revise(owner: string, version: string, patch: RegistryRevisePatch): RegistryRecord
 }

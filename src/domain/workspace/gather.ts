@@ -45,13 +45,16 @@ export function gatherWorkspaceSnapshot(input: GatherWorkspaceInput): WorkspaceS
         available: availability.available,
         ...(availability.reason ? { reason: availability.reason } : {}),
       })),
-    registry: (ctx.get('capabilityRegistry') as { list(): { owner: string; version: string; provenance: { kind: string }; status: string; capabilities: { id: string }[] }[] } | undefined)
+    registry: (ctx.get('capabilityRegistry') as { list(): { owner: string; version: string; provenance: { kind: string }; status: string; capabilities: { id: string }[]; permissions?: readonly string[]; provider?: string; providers?: readonly string[] }[] } | undefined)
       ?.list().map((record) => ({
         owner: record.owner,
         version: record.version,
         provenance: record.provenance.kind,
         status: record.status,
         capabilities: record.capabilities.map((item) => item.id),
+        ...(record.permissions ? { permissions: [...record.permissions] } : {}),
+        ...(record.provider ? { provider: record.provider } : {}),
+        ...(record.providers ? { providers: [...record.providers] } : {}),
       })) ?? [],
     extensionApprovals: extensionApprovals(ctx),
     memory: (ctx.get('personalMemory') as { query(): { records: { id: string; statement: string; topicKey: string; status: string }[] } } | undefined)
