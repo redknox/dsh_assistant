@@ -6,6 +6,7 @@ import { describe, it } from 'node:test'
 import { CallId } from '@deepseek-ai/dsh-llm'
 import { CandidateService } from '../src/domain/candidate/index.js'
 import {
+  GENERATED_EXTENSION_API_V1,
   WORKBENCH_MAX_FILE_BYTES,
   WORKBENCH_MAX_FILE_COUNT,
   WORKBENCH_MAX_LIST_DEPTH,
@@ -15,14 +16,17 @@ import {
   WorkbenchRepairRollbackError,
   WorkbenchService,
   parseWorkbenchRiskModel,
+  projectValidationDiagnostics,
   type WorkbenchPersistState,
 } from '../src/domain/workbench/index.js'
+import { WORKBENCH_CONVERSATION_GUIDANCE } from '../src/plugins/workbench-plugin.js'
 import { googleCalendarWriteRiskModel } from '../src/domain/reliability/index.js'
 import { RecoveryRoot } from '../src/domain/governance/index.js'
 import { InMemoryRegistryPersistence, RegistryService, bootstrapCoreInventory } from '../src/domain/registry/index.js'
 import { ResolutionService } from '../src/domain/resolution/index.js'
 import { PolicyReviewerProvider, ReviewService, finding, reviewPackageFromCandidate } from '../src/domain/review/index.js'
 import { projectMissionControl } from '../src/domain/workspace/index.js'
+import { PRODUCT_TOOL_NAMES } from '../src/product/bundle.js'
 import { bootAssistantControl, bootSafeModeRuntime } from '../src/runtime/boot.js'
 import { gatherWorkspaceSnapshot } from '../src/domain/workspace/gather.js'
 
@@ -719,12 +723,144 @@ describe('candidate workbench', () => {
     const { ctx } = await bootSafeModeRuntime()
     try {
       assert.equal(ctx.tools.get('create_candidate'), undefined)
+      assert.equal(ctx.tools.get('scaffold_candidate'), undefined)
       assert.equal(ctx.tools.get('write_candidate_file'), undefined)
       assert.equal(ctx.tools.get('request_extension_approval'), undefined)
       assert.ok(ctx.tools.get('inspect_extension_governance'))
-      assert.equal(ctx.get('candidateWorkbench'), undefined)
+      assert.ok(ctx.tools.get('inspect_authoring_contract'))
+      assert.ok(ctx.tools.get('list_workbench'))
+      assert.ok(ctx.tools.get('inspect_candidate'))
+      assert.ok(ctx.get('candidateWorkbench'))
     } finally {
       await ctx.fiber.dispose()
+    }
+  })
+
+  it('A. host contract and scaffold stay inactive and refuse overwrite', async () => {
+    const { ctx } = await bootAssistantControl()
+    try {
+      const assembly = await ctx.systemPrompt.assemble()
+      assert.match(assembly.sections.map((item) => item.text).join('\n'), /resolve first/)
+      assert.match(WORKBENCH_CONVERSATION_GUIDANCE, /Never treat "build this" as approve/)
+      const bad = await tool(ctx, 'inspect_authoring_contract', { version: 'generated-extension-api/v99' })
+      assert.equal(bad.isError, true)
+      const contract = parse(await tool(ctx, 'inspect_authoring_contract', {}))
+      assert.equal(contract.id, GENERATED_EXTENSION_API_V1)
+      assert.deepEqual(contract.brokerOps, [])
+      const plan = parse(await tool(ctx, 'plan_capability_change', {
+        capability: 'text.slugify',
+        need: 'lowercase URL-safe slug',
+      }))
+      assert.equal(plan.kind, 'new-plugin')
+      const created = parse(await tool(ctx, 'create_candidate', { planId: plan.planId }))
+      const id = String(created.id)
+      parse(await tool(ctx, 'scaffold_candidate', {
+        candidateId: id,
+        toolName: 'text_slugify',
+        toolDescription: 'Lowercase URL-safe slug',
+      }))
+      const again = await tool(ctx, 'scaffold_candidate', { candidateId: id, toolName: 'other_tool' })
+      assert.equal(again.isError, true)
+      assert.match(JSON.stringify(again), /overwrite/)
+      const pkg = JSON.parse(ctx.candidateWorkbench.readFile(id, 'package.json')) as { scripts?: unknown; dependencies?: unknown }
+      assert.equal(pkg.scripts, undefined)
+      assert.equal(pkg.dependencies, undefined)
+      assert.equal(ctx.candidateWorkbench.readFile(id, 'generated-extension-api.json').includes(GENERATED_EXTENSION_API_V1), true)
+      ctx.candidateWorkbench.writeFile(id, 'generated-extension-api.json', `${JSON.stringify({ version: 'generated-extension-api/v99' })}\n`)
+      const failed = parse(await tool(ctx, 'validate_candidate', { candidateId: id }))
+      assert.equal((failed.validation as { passed: boolean }).passed, false)
+      assert.ok(((failed.validation as { failed: string[] }).failed).includes('runtime.contract'))
+      assert.equal(ctx.capabilityRegistry.get('generated/text-slugify', '0.1.0'), undefined)
+      const inventory = JSON.stringify([...PRODUCT_TOOL_NAMES, ...Object.keys(ctx.tools)])
+      assert.doesNotMatch(inventory, /approve_extension|activate_extension|rollback_extension|shell|sandbox-root/)
+    } finally {
+      await ctx.fiber.dispose()
+    }
+  })
+
+  it('B. validation diagnostics stay bounded and repair does not mutate the parent', () => {
+    const view = projectValidationDiagnostics({
+      id: 'cand-diag',
+      workspaceRoot: '/Users/konghaifeng/secret/candidate',
+      validation: {
+        candidateId: 'cand-diag',
+        digest: 'abc',
+        passed: false,
+        unresolved: [],
+        blocked: [],
+        stages: [{
+          name: 'typecheck',
+          status: 'failed',
+          summary: 'Typecheck failed at /Users/konghaifeng/secret/candidate/src/bad.ts',
+          startedAt: '2026-08-23T00:00:00.000Z',
+          endedAt: '2026-08-23T00:00:00.000Z',
+          evidence: 'Implemented',
+          diagnostics: `/Users/konghaifeng/secret/candidate/src/bad.ts TOKEN=supersecret ${'x'.repeat(4000)}`,
+        }],
+      },
+    })
+    const rendered = JSON.stringify(view)
+    assert.doesNotMatch(rendered, /\/Users\/konghaifeng/)
+    assert.doesNotMatch(rendered, /supersecret/)
+    assert.equal(view.truncated, true)
+    assert.match(view.stages[0]?.diagnostic ?? '', /\[truncated\]/)
+    assert.equal(view.stages[0]?.file, 'src/bad.ts')
+
+    const policy = new PolicyReviewerProvider((pkg) => [finding({
+      reviewedDigest: pkg.candidate.digest,
+      severity: 'BLOCKER',
+      category: 'acceptance-contract',
+      claim: 'needs-repair',
+      location: 'policy',
+      evidence: 'forced',
+      whyItMatters: 'diagnostics',
+      requiredRemediation: 'fix',
+      status: 'open',
+    })])
+    const blocked = isolatedWorkbench(policy)
+    const blockedParent = authorIsolated(blocked)
+    blocked.workbench.review(blockedParent)
+    const child = blocked.workbench.repair(blockedParent)
+    const listed = blocked.workbench.list()
+    assert.ok(listed.candidates.some((item) => item.id === child.id && item.parentId === blockedParent))
+    assert.throws(() => blocked.workbench.writeFile(blockedParent, 'src/plugin.js', 'mutated'), WorkbenchContractError)
+    assert.equal(blocked.workspace.get(blockedParent).sealed, true)
+  })
+
+  it('C. list/resume works after a real home restart and leftover stays visible', async () => {
+    const home = mkdtempSync(path.join(tmpdir(), 'dsh-wb-m6c-'))
+    const first = await bootAssistantControl({ home })
+    let candidateId = ''
+    try {
+      const plan = parse(await tool(first.ctx, 'plan_capability_change', {
+        capability: 'text.slugify',
+        need: 'lowercase URL-safe slug',
+      }))
+      const created = parse(await tool(first.ctx, 'create_candidate', { planId: plan.planId }))
+      candidateId = String(created.id)
+      parse(await tool(first.ctx, 'scaffold_candidate', { candidateId }))
+    } finally {
+      await first.ctx.fiber.dispose()
+    }
+    const second = await bootAssistantControl({ home })
+    try {
+      const listed = parse(await tool(second.ctx, 'list_workbench', { limit: 20 }))
+      const rendered = JSON.stringify(listed)
+      assert.doesNotMatch(rendered, /workspaceRoot|\/Users\/|src\/plugin\.js/)
+      assert.ok((listed.candidates as { id: string }[]).some((item) => item.id === candidateId))
+      const inspected = parse(await tool(second.ctx, 'inspect_candidate', { candidateId }))
+      assert.equal(inspected.owner, 'generated/text-slugify')
+      assert.equal(inspected.contractVersion, GENERATED_EXTENSION_API_V1)
+    } finally {
+      await second.ctx.fiber.dispose()
+    }
+    const safe = await bootSafeModeRuntime({ home })
+    try {
+      parse(await tool(safe.ctx, 'list_workbench', {}))
+      parse(await tool(safe.ctx, 'inspect_candidate', { candidateId }))
+      assert.equal(safe.ctx.tools.get('scaffold_candidate'), undefined)
+    } finally {
+      await safe.ctx.fiber.dispose()
     }
   })
 })

@@ -71,7 +71,7 @@ Normative. Details: [docs/self-extension.md](./docs/self-extension.md).
 5. Writing code is not authorization to execute or mount that code.
 6. The Capability Registry is descriptive only. Resolution is advisory. Validation is evidence. Approval is a trusted-control record for an exact digest/diff. Activation is transactional. The assistant must not approve itself or rewrite the recovery root.
 7. TARS-NG personality is expression and initiative, never authorization. Personality configuration must not grant capability, change permissions, mint approval, activate extensions, or alter Recovery/Bootstrap authority.
-8. Candidate Workbench tools are development authority only. They cannot approve, activate, recover, write outside the managed candidate area, or treat `local.sandbox.*` as a Generated Runtime `host.*` grant. Human approval still requires Independent Review `review-complete` for the current digest.
+8. Candidate Workbench tools are development authority only. They cannot approve, activate, recover, write outside the managed candidate area, or treat `local.sandbox.*` as a Generated Runtime `host.*` grant. Human approval still requires Independent Review `review-complete` for the current digest. A user saying "build this" is not approval. Read `generated-extension-api/v1` before scaffolding.
 
 ## 9. Non-goals (engineering)
 

@@ -18,6 +18,10 @@ export class CandidateWorkbenchService extends Service implements CandidateWorkb
   getPlan(planId: string) { return this.store.getPlan(planId) }
   create(input: Parameters<CandidateWorkbench['create']>[0]) { return this.store.create(input) }
   inspect(candidateId: string) { return this.store.inspect(candidateId) }
+  inspectAuthoringContract(version?: string) { return this.store.inspectAuthoringContract(version) }
+  scaffold(input: Parameters<CandidateWorkbench['scaffold']>[0]) { return this.store.scaffold(input) }
+  inspectValidation(candidateId: string) { return this.store.inspectValidation(candidateId) }
+  list(input?: Parameters<CandidateWorkbench['list']>[0]) { return this.store.list(input) }
   listFiles(candidateId: string) { return this.store.listFiles(candidateId) }
   readFile(candidateId: string, relativePath: string) { return this.store.readFile(candidateId, relativePath) }
   writeFile(candidateId: string, relativePath: string, content: string) {
@@ -34,7 +38,22 @@ export class CandidateWorkbenchService extends Service implements CandidateWorkb
   requestApproval(candidateId: string) { return this.store.requestApproval(candidateId) }
 }
 
-export interface WorkbenchPluginConfig extends WorkbenchServiceOptions {}
+export interface WorkbenchPluginConfig extends WorkbenchServiceOptions {
+  readonly inspectOnly?: boolean
+}
+
+export const WORKBENCH_CONVERSATION_GUIDANCE = [
+  'When the user asks to add a missing capability: resolve first with plan_capability_change.',
+  'Prefer reuse, configure, or evolve an existing owner before new-plugin.',
+  'Use Candidate Workbench tools. Read inspect_authoring_contract before scaffolding.',
+  'Use scaffold_candidate, then bounded edits, then inspect_validation_diagnostics.',
+  'Repair only by creating a new revision; never mutate a sealed parent.',
+  'Request approval only after Independent Review is review-complete for the current digest.',
+  'Tell the user human approval is still required. review-complete is NOT APPROVED.',
+  'Never say you cannot create plugins when Workbench tools exist.',
+  'Never treat "build this" as approve or activate. Writing code is not authorization.',
+  'Generated code runs only after a human approves and activates, inside the isolated runner.',
+].join(' ')
 
 export const name = 'dsh-assistant-workbench'
 export const inject = [
@@ -65,7 +84,7 @@ export async function apply(ctx: Context, config: WorkbenchPluginConfig = {}) {
   ctx.systemPrompt.section({
     name: 'product:candidate-workbench',
     order: 45,
-    text: 'Candidate Workbench tools author a governed extension candidate. Proposal/plan tools do not execute. Writing candidate files is development authority only, never install or approval authority. Independent Review review-complete is NOT APPROVED. Only a human through Recovery Root / Mission-Control can approve and activate. Execution of generated code uses the isolated runner. Do not use the operator sandbox as a build workspace.',
+    text: WORKBENCH_CONVERSATION_GUIDANCE,
   })
-  ctx.effect(() => registerWorkbenchTools(ctx.tools, workbench))
+  ctx.effect(() => registerWorkbenchTools(ctx.tools, workbench, { inspectOnly: config.inspectOnly }))
 }

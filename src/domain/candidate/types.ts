@@ -24,6 +24,7 @@ export type ValidationStageStatus = (typeof VALIDATION_STAGE_STATUSES)[number]
 export const ALLOWED_VALIDATION_TASKS = [
   'manifest.validate',
   'package.inspect',
+  'runtime.contract',
   'source.boundary',
   'typecheck',
   'tests',

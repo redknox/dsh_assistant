@@ -649,6 +649,9 @@ export function apply(ctx) {
           reviewState: 'review-complete',
           blockingFindings: 0,
           canRequestApproval: true,
+          currentStep: 'request',
+          approvalState: 'ready-for-approval',
+          validationFailureSummary: undefined,
           effectSummary: [
             'remote-side-effect mutate',
             'calendar.google',
@@ -691,6 +694,8 @@ export function apply(ctx) {
     assert.match(workbench, /generated\/r0-workbench-ping@0.1.0/)
     assert.match(workbench, /r0.workbench.ping/)
     assert.match(workbench, /can request approval/)
+    assert.match(workbench, /step request/)
+    assert.match(workbench, /ready for approval/)
     assert.match(workbench, /\+r0.workbench.ping/)
     assert.match(workbench, /remote-side-effect mutate/)
     assert.match(workbench, /workspace\/notes/)

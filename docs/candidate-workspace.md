@@ -76,11 +76,12 @@ Default stages, each with an explicit status (`passed` / `failed` / `blocked` / 
 1. `manifest.validate`
 2. `reliability.gate` — risk class + Risk Model. R0 may use a synthesized low-risk model; R1+ fail closed without mandatory reliability evidence. See [docs/engineering-reliability.md](./engineering-reliability.md).
 3. `package.inspect` — dependencies are inspectable. Install/postinstall scripts are **not** executed and make the stage `blocked`.
-4. `source.boundary` — no DSH package-internal `src/` imports
-5. `typecheck` — offline TypeScript check when `.ts` sources exist
-6. `tests` — Node-native candidate test files (`.js` / `.mjs` / `.cjs`) run only inside an OS/process sandbox that denies network at the system layer (macOS `sandbox-exec` / Linux `unshare --user --map-root-user --net`), plus `node --permission` for workspace-only filesystem and no child-process flag. The runner probes that a sandboxed process can start before treating the sandbox as available; EPERM / policy-disabled startup is `unresolved`, never host execution. The runner does not inherit host `process.env`. Candidate runtime permissions are not validation-time permissions. TypeScript-only test files stay `unresolved`. If that OS sandbox is unavailable, the stage stays `unresolved` rather than executing candidate code on the host. A failing or denied suite is `failed`. Network denial is not implemented by patching Node APIs. GitHub Actions Ubuntu runners enable unprivileged user namespaces before tests so this sandbox can start.
-7. `bundle.inspect`
-8. `digest` — SHA-256 of candidate source files
+4. `runtime.contract` — host stamp `generated-extension-api.json` must be `generated-extension-api/v1` when present. Unsupported versions fail closed.
+5. `source.boundary` — no DSH package-internal `src/` imports
+6. `typecheck` — offline TypeScript check when `.ts` sources exist
+7. `tests` — Node-native candidate test files (`.js` / `.mjs` / `.cjs`) run only inside an OS/process sandbox that denies network at the system layer (macOS `sandbox-exec` / Linux `unshare --user --map-root-user --net`), plus `node --permission` for workspace-only filesystem and no child-process flag. The runner probes that a sandboxed process can start before treating the sandbox as available; EPERM / policy-disabled startup is `unresolved`, never host execution. The runner does not inherit host `process.env`. Candidate runtime permissions are not validation-time permissions. TypeScript-only test files stay `unresolved`. If that OS sandbox is unavailable, the stage stays `unresolved` rather than executing candidate code on the host. A failing or denied suite is `failed`. Network denial is not implemented by patching Node APIs. GitHub Actions Ubuntu runners enable unprivileged user namespaces before tests so this sandbox can start.
+8. `bundle.inspect`
+9. `digest` — SHA-256 of candidate source files
 
 Independent Review is a separate host-managed stage after validation. It binds to that digest and cannot approve or activate. See [docs/independent-review.md](./independent-review.md).
 
@@ -94,10 +95,10 @@ A candidate becomes `validated` only when every required stage is `passed` or ex
 ctx.candidateWorkspace.create / writeFile / diff / seal / discard
 ctx.candidateValidation.validate
 ctx.independentReview.review / reviewCandidate / status
-ctx.candidateWorkbench.plan / create / writeFile / validate / seal / review / repair
+ctx.candidateWorkbench.plan / create / scaffold / inspectValidation / list / writeFile / validate / seal / review / repair
 ```
 
-Model-facing Workbench tools (`plan_capability_change`, `create_candidate`, `write_candidate_file`, `validate_candidate`, `seal_candidate`, `review_candidate`, `repair_candidate`) author only the selected managed candidate workspace. They do not install, approve, activate, or use the operator sandbox as a build area. Owner, version, and provenance come from a host-owned plan, never from caller-supplied review facts. See [docs/extension-governance.md](./extension-governance.md).
+Model-facing Workbench tools (`plan_capability_change`, `create_candidate`, `scaffold_candidate`, `inspect_authoring_contract`, `inspect_validation_diagnostics`, `list_workbench`, `write_candidate_file`, `validate_candidate`, `seal_candidate`, `review_candidate`, `repair_candidate`) author only the selected managed candidate workspace. They do not install, approve, activate, or use the operator sandbox as a build area. Owner, version, and provenance come from a host-owned plan, never from caller-supplied review facts. See [docs/extension-governance.md](./extension-governance.md).
 
 ## Relationship to Registry
 

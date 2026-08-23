@@ -21,7 +21,7 @@ v0.3.0 = Governance + Mission-Control product baseline
 v0.4.0 target = Self-Developing Product Baseline
 ```
 
-Self-development is allowed; self-authorization is not. The Candidate Workbench is a bounded authoring/review/request loop; it is not self-approval or arbitrary software development.
+Self-development is allowed; self-authorization is not. The Candidate Workbench is a bounded conversation-to-review loop (`generated-extension-api/v1` + host scaffold + diagnostics + list/resume). It is not self-approval or arbitrary software development. Real-model soak: [docs/m6c-conversation-soak.md](./m6c-conversation-soak.md).
 
 The v0.1.0 Assistant Core MVP remains the stable product/runtime baseline underneath Self-Extension. Self-Extension sits beside that baseline; it does not replace it. v0.2.0 is the Governed Self-Extension baseline. v0.3.0 is the historical Governance + Mission-Control baseline.
 

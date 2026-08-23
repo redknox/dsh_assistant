@@ -65,6 +65,27 @@ function inspectPackage(root: string): ValidationStageResult {
   )
 }
 
+function inspectRuntimeContract(root: string): ValidationStageResult {
+  const stamp = path.join(root, 'generated-extension-api.json')
+  if (!existsSync(stamp)) {
+    return stage('runtime.contract', 'not-applicable', 'No host authoring-contract stamp.')
+  }
+  try {
+    const parsed = JSON.parse(readFileSync(stamp, 'utf8')) as { version?: string }
+    if (parsed.version !== 'generated-extension-api/v1') {
+      return stage(
+        'runtime.contract',
+        'failed',
+        `Unsupported authoring contract ${String(parsed.version)}.`,
+        { diagnostics: 'unsupported-contract-version' },
+      )
+    }
+    return stage('runtime.contract', 'passed', 'Host authoring contract generated-extension-api/v1.')
+  } catch {
+    return stage('runtime.contract', 'failed', 'Authoring-contract stamp is not valid JSON.')
+  }
+}
+
 function inspectBoundary(root: string, files: readonly string[]): ValidationStageResult {
   const sources = files.filter((file) => file.endsWith('.ts') || file.endsWith('.js'))
   if (sources.length === 0) {
@@ -186,6 +207,7 @@ export function runValidation(record: CandidateRecord): ValidationReport {
     { diagnostics: JSON.stringify({ derivedClass: reliability.derivedClass, checks: reliability.checks }) },
   ))
   stages.push(inspectPackage(record.workspaceRoot))
+  stages.push(inspectRuntimeContract(record.workspaceRoot))
   stages.push(inspectBoundary(record.workspaceRoot, files))
   stages.push(runTypecheck(record.workspaceRoot, files))
   stages.push(runTests(record.workspaceRoot, files))

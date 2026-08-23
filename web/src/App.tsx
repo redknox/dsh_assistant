@@ -367,13 +367,24 @@ function WorkbenchPanel(props: { readonly candidates: readonly WorkbenchProjecti
             <div className="workbench-meta">
               {item.resolutionKind ?? 'unresolved'} {item.resolutionCapability ?? ''}
             </div>
+            <div className="workbench-meta" data-current-step={item.currentStep ?? 'author'}>
+              step {item.currentStep ?? item.lifecycle}
+              {item.parentId ? ` · repair of ${item.parentId}` : ''}
+              {item.leftover ? ' · leftover repair' : ''}
+            </div>
             <div className="workbench-meta">
-              validation {item.validationPassed === true ? 'passed' : item.validationFailed?.join(', ') || item.lifecycle}
+              validation {item.validationPassed === true ? 'passed' : item.validationFailureSummary || item.validationFailed?.join(', ') || item.lifecycle}
             </div>
             <div className="workbench-meta">
               review {item.reviewState ?? 'not-reviewed'}
               {item.blockingFindings ? ` · ${item.blockingFindings} blockers` : ''}
               {item.blockerClaims?.length ? ` (${item.blockerClaims.join(', ')})` : ''}
+            </div>
+            <div className="workbench-meta" data-approval-state={item.approvalState ?? 'not-ready'}>
+              {item.approvalState === 'active' ? 'approved/active'
+                : item.approvalState === 'approved' ? 'approved, not active'
+                  : item.approvalState === 'approval-requested' || item.canRequestApproval ? 'ready for approval'
+                    : 'not ready for approval'}
             </div>
             <div className="workbench-diff">
               capabilities {formatDiff(item.diff?.capabilities.added ?? [], item.diff?.capabilities.removed ?? [])}

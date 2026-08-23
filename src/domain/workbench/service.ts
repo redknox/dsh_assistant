@@ -2,14 +2,26 @@ import { closeSync, existsSync, lstatSync, openSync, opendirSync, readFileSync, 
 import { createHash } from 'node:crypto'
 import path from 'node:path'
 import { defaultProvenance } from '../candidate/manifest.js'
+import { DEFAULT_RESOLUTION_INVENTORY } from '../resolution/inventory.js'
 import { resolveInsideRoot } from '../candidate/paths.js'
 import { SealedCandidateError } from '../candidate/errors.js'
 import type { CandidateManifest, CandidateManifestInput, CandidateRecord, CandidateValidation, CandidateWorkspace } from '../candidate/types.js'
 import type { ExtensionGovernance } from '../governance/types.js'
 import type { CapabilityResolution, ResolutionReview } from '../resolution/types.js'
 import type { IndependentReview, ReviewReport } from '../review/types.js'
+import { AUTHORING_CONTRACT_STAMP, assertSupportedAuthoringContract, authoringContractV1 } from './authoring-contract.js'
+import { projectValidationDiagnostics } from './diagnostics.js'
 import { WorkbenchContractError, WorkbenchRepairRollbackError } from './errors.js'
+import {
+  boundListLimit,
+  candidateStates,
+  candidateStep,
+  isLeftoverRepair,
+  parseListCursor,
+  type WorkbenchListView,
+} from './listing.js'
 import { parseWorkbenchRiskModel } from './risk-model.js'
+import { parseScaffoldNames, scaffoldFiles } from './scaffold.js'
 import {
   WORKBENCH_CHANGE_KINDS,
   WORKBENCH_MAX_FILE_BYTES,
@@ -20,9 +32,11 @@ import {
   type CandidateWorkbench,
   type WorkbenchCandidateView,
   type WorkbenchCreateInput,
+  type WorkbenchListInput,
   type WorkbenchPersistState,
   type WorkbenchPlan,
   type WorkbenchPlanView,
+  type WorkbenchScaffoldInput,
   type WorkbenchServiceOptions,
 } from './types.js'
 
@@ -63,6 +77,7 @@ export class WorkbenchService implements CandidateWorkbench {
       capability: input.capability,
       need: input.need,
       behavior: input.behavior,
+      inventory: { complete: true, seams: DEFAULT_RESOLUTION_INVENTORY.seams },
     })
     return this.rememberPlan(review)
   }
@@ -136,6 +151,95 @@ export class WorkbenchService implements CandidateWorkbench {
       },
       diff: this.workspace.diff(record.id),
       requestEligibility: this.governance.requestEligibility(record.id),
+      step: this.stepOf(record.id),
+      leftover: this.leftoverOf(record),
+      contractVersion: readContractVersion(record.workspaceRoot),
+    }
+  }
+
+  inspectAuthoringContract(version?: string) {
+    try {
+      assertSupportedAuthoringContract(version)
+    } catch (error) {
+      throw new WorkbenchContractError(error instanceof Error ? error.message : String(error))
+    }
+    return authoringContractV1()
+  }
+
+  scaffold(input: WorkbenchScaffoldInput): WorkbenchCandidateView {
+    const record = this.workspace.get(input.candidateId)
+    if (record.sealed) throw new WorkbenchContractError('cannot scaffold a sealed candidate')
+    const plan = this.bindings.get(record.id)?.planId === undefined
+      ? undefined
+      : this.plans.get(this.bindings.get(record.id)!.planId)
+    const capability = record.manifest.resolutionCapability
+    const names = parseScaffoldNames({
+      owner: record.owner,
+      capability,
+      toolName: input.toolName,
+      toolDescription: input.toolDescription,
+      capabilityOverride: input.capability,
+    })
+    if (plan && input.capability !== undefined && input.capability !== plan.review.capability) {
+      throw new WorkbenchContractError('scaffold capability must match the host plan')
+    }
+    const files = scaffoldFiles(names)
+    for (const [relative, content] of Object.entries(files)) {
+      const existing = tryRead(this.workspace, record.id, relative)
+      if (existing !== undefined && existing.trim() !== '' && existing !== content) {
+        throw new WorkbenchContractError(`refusing to overwrite non-empty candidate file: ${relative}`)
+      }
+    }
+    for (const [relative, content] of Object.entries(files)) {
+      this.writeFile(record.id, relative, content)
+    }
+    this.setManifest(record.id, {
+      capabilities: record.manifest.capabilities.length > 0 ? [...record.manifest.capabilities] : [capability],
+      tools: record.manifest.tools.length > 0 ? [...record.manifest.tools] : [names.toolName],
+      entryPoints: record.manifest.entryPoints.length > 0 ? [...record.manifest.entryPoints] : ['src/plugin.js'],
+    })
+    return this.inspect(record.id)
+  }
+
+  inspectValidation(candidateId: string) {
+    return projectValidationDiagnostics(this.workspace.get(candidateId))
+  }
+
+  list(input: WorkbenchListInput = {}): WorkbenchListView {
+    const limit = boundListLimit(input.limit)
+    const offset = parseListCursor(input.cursor)
+    const plans = [...this.plans.values()].map((plan) => ({
+      planId: plan.id,
+      kind: plan.review.kind,
+      capability: plan.review.capability,
+      need: plan.review.need,
+      canCreate: WORKBENCH_CHANGE_KINDS.includes(plan.review.kind as (typeof WORKBENCH_CHANGE_KINDS)[number]),
+    }))
+    const candidates = this.workspace.list().map((record) => {
+      const view = this.inspect(record.id)
+      return {
+        id: record.id,
+        owner: record.owner,
+        version: record.version,
+        states: candidateStates({
+          lifecycle: record.lifecycle,
+          sealed: record.sealed,
+          reviewState: view.review?.state,
+          approval: this.governance.inspectApproval(record.id)?.decision,
+          registryStatus: undefined,
+        }),
+        step: view.step,
+        planId: view.planId,
+        parentId: view.parentId,
+        leftover: view.leftover,
+      }
+    })
+    const slice = candidates.slice(offset, offset + limit)
+    const next = offset + limit < candidates.length ? String(offset + limit) : undefined
+    return {
+      plans: plans.slice(0, limit),
+      candidates: slice,
+      ...(next === undefined ? {} : { nextCursor: next }),
     }
   }
 
@@ -327,6 +431,28 @@ export class WorkbenchService implements CandidateWorkbench {
 
   requestApproval(candidateId: string) {
     return this.governance.requestApproval(candidateId)
+  }
+
+  private leftoverOf(record: CandidateRecord): boolean {
+    const parentId = this.bindings.get(record.id)?.parentId
+    let files: readonly string[] = []
+    try {
+      files = listBoundedFiles(record.workspaceRoot)
+    } catch {
+      return Boolean(parentId)
+    }
+    return isLeftoverRepair(record, parentId, files)
+  }
+
+  private stepOf(candidateId: string) {
+    const record = this.workspace.get(candidateId)
+    return candidateStep({
+      lifecycle: record.lifecycle,
+      sealed: record.sealed,
+      reviewState: this.independentReview.status({ id: record.id, digest: record.digest }),
+      canRequest: this.governance.requestEligibility(record.id).ok,
+      approval: this.governance.inspectApproval(record.id)?.decision,
+    })
   }
 }
 
@@ -529,6 +655,29 @@ function listBoundedFiles(root: string): string[] {
   }
   if (existsSync(root) && lstatSync(root).isDirectory()) walk(root, '', 0)
   return files.sort()
+}
+
+function tryRead(
+  workspace: CandidateWorkspace,
+  candidateId: string,
+  relativePath: string,
+): string | undefined {
+  try {
+    return workspace.readFile(candidateId, relativePath)
+  } catch {
+    return undefined
+  }
+}
+
+function readContractVersion(root: string): string | undefined {
+  const dest = path.join(root, AUTHORING_CONTRACT_STAMP)
+  if (!existsSync(dest)) return undefined
+  try {
+    const parsed = JSON.parse(readFileSync(dest, 'utf8')) as { version?: string }
+    return typeof parsed.version === 'string' ? parsed.version : undefined
+  } catch {
+    return undefined
+  }
 }
 
 export function readBoundedFile(root: string, relativePath: string): string {

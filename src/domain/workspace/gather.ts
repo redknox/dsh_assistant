@@ -181,6 +181,9 @@ function workbenchCandidates(ctx: Context): WorkspaceSnapshotInput['candidates']
     resolutionKind?: string
     resolutionCapability?: string
     sealed: boolean
+    parentId?: string
+    leftover?: boolean
+    step?: string
     validation?: { passed: boolean; failed: readonly string[] }
     review?: { state: string; blockingFindings: number }
     diff?: import('./types.js').WorkbenchProjection['diff']
@@ -223,6 +226,18 @@ function workbenchCandidates(ctx: Context): WorkspaceSnapshotInput['candidates']
         effectSummary: view.diff === undefined ? undefined : summarizeCandidateEffects(view.diff.effects),
         canRequestApproval: view.requestEligibility.ok,
         requestDenials: view.requestEligibility.denials.map((item) => item.reason),
+        currentStep: view.step,
+        validationFailureSummary: boundFailureSummary(view.validation?.failed),
+        parentId: view.parentId,
+        leftover: view.leftover,
+        approvalState: approvalStateOf({
+          canRequest: view.requestEligibility.ok,
+          decision: (ctx.get('extensionGovernance') as { inspectApproval?(id: string): { decision: string } | undefined } | undefined)
+            ?.inspectApproval?.(view.id)?.decision,
+          owner: view.owner,
+          version: view.version,
+          registry: ctx.get('capabilityRegistry') as { get(owner: string, version: string): { status: string } | undefined } | undefined,
+        }),
       }
     })
   }
@@ -304,4 +319,24 @@ function extensionApprovals(ctx: Context): WorkspaceSnapshotInput['extensionAppr
     })
   }
   return out
+}
+
+function boundFailureSummary(failed?: readonly string[]): string | undefined {
+  if (!failed?.length) return undefined
+  const text = failed.join(', ')
+  return text.length > 160 ? `${text.slice(0, 148)}[truncated]` : text
+}
+
+function approvalStateOf(input: {
+  readonly canRequest: boolean
+  readonly decision?: string
+  readonly owner: string
+  readonly version: string
+  readonly registry?: { get(owner: string, version: string): { status: string } | undefined }
+}): import('./types.js').WorkbenchProjection['approvalState'] {
+  if (input.registry?.get(input.owner, input.version)?.status === 'active') return 'active'
+  if (input.decision === 'approved-for-exact-diff') return 'approved'
+  if (input.decision === 'approval-requested') return 'approval-requested'
+  if (input.canRequest) return 'ready-for-approval'
+  return 'not-ready'
 }

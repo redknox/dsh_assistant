@@ -12,11 +12,84 @@ function textOutput() {
   }
 }
 
+export interface WorkbenchToolOptions {
+  readonly inspectOnly?: boolean
+}
+
 /** Model-facing development tools. Cannot approve, activate, recover, or leave the candidate area. */
 export function registerWorkbenchTools(
   tools: Pick<ToolRuntime, 'register'>,
   workbench: CandidateWorkbench,
+  options: WorkbenchToolOptions = {},
 ): () => void {
+  const disposeInspectContract = tools.register(defineTool({
+    name: 'inspect_authoring_contract',
+    description: 'Read the host-owned generated-extension-api/v1 authoring contract. Unsupported versions fail closed.',
+    parameters: { version: { type: 'string' } },
+    output: textOutput(),
+    async execute(args) {
+      return JSON.stringify(workbench.inspectAuthoringContract(
+        typeof args.version === 'string' && args.version !== '' ? String(args.version) : undefined,
+      ))
+    },
+  }))
+
+  const disposeListWorkbench = tools.register(defineTool({
+    name: 'list_workbench',
+    description: 'List host-owned plans and candidates after context loss. No paths or source. Pagination is bounded.',
+    parameters: {
+      limit: { type: 'number' },
+      cursor: { type: 'string' },
+    },
+    output: textOutput(),
+    async execute(args) {
+      return JSON.stringify(workbench.list({
+        limit: typeof args.limit === 'number' ? args.limit : undefined,
+        cursor: typeof args.cursor === 'string' ? args.cursor : undefined,
+      }))
+    },
+  }))
+
+  const disposeInspectValidation = tools.register(defineTool({
+    name: 'inspect_validation_diagnostics',
+    description: 'Bounded per-stage validation diagnostics. Host evidence only. No absolute paths or secrets.',
+    parameters: { candidateId: { type: 'string', required: true } },
+    output: textOutput(),
+    async execute(args) {
+      return JSON.stringify(workbench.inspectValidation(String(args.candidateId)))
+    },
+  }))
+
+  const disposeInspect = tools.register(defineTool({
+    name: 'inspect_candidate',
+    description: 'Inspect host-owned candidate status, validation, review, and approval-request eligibility. Read-only.',
+    parameters: { candidateId: { type: 'string', required: true } },
+    output: textOutput(),
+    async execute(args) {
+      return JSON.stringify(workbench.inspect(String(args.candidateId)))
+    },
+  }))
+
+  const disposeInspectReview = tools.register(defineTool({
+    name: 'inspect_candidate_review',
+    description: 'Inspect Independent Review state for a candidate. Read-only.',
+    parameters: { candidateId: { type: 'string', required: true } },
+    output: textOutput(),
+    async execute(args) {
+      return JSON.stringify(workbench.inspectReview(String(args.candidateId)))
+    },
+  }))
+
+  if (options.inspectOnly) {
+    return () => {
+      disposeInspectContract()
+      disposeListWorkbench()
+      disposeInspectValidation()
+      disposeInspect()
+      disposeInspectReview()
+    }
+  }
+
   const disposePlan = tools.register(defineTool({
     name: 'plan_capability_change',
     description: 'Host-owned Capability Resolution for a requested change. Stores a plan id. Does not create or approve a plugin.',
@@ -51,13 +124,23 @@ export function registerWorkbenchTools(
     },
   }))
 
-  const disposeInspect = tools.register(defineTool({
-    name: 'inspect_candidate',
-    description: 'Inspect host-owned candidate status, validation, review, and approval-request eligibility. Read-only.',
-    parameters: { candidateId: { type: 'string', required: true } },
+  const disposeScaffold = tools.register(defineTool({
+    name: 'scaffold_candidate',
+    description: 'Write the host-owned R0 scaffold. Model may supply only bounded names and descriptions. Does not execute candidate code.',
+    parameters: {
+      candidateId: { type: 'string', required: true },
+      toolName: { type: 'string' },
+      toolDescription: { type: 'string' },
+      capability: { type: 'string' },
+    },
     output: textOutput(),
     async execute(args) {
-      return JSON.stringify(workbench.inspect(String(args.candidateId)))
+      return JSON.stringify(workbench.scaffold({
+        candidateId: String(args.candidateId),
+        toolName: typeof args.toolName === 'string' ? args.toolName : undefined,
+        toolDescription: typeof args.toolDescription === 'string' ? args.toolDescription : undefined,
+        capability: typeof args.capability === 'string' ? args.capability : undefined,
+      }))
     },
   }))
 
@@ -155,16 +238,6 @@ export function registerWorkbenchTools(
     },
   }))
 
-  const disposeInspectReview = tools.register(defineTool({
-    name: 'inspect_candidate_review',
-    description: 'Inspect Independent Review state for a candidate. Read-only.',
-    parameters: { candidateId: { type: 'string', required: true } },
-    output: textOutput(),
-    async execute(args) {
-      return JSON.stringify(workbench.inspectReview(String(args.candidateId)))
-    },
-  }))
-
   const disposeRepair = tools.register(defineTool({
     name: 'repair_candidate',
     description: 'Create a new mutable revision from a sealed parent with changes-required review. Parent stays immutable.',
@@ -176,9 +249,14 @@ export function registerWorkbenchTools(
   }))
 
   return () => {
+    disposeInspectContract()
+    disposeListWorkbench()
+    disposeInspectValidation()
+    disposeInspect()
+    disposeInspectReview()
     disposePlan()
     disposeCreate()
-    disposeInspect()
+    disposeScaffold()
     disposeList()
     disposeRead()
     disposeWrite()
@@ -186,7 +264,6 @@ export function registerWorkbenchTools(
     disposeValidate()
     disposeSeal()
     disposeReview()
-    disposeInspectReview()
     disposeRepair()
   }
 }

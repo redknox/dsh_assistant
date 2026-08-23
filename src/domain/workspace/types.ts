@@ -146,6 +146,11 @@ export interface WorkbenchProjection {
   readonly effectSummary?: readonly string[]
   readonly canRequestApproval: boolean
   readonly requestDenials?: readonly string[]
+  readonly currentStep?: string
+  readonly validationFailureSummary?: string
+  readonly parentId?: string
+  readonly leftover?: boolean
+  readonly approvalState?: 'not-ready' | 'ready-for-approval' | 'approval-requested' | 'approved' | 'active'
 }
 
 export interface WorkspaceSnapshotInput {
