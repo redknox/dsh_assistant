@@ -51,6 +51,17 @@ function previewText(text: string, limit = 72): string {
   return compact.length > limit ? `${compact.slice(0, limit - 1)}…` : compact
 }
 
+function PlateRivets() {
+  return (
+    <>
+      <span className="rivet rivet--tl" aria-hidden="true" />
+      <span className="rivet rivet--tr" aria-hidden="true" />
+      <span className="rivet rivet--bl" aria-hidden="true" />
+      <span className="rivet rivet--br" aria-hidden="true" />
+    </>
+  )
+}
+
 function SystemHeader(props: {
   readonly identity: string
   readonly systemState: MissionControlView['systemState']
@@ -59,6 +70,7 @@ function SystemHeader(props: {
 }) {
   return (
     <header className="topbar" aria-label="System header">
+      <PlateRivets />
       <div className="brand-block">
         <span className="brand">{props.identity}</span>
         <span className="divider" aria-hidden="true">/</span>
@@ -333,6 +345,7 @@ function ControlStripView(props: {
   const safe = props.view.systemState === 'SAFE_MODE' || props.view.systemState === 'RECOVERY'
   return (
     <footer className="control-strip" aria-label="Runtime status" data-control-plane="user-workspace">
+      <PlateRivets />
       <div className="control-strip-row">
         <div>
           <Glyph name="chip" />
@@ -384,16 +397,6 @@ export function MissionControlScreen(props: {
   const locked = !props.connected
   return (
     <div className="chassis">
-      <span className="rivet rivet--tl" aria-hidden="true" />
-      <span className="rivet rivet--tr" aria-hidden="true" />
-      <span className="rivet rivet--bl" aria-hidden="true" />
-      <span className="rivet rivet--br" aria-hidden="true" />
-      <span className="rivet rivet--ml" aria-hidden="true" />
-      <span className="rivet rivet--mr" aria-hidden="true" />
-      <span className="rivet rivet--ctl" aria-hidden="true" />
-      <span className="rivet rivet--ctr" aria-hidden="true" />
-      <span className="rivet rivet--cbl" aria-hidden="true" />
-      <span className="rivet rivet--cbr" aria-hidden="true" />
     <div className="console" data-system-state={view.systemState} data-connected={props.connected ? 'yes' : 'no'}>
       <SystemHeader
         identity={view.identity}
