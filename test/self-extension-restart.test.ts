@@ -406,6 +406,11 @@ describe('Self-Extension durable restart', () => {
       assert.ok(upgraded.ctx.tools.get('restart_probe_alt'))
       assert.match(upgraded.recoveryRoot.inspect().lastFailure?.diagnostics ?? '', /legacy-authoring-contract/)
       assert.match(upgraded.recoveryRoot.inspect().lastFailure?.diagnostics ?? '', /migrate-authoring-contract/)
+      const withheld = upgraded.recoveryRoot.inspect()
+      assert.equal(withheld.integrityVerified, true)
+      assert.equal(withheld.recoveryRequired, false)
+      assertSnapshotsMatchActiveRegistry(withheld, upgraded.ctx.capabilityRegistry)
+      assert.equal(activeOwnerKeys(withheld.lastKnownGood).includes('generated/restart-probe@0.1.0'), false)
       const migrated = upgraded.recoveryRoot.migrateAuthoringContract(
         upgraded.recoveryRoot.issueAuthority({ kind: 'human-control', source: 'operator-cli' }),
         created.id,
@@ -431,6 +436,19 @@ describe('Self-Extension durable restart', () => {
       const activated = await upgraded.recoveryRoot.activate(migrated.id, operator)
       assert.equal(activated.state, 'active', activated.lastFailure?.diagnostics)
       assert.equal(await ping(upgraded.ctx), 'pong')
+      const rolled = await upgraded.recoveryRoot.rollback(operator)
+      assert.equal(rolled.state, 'rolled-back', rolled.lastFailure?.diagnostics)
+      assert.equal(rolled.safeMode, false)
+      assert.equal(rolled.integrityVerified, true)
+      assert.equal(rolled.recoveryRequired, false)
+      assert.equal(upgraded.ctx.tools.get('restart_probe_ping'), undefined)
+      assert.ok(upgraded.ctx.tools.get('restart_probe_alt'))
+      assert.notEqual(upgraded.ctx.capabilityRegistry.get('generated/restart-probe', '0.1.0')?.status, 'active')
+      assert.notEqual(upgraded.ctx.capabilityRegistry.get(migrated.owner, migrated.version)?.status, 'active')
+      assert.equal(upgraded.ctx.capabilityRegistry.get('generated/restart-probe-b', '0.1.0')?.status, 'active')
+      assertSnapshotsMatchActiveRegistry(rolled, upgraded.ctx.capabilityRegistry)
+      assert.equal(activeOwnerKeys(rolled.lastKnownGood).includes('generated/restart-probe@0.1.0'), false)
+      assert.equal(activeOwnerKeys(rolled.current).includes(`${migrated.owner}@${migrated.version}`), false)
     } finally {
       await upgraded.ctx.fiber.dispose()
     }
@@ -463,4 +481,28 @@ function downgradePersistedContractToMain6998205(home: string, candidateId: stri
   row.record.digest = digest
   if (row.record.validation) row.record.validation.digest = digest
   writeFileSync(paths.candidateIndexPath, `${JSON.stringify(index, null, 2)}\n`)
+}
+
+function activeOwnerKeys(snapshot?: { owners: readonly { owner: string; version: string; status: string }[] }): string[] {
+  return (snapshot?.owners ?? [])
+    .filter((item) => item.status === 'active')
+    .map((item) => `${item.owner}@${item.version}`)
+    .sort()
+}
+
+function assertSnapshotsMatchActiveRegistry(
+  status: {
+    current?: { owners: readonly { owner: string; version: string; status: string }[] }
+    lastKnownGood?: { owners: readonly { owner: string; version: string; status: string }[] }
+    rollbackTarget?: { owners: readonly { owner: string; version: string; status: string }[] }
+  },
+  registry: { list(): readonly { owner: string; version: string; status: string }[] },
+): void {
+  const active = registry.list()
+    .filter((item) => item.status === 'active')
+    .map((item) => `${item.owner}@${item.version}`)
+    .sort()
+  assert.deepEqual(activeOwnerKeys(status.current), active)
+  assert.deepEqual(activeOwnerKeys(status.lastKnownGood), active)
+  assert.deepEqual(activeOwnerKeys(status.rollbackTarget), active)
 }

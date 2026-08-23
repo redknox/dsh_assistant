@@ -426,7 +426,7 @@ export class GovernanceService implements ExtensionGovernance, ExtensionActivati
       await this.failClosedSafeMode([...fatal, ...withheld])
       return [...fatal, ...withheld]
     }
-    if (withheld.length > 0) this.recordLegacyContractWithhold(withheld)
+    if (withheld.length > 0) this.noteLegacyContractWithhold(withheld)
     for (const candidate of verified) {
       const prepared = await this.runtime.prepare(candidate.id, this.prepareContext(candidate))
       if (!prepared.ok) {
@@ -443,6 +443,7 @@ export class GovernanceService implements ExtensionGovernance, ExtensionActivati
       }
       await this.runtime.commit(candidate.id)
     }
+    if (withheld.length > 0) this.adoptVerifiedOperationalSnapshot()
     return withheld
   }
 
@@ -451,7 +452,7 @@ export class GovernanceService implements ExtensionGovernance, ExtensionActivati
     return this.lastKnownGood
   }
 
-  private recordLegacyContractWithhold(diagnostics: readonly string[]): void {
+  private noteLegacyContractWithhold(diagnostics: readonly string[]): void {
     this.lastFailure = {
       candidateId: this.pendingCandidateId ?? 'restart',
       version: '',
@@ -462,7 +463,14 @@ export class GovernanceService implements ExtensionGovernance, ExtensionActivati
       rollbackSucceeded: false,
       safeModeRequired: false,
     }
+  }
+
+  /** Verified reduced snapshot after withholding unremountable legacy owners. Not a silent v1 stamp. */
+  private adoptVerifiedOperationalSnapshot(): void {
     this.current = this.captureSnapshot()
+    this.lastKnownGood = this.current
+    this.rollbackTarget = this.current
+    this.integrityVerified = true
     this.flush()
   }
 
