@@ -32,7 +32,7 @@ Evaluate in this order. Stop at the first option that satisfies the need. Record
 
 1. **reuse** — an active owner already exposes the requested capability/behavior.
 2. **configure** — a supplied permission or configuration option on that owner would satisfy the need.
-3. **evolve-owner** — an active **replaceable** owner already covers the domain; produce a new candidate version instead of a helper/v2 plugin. Host-owned in-process owners that declare services/providers are not replaceable by isolated assistant-origin candidates.
+3. **evolve-owner** — an active **replaceable** owner already covers the domain; produce a new candidate version instead of a helper/v2 plugin. Host-owned in-process owners that declare services/providers are not replaceable by isolated assistant-origin candidates. After reuse/configure, any unsatisfied `ui.*` need is `host-product-change-required` and never evolve/adopt/provider.
 4. **adopt-existing** — an inactive candidate or a caller-supplied existing plugin already describes the capability.
 5. **implement-provider** — implement an adapter/provider behind an existing application/DSH seam.
 6. **host-product-change-required** — the need is WUI/frontend composition (`ui.*`) or a new capability on an irreplaceable host owner. Do not mint an isolated tool. Caller inventory, catalog plugins, and plugin `runtimeSeams` cannot invent a frontend-extension seam.

@@ -253,6 +253,30 @@ describe('capability resolution review', () => {
     }
   })
 
+  it('does not evolve a replaceable UI owner for new ui.markdown', () => {
+    const registry = new RegistryService(new InMemoryRegistryPersistence())
+    registry.register({
+      owner: 'generated/legacy-ui',
+      version: '0.1.0',
+      provenance: { kind: 'generated', origin: 'assistant' },
+      status: 'active',
+      evidence: 'Verified',
+      capabilities: [{ id: 'ui.control', permissions: [] }],
+      runtimeSeams: [],
+      tools: ['legacy_ui'],
+    })
+    const review = new ResolutionService(registry).review({
+      capability: 'ui.markdown',
+      need: 'render markdown',
+    })
+    assert.equal(review.kind, 'host-product-change-required')
+    rejected(review, 'reuse')
+    rejected(review, 'configure')
+    rejected(review, 'evolve-owner')
+    rejected(review, 'adopt-existing')
+    rejected(review, 'implement-provider')
+  })
+
   it('does not let a catalog plugin adopt ui.markdown', () => {
     const { resolver } = seededResolver()
     const review = resolver.review({

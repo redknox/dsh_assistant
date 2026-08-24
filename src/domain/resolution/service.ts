@@ -192,22 +192,12 @@ export class ResolutionService implements CapabilityResolution {
       }, `Change configuration/permissions on ${configure.owner}.`, 'The existing owner can satisfy the need if a known permission or config is enabled.', discoveryFacts)
     }
 
-    const evolveAccepted = domainOwner !== undefined && providerSwap === undefined && !hostOwnedIrreplaceable
-    steps.push(this.step('evolve-owner', evolveAccepted, evolveAccepted
-      ? `${domainOwner!.owner}@${domainOwner!.version} owns the ${domain} domain; evolve it instead of minting a parallel plugin.`
-      : hostOwnedIrreplaceable && domainOwner !== undefined
-        ? `${domainOwner.owner} is a host-owned in-process owner; isolated assistant-origin candidates cannot replace it.`
-        : 'No active owner in this capability domain.'))
-    if (evolveAccepted && domainOwner) {
-      return this.recommend(request, capability, 'evolve-owner', steps, exact, domainOwners, conflicts, {
-        owner: domainOwner.owner,
-        version: domainOwner.version,
-        seam: domainOwner.runtimeSeams[0],
-        provider: domainOwner.provider,
-      }, `Produce a new candidate version of ${domainOwner.owner}.`, 'An existing owner already covers this domain. The smallest change is a new candidate version, not a helper/v2 plugin.', discoveryFacts)
-    }
-
     if (isHostProductCapability(capability)) {
+      steps.push(this.step(
+        'evolve-owner',
+        false,
+        'WUI/frontend composition cannot be evolved as an isolated or replaceable candidate.',
+      ))
       steps.push(this.step(
         'adopt-existing',
         false,
@@ -235,6 +225,21 @@ export class ResolutionService implements CapabilityResolution {
         assumptions: [],
         unresolved: [],
       })
+    }
+
+    const evolveAccepted = domainOwner !== undefined && providerSwap === undefined && !hostOwnedIrreplaceable
+    steps.push(this.step('evolve-owner', evolveAccepted, evolveAccepted
+      ? `${domainOwner!.owner}@${domainOwner!.version} owns the ${domain} domain; evolve it instead of minting a parallel plugin.`
+      : hostOwnedIrreplaceable && domainOwner !== undefined
+        ? `${domainOwner.owner} is a host-owned in-process owner; isolated assistant-origin candidates cannot replace it.`
+        : 'No active owner in this capability domain.'))
+    if (evolveAccepted && domainOwner) {
+      return this.recommend(request, capability, 'evolve-owner', steps, exact, domainOwners, conflicts, {
+        owner: domainOwner.owner,
+        version: domainOwner.version,
+        seam: domainOwner.runtimeSeams[0],
+        provider: domainOwner.provider,
+      }, `Produce a new candidate version of ${domainOwner.owner}.`, 'An existing owner already covers this domain. The smallest change is a new candidate version, not a helper/v2 plugin.', discoveryFacts)
     }
 
     const adoptTarget = inactiveAdopt !== undefined
