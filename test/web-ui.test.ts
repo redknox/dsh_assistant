@@ -1589,6 +1589,10 @@ export function apply(ctx) {
         const plugin = ready.view.plugins.find((item) => item.owner === 'generated/text-slugify')
         assert.ok(plugin)
         assert.ok(ctx.tools.get('text_slugify'))
+        const activeRow = ready.view.extensions.find((item) => item.owner === 'generated/text-slugify')
+        assert.equal(activeRow?.lifecycle, 'ACTIVE')
+        assert.equal(activeRow?.eligibilityDenials.includes('approval-stale'), false)
+        assert.equal(ctx.extensionGovernance.eligibility(base.id).ok, true)
         assert.equal((await fetch(`${url}/api/uninstall`, {
           method: 'POST',
           headers: { 'content-type': 'application/json', ...authHeaders(cookie) },
