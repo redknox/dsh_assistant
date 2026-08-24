@@ -2,12 +2,12 @@ import { createReadStream, existsSync, statSync } from 'node:fs'
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { ActivationDeniedError, GovernanceContractError, UninstallDeniedError } from '../domain/governance/errors.js'
+import { ActivationDeniedError, GovernanceContractError, RollbackDeniedError, UninstallDeniedError } from '../domain/governance/errors.js'
 import { SimulatedCrashError } from '../domain/governance/service.js'
 import type { RecoveryRoot } from '../domain/governance/root.js'
 import { boundActivationDiagnostics } from '../domain/workspace/failure.js'
 import { AssistantControlSurface } from '../ui/controller.js'
-import type { ActivationCard, ApprovalCard, MissionControlView, UserPluginView } from '../domain/workspace/types.js'
+import type { ActivationCard, ApprovalCard, MissionControlView, RollbackCard, UserPluginView } from '../domain/workspace/types.js'
 import { PRODUCT_UI_SESSION_ID } from './constants.js'
 import {
   assertSafePayload,
@@ -138,12 +138,19 @@ export function startWebUiServer(options: WebUiServerOptions): Promise<WebUiServ
     if (busy !== undefined) {
       return { status: 409 as const, body: { error: `${busy}-in-flight`, action } }
     }
-    const human = options.recoveryRoot.issueAuthority({ kind: 'human-control', source: 'application-ui' })
     if (action === 'rollback') {
+      const inspected = options.recoveryRoot.inspect()
+      if (!inspected.safeMode && !inspected.recoveryRequired) {
+        return { status: 409 as const, body: { error: 'ready-state-rollback', action } }
+      }
+      const human = options.recoveryRoot.issueAuthority({ kind: 'human-control', source: 'application-ui' })
       recoveryBusy = true
       try {
         return { status: 200 as const, body: { action, result: await options.recoveryRoot.rollback(human) } }
       } catch (error) {
+        if (error instanceof RollbackDeniedError) {
+          return { status: 409 as const, body: { error: 'rollback-denied', denials: error.denials, action } }
+        }
         if (error instanceof GovernanceContractError && /in-flight$/.test(error.message)) {
           return { status: 409 as const, body: { error: error.message, action } }
         }
@@ -156,6 +163,7 @@ export function startWebUiServer(options: WebUiServerOptions): Promise<WebUiServ
     if (status.recoveryRequired) {
       return { status: 409 as const, body: { error: 'integrity-failure', action: 'exit-safe-mode' } }
     }
+    const human = options.recoveryRoot.issueAuthority({ kind: 'human-control', source: 'application-ui' })
     recoveryBusy = true
     try {
       return { status: 200 as const, body: { action, result: options.recoveryRoot.exitSafeMode(human) } }
@@ -245,6 +253,28 @@ export function startWebUiServer(options: WebUiServerOptions): Promise<WebUiServ
         return { error: 'stale-digest' as const }
       }
     }
+    return { card }
+  }
+
+  const bindRollback = (body: {
+    id?: unknown
+    fingerprint?: unknown
+    currentGeneration?: unknown
+    targetGeneration?: unknown
+  }, card: RollbackCard | undefined) => {
+    if (typeof body.id !== 'string' || body.id === '') return { error: 'malformed' as const }
+    if (typeof body.fingerprint !== 'string' || body.fingerprint === '') return { error: 'malformed' as const }
+    if (typeof body.currentGeneration !== 'number' || !Number.isInteger(body.currentGeneration)) {
+      return { error: 'malformed' as const }
+    }
+    if (typeof body.targetGeneration !== 'number' || !Number.isInteger(body.targetGeneration)) {
+      return { error: 'malformed' as const }
+    }
+    if (card === undefined) return { error: 'unknown-rollback' as const }
+    if (card.id !== body.id) return { error: 'stale-rollback' as const }
+    if (card.fingerprint !== body.fingerprint) return { error: 'stale-fingerprint' as const }
+    if (card.currentGeneration !== body.currentGeneration) return { error: 'stale-current' as const }
+    if (card.targetGeneration !== body.targetGeneration) return { error: 'stale-target' as const }
     return { card }
   }
 
@@ -471,6 +501,76 @@ export function startWebUiServer(options: WebUiServerOptions): Promise<WebUiServ
           broadcast()
         } finally {
           uninstallBusy = false
+        }
+        return
+      }
+      if (req.method === 'POST' && requestUrl.pathname === '/api/rollback') {
+        const body = JSON.parse(await readBody(req)) as {
+          id?: unknown
+          fingerprint?: unknown
+          currentGeneration?: unknown
+          targetGeneration?: unknown
+          confirm?: unknown
+        }
+        if (body.confirm !== true) {
+          sendJson(res, 409, { error: 'confirmation-required' })
+          return
+        }
+        if (mutationInFlight() !== undefined) {
+          sendJson(res, 409, { error: `${mutationInFlight()}-in-flight`, view: snapshot(), webUi: url })
+          return
+        }
+        const bound = bindRollback(body, snapshot().rollback)
+        if ('error' in bound) {
+          sendJson(res, bound.error === 'malformed' ? 400 : 409, { error: bound.error })
+          return
+        }
+        const human = options.recoveryRoot.issueAuthority({ kind: 'human-control', source: 'application-ui' })
+        recoveryBusy = true
+        try {
+          const status = await options.recoveryRoot.rollback(human)
+          if (status.state === 'activation-failed' || status.safeMode) {
+            sendJson(res, 409, {
+              error: 'rollback-failed',
+              diagnostics: status.lastFailure?.diagnostics
+                ? boundActivationDiagnostics(status.lastFailure.diagnostics)
+                : 'rollback failed',
+              recoveryRequired: status.recoveryRequired,
+              safeMode: status.safeMode,
+              view: snapshot(),
+              webUi: url,
+            })
+            broadcast()
+            return
+          }
+          sendJson(res, 200, envelope())
+          broadcast()
+        } catch (error) {
+          if (error instanceof RollbackDeniedError) {
+            sendJson(res, 409, { error: 'rollback-denied', denials: error.denials, view: snapshot(), webUi: url })
+            broadcast()
+            return
+          }
+          if (error instanceof SimulatedCrashError) {
+            sendJson(res, 409, {
+              error: 'rollback-interrupted',
+              diagnostics: boundActivationDiagnostics(error.message),
+              view: snapshot(),
+              webUi: url,
+            })
+            broadcast()
+            return
+          }
+          const message = error instanceof Error ? error.message : 'rollback failed'
+          sendJson(res, 409, {
+            error: 'rollback-failed',
+            diagnostics: boundActivationDiagnostics(message),
+            view: snapshot(),
+            webUi: url,
+          })
+          broadcast()
+        } finally {
+          recoveryBusy = false
         }
         return
       }

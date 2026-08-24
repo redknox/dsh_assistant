@@ -37,6 +37,8 @@ export class InMemoryActivationRuntime implements ActivationRuntime {
   private currentMounted: string[] = []
   failPrepare = false
   failHealth = false
+  failRestore = false
+  failRestoreOnce = false
 
   snapshot(generation: number, owners: ActivationSnapshot['owners']): ActivationSnapshot {
     return {
@@ -63,6 +65,10 @@ export class InMemoryActivationRuntime implements ActivationRuntime {
   }
 
   async restore(snapshot: ActivationSnapshot): Promise<void> {
+    if (this.failRestore || this.failRestoreOnce) {
+      this.failRestoreOnce = false
+      throw new Error('runtime restore failed')
+    }
     this.currentMounted = [...snapshot.mounted]
   }
 

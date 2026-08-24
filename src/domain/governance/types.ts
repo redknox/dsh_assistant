@@ -116,6 +116,16 @@ export interface ActivationStatus {
   /** Current evidence that restored LKG / Registry / artifacts were revalidated. */
   readonly integrityVerified: boolean
   readonly lifecycleBusy?: 'activation' | 'uninstall' | 'recovery'
+  readonly rollbackPlan?: RollbackPlan
+}
+
+export interface RollbackPlan {
+  readonly id: string
+  readonly currentGeneration: number
+  readonly targetGeneration: number
+  readonly fingerprint: string
+  readonly available: boolean
+  readonly denials: readonly EligibilityDenial[]
 }
 
 export interface TrustedApprovalInput {

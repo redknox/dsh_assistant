@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto'
 import { existsSync } from 'node:fs'
 import { contractDigestExtras, digestFiles } from '../candidate/digest.js'
 import { listSourceFiles } from '../candidate/files.js'
@@ -7,7 +8,7 @@ import { REVIEW_POLICY_VERSION, type IndependentReview } from '../review/index.j
 import type { CandidateManifestInput, CandidateRecord, CandidateValidation, CandidateWorkspace } from '../candidate/types.js'
 import { AUTHORING_CONTRACT_STAMP, GENERATED_EXTENSION_API_V1 } from '../workbench/authoring-contract.js'
 import { analyzePluginDependents } from './dependents.js'
-import { ActivationDeniedError, GovernanceAuthorityError, GovernanceContractError, UninstallDeniedError } from './errors.js'
+import { ActivationDeniedError, GovernanceAuthorityError, GovernanceContractError, RollbackDeniedError, UninstallDeniedError } from './errors.js'
 import { approvalSummary, fingerprintFromCandidate } from './fingerprint.js'
 import { InMemoryActivationRuntime, type ActivationPrepareContext, type ActivationRuntime } from './runtime.js'
 import type {
@@ -16,6 +17,7 @@ import type {
   ActivationSnapshot,
   ActivationState,
   ActivationStatus,
+  RollbackPlan,
   ApprovalRecord,
   ApprovalSummary,
   EligibilityDenial,
@@ -28,7 +30,7 @@ import type {
 } from './types.js'
 import { TrustedAuthorityCredential as AuthorityCredential } from './types.js'
 
-export type ActivationInterrupt = 'activation-pending' | 'prepare' | 'registry-commit' | 'commit' | 'rollback-pending' | 'uninstall-registry-commit' | 'uninstall-commit'
+export type ActivationInterrupt = 'activation-pending' | 'prepare' | 'registry-commit' | 'commit' | 'rollback-pending' | 'rollback-registry-commit' | 'uninstall-registry-commit' | 'uninstall-commit'
 export type LifecycleMutation = 'activation' | 'uninstall' | 'recovery'
 
 export interface GovernanceHydrate {
@@ -80,9 +82,12 @@ export class GovernanceService implements ExtensionGovernance, ExtensionActivati
   failActivation?: { phase: ActivationPhase; diagnostics: string }
   failUninstall?: { phase: 'after-unload' | 'after-registry' | 'after-persist'; diagnostics: string }
   failUninstallRestore = false
+  failRollback?: { phase: 'after-restore' | 'after-registry' | 'after-remount'; diagnostics: string }
+  failRollbackRestore = false
   holdActivation?: Promise<void>
   holdUninstall?: Promise<void>
   holdSafeMode?: Promise<void>
+  holdRollback?: Promise<void>
   private mutation: 'idle' | LifecycleMutation = 'idle'
   private readonly persistHook?: () => void
   private readonly beginAuthorityCommit?: () => void
@@ -218,6 +223,7 @@ export class GovernanceService implements ExtensionGovernance, ExtensionActivati
       recoveryRequired: this.isRecoveryRequired(),
       integrityVerified: this.integrityVerified,
       ...(this.lifecycleBusy() === undefined ? {} : { lifecycleBusy: this.lifecycleBusy() }),
+      rollbackPlan: this.rollbackPlan(),
     }
   }
 
@@ -329,12 +335,16 @@ export class GovernanceService implements ExtensionGovernance, ExtensionActivati
     this.assertMutationIdle('recovery')
     const target = this.rollbackTarget ?? this.lastKnownGood
     if (target === undefined) throw new GovernanceContractError('no last-known-good snapshot to restore')
+    const denials = this.rollbackDenials(target)
+    if (denials.length > 0) throw new RollbackDeniedError(denials)
     this.mutation = 'recovery'
+    const priorState = this.state
     try {
+      if (this.holdRollback) await this.holdRollback
       this.state = 'rollback-pending'
       this.flush()
       await this.maybeInterrupt('rollback-pending')
-      return this.finishRollback(target)
+      return await this.finishRollback(target, priorState)
     } finally {
       this.mutation = 'idle'
     }
@@ -485,6 +495,86 @@ export class GovernanceService implements ExtensionGovernance, ExtensionActivati
     if (kind === 'activation') throw new ActivationDeniedError([denial])
     if (kind === 'uninstall') throw new UninstallDeniedError([denial])
     throw new GovernanceContractError(denial.reason)
+  }
+
+  private rollbackPlan(): RollbackPlan | undefined {
+    const current = this.current
+    const target = this.rollbackTarget ?? this.lastKnownGood
+    if (current === undefined || target === undefined) return undefined
+    const denials = this.rollbackDenials(target)
+    const available = denials.length === 0
+      && !this.safeMode
+      && !this.isRecoveryRequired()
+      && this.lifecycleBusy() === undefined
+      && this.state !== 'activating'
+      && this.state !== 'activation-pending'
+      && this.state !== 'rollback-pending'
+    return {
+      id: `rollback-${current.generation}-${target.generation}`,
+      currentGeneration: current.generation,
+      targetGeneration: target.generation,
+      fingerprint: this.rollbackFingerprint(current, target),
+      available,
+      denials,
+    }
+  }
+
+  private rollbackFingerprint(current: ActivationSnapshot, target: ActivationSnapshot): string {
+    return createHash('sha256').update(JSON.stringify({
+      current: this.snapshotIdentity(current),
+      target: this.snapshotIdentity(target),
+      liveMounted: [...this.runtime.mounted()].sort(),
+    })).digest('hex')
+  }
+
+  private snapshotIdentity(snapshot: ActivationSnapshot) {
+    return {
+      generation: snapshot.generation,
+      profileIdentity: snapshot.profileIdentity,
+      mounted: [...snapshot.mounted].sort(),
+      owners: [...snapshot.owners]
+        .map((item) => {
+          const record = this.registry.get(item.owner, item.version)
+          const candidate = this.workspace.list().find((row) => row.owner === item.owner && row.version === item.version)
+          return {
+            owner: item.owner,
+            version: item.version,
+            status: item.status,
+            capabilities: [...item.capabilities].sort(),
+            registryCapabilities: [...(record?.capabilities.map((claim) => claim.id) ?? [])].sort(),
+            tools: [...(record?.tools ?? [])].sort(),
+            digest: candidate?.digest ?? '',
+          }
+        })
+        .sort((left, right) => `${left.owner}@${left.version}`.localeCompare(`${right.owner}@${right.version}`)),
+    }
+  }
+
+  private rollbackDenials(target: ActivationSnapshot): { reason: string; detail: string }[] {
+    const currentOwners = (this.current?.owners ?? ownersFromRegistry(this.registry)).map((item) => `${item.owner}@${item.version}`).sort()
+    const targetOwners = target.owners.map((item) => `${item.owner}@${item.version}`).sort()
+    if (currentOwners.join('\n') === targetOwners.join('\n') && !this.isRecoveryRequired()) {
+      return [{ reason: 'already-restored', detail: 'current owner set already matches the rollback target' }]
+    }
+    for (const owner of target.owners) {
+      const record = this.registry.get(owner.owner, owner.version)
+      if (record === undefined) {
+        return [{ reason: 'missing-target-artifact', detail: `${owner.owner}@${owner.version}` }]
+      }
+      if (!isolatedRuntimeOwner(record)) continue
+      const candidate = this.workspace.list().find((item) => item.owner === owner.owner && item.version === owner.version)
+      if (candidate === undefined) {
+        return [{ reason: 'missing-target-artifact', detail: `${owner.owner}@${owner.version}` }]
+      }
+      const integrity = this.verifySealedArtifact(candidate)
+      if (integrity !== undefined) {
+        return [{
+          reason: integrity.startsWith('digest-mismatch') ? 'digest-mismatch' : 'missing-target-artifact',
+          detail: integrity,
+        }]
+      }
+    }
+    return []
   }
 
   private uninstallDenials(
@@ -696,22 +786,94 @@ export class GovernanceService implements ExtensionGovernance, ExtensionActivati
       this.flush()
       return
     }
-    await this.finishRollback(target)
+    await this.finishRollback(target, this.state === 'rollback-pending' ? 'active' : this.state)
   }
 
-  private async finishRollback(target: ActivationSnapshot): Promise<ActivationStatus> {
-    const restored = await this.restoreSnapshot(target)
-    this.lastKnownGood = target
-    this.current = target
-    this.state = restored ? 'rolled-back' : 'activation-failed'
-    this.safeMode = this.safeMode || !restored
-    this.pendingCandidateId = undefined
-    this.phase = undefined
-    if (restored) await this.remountCommittedGenerated()
-    this.current = this.captureSnapshot()
-    this.integrityVerified = restored && this.verifyRestoredIntegrity(target)
-    this.flush()
-    return this.status()
+  private async finishRollback(target: ActivationSnapshot, priorState: ActivationState = 'active'): Promise<ActivationStatus> {
+    const prior = this.current
+    const priorLkg = this.lastKnownGood
+    const priorTarget = this.rollbackTarget
+    const priorSafe = this.safeMode
+    const priorIntegrity = this.integrityVerified
+    const priorFailure = this.lastFailure
+    this.beginAuthorityCommit?.()
+    try {
+      const restored = await this.restoreSnapshot(target)
+      if (!restored || this.failRollback?.phase === 'after-restore') {
+        throw new Error(this.failRollback?.diagnostics ?? 'rollback restore failed')
+      }
+      await this.maybeInterrupt('rollback-registry-commit')
+      if (this.failRollback?.phase === 'after-registry') throw new Error(this.failRollback.diagnostics)
+      this.lastKnownGood = target
+      this.current = target
+      this.state = 'rolled-back'
+      this.pendingCandidateId = undefined
+      this.phase = undefined
+      await this.remountCommittedGenerated()
+      if (this.failRollback?.phase === 'after-remount') throw new Error(this.failRollback.diagnostics)
+      this.current = this.captureSnapshot()
+      this.integrityVerified = this.verifyRestoredIntegrity(target)
+      if (!this.integrityVerified) throw new Error('rollback integrity failed')
+      this.flush()
+      this.finishAuthorityCommit?.()
+      return this.status()
+    } catch (error) {
+      if (error instanceof SimulatedCrashError) throw error
+      const recovered = await this.recoverPriorSnapshot(prior, {
+        lastKnownGood: priorLkg,
+        rollbackTarget: priorTarget,
+        state: priorState,
+        safeMode: priorSafe,
+        integrityVerified: priorIntegrity,
+        lastFailure: priorFailure,
+      })
+      this.flush()
+      this.finishAuthorityCommit?.()
+      if (recovered) throw error
+      const diagnostics = error instanceof Error ? error.message : String(error)
+      await this.failClosedSafeMode([diagnostics])
+      this.lastFailure = {
+        candidateId: this.pendingCandidateId ?? 'rollback',
+        version: '',
+        digest: '',
+        phase: 'commit',
+        diagnostics,
+        rollbackAttempted: true,
+        rollbackSucceeded: false,
+        restoredLkgGeneration: target.generation,
+        safeModeRequired: true,
+      }
+      this.flush()
+      return this.status()
+    }
+  }
+
+  private async recoverPriorSnapshot(
+    prior: ActivationSnapshot | undefined,
+    restore: {
+      readonly lastKnownGood?: ActivationSnapshot
+      readonly rollbackTarget?: ActivationSnapshot
+      readonly state: ActivationState
+      readonly safeMode: boolean
+      readonly integrityVerified: boolean
+      readonly lastFailure?: ActivationFailure
+    },
+  ): Promise<boolean> {
+    if (prior === undefined) return false
+    try {
+      if (this.failRollbackRestore) throw new Error('rollback restore of prior snapshot failed')
+      if (!await this.restoreSnapshot(prior)) return false
+      this.current = prior
+      this.lastKnownGood = restore.lastKnownGood
+      this.rollbackTarget = restore.rollbackTarget
+      this.state = restore.state
+      this.safeMode = restore.safeMode
+      this.integrityVerified = restore.integrityVerified
+      this.lastFailure = restore.lastFailure
+      return true
+    } catch {
+      return false
+    }
   }
 
   private isRecoveryRequired(): boolean {
@@ -999,21 +1161,31 @@ export class GovernanceService implements ExtensionGovernance, ExtensionActivati
     }
   }
 
+  private applyRegistryOwners(owners: ActivationSnapshot['owners']): void {
+    for (const current of this.registry.list({ status: 'active' })) {
+      const wanted = owners.some((item) => item.owner === current.owner && item.version === current.version)
+      if (!wanted) this.registry.transitionStatus(current.owner, current.version, 'disabled')
+    }
+    for (const owner of owners) {
+      const record = this.registry.get(owner.owner, owner.version)
+      if (record !== undefined && record.status !== 'active') {
+        this.registry.transitionStatus(owner.owner, owner.version, 'active')
+      }
+    }
+  }
+
   private async restoreSnapshot(snapshot: ActivationSnapshot): Promise<boolean> {
+    const priorOwners = ownersFromRegistry(this.registry)
     try {
       await this.runtime.restore(snapshot)
-      for (const current of this.registry.list({ status: 'active' })) {
-        const wanted = snapshot.owners.some((item) => item.owner === current.owner && item.version === current.version)
-        if (!wanted) this.registry.transitionStatus(current.owner, current.version, 'disabled')
-      }
-      for (const owner of snapshot.owners) {
-        const record = this.registry.get(owner.owner, owner.version)
-        if (record !== undefined && record.status !== 'active') {
-          this.registry.transitionStatus(owner.owner, owner.version, 'active')
-        }
-      }
+      this.applyRegistryOwners(snapshot.owners)
       return true
     } catch {
+      try {
+        this.applyRegistryOwners(priorOwners)
+      } catch {
+        return false
+      }
       return false
     }
   }

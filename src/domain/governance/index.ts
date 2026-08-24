@@ -4,6 +4,7 @@ export type {
   ActivationSnapshot,
   ActivationState,
   ActivationStatus,
+  RollbackPlan,
   ApprovalAuthority,
   ApprovalDecision,
   ApprovalFingerprintInput,
@@ -26,6 +27,7 @@ export {
   ActivationDeniedError,
   GovernanceAuthorityError,
   GovernanceContractError,
+  RollbackDeniedError,
   UninstallDeniedError,
 } from './errors.js'
 export { analyzePluginDependents, type PluginDependencyResult, type PluginDependent } from './dependents.js'

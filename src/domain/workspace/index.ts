@@ -8,6 +8,8 @@ export type {
   ObjectiveStatus,
   ObjectiveView,
   RecoveryView,
+  RollbackCard,
+  RollbackOwnerChange,
   UserCapabilityArea,
   UserCapabilityStatus,
   UserCapabilityView,
@@ -27,6 +29,7 @@ export { projectActivity } from './activity.js'
 export { projectApprovalCards } from './approvals.js'
 export { projectUserCapabilities } from './capabilities.js'
 export { projectUserPlugins } from './plugins.js'
+export { projectRollbackCard } from './rollback.js'
 export { flattenEffects, secretAccessLabel, summarizeCandidateEffects } from './effects.js'
 export { allowedApprovalPayload, redactText, redactUnknown, sanitizeMissionControlView } from './redact.js'
 export { gatherWorkspaceSnapshot, projectWorkspace } from './gather.js'

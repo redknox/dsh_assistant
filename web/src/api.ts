@@ -1,4 +1,4 @@
-import type { ActivationCard, ApprovalCard, MissionControlView, UserPluginView, WorkObjectKind } from '../../src/domain/workspace/types'
+import type { ActivationCard, ApprovalCard, MissionControlView, RollbackCard, UserPluginView, WorkObjectKind } from '../../src/domain/workspace/types'
 
 export interface UiEnvelope {
   readonly view: MissionControlView
@@ -73,6 +73,21 @@ export async function uninstallPlugin(plugin: UserPluginView, confirm: boolean):
       acknowledgeDependents: true,
       ...(plugin.candidateId ? { candidateId: plugin.candidateId } : {}),
       ...(plugin.digest ? { digest: plugin.digest } : {}),
+    }),
+  }))
+}
+
+export async function rollbackSystemState(card: RollbackCard, confirm: boolean): Promise<UiEnvelope> {
+  return parseEnvelope(await fetch('/api/rollback', {
+    ...include,
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({
+      id: card.id,
+      fingerprint: card.fingerprint,
+      currentGeneration: card.currentGeneration,
+      targetGeneration: card.targetGeneration,
+      confirm,
     }),
   }))
 }

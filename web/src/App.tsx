@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState, type FormEvent } from 'react'
-import type { ActivationCard, ApprovalCard, MissionControlView, UserCapabilityStatus, UserPluginView, WorkObjectKind, WorkbenchProjection } from '../../src/domain/workspace/types'
+import type { ActivationCard, ApprovalCard, MissionControlView, RollbackCard, UserCapabilityStatus, UserPluginView, WorkObjectKind, WorkbenchProjection } from '../../src/domain/workspace/types'
 import {
   activateCandidate,
   decideApproval,
@@ -8,6 +8,7 @@ import {
   formatMarkdownLite,
   openViewStream,
   recoveryActionId,
+  rollbackSystemState,
   runRecovery,
   sendMessage,
   uninstallPlugin,
@@ -291,6 +292,57 @@ function RecoveryPanel(props: {
   )
 }
 
+function RollbackCardView(props: {
+  readonly card: RollbackCard
+  readonly locked: boolean
+  readonly deferred: boolean
+  readonly armed: boolean
+  readonly onAsk: (card: RollbackCard) => void
+  readonly onDefer: (card: RollbackCard) => void
+}) {
+  const { card } = props
+  if (props.deferred) return null
+  return (
+    <article
+      className="approval-card"
+      data-rollback-id={card.id}
+      data-kind={card.kind}
+      data-fingerprint={card.fingerprint}
+      data-current-generation={card.currentGeneration}
+      data-target-generation={card.targetGeneration}
+      aria-labelledby={`rollback-title-${card.id}`}
+    >
+      <header className="approval-header">
+        <Glyph name="shield" className="glyph approval-symbol" />
+        <h2 id={`rollback-title-${card.id}`}>{card.title}</h2>
+      </header>
+      <dl className="approval-facts">
+        <div><dt>CURRENT</dt><dd>generation {card.currentGeneration}</dd></div>
+        <div><dt>TARGET</dt><dd>generation {card.targetGeneration}</dd></div>
+        <div><dt>FINGERPRINT</dt><dd>{card.fingerprint}</dd></div>
+        <div><dt>WHY</dt><dd>{card.reason}</dd></div>
+        <div><dt>OWNERS</dt><dd>{card.ownerChanges.map((item) => `${item.change} ${item.owner}${item.from ? ` ${item.from}` : ''}${item.to ? `→${item.to}` : ''}`).join('; ') || 'none'}</dd></div>
+        <div><dt>CAPABILITIES</dt><dd>added {card.capabilitiesAdded.join(', ') || 'none'}; removed {card.capabilitiesRemoved.join(', ') || 'none'}</dd></div>
+        <div><dt>TOOLS</dt><dd>added {card.toolsAdded.join(', ') || 'none'}; removed {card.toolsRemoved.join(', ') || 'none'}</dd></div>
+        <div><dt>MOUNTS</dt><dd>added {card.mountsAdded.length}; removed {card.mountsRemoved.length}</dd></div>
+        <div><dt>RECOVERY REQUIRED</dt><dd>{card.recoveryRequired ? 'yes' : 'no'}</dd></div>
+        <div><dt>WARNING</dt><dd>This is a system-state rollback, not a single-plugin uninstall. Candidate, approval, review, and audit history are retained.</dd></div>
+      </dl>
+      {props.armed ? (
+        <div className="approval-actions">
+          <button type="button" className="button button--secondary" data-rollback-action="cancel" disabled={props.locked} onClick={() => props.onDefer(card)}>Not now</button>
+          <button type="button" className="button button--fault" data-rollback-action="confirm" disabled={props.locked} onClick={() => props.onAsk(card)}>Confirm Rollback system state</button>
+        </div>
+      ) : (
+        <div className="approval-actions">
+          <button type="button" className="button button--secondary" data-rollback-action="defer" disabled={props.locked} onClick={() => props.onDefer(card)}>Not now</button>
+          <button type="button" className="button button--approval" data-rollback-action="ask" disabled={props.locked} onClick={() => props.onAsk(card)}>Rollback system state</button>
+        </div>
+      )}
+    </article>
+  )
+}
+
 function ConversationWorkspace(props: {
   readonly view: MissionControlView
   readonly connected: boolean
@@ -305,6 +357,11 @@ function ConversationWorkspace(props: {
   readonly armedActivation?: string
   readonly onActivate: (card: ActivationCard) => void
   readonly onDefer: (card: ActivationCard) => void
+  readonly rollback?: RollbackCard
+  readonly deferredRollback?: boolean
+  readonly armedRollback?: boolean
+  readonly onAskRollback?: (card: RollbackCard) => void
+  readonly onDeferRollback?: (card: RollbackCard) => void
 }) {
   const locked = !props.connected
   return (
@@ -343,6 +400,16 @@ function ConversationWorkspace(props: {
             onDefer={props.onDefer}
           />
         ))}
+        {props.rollback ? (
+          <RollbackCardView
+            card={props.rollback}
+            locked={locked}
+            deferred={props.deferredRollback === true}
+            armed={props.armedRollback === true}
+            onAsk={props.onAskRollback ?? (() => {})}
+            onDefer={props.onDeferRollback ?? (() => {})}
+          />
+        ) : null}
       </div>
       <div>
         <form className="composer" aria-label="Send a message" onSubmit={(event: FormEvent) => { event.preventDefault(); props.onSend() }}>
@@ -646,6 +713,10 @@ export function MissionControlScreen(props: {
   readonly onAskUninstall?: (plugin: UserPluginView) => void
   readonly onCancelUninstall?: () => void
   readonly onConfirmUninstall?: (plugin: UserPluginView) => void
+  readonly deferredRollback?: boolean
+  readonly armedRollback?: boolean
+  readonly onAskRollback?: (card: RollbackCard) => void
+  readonly onDeferRollback?: (card: RollbackCard) => void
   readonly onRecovery: (action: 'diagnostics' | 'rollback' | 'exit-safe-mode') => void
 }) {
   const { view } = props
@@ -686,6 +757,11 @@ export function MissionControlScreen(props: {
           armedActivation={props.armedActivation}
           onActivate={props.onActivate ?? (() => {})}
           onDefer={props.onDeferActivation ?? (() => {})}
+          rollback={view.rollback}
+          deferredRollback={props.deferredRollback}
+          armedRollback={props.armedRollback}
+          onAskRollback={props.onAskRollback}
+          onDeferRollback={props.onDeferRollback}
         />
         <OperationsPanel
           view={view}
@@ -712,6 +788,8 @@ export function App() {
   const [armedActivation, setArmedActivation] = useState<string>()
   const [deferredActivations, setDeferredActivations] = useState<string[]>([])
   const [confirmingPlugin, setConfirmingPlugin] = useState<string>()
+  const [deferredRollback, setDeferredRollback] = useState(false)
+  const [armedRollback, setArmedRollback] = useState(false)
 
   useEffect(() => {
     let closed = false
@@ -794,6 +872,20 @@ export function App() {
       onConfirmUninstall={(plugin) => {
         setConfirmingPlugin(undefined)
         void act(() => uninstallPlugin(plugin, true))
+      }}
+      deferredRollback={deferredRollback}
+      armedRollback={armedRollback}
+      onDeferRollback={() => {
+        setArmedRollback(false)
+        setDeferredRollback(true)
+      }}
+      onAskRollback={(card) => {
+        if (!armedRollback) {
+          setArmedRollback(true)
+          return
+        }
+        setArmedRollback(false)
+        void act(() => rollbackSystemState(card, true))
       }}
       onRecovery={(action) => {
         if (action !== 'diagnostics' && armedRecovery !== action) {

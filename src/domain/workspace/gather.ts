@@ -26,6 +26,7 @@ export function gatherWorkspaceSnapshot(input: GatherWorkspaceInput): WorkspaceS
       recoveryRequired?: boolean
       state?: string
       pendingCandidateId?: string
+      lifecycleBusy?: 'activation' | 'uninstall' | 'recovery'
       lastFailure?: {
         diagnostics: string
         candidateId?: string
@@ -33,7 +34,17 @@ export function gatherWorkspaceSnapshot(input: GatherWorkspaceInput): WorkspaceS
         rollbackSucceeded?: boolean
         safeModeRequired?: boolean
       }
-      current?: { generation: number; mounted: readonly string[] }
+      current?: { generation: number; mounted: readonly string[]; owners: readonly { owner: string; version: string; status: string; capabilities: readonly string[] }[] }
+      rollbackTarget?: { generation: number; mounted: readonly string[]; owners: readonly { owner: string; version: string; status: string; capabilities: readonly string[] }[] }
+      lastKnownGood?: { generation: number; mounted: readonly string[]; owners: readonly { owner: string; version: string; status: string; capabilities: readonly string[] }[] }
+      rollbackPlan?: {
+        id: string
+        currentGeneration: number
+        targetGeneration: number
+        fingerprint: string
+        available: boolean
+        denials: readonly { reason: string; detail: string }[]
+      }
     }
   } | undefined
   const activation = recovery?.inspect()
@@ -81,6 +92,10 @@ export function gatherWorkspaceSnapshot(input: GatherWorkspaceInput): WorkspaceS
       ...(activation?.current?.generation !== undefined ? { generation: activation.current.generation } : {}),
       ...(activation?.current?.mounted ? { mounted: [...activation.current.mounted] } : {}),
       ...(activation?.pendingCandidateId ? { pendingCandidateId: activation.pendingCandidateId } : {}),
+      ...(activation?.lifecycleBusy ? { lifecycleBusy: activation.lifecycleBusy } : {}),
+      ...(activation?.current ? { current: snapshotView(activation.current) } : {}),
+      ...(activation?.rollbackTarget ? { rollbackTarget: snapshotView(activation.rollbackTarget) } : {}),
+      ...(activation?.lastKnownGood ? { lastKnownGood: snapshotView(activation.lastKnownGood) } : {}),
       ...(lastFailure?.candidateId ? { lastFailureCandidateId: lastFailure.candidateId } : {}),
       ...(lastFailure && boundedFailure
         ? {
@@ -93,6 +108,7 @@ export function gatherWorkspaceSnapshot(input: GatherWorkspaceInput): WorkspaceS
           },
         }
         : {}),
+      ...(activation?.rollbackPlan ? { rollbackPlan: activation.rollbackPlan } : {}),
     },
     candidates: workbenchCandidates(ctx),
     memory: (ctx.get('personalMemory') as { query(): { records: { id: string; statement: string; topicKey: string; status: string }[] } } | undefined)
@@ -420,5 +436,22 @@ function projectedLifecycle(input: {
     ...(lifecycle === 'ACTIVATION_FAILED' && failure?.diagnostics
       ? { activationFailureSummary: boundActivationDiagnostics(failure.diagnostics) }
       : {}),
+  }
+}
+
+function snapshotView(input: {
+  readonly generation: number
+  readonly mounted?: readonly string[]
+  readonly owners: readonly { owner: string; version: string; status?: string; capabilities?: readonly string[] }[]
+}) {
+  return {
+    generation: input.generation,
+    ...(input.mounted ? { mounted: [...input.mounted] } : {}),
+    owners: input.owners.map((item) => ({
+      owner: item.owner,
+      version: item.version,
+      ...(item.status ? { status: item.status } : {}),
+      ...(item.capabilities ? { capabilities: [...item.capabilities] } : {}),
+    })),
   }
 }

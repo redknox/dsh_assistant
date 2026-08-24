@@ -22,6 +22,9 @@ export function renderMissionControlAsText(view: MissionControlView): string {
     ...view.knowledge.slice(0, 5).map((item) => `- Knowledge  ${item.sourceUri}`),
     ...view.capabilities.map((item) => `- ${item.area}  ${item.action}  ${item.status}`),
     ...(view.plugins ?? []).map((item) => `- Plugin  ${item.owner}@${item.version}  uninstallable`),
+    view.rollback
+      ? `- Rollback  generation ${view.rollback.currentGeneration} → ${view.rollback.targetGeneration}  ${view.rollback.title}`
+      : '',
     '',
     '# Conversation / work',
     ...view.conversation.map((item) => `[${item.kind}] ${item.text}`),
@@ -74,6 +77,9 @@ export function renderMissionControlAsHtml(view: MissionControlView): string {
     ...view.knowledge.map((item) => `<li>${escapeHtml(item.sourceUri)}</li>`),
     ...view.capabilities.map((item) => `<li data-area="${escapeHtml(item.area)}" data-status="${escapeHtml(item.status)}">${escapeHtml(item.area)} — ${escapeHtml(item.action)} (${escapeHtml(item.status)})</li>`),
     ...(view.plugins ?? []).map((item) => `<li data-plugin-id="${escapeHtml(item.id)}" data-uninstallable="yes">${escapeHtml(item.owner)}@${escapeHtml(item.version)}</li>`),
+    ...(view.rollback
+      ? [`<li data-rollback-id="${escapeHtml(view.rollback.id)}" data-rollback-fingerprint="${escapeHtml(view.rollback.fingerprint)}">${escapeHtml(view.rollback.title)} ${view.rollback.currentGeneration}→${view.rollback.targetGeneration}</li>`]
+      : []),
   ].join('')
   const conversation = view.conversation.map((item) => `<li data-kind="${escapeHtml(item.kind)}">${escapeHtml(item.text)}</li>`).join('')
   const approvals = view.approvals.map((card) => `<article data-approval-id="${escapeHtml(card.id)}" data-kind="${escapeHtml(card.kind)}" data-fingerprint="${escapeHtml(card.fingerprint)}">
@@ -125,6 +131,7 @@ export function renderMissionControlAsHtml(view: MissionControlView): string {
       <ol>${conversation}</ol>
       <section id="approvals">${approvals}</section>
       <section id="activations">${activations}</section>
+      ${view.rollback ? `<section id="rollback"><article data-rollback-id="${escapeHtml(view.rollback.id)}" data-kind="${escapeHtml(view.rollback.kind)}" data-fingerprint="${escapeHtml(view.rollback.fingerprint)}"><h2>${escapeHtml(view.rollback.title)}</h2></article></section>` : ''}
     </main>
     <aside id="activity"><h1>Activity</h1><ul>${activity}</ul></aside>
   </div>

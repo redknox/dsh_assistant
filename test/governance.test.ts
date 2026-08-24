@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { mkdtempSync, rmSync } from 'node:fs'
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { describe, it } from 'node:test'
@@ -261,6 +261,65 @@ describe('extension governance and recovery', () => {
     assert.notEqual(exited.state, 'safe-mode')
     assert.match(exited.lastFailure?.diagnostics ?? '', /missing-active-artifact/)
     assert.equal(registry.get('generated/matter-home', '0.1.0')?.status, 'disabled')
+  })
+
+  it('H3. READY rollback is a transactional authority commit and releases the lock', async () => {
+    const { registry, workspace, governance, root, human, runtime } = seeded()
+    const first = ready(workspace, { owner: 'generated/text-slugify', version: '0.1.0', capabilities: ['text.slugify'] })
+    root.recordApproval(human, {
+      candidateId: first.id,
+      fingerprint: governance.requestApproval(first.id).fingerprint,
+      decision: 'approved-for-exact-diff',
+    })
+    await root.activate(first.id, human)
+    const plan = root.inspect().rollbackPlan
+    assert.equal(plan?.available, true)
+    runtime.failRestoreOnce = true
+    await assert.rejects(() => root.rollback(human), /rollback restore failed/)
+    assert.equal(registry.get('generated/text-slugify', '0.1.0')?.status, 'active')
+    assert.equal(root.inspect().lifecycleBusy, undefined)
+    assert.equal(root.inspect().safeMode, false)
+    runtime.failRestore = true
+    const closed = await root.rollback(human)
+    assert.equal(closed.safeMode, true)
+    assert.equal(closed.recoveryRequired, true)
+    assert.equal(root.inspect().lifecycleBusy, undefined)
+    assert.notEqual(registry.get('generated/text-slugify', '0.1.0')?.status, 'active')
+  })
+
+  it('H4. holdRollback rejection releases the recovery lock', async () => {
+    const { registry, workspace, governance, root, human } = seeded()
+    const first = ready(workspace, { owner: 'generated/text-slugify', version: '0.1.0', capabilities: ['text.slugify'] })
+    root.recordApproval(human, {
+      candidateId: first.id,
+      fingerprint: governance.requestApproval(first.id).fingerprint,
+      decision: 'approved-for-exact-diff',
+    })
+    await root.activate(first.id, human)
+    governance.holdRollback = Promise.reject(new Error('hold rejected'))
+    await assert.rejects(() => root.rollback(human), /hold rejected/)
+    assert.equal(root.inspect().lifecycleBusy, undefined)
+    assert.equal(registry.get('generated/text-slugify', '0.1.0')?.status, 'active')
+  })
+
+  it('H5. corrupted target artifact is not an available READY rollback plan', async () => {
+    const { workspace, governance, root, human } = seeded()
+    const first = ready(workspace, { owner: 'generated/text-slugify', version: '0.1.0', capabilities: ['text.slugify'] })
+    const second = ready(workspace, { owner: 'generated/other-opt', version: '0.1.0', capabilities: ['other.opt'] })
+    for (const item of [first, second]) {
+      root.recordApproval(human, {
+        candidateId: item.id,
+        fingerprint: governance.requestApproval(item.id).fingerprint,
+        decision: 'approved-for-exact-diff',
+      })
+    }
+    await root.activate(first.id, human)
+    await root.activate(second.id, human)
+    assert.equal(root.inspect().rollbackPlan?.available, true)
+    writeFileSync(path.join(first.workspaceRoot, 'src/ok.ts'), 'tampered\n')
+    const plan = root.inspect().rollbackPlan
+    assert.equal(plan?.available, false)
+    assert.ok(plan?.denials.some((item) => item.reason === 'digest-mismatch'))
   })
 
   it('I. enters Safe Mode without the generated extension', async () => {
