@@ -70,6 +70,14 @@ body {
 button, textarea { font: inherit; }
 button { color: inherit; }
 
+.runtime-context {
+  margin: 0;
+  padding: 0 18px 10px;
+  color: var(--muted);
+  font: 650 13px/1.3 var(--font-instrument);
+  letter-spacing: .06em;
+}
+
 .loading {
   min-height: 100%;
   display: grid;
@@ -176,6 +184,12 @@ button { color: inherit; }
 .error { background: #f0d4ce; color: #6b241c; }
 .conversation-panel .error {
   margin: 0 clamp(26px, 4vw, 58px) 16px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+.recovery-panel .error {
+  margin: 8px 0;
+  padding: 8px 10px;
   border: 1px solid var(--line);
   border-radius: 8px;
 }

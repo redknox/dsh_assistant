@@ -76,7 +76,9 @@ function SystemHeader(props: {
   readonly systemState: MissionControlView['systemState']
   readonly objective?: string
   readonly connected: boolean
+  readonly runtimeContext?: MissionControlView['runtimeContext']
 }) {
+  const context = props.runtimeContext
   return (
     <header className="faceplate topbar" aria-label="System header">
       <PlateRivets />
@@ -92,6 +94,11 @@ function SystemHeader(props: {
           <span>{props.systemState}</span>
         </div>
       </div>
+      {context ? (
+        <p className="runtime-context" data-runtime-context="true">
+          Profile {context.profile} · Workspace {context.workspaceLabel} · Session {context.sessionId} · Persistence {context.sessionPersistence}
+        </p>
+      ) : null}
     </header>
   )
 }
@@ -284,6 +291,7 @@ function RecoveryPanel(props: {
   readonly recovery: NonNullable<MissionControlView['recovery']>
   readonly locked: boolean
   readonly armedRecovery?: string
+  readonly error?: string
   readonly onRecovery: (action: 'diagnostics' | 'rollback' | 'exit-safe-mode') => void
 }) {
   return (
@@ -291,6 +299,7 @@ function RecoveryPanel(props: {
       <h1>{props.systemState}</h1>
       <p>{props.recovery.why}</p>
       <p>Disabled: {props.recovery.disabled.join(', ') || 'generated/optional capabilities'}</p>
+      {props.error ? <p className="error" role="alert">{props.error}</p> : null}
       <div className="recovery-actions">
         {props.recovery.actions.map((action) => {
           const mapped = recoveryActionId(action)
@@ -908,6 +917,7 @@ export function MissionControlScreen(props: {
         systemState={view.systemState}
         objective={view.objective?.text}
         connected={props.connected}
+        runtimeContext={view.runtimeContext}
       />
       {!props.connected ? <p className="transport" role="status">Disconnected from local runtime</p> : null}
       {props.acknowledgement ? (
@@ -922,6 +932,7 @@ export function MissionControlScreen(props: {
           recovery={view.recovery}
           locked={locked}
           armedRecovery={props.armedRecovery}
+          error={props.error}
           onRecovery={props.onRecovery}
         />
       ) : null}

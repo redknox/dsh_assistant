@@ -89,6 +89,32 @@ describe('TARS-NG Home runtime lease', () => {
     reclaimed.hold.release()
   })
 
+  it('refreshes lease context only for the current run token', async () => {
+    const layout = ensureProductHome(isolatedHome())
+    const first = await acquireRuntimeLease(layout, {
+      profile: 'assistant',
+      profileIdentity: 'assistant',
+      workspaceIdentity: 'ws',
+      sessionRootIdentity: 'sr',
+      sessionId: 'main',
+    })
+    assert.equal(first.ok, true)
+    if (!first.ok) throw new Error('expected lease')
+    const runId = first.hold.identity.runId
+    assert.equal(first.hold.refreshContextStamp({
+      profile: 'assistant',
+      profileIdentity: `v1:${'ab'.repeat(32)}`,
+      workspaceIdentity: 'ws',
+      sessionRootIdentity: 'sr',
+      sessionId: 'main',
+    }), true)
+    assert.equal(readRuntimeIdentity(layout)?.profileIdentity, `v1:${'ab'.repeat(32)}`)
+    assert.equal(first.hold.identity.profileIdentity, `v1:${'ab'.repeat(32)}`)
+    assert.equal(first.hold.identity.runId, runId)
+    assert.equal(first.hold.release(), true)
+    assert.equal(first.hold.refreshContextStamp({ profileIdentity: `v1:${'cd'.repeat(32)}` }), false)
+  })
+
   it('refuses to remove a newer lease from an old finalizer and treats a live unverified PID as ambiguous', async () => {
     const layout = ensureProductHome(isolatedHome())
     const first = await acquireRuntimeLease(layout)
@@ -195,7 +221,7 @@ describe('TARS-NG Home runtime lease', () => {
       assert.equal(code, 1)
       assert.equal(existsSync(layout.pidFile), false)
       assert.equal(existsSync(layout.runtimeIdentityFile), false)
-      assert.doesNotMatch(lines.join('\n'), /[a-f0-9]{64}/)
+      assert.doesNotMatch(lines.join('\n').replace(/profile-identity: v\d+:[a-f0-9]+/g, ''), /[a-f0-9]{64}/)
     } finally {
       if (previous.deepseek === undefined) delete process.env.DEEPSEEK_API_KEY
       else process.env.DEEPSEEK_API_KEY = previous.deepseek

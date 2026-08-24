@@ -5,6 +5,7 @@ import type { KnowledgeRetrieval } from '../domain/knowledge/types.js'
 import type { MemoryCategory, MemoryReplaceInput, MemoryWriteInput, Provenance } from '../domain/memory/types.js'
 import type { PolicyOutcome } from '../domain/policy/types.js'
 import type { ObjectiveView } from '../domain/workspace/types.js'
+import { publicRuntimeContextView, type RuntimeContext } from '../product/runtime-context.js'
 import { projectWorkspace } from '../domain/workspace/gather.js'
 import type { UserPersonalityPrefs } from '../domain/personality/types.js'
 import type { AssistantView, KnowledgeSourceDto } from './dto.js'
@@ -33,6 +34,7 @@ export class AssistantControlSurface {
   constructor(
     private readonly ctx: Context,
     readonly sessionId: string,
+    readonly runtimeContext?: RuntimeContext,
   ) {}
 
   snapshot(): AssistantView {
@@ -48,6 +50,7 @@ export class AssistantControlSurface {
       ctx: this.ctx,
       sessionId: this.sessionId,
       ...(this.objective ? { objective: this.objective } : {}),
+      ...(this.runtimeContext ? { runtimeContext: publicRuntimeContextView(this.runtimeContext) } : {}),
     })
   }
 

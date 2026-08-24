@@ -13,9 +13,11 @@
     },
     "./package.json": "./package.json"
   },
-  "files": [
+    "files": [
     "dist",
-    "cordis.patch.yml"
+    "cordis.patch.yml",
+    "profiles/assistant",
+    "profiles/assistant-safe"
   ],
   "bin": {
     "tars-ng": "./dist/product/bin.js"
@@ -49,7 +51,9 @@
     "@deepseek-ai/dsh-agent": "0.1.0-rc.8",
     "@deepseek-ai/dsh-agent-default-model": "0.1.0-rc.8",
     "@deepseek-ai/dsh-agent-loop": "0.1.0-rc.8",
+    "@deepseek-ai/dsh-app-boot": "0.1.0-rc.8",
     "@deepseek-ai/dsh-anonymous-user-id": "0.1.0-rc.8",
+    "@deepseek-ai/dsh-base": "0.1.0-rc.8",
     "@deepseek-ai/dsh-attachment": "0.1.0-rc.8",
     "@deepseek-ai/dsh-brand": "0.1.0-rc.8",
     "@deepseek-ai/dsh-credentials": "0.1.0-rc.8",
@@ -63,6 +67,7 @@
     "@deepseek-ai/dsh-scope": "0.1.0-rc.8",
     "@deepseek-ai/dsh-session": "0.1.0-rc.8",
     "@deepseek-ai/dsh-session-persistence": "0.1.0-rc.8",
+    "@deepseek-ai/dsh-session-persistence-jsonl": "0.1.0-rc.8",
     "@deepseek-ai/dsh-settings": "0.1.0-rc.8",
     "@deepseek-ai/dsh-system-prompt": "0.1.0-rc.8",
     "@deepseek-ai/dsh-timeout": "0.1.0-rc.8",
@@ -70,8 +75,6 @@
     "@deepseek-ai/dsh-typert-protocol": "0.1.0-rc.8"
   },
   "devDependencies": {
-    "@deepseek-ai/dsh-app-boot": "0.1.0-rc.8",
-    "@deepseek-ai/dsh-base": "0.1.0-rc.8",
     "@types/node": "^24.3.0",
     "@types/react": "^19.1.8",
     "@types/react-dom": "^19.1.6",

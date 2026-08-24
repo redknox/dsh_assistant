@@ -3,7 +3,7 @@ import { operatorStatus } from '../domain/self-extension/status.js'
 import { runSelfExtensionCli } from '../runtime/self-extension-cli.js'
 import { bootAssistantControl, createAssistantAgent, type AssistantControl } from '../runtime/boot.js'
 import { inspectCompatibility } from './compatibility.js'
-import { DEFAULT_LLM_MODEL, DEFAULT_LLM_PROVIDER, PRODUCT_COMMAND, PRODUCT_NAME, PRODUCT_UI_SESSION_ID } from './constants.js'
+import { DEFAULT_LLM_MODEL, DEFAULT_LLM_PROVIDER, PRODUCT_COMMAND, PRODUCT_NAME } from './constants.js'
 import { attachRuntimeDoctor, collectStaticDoctor, formatDoctorReport } from './doctor.js'
 import { inspectEnvFile, type EnvFileLoad } from './env.js'
 import { inspectLlmRuntime, formatUnusableLlmError } from './llm.js'
@@ -29,6 +29,18 @@ import {
   type RuntimeIdentity,
 } from './runtime-lease.js'
 import { AssistantControlSurface } from '../ui/controller.js'
+import { assertAssistantAdapterContract, assertRecoveryAdapterContract, assertSelectedProfile } from './profile-composition.js'
+import {
+  claimSessionPartition,
+  commitRuntimeContext,
+  completeProfileIdentityMigration,
+  discardEphemeralRecoverySessions,
+  inspectRuntimeContext,
+  recoverySessionsDir,
+  rollbackSessionRootOwner,
+  type RuntimeContext,
+  type SessionPartitionHold,
+} from './runtime-context.js'
 import { attachWebUiBroadcast, startWebUiServer, type WebUiServer } from './web-ui-server.js'
 
 export interface ProductCliOptions {
@@ -37,18 +49,23 @@ export interface ProductCliOptions {
   readonly home?: string
   readonly once: boolean
   readonly allowFixtures?: boolean
+  readonly profile?: string
+  readonly workspace?: string
+  readonly sessionRoot?: string
+  readonly sessionId?: string
   readonly help: boolean
 }
 
 function usage(): string {
   return `${PRODUCT_COMMAND} <command>
-  start [--once] [--home <dir>] [--allow-fixtures]
+  start [--once] [--home <dir>] [--allow-fixtures] [--profile <name>] [--workspace <dir>] [--session-root <dir>] [--session-id <id>]
   status [--home <dir>]
-  doctor [--home <dir>] [--allow-fixtures]
+  doctor [--home <dir>] [--allow-fixtures] [--profile <name>] [--workspace <dir>] [--session-root <dir>] [--session-id <id>]
   stop [--home <dir>]
   self-extension <subcommand>
 
 TARS-NG home defaults to $TARS_NG_HOME, then $DSH_ASSISTANT_HOME, then ~/.local/share/tars-ng.
+Runtime context precedence: CLI → environment → $TARS_NG_HOME/config/product.json → defaults (profile=assistant, workspace=$HOME/workspace, sessions=$HOME/sessions, session-id=main).
 A TARS-NG Home has at most one verified writer. A PID is liveness metadata, not process identity.
 Secrets belong in $TARS_NG_HOME/config/env or ~/.config/tars-ng/env (chmod 600).
 start prints a loopback Web UI URL (default http://127.0.0.1:8787).
@@ -58,7 +75,19 @@ stop authenticates against the live lease holder and does not signal a PID.`
 export interface ProductCliHooks {
   readonly bootProduct?: (layout: ProductHomeLayout, allowFixtures: boolean) => Promise<AssistantControl>
   readonly stopConfirmTimeoutMs?: number
-  readonly afterWebUiBound?: (web: WebUiServer) => void
+  readonly afterWebUiBound?: (web: WebUiServer) => void | Promise<void>
+  readonly flushSession?: () => Promise<boolean>
+}
+
+function takeValue(argv: readonly string[], index: number, flag: string): { readonly value: string; readonly next: number } {
+  const inline = argv[index]?.startsWith(`${flag}=`) === true ? argv[index]!.slice(`${flag}=`.length) : undefined
+  if (inline !== undefined) {
+    if (inline === '') throw new Error(`missing ${flag} value`)
+    return { value: inline, next: index }
+  }
+  const value = argv[index + 1]
+  if (value === undefined || value.startsWith('-')) throw new Error(`missing ${flag} value`)
+  return { value, next: index + 1 }
 }
 
 export function parseProductArgv(argv: readonly string[]): ProductCliOptions {
@@ -67,6 +96,10 @@ export function parseProductArgv(argv: readonly string[]): ProductCliOptions {
   let home: string | undefined
   let once = false
   let allowFixtures: boolean | undefined
+  let profile: string | undefined
+  let workspace: string | undefined
+  let sessionRoot: string | undefined
+  let sessionId: string | undefined
   let help = false
   for (let i = 0; i < argv.length; i += 1) {
     const arg = argv[i]
@@ -83,14 +116,38 @@ export function parseProductArgv(argv: readonly string[]): ProductCliOptions {
       allowFixtures = true
       continue
     }
-    if (arg === '--home') {
-      home = argv[i + 1]
-      i += 1
+    if (arg === '--home' || arg.startsWith('--home=')) {
+      const taken = takeValue(argv, i, '--home')
+      home = taken.value
+      i = taken.next
       continue
     }
-    if (arg.startsWith('--home=')) {
-      home = arg.slice('--home='.length)
+    if (arg === '--profile' || arg.startsWith('--profile=')) {
+      const taken = takeValue(argv, i, '--profile')
+      profile = taken.value
+      i = taken.next
       continue
+    }
+    if (arg === '--workspace' || arg.startsWith('--workspace=')) {
+      const taken = takeValue(argv, i, '--workspace')
+      workspace = taken.value
+      i = taken.next
+      continue
+    }
+    if (arg === '--session-root' || arg.startsWith('--session-root=')) {
+      const taken = takeValue(argv, i, '--session-root')
+      sessionRoot = taken.value
+      i = taken.next
+      continue
+    }
+    if (arg === '--session-id' || arg.startsWith('--session-id=')) {
+      const taken = takeValue(argv, i, '--session-id')
+      sessionId = taken.value
+      i = taken.next
+      continue
+    }
+    if (arg.startsWith('--') && command !== 'self-extension') {
+      throw new Error(`unknown option ${arg}`)
     }
     if (command === '') {
       command = arg
@@ -98,7 +155,18 @@ export function parseProductArgv(argv: readonly string[]): ProductCliOptions {
     }
     rest.push(arg)
   }
-  return { command: command || 'help', rest, home, once, allowFixtures, help }
+  return {
+    command: command || 'help',
+    rest,
+    home,
+    once,
+    allowFixtures,
+    profile,
+    workspace,
+    sessionRoot,
+    sessionId,
+    help,
+  }
 }
 
 function resolveAllowFixtures(cli: boolean | undefined, fileValue: boolean): boolean {
@@ -157,11 +225,15 @@ async function waitUntilStopConfirmed(layout: ProductHomeLayout, identity: Runti
   return current === undefined || !runIdEquals(current.runId, identity.runId) || !processAlive(current.pid)
 }
 
-async function defaultBootProduct(layout: ProductHomeLayout, allowFixtures: boolean) {
+async function defaultBootProduct(layout: ProductHomeLayout, allowFixtures: boolean, context?: RuntimeContext, persistSessions = false) {
   return bootAssistantControl({
     home: layout.root,
     allowFixtures,
     memory: { persistence: 'json-file', jsonFilePath: layout.memoryFile },
+    sessionRoot: persistSessions ? context?.sessionPersistenceDir : undefined,
+    sessionId: context?.sessionId.value,
+    workspace: context?.workspace.value,
+    safeMode: context?.safeMode,
   })
 }
 
@@ -217,7 +289,13 @@ export async function runProductCli(
   io: { log: (text: string) => void; error: (text: string) => void } = console,
   hooks: ProductCliHooks = {},
 ): Promise<number> {
-  const parsed = parseProductArgv(argv)
+  let parsed: ProductCliOptions
+  try {
+    parsed = parseProductArgv(argv)
+  } catch (error) {
+    io.error(error instanceof Error ? error.message : 'invalid arguments')
+    return 1
+  }
   if (parsed.help || parsed.command === 'help' || parsed.command === '') {
     io.log(usage())
     return 0
@@ -232,6 +310,20 @@ export async function runProductCli(
   const envFiles = loadEnvFiles(layout)
   const userConfig = readProductUserConfig(layout)
   const allowFixtures = resolveAllowFixtures(parsed.allowFixtures, userConfig.config.allowFixtures)
+  let runtimeContext: RuntimeContext | undefined
+  if (parsed.command === 'start' || parsed.command === 'doctor' || parsed.command === 'status') {
+    try {
+      runtimeContext = inspectRuntimeContext(layout, {
+        profile: parsed.profile,
+        workspace: parsed.workspace,
+        sessionRoot: parsed.sessionRoot,
+        sessionId: parsed.sessionId,
+      }, userConfig.config.runtime)
+    } catch (error) {
+      io.error(error instanceof Error ? error.message : 'runtime context failed')
+      return 1
+    }
+  }
   const compatibility = inspectCompatibility()
   if (!compatibility.ok && (parsed.command === 'start' || parsed.command === 'doctor')) {
     io.error(compatibility.problems.join('\n'))
@@ -282,6 +374,10 @@ export async function runProductCli(
       `llm: ${DEFAULT_LLM_PROVIDER} / ${DEFAULT_LLM_MODEL}`,
       webUi ? `web-ui: ${webUi}` : 'web-ui: not-running',
       last === undefined ? 'last-start: none' : `last-start: recorded`,
+      runtimeContext ? `profile: ${runtimeContext.profile.value} (${runtimeContext.profile.source})` : 'profile: unresolved',
+      runtimeContext ? `profile-identity: ${runtimeContext.profileIdentity}` : 'profile-identity: unresolved',
+      runtimeContext ? `workspace: ${runtimeContext.workspaceLabel} (${runtimeContext.workspace.source})` : 'workspace: unresolved',
+      runtimeContext ? `session: ${runtimeContext.sessionId.value} (${runtimeContext.sessionId.source})` : 'session: unresolved',
       inspected.state === 'ambiguous' ? `lease: ambiguous` : `lease: ${inspected.state}`,
     ].join('\n'))
     return 0
@@ -294,6 +390,7 @@ export async function runProductCli(
       envFiles,
       allowFixtures,
       lastStartup: readLastStatus(layout),
+      runtimeContext,
     })
     if (parsed.command === 'doctor') {
       const inspected = await inspectRuntimeLease(layout)
@@ -306,13 +403,69 @@ export async function runProductCli(
         return 1
       }
     }
-    const lease = await acquireRuntimeLease(layout)
+    const lease = await acquireRuntimeLease(layout, runtimeContext ? {
+      profile: runtimeContext.profile.value,
+      profileIdentity: runtimeContext.profileIdentity,
+      workspaceIdentity: runtimeContext.workspaceIdentity,
+      sessionRootIdentity: runtimeContext.sessionRootIdentity,
+      sessionId: runtimeContext.sessionId.value,
+    } : undefined)
     if (!lease.ok) {
       io.error(`${lease.error}: ${lease.detail}`)
       return 1
     }
     const hold = lease.hold
-    const boot = hooks.bootProduct ?? defaultBootProduct
+    let partition: SessionPartitionHold | undefined
+    if (parsed.command === 'start' && runtimeContext) {
+      try {
+        assertSelectedProfile(runtimeContext.profile.value)
+        if (runtimeContext.profileCompositionError !== undefined) {
+          assertRecoveryAdapterContract()
+        } else {
+          try {
+            assertAssistantAdapterContract()
+          } catch (error) {
+            runtimeContext = {
+              ...runtimeContext,
+              safeMode: true,
+              profileCompositionError: error instanceof Error ? error.message : 'normal Profile composition failed',
+            }
+            assertRecoveryAdapterContract()
+          }
+        }
+        if (!runtimeContext.bound && runtimeContext.profileCompositionError !== undefined) {
+          runtimeContext = {
+            ...runtimeContext,
+            ephemeralRecovery: true,
+            sessionPersistenceDir: recoverySessionsDir(layout),
+          }
+        }
+        if (runtimeContext.bound && runtimeContext.profileCompositionError === undefined) {
+          runtimeContext = completeProfileIdentityMigration(layout, runtimeContext, { allowFixtures })
+          if (!hold.refreshContextStamp({
+            profile: runtimeContext.profile.value,
+            profileIdentity: runtimeContext.profileIdentity,
+            workspaceIdentity: runtimeContext.workspaceIdentity,
+            sessionRootIdentity: runtimeContext.sessionRootIdentity,
+            sessionId: runtimeContext.sessionId.value,
+          })) {
+            throw new Error('failed to refresh Home lease identity after Profile migration')
+          }
+        }
+        partition = claimSessionPartition(runtimeContext)
+        if (!runtimeContext.bound && runtimeContext.profileCompositionError === undefined) {
+          runtimeContext = commitRuntimeContext(layout, runtimeContext, { allowFixtures })
+        }
+      } catch (error) {
+        if (partition?.createdOwner) rollbackSessionRootOwner(runtimeContext)
+        partition?.release()
+        if (runtimeContext.ephemeralRecovery) discardEphemeralRecoverySessions(layout)
+        hold.release()
+        io.error(error instanceof Error ? error.message : 'runtime context commit failed')
+        return 1
+      }
+    }
+    const boot = hooks.bootProduct ?? ((homeLayout, fixtures) => defaultBootProduct(homeLayout, fixtures, runtimeContext, parsed.command === 'start'))
     let booted: AssistantControl | undefined
     let handle: Awaited<ReturnType<typeof createAssistantAgent>> | undefined
     let web: WebUiServer | undefined
@@ -326,7 +479,15 @@ export async function runProductCli(
           await web.close()
           web = undefined
         }
+        let flushed = handle === undefined
         if (handle !== undefined) {
+          try {
+            if (hooks.flushSession) await hooks.flushSession()
+            else if (booted !== undefined) await booted.ctx.sessions.flush(handle.agent.session)
+            flushed = true
+          } catch {
+            flushed = false
+          }
           await handle.dispose()
           handle = undefined
         }
@@ -334,6 +495,10 @@ export async function runProductCli(
           await booted.ctx.fiber.dispose()
           booted = undefined
         }
+        partition?.release()
+        partition = undefined
+        if (runtimeContext?.ephemeralRecovery) discardEphemeralRecoverySessions(layout)
+        if (!flushed) return false
         writerStillActive = false
         return true
       } catch {
@@ -360,6 +525,11 @@ export async function runProductCli(
         missingConfiguration: report.missingConfiguration,
         calendar: report.integrations.find((item) => item.capability === 'calendar')?.mode,
         llm: { provider: llm.provider, model: llm.model, routeAvailable: llm.routeAvailable, usable: llm.usable },
+        ...(runtimeContext ? {
+          profile: runtimeContext.profile.value,
+          workspaceIdentity: runtimeContext.workspaceIdentity,
+          sessionId: runtimeContext.sessionId.value,
+        } : {}),
       }
       writeLastStatus(layout, snapshot)
       appendProductLog(layout.logFile, `lifecycle ${parsed.command} persistence=${report.persistence} safeMode=${report.safeMode} llm=${llm.state}`)
@@ -377,8 +547,9 @@ export async function runProductCli(
       if (parsed.once) {
         return compatibility.ok ? 0 : 1
       }
-      handle = await createAssistantAgent(booted.ctx, PRODUCT_UI_SESSION_ID)
-      const surface = new AssistantControlSurface(booted.ctx, PRODUCT_UI_SESSION_ID)
+      const sessionId = runtimeContext?.sessionId.value ?? 'main'
+      handle = await createAssistantAgent(booted.ctx, sessionId, undefined, runtimeContext?.workspace.value)
+      const surface = new AssistantControlSurface(booted.ctx, sessionId, runtimeContext)
       let requestStop = () => {}
       const stopped = new Promise<void>((resolve) => {
         requestStop = resolve
@@ -410,7 +581,7 @@ export async function runProductCli(
       writerStillActive = true
       const bound = web
       detach = attachWebUiBroadcast(booted.ctx, () => bound.notify())
-      hooks.afterWebUiBound?.(bound)
+      await hooks.afterWebUiBound?.(bound)
       if (!hold.publishControlEndpoint(bound.url)) {
         throw new Error('failed to publish loopback control endpoint')
       }
@@ -444,6 +615,8 @@ export async function runProductCli(
     } finally {
       if (!writerStillActive) {
         if (booted !== undefined) await booted.ctx.fiber.dispose()
+        partition?.release()
+        if (runtimeContext?.ephemeralRecovery) discardEphemeralRecoverySessions(layout)
         removeOwnPidFile(layout)
         hold.release()
       }

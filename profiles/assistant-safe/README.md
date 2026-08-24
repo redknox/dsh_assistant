@@ -1,5 +1,5 @@
-# Safe Mode DSH profile
+# Independent recovery Profile
 
-Same bundles as `profiles/assistant/`, but the overlay sets `safeMode: true` on `dsh-assistant` so optional integrations, jobs, and generated extensions are never loaded. Recovery, Registry, and governance inspect/request stay available.
+Shipped recovery composition for Safe Mode. It is applied over `@deepseek-ai/dsh-base` and `dsh-assistant` only. It does **not** read `profiles/assistant`. Ordinary Profile patches cannot disable `dsh-assistant` or remove governance/registry authority.
 
-This directory is a repo example. It is not included in the npm pack.
+See [docs/runtime-context.md](../../docs/runtime-context.md).

@@ -8,7 +8,7 @@ export const DEFAULT_HOME_DIRNAME = 'tars-ng'
 export const DEFAULT_LLM_PROVIDER = 'deepseek-official'
 export const DEFAULT_LLM_MODEL = 'deepseek-v4-flash'
 export const DEFAULT_LLM_CREDENTIAL = 'DEEPSEEK_API_KEY'
-export const PRODUCT_UI_SESSION_ID = 'tars-ng'
+export const PRODUCT_UI_SESSION_ID = 'main'
 export const DEFAULT_UI_HOST = '127.0.0.1'
 export const DEFAULT_UI_PORT = 8787
 
@@ -27,6 +27,10 @@ export const CONFIG_ENV_NAMES = [
   'DSH_ASSISTANT_GOOGLE_CALENDAR_MODE',
   'DSH_ASSISTANT_SANDBOX_ROOT',
   'TARS_NG_ALLOW_FIXTURES',
+  'TARS_NG_PROFILE',
+  'TARS_NG_WORKSPACE',
+  'TARS_NG_SESSION_ROOT',
+  'TARS_NG_SESSION_ID',
 ] as const
 
 export const DSH_RUNTIME_PACKAGES = [
@@ -39,6 +43,8 @@ export const DSH_RUNTIME_PACKAGES = [
   '@deepseek-ai/dsh-llm',
   '@deepseek-ai/dsh-llm-deepseek',
   '@deepseek-ai/dsh-session',
+  '@deepseek-ai/dsh-session-persistence',
+  '@deepseek-ai/dsh-session-persistence-jsonl',
   '@deepseek-ai/dsh-system-prompt',
   '@deepseek-ai/dsh-tools',
 ] as const

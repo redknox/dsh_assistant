@@ -1,5 +1,5 @@
-# Example DSH profile
+# TARS-NG assistant Profile
 
-`dsh.profile.bundles` lists `@deepseek-ai/dsh-base` then `dsh-assistant`. The overlay `cordis.patch.yml` is empty: product insertion lives in the assistant bundle patch.
+Shipped host Profile for this product. `dsh.profile.bundles` lists `@deepseek-ai/dsh-base` then `dsh-assistant`. `cordis.patch.yml` disables DSH base rows the product does not mount.
 
-This directory is a repo example. It is not included in the npm pack. `npm test` loads the same bundle list through `@deepseek-ai/dsh-app-boot` (`loadProfile`, `renderConfigDump`, `boot`) — the same composition `dsh --profile assistant --dump-config` uses. See `docs/packaging.md`.
+Production `tars-ng start` resolves this directory through official `loadProfile` / `composeEntries` and mounts the **active** composition. Safe Mode applies `profiles/assistant-safe` as a recovery overlay. See [docs/packaging.md](../../docs/packaging.md) and [docs/runtime-context.md](../../docs/runtime-context.md).

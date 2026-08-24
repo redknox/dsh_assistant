@@ -11,10 +11,12 @@ Operator-facing install/start/secrets: [operator.md](./operator.md). Soak/freeze
 | Product command | `bin.tars-ng` → `dist/product/bin.js` | `start` / `status` / `doctor` / `stop` / `self-extension` |
 | Product bundle | `package.json` → `dsh.bundle.patch` = `cordis.patch.yml` | Inserts plugin id `dsh-assistant` |
 | Bundle entry | `src/product/bundle.ts` (`name`, `inject`, `apply`) | Loads registry, candidate, review, personality, governance, then optional memory/knowledge/integrations/policy/jobs |
-| Example profile | `profiles/assistant/` | `dsh.profile.bundles`: `@deepseek-ai/dsh-base` then `dsh-assistant` |
+| Shipped Profile | `profiles/assistant/` | Governed host Profile: `@deepseek-ai/dsh-base` then `dsh-assistant`, with disallowed DSH base rows disabled |
+| Safe overlay | `profiles/assistant-safe/` | Recovery overlay: disable official `jobs`, set `dsh-assistant.safeMode` |
+| Runtime Context | `$TARS_NG_HOME/config/product.json` + `state/runtime-context.json` | Profile / Workspace / Session binding; [runtime-context.md](./runtime-context.md) |
 | Headless product start | `tars-ng start --once` | Compiled `dist/` entry; no `tsx` |
 
-The profile overlay `profiles/assistant/cordis.patch.yml` is empty so composition stays in bundle patches.
+The shipped `profiles/assistant/cordis.patch.yml` disables DSH base rows this product does not mount. Production `start` parses that Profile with official `loadOverlayPatches` / `composeEntries` and compares the **active** composition to the live adapter registry.
 
 ## Fresh environment
 
@@ -39,7 +41,7 @@ Inspect the ship list without publishing:
 npm run pack:inspect
 ```
 
-Intended pack contents: `package.json`, `README.md`, `cordis.patch.yml`, and `dist/**` (including `dist/product/bin.js` and `dist/web/` UI assets). Not shipped: `src/`, `web/` source, `test/`, `fixtures/`, `docs/`, `profiles/`, `.env*`, credentials, user home state.
+Intended pack contents: `package.json`, `README.md`, `cordis.patch.yml`, `profiles/assistant/**`, `profiles/assistant-safe/**`, and `dist/**` (including `dist/product/bin.js` and `dist/web/` UI assets). Not shipped: `src/`, `web/` source, `test/`, `fixtures/`, `docs/`, `.env*`, credentials, user home state.
 
 `test/packaging.test.ts` installs that tarball into a clean directory and runs `tars-ng doctor` / `start --once` with an isolated product home. Missing `DEEPSEEK_API_KEY` must make `start` exit non-zero without a pid; an injected test key plus a resolvable default route must make `start --once` succeed. A subsequent `tars-ng start` must serve the packed Web UI from `dist/web` without Vite, `tsx`, or `src/`.
 

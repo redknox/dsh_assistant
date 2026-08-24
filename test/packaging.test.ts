@@ -51,17 +51,19 @@ describe('product package and profile', () => {
     assert.equal(pkg.dsh.bundle.patch, './cordis.patch.yml')
     assert.equal(pkg.bin?.['tars-ng'], './dist/product/bin.js')
     assert.equal(pkg.tarsNg?.dsh, '0.1.0-rc.8')
-    assert.deepEqual(pkg.files, ['dist', 'cordis.patch.yml'])
+    assert.deepEqual(pkg.files, ['dist', 'cordis.patch.yml', 'profiles/assistant', 'profiles/assistant-safe'])
     assert.equal(pkg.dependencies['@deepseek-ai/dsh-agent-loop'], '0.1.0-rc.8')
     assert.equal(pkg.dependencies['@deepseek-ai/dsh-llm-deepseek'], '0.1.0-rc.8')
     assert.equal(pkg.dependencies['@deepseek-ai/dsh-agent-default-model'], '0.1.0-rc.8')
+    assert.equal(pkg.dependencies['@deepseek-ai/dsh-app-boot'], '0.1.0-rc.8')
+    assert.equal(pkg.dependencies['@deepseek-ai/dsh-base'], '0.1.0-rc.8')
     assert.match(readFileSync(join(root, 'cordis.patch.yml'), 'utf8'), /id: dsh-assistant/)
 
     const profile = JSON.parse(readFileSync(join(root, 'profiles/assistant/package.json'), 'utf8')) as {
       dsh: { profile: { bundles: string[] } }
     }
     assert.deepEqual(profile.dsh.profile.bundles, ['@deepseek-ai/dsh-base', 'dsh-assistant'])
-    assert.match(readFileSync(join(root, 'profiles/assistant/cordis.patch.yml'), 'utf8'), /^\[]\s*$/m)
+    assert.match(readFileSync(join(root, 'profiles/assistant/cordis.patch.yml'), 'utf8'), /id: skill\n  disabled: true/)
   })
 
   it('remounts the product bundle without duplicate tools or leftover services', async () => {
@@ -195,20 +197,26 @@ describe('product package and profile', () => {
     assert.ok(paths.includes('cordis.patch.yml'))
     assert.ok(paths.includes('package.json'))
     assert.ok(paths.some((path) => path === 'dist/index.js' || path.startsWith('dist/')))
-    const forbidden = paths.filter((path) => (
-      path.startsWith('src/')
-      || path.startsWith('web/')
-      || path.startsWith('test/')
-      || path.startsWith('fixtures/')
-      || path.startsWith('docs/')
-      || path.startsWith('profiles/')
-      || path.startsWith('self-extension/')
-      || path.includes('authority.json')
-      || path.includes('candidates/')
-      || path.startsWith('.env')
-      || path.includes('credentials')
-      || path.includes('conversation-self-dev-adapter')
-    ))
+    assert.ok(paths.some((item) => item === 'profiles/assistant/cordis.patch.yml' || item.startsWith('profiles/assistant/')))
+    assert.ok(paths.some((item) => item === 'profiles/assistant-safe/cordis.patch.yml' || item.startsWith('profiles/assistant-safe/')))
+    const forbidden = paths.filter((item) => {
+      const profileOk = item === 'profiles/assistant'
+        || item.startsWith('profiles/assistant/')
+        || item === 'profiles/assistant-safe'
+        || item.startsWith('profiles/assistant-safe/')
+      return item.startsWith('src/')
+        || item.startsWith('web/')
+        || item.startsWith('test/')
+        || item.startsWith('fixtures/')
+        || item.startsWith('docs/')
+        || (item.startsWith('profiles/') && !profileOk)
+        || item.startsWith('self-extension/')
+        || item.includes('authority.json')
+        || item.includes('candidates/')
+        || item.startsWith('.env')
+        || item.includes('credentials')
+        || item.includes('conversation-self-dev-adapter')
+    })
     assert.deepEqual(forbidden, [])
   })
 

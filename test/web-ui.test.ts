@@ -19,6 +19,8 @@ import {
   resolveWebUiListen,
   assertSafePayload,
 } from '../src/product/web-ui-protocol.js'
+import { ensureProductHome } from '../src/product/home.js'
+import { inspectRuntimeContext } from '../src/product/runtime-context.js'
 import { attachWebUiBroadcast, startWebUiServer } from '../src/product/web-ui-server.js'
 import type { MissionControlView } from '../src/domain/workspace/types.js'
 import { MissionControlScreen } from '../web/src/App.tsx'
@@ -480,6 +482,39 @@ describe('local Mission-Control Web UI', () => {
         body: JSON.stringify({ action: 'diagnostics' }),
       })
       assert.equal(diagnostics.status, 200)
+      const diagnosticsBody = await diagnostics.json() as { acknowledgement?: { text: string } }
+      assert.match(diagnosticsBody.acknowledgement?.text ?? '', /safe-mode|recovery/)
+    } finally {
+      await web.close()
+      await control.ctx.fiber.dispose()
+    }
+  })
+
+  it('refuses Exit Safe Mode when Profile composition recovery is active', async () => {
+    const control = await bootSafeModeRuntime()
+    const layout = ensureProductHome(mkdtempSync(join(tmpdir(), 'web-ui-profile-safe-')))
+    const inspected = inspectRuntimeContext(layout, {}, undefined)
+    const surface = new AssistantControlSurface(control.ctx, 'profile-safe', {
+      ...inspected,
+      safeMode: true,
+      profileCompositionError: 'failed to load assistant patch',
+    })
+    const web = await startWebUiServer({
+      surface,
+      recoveryRoot: control.recoveryRoot,
+      port: 0,
+    })
+    try {
+      const cookie = await cookieHeader(web.url)
+      const exited = await fetch(`${web.url}/api/recovery`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', ...authHeaders(cookie) },
+        body: JSON.stringify({ action: 'exit-safe-mode', confirm: true }),
+      })
+      assert.equal(exited.status, 409)
+      const body = await exited.json() as { error?: string; detail?: string }
+      assert.equal(body.error, 'profile-composition-recovery')
+      assert.match(body.detail ?? '', /cannot repair a broken Profile/)
     } finally {
       await web.close()
       await control.ctx.fiber.dispose()
@@ -547,6 +582,9 @@ export function apply(ctx) {
         body: JSON.stringify({ action: 'exit-safe-mode', confirm: true }),
       })
       assert.equal(immediate.status, 409)
+      const immediateBody = await immediate.json() as { error?: string; detail?: string }
+      assert.equal(immediateBody.error, 'integrity-failure')
+      assert.match(immediateBody.detail ?? '', /recovery is still required/)
       const rolled = await fetch(`${web.url}/api/recovery`, {
         method: 'POST',
         headers: { 'content-type': 'application/json', ...authHeaders(cookie) },

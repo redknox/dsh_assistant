@@ -1,7 +1,7 @@
 {
   "name": "dsh-assistant-profile",
   "private": true,
-  "description": "Example DSH profile composition: base Harness bundle plus this assistant product bundle. Replaceable through profile bundle order.",
+  "description": "Shipped TARS-NG governed Profile: DSH base plus the assistant product bundle, with disallowed base rows disabled.",
   "dsh": {
     "profile": {
       "bundles": [
