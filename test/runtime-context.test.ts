@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { spawnSync } from 'node:child_process'
-import { chmodSync, existsSync, mkdtempSync, realpathSync, readFileSync, statSync, writeFileSync } from 'node:fs'
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, realpathSync, readFileSync, statSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -9,12 +9,14 @@ import { createUserMessage } from '@deepseek-ai/dsh-llm'
 import { withDshAssistantProfile } from './helpers/dsh-profile-loader.js'
 import { parseProductArgv, runProductCli } from '../src/product/cli.js'
 import {
+  ASSISTANT_OFFICIAL_COMPOSED_IDS,
   ASSISTANT_PROFILE_BUNDLES,
   assertAssistantAdapterContract,
   assertMountedAdapterContract,
   assertOfficialComposedIds,
   assertOfficialEquivalentToAdapter,
   assertProfilePatchSafe,
+  expectedProductionAdapterIds,
   mountedAdapterPluginIds,
 } from '../src/product/profile-composition.js'
 import { ensureProductHome } from '../src/product/home.js'
@@ -27,6 +29,7 @@ import {
   resolveRuntimeContext,
   runtimeContextBindingFile,
   RuntimeContextError,
+  sessionPartitionLockDir,
 } from '../src/product/runtime-context.js'
 import { bootAssistantControl, bootSafeModeRuntime, createAssistantAgent } from '../src/runtime/boot.js'
 import { AssistantControlSurface } from '../src/ui/controller.js'
@@ -362,10 +365,26 @@ describe('runtime context', () => {
     assertAssistantAdapterContract()
     const booted = await bootAssistantControl()
     try {
+      const mounted = mountedAdapterPluginIds(booted.ctx)
+      const expected = expectedProductionAdapterIds({ safeMode: false, sessionPersistence: false })
+      assert.deepEqual(mounted, [...expected])
       assertMountedAdapterContract(booted.ctx, { safeMode: false, sessionPersistence: false })
+      assert.throws(
+        () => assertOfficialEquivalentToAdapter(ASSISTANT_OFFICIAL_COMPOSED_IDS, ['dsh-assistant']),
+        /not equivalent to the production adapter/,
+      )
+      assert.throws(
+        () => assertOfficialEquivalentToAdapter(ASSISTANT_OFFICIAL_COMPOSED_IDS, expected.filter((id) => id !== 'dsh-assistant')),
+        /not equivalent to the production adapter/,
+      )
+      assert.throws(
+        () => assertOfficialEquivalentToAdapter(ASSISTANT_OFFICIAL_COMPOSED_IDS, [...expected, 'unknown-extra-plugin']),
+        /not equivalent to the production adapter/,
+      )
       await withDshAssistantProfile(async ({ composedIds }) => {
         assertOfficialComposedIds(composedIds)
-        assertOfficialEquivalentToAdapter(composedIds, mountedAdapterPluginIds(booted.ctx))
+        assert.deepEqual(composedIds, [...ASSISTANT_OFFICIAL_COMPOSED_IDS])
+        assertOfficialEquivalentToAdapter(composedIds, mounted, { safeMode: false, sessionPersistence: false })
         assert.equal(composedIds.filter((id) => id === 'dsh-assistant').length, 1)
         assert.throws(
           () => assertOfficialComposedIds(['dsh-assistant', 'agent', 'system-prompt', 'not-mounted-by-production']),
@@ -403,6 +422,31 @@ describe('runtime context', () => {
     } finally {
       await booted.ctx.fiber.dispose()
     }
+  })
+
+  it('recovers unpublished partition locks left by a crash before identity publish', () => {
+    const context = resolveRuntimeContext(ensureProductHome(isolatedHome()), {}, undefined, { allowFixtures: false })
+    const root = context.sessionPersistenceDir
+    mkdirSync(root, { recursive: true, mode: 0o700 })
+    mkdirSync(sessionPartitionLockDir(root), { recursive: true, mode: 0o700 })
+    const incompleteStaging = path.join(root, `${'.writer.lock.'}${'ab'.repeat(32)}.staging`)
+    mkdirSync(incompleteStaging, { recursive: true, mode: 0o700 })
+    const deadStaging = path.join(root, `${'.writer.lock.'}${'cd'.repeat(32)}.staging`)
+    mkdirSync(deadStaging, { recursive: true, mode: 0o700 })
+    writeFileSync(path.join(deadStaging, 'identity.json'), `${JSON.stringify({
+      schemaVersion: 1,
+      pid: 999999,
+      runId: 'cd'.repeat(32),
+      startedAt: new Date().toISOString(),
+      home: context.home,
+      partitionKey: 'dead',
+    }, null, 2)}\n`)
+    const hold = claimSessionPartition(context)
+    assert.equal(existsSync(sessionPartitionLockDir(root)), true)
+    assert.equal(existsSync(path.join(sessionPartitionLockDir(root), 'identity.json')), true)
+    assert.equal(existsSync(incompleteStaging), false)
+    assert.equal(existsSync(deadStaging), false)
+    hold.release()
   })
 
   it('reclaims a stale session partition after a child process exits without release', () => {

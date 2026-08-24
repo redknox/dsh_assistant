@@ -388,7 +388,7 @@ export function rollbackSessionRootOwner(context: RuntimeContext): boolean {
   }
   const partition = sessionPersistenceDirOf(context)
   if (existsSync(partition)) {
-    const leftover = readdirSync(partition).filter((name) => name !== '.writer.lock')
+    const leftover = readdirSync(partition).filter((name) => !name.startsWith('.writer.lock'))
     if (leftover.length > 0) return false
   }
   try {
@@ -431,13 +431,65 @@ export function inspectSessionPartition(root: string): SessionPartitionInspectio
   if (!existsSync(lockDir)) return { state: 'empty' }
   const identity = readSessionPartitionIdentity(root)
   if (!identity) {
-    return { state: 'ambiguous', detail: 'session partition lock exists without a readable identity' }
+    return { state: 'empty' }
   }
   if (!processAlive(identity.pid)) return { state: 'stale', identity }
   if (localPartitionHolds.get(root) !== undefined && runIdEquals(localPartitionHolds.get(root)!, identity.runId)) {
     return { state: 'held', identity }
   }
   return { state: 'ambiguous', detail: 'session partition lock belongs to a live unverified writer' }
+}
+
+export function sweepIncompletePartitionLocks(root: string): void {
+  if (!existsSync(root)) return
+  const official = sessionPartitionLockDir(root)
+  if (existsSync(official) && readSessionPartitionIdentity(root) === undefined) {
+    const tomb = path.join(root, `.writer.lock.incomplete.${randomBytes(8).toString('hex')}.retired`)
+    try {
+      renameSync(official, tomb)
+      rmSync(tomb, { recursive: true, force: true })
+    } catch {
+      // another writer may be sweeping the same unpublished lock
+    }
+  }
+  for (const name of readdirSync(root)) {
+    const staged = /^\.writer\.lock\.([0-9a-f]{64})\.staging$/.exec(name)
+    if (!staged) continue
+    const dir = path.join(root, name)
+    let identity: SessionPartitionIdentity | undefined
+    try {
+      const raw = JSON.parse(readFileSync(path.join(dir, 'identity.json'), 'utf8')) as Partial<SessionPartitionIdentity>
+      if (typeof raw.pid === 'number' && typeof raw.runId === 'string') {
+        identity = raw as SessionPartitionIdentity
+      }
+    } catch {
+      identity = undefined
+    }
+    if (identity && processAlive(identity.pid)) continue
+    rmSync(dir, { recursive: true, force: true })
+  }
+}
+
+function publishPartitionLock(root: string, identity: SessionPartitionIdentity): void {
+  const staging = path.join(root, `.writer.lock.${identity.runId}.staging`)
+  mkdirSync(staging, { recursive: false, mode: 0o700 })
+  try {
+    writeJsonAtomic(path.join(staging, 'identity.json'), identity)
+    try {
+      const fd = openSync(staging, 'r')
+      try {
+        fsyncSync(fd)
+      } finally {
+        closeSync(fd)
+      }
+    } catch {
+      // directory fsync is best-effort
+    }
+    renameSync(staging, sessionPartitionLockDir(root))
+  } catch (error) {
+    rmSync(staging, { recursive: true, force: true })
+    throw error
+  }
 }
 
 export function removePartitionLockIfRunId(root: string, runId: string): boolean {
@@ -472,6 +524,7 @@ export function claimSessionPartition(context: RuntimeContext): SessionPartition
       // chmod may fail on some filesystems
     }
     for (let attempt = 0; attempt < 8; attempt += 1) {
+      sweepIncompletePartitionLocks(root)
       const inspected = inspectSessionPartition(root)
       if (inspected.state === 'held') {
         throw new RuntimeContextError('session partition is already held by another writer')
@@ -483,13 +536,6 @@ export function claimSessionPartition(context: RuntimeContext): SessionPartition
         removePartitionLockIfRunId(root, inspected.identity.runId)
         continue
       }
-      const lockDir = sessionPartitionLockDir(root)
-      try {
-        mkdirSync(lockDir, { recursive: false, mode: 0o700 })
-      } catch (error) {
-        if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error
-        continue
-      }
       const identity: SessionPartitionIdentity = {
         schemaVersion: SESSION_OWNER_SCHEMA_VERSION,
         pid: process.pid,
@@ -498,7 +544,12 @@ export function claimSessionPartition(context: RuntimeContext): SessionPartition
         home: context.home,
         partitionKey: partitionKeyOf(context),
       }
-      writeJsonAtomic(path.join(lockDir, 'identity.json'), identity)
+      try {
+        publishPartitionLock(root, identity)
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error
+        continue
+      }
       localPartitionHolds.set(root, identity.runId)
       return {
         root,

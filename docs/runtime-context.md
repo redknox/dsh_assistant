@@ -49,7 +49,7 @@ CLI (--profile, --workspace, --session-root, --session-id)
 
 A Home is stamped on first successful **start** after the Home lease is held. `doctor` and `status` inspect only. Rebinding Profile, Workspace, or Session Root fails closed. Changing Session ID on the same binding is allowed (one selected session at runtime).
 
-Session files are stored under `$SESSION_ROOT/.tars-ng-sessions/<home+profile+workspace identity>/`. The Session Root itself carries an exclusive owner stamp, so a different Home cannot mount or read it. The partition writer lock uses a run token, classifies live/stale/ambiguous like the Home lease, and only a proven-stale lock can be reclaimed. `start` claims that Session Root before it permanently writes the Home binding.
+Session files are stored under `$SESSION_ROOT/.tars-ng-sessions/<home+profile+workspace identity>/`. The Session Root itself carries an exclusive owner stamp, so a different Home cannot mount or read it. The partition writer lock is published atomically: identity is written and fsynced in a token-named staging directory, then renamed to `.writer.lock`. A visible official lock always has a complete identity. Crash leftovers (empty official lock or unpublished staging) are swept before the next claim. The lock uses a run token, classifies live/stale/ambiguous like the Home lease, and only a proven-stale lock can be reclaimed. `start` claims that Session Root before it permanently writes the Home binding.
 
 ## Persistence
 
@@ -57,7 +57,7 @@ Production boot mounts `@deepseek-ai/dsh-session-persistence-jsonl` under the re
 
 A Home lease remains the single-writer gate for Session Root. Concurrent writers to the same Home/session identity are rejected by that lease before a second persistence backend can attach. Shutdown disposes the live Agent/Session so DSH persistence can flush before the lease is released.
 
-Production `start` uses the public DSH plugin adapter that matches the packaged `assistant` composition (`@deepseek-ai/dsh-base` then exactly one `dsh-assistant`). Official `dsh-app-boot` `loadProfile` / `renderConfigDump` / `boot` remains the packaging smoke path and is not a silent third-party installer.
+Production `start` uses the public DSH plugin adapter that matches the packaged `assistant` composition (`@deepseek-ai/dsh-base` then exactly one `dsh-assistant`). Every official composed id is either mapped to a live `ctx.registry` name or classified as an intentional exclusion. The mapped expected set must equal the mounted production plugins; a lone `dsh-assistant` is not equivalent. Official `dsh-app-boot` `loadProfile` / `renderConfigDump` / `boot` remains the packaging smoke path and is not a silent third-party installer.
 
 ## Surfaces
 
