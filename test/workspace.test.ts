@@ -641,6 +641,7 @@ describe('TARS-NG mission-control workspace', () => {
     const view = projectMissionControl(snapshot({
       activation: {
         state: 'activation-failed',
+        generation: 4,
         lastFailureCandidateId: 'cand-obsidian',
         lastFailure: {
           candidateId: 'cand-obsidian',
@@ -668,7 +669,7 @@ describe('TARS-NG mission-control workspace', () => {
     const retry = view.activations.find((item) => item.candidateId === 'cand-obsidian')
     assert.ok(retry)
     assert.equal(retry.status, 'ACTIVATION_FAILED')
-    assert.equal(retry.id, 'act-retry-apr-2')
+    assert.equal(retry.id, 'act-retry-apr-2-4-health')
     assert.equal(retry.title, 'Retry activation')
     assert.equal(retry.eligibilityOk, true)
     assert.equal(view.activationFailure?.phase, 'health')
@@ -677,7 +678,37 @@ describe('TARS-NG mission-control workspace', () => {
     assert.ok(view.activity.some((item) => item.kind === 'FAILED' && item.summary.includes('health')))
     assert.match(renderMissionControlAsText(view), /ACTIVATION FAILED/)
     assert.match(renderMissionControlAsHtml(view), /data-activation-failed="true"/)
-    assert.match(renderMissionControlAsHtml(view), /data-activation-id="act-retry-apr-2"/)
+    assert.match(renderMissionControlAsHtml(view), /data-activation-id="act-retry-apr-2-4-health"/)
+    const nextAttempt = projectMissionControl(snapshot({
+      activation: {
+        state: 'activation-failed',
+        generation: 5,
+        lastFailureCandidateId: 'cand-obsidian',
+        lastFailure: {
+          candidateId: 'cand-obsidian',
+          phase: 'health',
+          diagnostics: 'post-activation health verification failed',
+          rollbackSucceeded: true,
+          safeModeRequired: false,
+        },
+      },
+      extensionApprovals: [{
+        id: 'apr-2',
+        candidateId: 'cand-obsidian',
+        fingerprint: 'fp-ext',
+        decision: 'approved-for-exact-diff',
+        owner: 'generated/obsidian-vault',
+        candidateVersion: '0.1.0',
+        digest: 'abc123',
+        capabilitiesAdded: ['obsidian.read'],
+        capabilitiesRemoved: [],
+        permissionsAdded: [],
+        permissionsRemoved: [],
+        effects: [],
+      }],
+    }))
+    assert.equal(nextAttempt.activations[0]?.id, 'act-retry-apr-2-5-health')
+    assert.notEqual(nextAttempt.activations[0]?.id, retry.id)
 
     const blocked = projectMissionControl(snapshot({
       recoveryRequired: true,

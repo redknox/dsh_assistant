@@ -34,6 +34,7 @@ export function projectActivationCards(input: WorkspaceSnapshotInput): readonly 
       )),
     })
     if (lifecycle === 'ACTIVATION_FAILED') {
+      if (input.activation?.generation === undefined) continue
       if (!isActivationRetryEligible({
         lifecycle,
         eligibilityOk: approval.eligibilityOk,
@@ -44,7 +45,10 @@ export function projectActivationCards(input: WorkspaceSnapshotInput): readonly 
     } else if (lifecycle !== 'APPROVED_NOT_ACTIVE' && lifecycle !== 'ACTIVATING' && lifecycle !== 'DISABLED_REACTIVATABLE') {
       continue
     }
-    cards.push(selfExtensionActivationCard(approval, lifecycle))
+    cards.push(selfExtensionActivationCard(approval, lifecycle, {
+      generation: input.activation?.generation,
+      failurePhase: input.activation?.lastFailure?.phase,
+    }))
   }
   return cards
 }
@@ -52,6 +56,7 @@ export function projectActivationCards(input: WorkspaceSnapshotInput): readonly 
 function selfExtensionActivationCard(
   approval: NonNullable<WorkspaceSnapshotInput['extensionApprovals']>[number],
   status: ActivationCard['status'],
+  attempt?: { readonly generation?: number; readonly failurePhase?: string },
 ): ActivationCard {
   const eligibilityOk = approval.eligibilityOk !== false
   const denials = approval.eligibilityDenials ?? []
@@ -59,7 +64,10 @@ function selfExtensionActivationCard(
   const permissionsChanged = approval.permissionsChanged ?? []
   const toolsChanged = approval.toolsChanged ?? []
   return {
-    id: activationCardId(approval.id, status),
+    id: activationCardId(approval.id, status, attempt?.generation === undefined ? undefined : {
+      generation: attempt.generation,
+      failurePhase: attempt.failurePhase,
+    }),
     kind: 'self-extension-activate',
     title: status === 'DISABLED_REACTIVATABLE'
       ? 'Reactivate extension'

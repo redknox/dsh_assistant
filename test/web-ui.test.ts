@@ -1541,18 +1541,17 @@ export function apply(ctx) {
           confirm: true,
         }),
       })).status, 409)
-      recoveryRoot.service.failActivation = undefined
       const failed = await fetch(`${url}/api/view`).then((res) => res.json()) as { view: MissionControlView }
       const row = failed.view.extensions.find((item) => item.candidateId === prepared.id)
       assert.ok(row)
       assert.equal(row.lifecycle, 'ACTIVATION_FAILED')
       assert.equal(row.eligibilityOk, true)
-      const retry = failed.view.activations.find((item) => item.candidateId === prepared.id)
-      assert.ok(retry)
-      assert.equal(retry.status, 'ACTIVATION_FAILED')
-      assert.equal(retry.title, 'Retry activation')
-      assert.notEqual(retry.id, first.id)
-      assert.match(retry.id, /^act-retry-/)
+      const retryA = failed.view.activations.find((item) => item.candidateId === prepared.id)
+      assert.ok(retryA)
+      assert.equal(retryA.status, 'ACTIVATION_FAILED')
+      assert.equal(retryA.title, 'Retry activation')
+      assert.notEqual(retryA.id, first.id)
+      assert.match(retryA.id, /^act-retry-/)
       const markup = renderToStaticMarkup(createElement(MissionControlScreen, {
         view: failed.view,
         pane: 'extensions',
@@ -1571,6 +1570,36 @@ export function apply(ctx) {
         method: 'POST',
         headers: { 'content-type': 'application/json', ...authHeaders(cookie) },
         body: JSON.stringify({
+          id: retryA.id,
+          candidateId: retryA.candidateId,
+          digest: retryA.digest,
+          fingerprint: retryA.fingerprint,
+          confirm: true,
+        }),
+      })).status, 409)
+      const afterSecond = await fetch(`${url}/api/view`).then((res) => res.json()) as { view: MissionControlView }
+      const retryB = afterSecond.view.activations.find((item) => item.candidateId === prepared.id)
+      assert.ok(retryB)
+      assert.notEqual(retryB.id, retryA.id)
+      const generationAfterB = recoveryRoot.inspect().current?.generation
+      recoveryRoot.service.failActivation = undefined
+      assert.equal((await fetch(`${url}/api/activate`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', ...authHeaders(cookie) },
+        body: JSON.stringify({
+          id: retryA.id,
+          candidateId: retryA.candidateId,
+          digest: retryA.digest,
+          fingerprint: retryA.fingerprint,
+          confirm: true,
+        }),
+      })).status, 409)
+      assert.equal(recoveryRoot.inspect().current?.generation, generationAfterB)
+      assert.equal(ctx.tools.get('r0_wui_retry'), undefined)
+      assert.equal((await fetch(`${url}/api/activate`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', ...authHeaders(cookie) },
+        body: JSON.stringify({
           id: first.id,
           candidateId: first.candidateId,
           digest: first.digest,
@@ -1582,9 +1611,9 @@ export function apply(ctx) {
         method: 'POST',
         headers: { 'content-type': 'application/json', ...authHeaders(cookie) },
         body: JSON.stringify({
-          id: retry.id,
-          candidateId: retry.candidateId,
-          digest: retry.digest,
+          id: retryB.id,
+          candidateId: retryB.candidateId,
+          digest: retryB.digest,
           fingerprint: 'stale-fingerprint',
           confirm: true,
         }),
@@ -1593,10 +1622,10 @@ export function apply(ctx) {
         method: 'POST',
         headers: { 'content-type': 'application/json', ...authHeaders(cookie) },
         body: JSON.stringify({
-          id: retry.id,
-          candidateId: retry.candidateId,
-          digest: retry.digest,
-          fingerprint: retry.fingerprint,
+          id: retryB.id,
+          candidateId: retryB.candidateId,
+          digest: retryB.digest,
+          fingerprint: retryB.fingerprint,
           confirm: true,
         }),
       })).status, 200)

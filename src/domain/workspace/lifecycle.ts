@@ -55,8 +55,14 @@ export function isActivationRetryEligible(input: {
   return true
 }
 
-export function activationCardId(approvalId: string, lifecycle: ExtensionLifecycleState): string {
-  return lifecycle === 'ACTIVATION_FAILED' ? `act-retry-${approvalId}` : approvalId
+export function activationCardId(
+  approvalId: string,
+  lifecycle: ExtensionLifecycleState,
+  attempt?: { readonly generation: number; readonly failurePhase?: string },
+): string {
+  if (lifecycle !== 'ACTIVATION_FAILED') return approvalId
+  const phase = attempt?.failurePhase?.replaceAll(/[^a-z0-9-]/gi, '') || 'failed'
+  return `act-retry-${approvalId}-${attempt?.generation ?? 'unknown'}-${phase}`
 }
 
 export function compareOwnerVersion(left: string, right: string): number {
