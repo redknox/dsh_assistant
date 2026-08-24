@@ -458,6 +458,32 @@ describe('extension governance and recovery', () => {
     assert.equal(root.inspect().lifecycleBusy, undefined)
   })
 
+  it('I3e. uninstall blocks rollback, Safe Mode, and disable on the same mutation lock', async () => {
+    const { workspace, governance, root, human } = seeded()
+    const active = ready(workspace, { owner: 'generated/text-slugify', version: '0.1.0', capabilities: ['text.slugify'] })
+    root.recordApproval(human, {
+      candidateId: active.id,
+      fingerprint: governance.requestApproval(active.id).fingerprint,
+      decision: 'approved-for-exact-diff',
+    })
+    await root.activate(active.id, human)
+    let release!: () => void
+    governance.holdUninstall = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    const pending = root.uninstall(human, 'generated/text-slugify', '0.1.0')
+    for (let i = 0; i < 50 && root.inspect().lifecycleBusy !== 'uninstall'; i += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 10))
+    }
+    assert.equal(root.inspect().lifecycleBusy, 'uninstall')
+    await assert.rejects(() => root.rollback(human), /uninstall-in-flight/)
+    assert.throws(() => root.enterSafeMode(human), /uninstall-in-flight/)
+    assert.throws(() => root.disable(human, 'generated/text-slugify', '0.1.0'), /uninstall-in-flight/)
+    release()
+    await pending
+    assert.equal(root.inspect().lifecycleBusy, undefined)
+  })
+
   it('J. rejects attempts to rewrite the recovery root', () => {
     const { governance, root } = seeded()
     assert.throws(() => governance.rewriteRecoveryRoot(), GovernanceAuthorityError)

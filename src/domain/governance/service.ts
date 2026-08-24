@@ -28,7 +28,8 @@ import type {
 } from './types.js'
 import { TrustedAuthorityCredential as AuthorityCredential } from './types.js'
 
-export type ActivationInterrupt = 'activation-pending' | 'prepare' | 'registry-commit' | 'commit' | 'rollback-pending'
+export type ActivationInterrupt = 'activation-pending' | 'prepare' | 'registry-commit' | 'commit' | 'rollback-pending' | 'uninstall-registry-commit' | 'uninstall-commit'
+export type LifecycleMutation = 'activation' | 'uninstall' | 'recovery'
 
 export interface GovernanceHydrate {
   readonly approvals: readonly ApprovalRecord[]
@@ -81,7 +82,7 @@ export class GovernanceService implements ExtensionGovernance, ExtensionActivati
   failUninstallRestore = false
   holdActivation?: Promise<void>
   holdUninstall?: Promise<void>
-  private mutation: 'idle' | 'activation' | 'uninstall' = 'idle'
+  private mutation: 'idle' | LifecycleMutation = 'idle'
   private readonly persistHook?: () => void
   private readonly beginAuthorityCommit?: () => void
   private readonly finishAuthorityCommit?: () => void
@@ -249,9 +250,7 @@ export class GovernanceService implements ExtensionGovernance, ExtensionActivati
 
   async activate(candidateId: string, credential: TrustedAuthorityCredential): Promise<ActivationStatus> {
     this.assertCredential(credential)
-    if (this.mutation !== 'idle') {
-      throw new ActivationDeniedError([{ reason: `${this.mutation}-in-flight`, detail: 'another trusted lifecycle mutation is in progress' }])
-    }
+    this.assertMutationIdle('activation')
     const gate = this.eligibility(candidateId)
     if (!gate.ok) throw new ActivationDeniedError(gate.denials)
     const { record } = this.facts(candidateId)
@@ -326,46 +325,70 @@ export class GovernanceService implements ExtensionGovernance, ExtensionActivati
 
   async rollback(credential: TrustedAuthorityCredential): Promise<ActivationStatus> {
     this.assertCredential(credential)
+    this.assertMutationIdle('recovery')
     const target = this.rollbackTarget ?? this.lastKnownGood
     if (target === undefined) throw new GovernanceContractError('no last-known-good snapshot to restore')
-    this.state = 'rollback-pending'
-    this.flush()
-    await this.maybeInterrupt('rollback-pending')
-    return this.finishRollback(target)
+    this.mutation = 'recovery'
+    try {
+      this.state = 'rollback-pending'
+      this.flush()
+      await this.maybeInterrupt('rollback-pending')
+      return this.finishRollback(target)
+    } finally {
+      this.mutation = 'idle'
+    }
   }
 
   enterSafeMode(credential: TrustedAuthorityCredential): ActivationStatus {
     this.assertCredential(credential)
-    for (const record of this.registry.list({ status: 'active' })) {
-      if (isolatedRuntimeOwner(record)) {
-        this.registry.transitionStatus(record.owner, record.version, 'disabled')
+    this.assertMutationIdle('recovery')
+    this.mutation = 'recovery'
+    try {
+      for (const record of this.registry.list({ status: 'active' })) {
+        if (isolatedRuntimeOwner(record)) {
+          this.registry.transitionStatus(record.owner, record.version, 'disabled')
+        }
       }
+      this.safeMode = true
+      this.state = 'safe-mode'
+      this.current = this.captureSnapshot()
+      void this.runtime.unloadGenerated()
+      this.flush()
+      return this.status()
+    } finally {
+      this.mutation = 'idle'
     }
-    this.safeMode = true
-    this.state = 'safe-mode'
-    this.current = this.captureSnapshot()
-    void this.runtime.unloadGenerated()
-    this.flush()
-    return this.status()
   }
 
   exitSafeMode(credential: TrustedAuthorityCredential): ActivationStatus {
     this.assertCredential(credential)
+    this.assertMutationIdle('recovery')
     if (this.isRecoveryRequired()) {
       throw new GovernanceContractError('cannot exit Safe Mode while recovery is still required')
     }
-    this.safeMode = false
-    this.state = this.lastKnownGood === undefined ? 'idle' : 'active'
-    this.current = this.captureSnapshot()
-    this.flush()
-    return this.status()
+    this.mutation = 'recovery'
+    try {
+      this.safeMode = false
+      this.state = this.lastKnownGood === undefined ? 'idle' : 'active'
+      this.current = this.captureSnapshot()
+      this.flush()
+      return this.status()
+    } finally {
+      this.mutation = 'idle'
+    }
   }
 
   disable(credential: TrustedAuthorityCredential, owner: string, version: string): void {
     this.assertCredential(credential)
-    this.registry.transitionStatus(owner, version, 'disabled')
-    this.current = this.captureSnapshot()
-    this.flush()
+    this.assertMutationIdle('recovery')
+    this.mutation = 'recovery'
+    try {
+      this.registry.transitionStatus(owner, version, 'disabled')
+      this.current = this.captureSnapshot()
+      this.flush()
+    } finally {
+      this.mutation = 'idle'
+    }
   }
 
   async uninstall(
@@ -375,9 +398,7 @@ export class GovernanceService implements ExtensionGovernance, ExtensionActivati
     options: { readonly acknowledgeDependents?: boolean } = {},
   ): Promise<ActivationStatus> {
     this.assertCredential(credential)
-    if (this.lifecycleBusy() !== undefined) {
-      throw new UninstallDeniedError([{ reason: `${this.lifecycleBusy()}-in-flight`, detail: 'another trusted lifecycle mutation is in progress' }])
-    }
+    this.assertMutationIdle('uninstall')
     const denials = this.uninstallDenials(owner, version, options)
     if (denials.length > 0) throw new UninstallDeniedError(denials)
     const record = this.registry.get(owner, version)
@@ -393,14 +414,19 @@ export class GovernanceService implements ExtensionGovernance, ExtensionActivati
     try {
       await this.runtime.unloadGenerated(candidate.id)
       if (this.failUninstall?.phase === 'after-unload') throw new Error(this.failUninstall.diagnostics)
+      this.beginAuthorityCommit?.()
       this.registry.transitionStatus(owner, version, 'disabled')
+      await this.maybeInterrupt('uninstall-registry-commit')
       if (this.failUninstall?.phase === 'after-registry') throw new Error(this.failUninstall.diagnostics)
       this.current = this.captureSnapshot()
       this.lastKnownGood = this.current
       if (this.failUninstall?.phase === 'after-persist') throw new Error(this.failUninstall.diagnostics)
       this.flush()
+      this.finishAuthorityCommit?.()
+      await this.maybeInterrupt('uninstall-commit')
       return this.status()
     } catch (error) {
+      if (error instanceof SimulatedCrashError) throw error
       if (this.registry.get(owner, version)?.status !== 'active') {
         try {
           this.registry.transitionStatus(owner, version, 'active')
@@ -421,6 +447,7 @@ export class GovernanceService implements ExtensionGovernance, ExtensionActivati
       this.current = prior
       this.lastKnownGood = priorLkg
       this.flush()
+      this.finishAuthorityCommit?.()
       throw error
     } finally {
       this.mutation = 'idle'
@@ -442,10 +469,20 @@ export class GovernanceService implements ExtensionGovernance, ExtensionActivati
     })
   }
 
-  private lifecycleBusy(): 'activation' | 'uninstall' | undefined {
+  private lifecycleBusy(): LifecycleMutation | undefined {
     if (this.mutation !== 'idle') return this.mutation
     if (this.state === 'activating' || this.state === 'activation-pending') return 'activation'
+    if (this.state === 'rollback-pending') return 'recovery'
     return undefined
+  }
+
+  private assertMutationIdle(kind: LifecycleMutation): void {
+    const busy = this.lifecycleBusy()
+    if (busy === undefined) return
+    const denial = { reason: `${busy}-in-flight`, detail: 'another trusted lifecycle mutation is in progress' }
+    if (kind === 'activation') throw new ActivationDeniedError([denial])
+    if (kind === 'uninstall') throw new UninstallDeniedError([denial])
+    throw new GovernanceContractError(denial.reason)
   }
 
   private uninstallDenials(

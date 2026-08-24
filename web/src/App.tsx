@@ -391,6 +391,7 @@ function PluginRow(props: {
   const blocked = plugin.dependency.severity === 'hard' || plugin.dependency.severity === 'unresolved'
   const hard = plugin.dependency.dependents.filter((item) => item.kind === 'hard')
   const optional = plugin.dependency.dependents.filter((item) => item.kind === 'optional')
+  const historical = plugin.dependency.dependents.filter((item) => item.kind === 'historical')
   return (
     <div
       className="plugin-row"
@@ -412,11 +413,14 @@ function PluginRow(props: {
               {plugin.capabilities.length > 0 ? ` Capability: ${plugin.capabilities.join(', ')}.` : ''}
               {plugin.tools.length > 0 ? ` Tool: ${plugin.tools.join(', ')}.` : ''}
               {` Runtime mount: ${plugin.mounted ? 1 : 0}.`}
+              {plugin.candidateId ? ` Candidate: ${plugin.candidateId}.` : ''}
+              {plugin.digest ? ` Digest: ${plugin.digest}.` : ''}
             </p>
             <p>
               Dependency check: {plugin.dependency.severity === 'none' ? 'no active dependents' : plugin.dependency.severity}
               {hard.length > 0 ? ` — ${hard.map((item) => `${item.owner}@${item.version} requires ${item.requiredCapability}`).join('; ')}` : ''}
               {optional.length > 0 ? ` Optional dependents will degrade: ${optional.map((item) => `${item.owner}@${item.version}`).join(', ')}.` : ''}
+              {historical.length > 0 ? ` Historical dependents: ${historical.map((item) => `${item.owner}@${item.version} required ${item.requiredCapability}`).join(', ')}.` : ''}
             </p>
             <p>Candidate files and audit history will be retained.</p>
             <div className="approval-actions">

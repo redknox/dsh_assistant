@@ -2,7 +2,7 @@ import { createReadStream, existsSync, statSync } from 'node:fs'
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { ActivationDeniedError, UninstallDeniedError } from '../domain/governance/errors.js'
+import { ActivationDeniedError, GovernanceContractError, UninstallDeniedError } from '../domain/governance/errors.js'
 import { SimulatedCrashError } from '../domain/governance/service.js'
 import type { RecoveryRoot } from '../domain/governance/root.js'
 import { boundActivationDiagnostics } from '../domain/workspace/failure.js'
@@ -134,15 +134,39 @@ export function startWebUiServer(options: WebUiServerOptions): Promise<WebUiServ
         body: { action, diagnostics: options.diagnostics ?? { activation: options.recoveryRoot.inspect() } },
       }
     }
+    const busy = mutationInFlight()
+    if (busy !== undefined) {
+      return { status: 409 as const, body: { error: `${busy}-in-flight`, action } }
+    }
     const human = options.recoveryRoot.issueAuthority({ kind: 'human-control', source: 'application-ui' })
     if (action === 'rollback') {
-      return { status: 200 as const, body: { action, result: await options.recoveryRoot.rollback(human) } }
+      recoveryBusy = true
+      try {
+        return { status: 200 as const, body: { action, result: await options.recoveryRoot.rollback(human) } }
+      } catch (error) {
+        if (error instanceof GovernanceContractError && /in-flight$/.test(error.message)) {
+          return { status: 409 as const, body: { error: error.message, action } }
+        }
+        throw error
+      } finally {
+        recoveryBusy = false
+      }
     }
     const status = options.recoveryRoot.inspect()
     if (status.recoveryRequired) {
       return { status: 409 as const, body: { error: 'integrity-failure', action: 'exit-safe-mode' } }
     }
-    return { status: 200 as const, body: { action, result: options.recoveryRoot.exitSafeMode(human) } }
+    recoveryBusy = true
+    try {
+      return { status: 200 as const, body: { action, result: options.recoveryRoot.exitSafeMode(human) } }
+    } catch (error) {
+      if (error instanceof GovernanceContractError && /in-flight$/.test(error.message)) {
+        return { status: 409 as const, body: { error: error.message, action } }
+      }
+      throw error
+    } finally {
+      recoveryBusy = false
+    }
   }
 
   const bindCard = (body: { id?: unknown; candidateId?: unknown; fingerprint?: unknown }, cards: readonly ApprovalCard[]) => {
@@ -161,13 +185,16 @@ export function startWebUiServer(options: WebUiServerOptions): Promise<WebUiServ
 
   let activationBusy = false
   let uninstallBusy = false
+  let recoveryBusy = false
 
-  const mutationInFlight = (): 'activation' | 'uninstall' | undefined => {
+  const mutationInFlight = (): 'activation' | 'uninstall' | 'recovery' | undefined => {
     if (uninstallBusy) return 'uninstall'
     if (activationBusy) return 'activation'
+    if (recoveryBusy) return 'recovery'
     const inspected = options.recoveryRoot.inspect()
     if (inspected.lifecycleBusy !== undefined) return inspected.lifecycleBusy
     if (inspected.state === 'activating' || inspected.state === 'activation-pending') return 'activation'
+    if (inspected.state === 'rollback-pending') return 'recovery'
     return undefined
   }
 

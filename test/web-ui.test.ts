@@ -11,6 +11,7 @@ import { googleCalendarReadRiskModel } from '../src/domain/reliability/index.js'
 import type { ResolutionReview } from '../src/domain/resolution/index.js'
 import { GENERATED_EXTENSION_API_V1 } from '../src/domain/workbench/index.js'
 import { projectMissionControl } from '../src/domain/workspace/index.js'
+import { SimulatedCrashError } from '../src/domain/governance/index.js'
 import { bootAssistantControl, bootSafeModeRuntime, createAssistantAgent } from '../src/runtime/boot.js'
 import { AssistantControlSurface } from '../src/ui/controller.js'
 import {
@@ -716,6 +717,8 @@ export function apply(ctx) {
         onRecovery() {},
       }))
       assert.match(dialog, /Confirm uninstall/)
+      assert.match(dialog, new RegExp(`Candidate: ${plugin.candidateId}`))
+      assert.match(dialog, new RegExp(`Digest: ${plugin.digest}`))
       assert.doesNotMatch(trash, /data-owner="managed\//)
       assert.equal(ctx.tools.get('uninstall_plugin'), undefined)
       assert.equal(ctx.tools.get('disable_extension'), undefined)
@@ -817,6 +820,23 @@ export function apply(ctx) {
         body: JSON.stringify({ ...uninstallBody(hardPlugin), confirm: true }),
       })).status, 200)
       assert.equal(ctx.tools.get('other_dep'), undefined)
+      const afterHard = await fetch(`${url}/api/view`).then((res) => res.json()) as { view: MissionControlView }
+      const afterHardPlugin = afterHard.view.plugins.find((item) => item.owner === 'generated/text-slugify')
+      assert.ok(afterHardPlugin)
+      assert.ok(afterHardPlugin.dependency.dependents.some((item) => item.kind === 'historical' && item.owner === 'generated/other-dep'))
+      const historicalDialog = renderToStaticMarkup(createElement(MissionControlScreen, {
+        view: afterHard.view,
+        connected: true,
+        sending: false,
+        draft: '',
+        confirmingPlugin: afterHardPlugin.id,
+        onDraft() {},
+        onSend() {},
+        onApprove() {},
+        onReject() {},
+        onRecovery() {},
+      }))
+      assert.match(historicalDialog, /Historical dependents: generated\/other-dep@0.1.0 required text.slugify/)
 
       const optional = authorGenerated(ctx, 'other.opt', {
         pluginDependencies: [{ capability: 'text.slugify', strength: 'optional' }],
@@ -923,6 +943,19 @@ export function apply(ctx) {
         await new Promise((resolve) => setTimeout(resolve, 20))
       }
       assert.equal(recoveryRoot.inspect().lifecycleBusy, 'uninstall')
+      const recovery = await fetch(`${url}/api/recovery`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', ...authHeaders(cookie) },
+        body: JSON.stringify({ action: 'rollback', confirm: true }),
+        signal: AbortSignal.timeout(3000),
+      })
+      assert.equal(recovery.status, 409)
+      const recoveryBody = await recovery.json() as { error: string }
+      assert.equal(recoveryBody.error, 'uninstall-in-flight')
+      assert.throws(() => recoveryRoot.enterSafeMode(recoveryRoot.issueAuthority({
+        kind: 'human-control',
+        source: 'application-ui',
+      })), /uninstall-in-flight/)
       const unused = authorGenerated(ctx, 'other.idle')
       const unusedCard = await approveActivationCard(url, cookie, unused.id)
       const crossed = await fetch(`${url}/api/activate`, {
@@ -983,6 +1016,48 @@ export function apply(ctx) {
         assert.ok(leftover)
         assert.equal(leftover.sealed, true)
         assert.ok(second.ctx.extensionGovernance.inspectApproval(leftover.id))
+      } finally {
+        await second.ctx.fiber.dispose()
+      }
+    } finally {
+      rmSync(home, { recursive: true, force: true })
+    }
+  })
+
+  it('keeps the prior LKG when uninstall is interrupted between Registry and authority commit', async () => {
+    const home = mkdtempSync(join(tmpdir(), 'tars-uninstall-atomic-'))
+    try {
+      const first = await bootAssistantControl({ home })
+      try {
+        const cookieHome = first
+        const base = authorGenerated(cookieHome.ctx, 'text.slugify')
+        const human = cookieHome.recoveryRoot.issueAuthority({ kind: 'human-control', source: 'application-ui' })
+        cookieHome.recoveryRoot.recordApproval(human, {
+          candidateId: base.id,
+          fingerprint: base.requested.fingerprint,
+          decision: 'approved-for-exact-diff',
+        })
+        await cookieHome.recoveryRoot.activate(base.id, human)
+        assert.ok(cookieHome.ctx.tools.get('text_slugify'))
+        cookieHome.recoveryRoot.simulateInterrupt('uninstall-registry-commit')
+        await assert.rejects(
+          () => cookieHome.recoveryRoot.uninstall(human, 'generated/text-slugify', '0.1.0'),
+          SimulatedCrashError,
+        )
+        const authority = JSON.parse(readFileSync(join(home, 'self-extension', 'authority.json'), 'utf8')) as {
+          registry: { records: { owner: string; status: string }[] }
+          recovery: { lastKnownGood?: { owners: { owner: string; status: string }[] } }
+        }
+        assert.equal(authority.registry.records.some((row) => row.owner === 'generated/text-slugify' && row.status === 'active'), true)
+        assert.equal(authority.recovery.lastKnownGood?.owners.some((row) => row.owner === 'generated/text-slugify' && row.status === 'active'), true)
+      } finally {
+        await first.ctx.fiber.dispose()
+      }
+      const second = await bootAssistantControl({ home })
+      try {
+        assert.equal(second.ctx.capabilityRegistry.get('generated/text-slugify', '0.1.0')?.status, 'active')
+        assert.ok(second.ctx.tools.get('text_slugify'))
+        assert.equal(second.recoveryRoot.inspect().lastKnownGood?.owners.some((row) => row.owner === 'generated/text-slugify' && row.status === 'active'), true)
       } finally {
         await second.ctx.fiber.dispose()
       }
