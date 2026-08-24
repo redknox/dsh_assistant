@@ -221,7 +221,6 @@ export interface MissionControlView {
   readonly activity: readonly ActivityItem[]
   readonly approvals: readonly ApprovalCard[]
   readonly approvalResolutions: readonly ApprovalResolution[]
-  readonly acknowledgement?: { readonly text: string }
   readonly activations: readonly ActivationCard[]
   readonly plugins: readonly UserPluginView[]
   readonly extensions: readonly ExtensionRecord[]

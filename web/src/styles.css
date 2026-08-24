@@ -323,8 +323,12 @@ button.nav-item { cursor: pointer; font: inherit; }
 .message--assistant .message-body { padding: 0; border: 0; border-radius: 0; background: transparent; }
 .message--alert .message-body { color: #6b241c; }
 .acknowledgement {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
   max-width: 820px;
-  margin: 0 auto 20px;
+  margin: 12px auto 0;
   padding: 10px 14px;
   border: 1px solid #c5beb1;
   border-radius: 8px;

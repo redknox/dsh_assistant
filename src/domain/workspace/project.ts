@@ -1,7 +1,7 @@
 import { humorSuppressed } from '../personality/effective.js'
 import { projectActivity } from './activity.js'
 import { projectActivationCards } from './activations.js'
-import { acknowledgementOf, projectApprovalCards, projectApprovalResolutions } from './approvals.js'
+import { projectApprovalCards, projectApprovalResolutions } from './approvals.js'
 import { projectUserCapabilities } from './capabilities.js'
 import { projectExtensions } from './extensions.js'
 import { projectUserPlugins } from './plugins.js'
@@ -14,7 +14,6 @@ export function projectMissionControl(input: WorkspaceSnapshotInput): MissionCon
   const systemState = deriveSystemState(input)
   const approvals = projectApprovalCards(input)
   const approvalResolutions = projectApprovalResolutions(input)
-  const acknowledgement = acknowledgementOf(approvalResolutions)
   const activations = projectActivationCards(input)
   const jobsRunning = input.jobs.filter((job) => job.lastRunStatus === 'running' || job.lastRunStatus === 'pending').length
   const degraded = input.integrationStatus.filter((item) => !item.available).map((item) => item.capability)
@@ -31,7 +30,6 @@ export function projectMissionControl(input: WorkspaceSnapshotInput): MissionCon
     activity: projectActivity(input),
     approvals,
     approvalResolutions,
-    ...(acknowledgement ? { acknowledgement } : {}),
     activations,
     plugins: projectUserPlugins(input),
     extensions: projectExtensions(input),

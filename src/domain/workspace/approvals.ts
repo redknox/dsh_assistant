@@ -46,13 +46,11 @@ export function projectApprovalResolutions(input: WorkspaceSnapshotInput): reado
   return items
 }
 
-export function acknowledgementOf(resolutions: readonly ApprovalResolution[]): { readonly text: string } | undefined {
-  const last = resolutions.at(-1)
-  if (!last) return undefined
-  const target = last.capability && last.operation ? `${last.capability}.${last.operation}` : 'action'
-  if (last.outcome === 'completed') return { text: `Approved. ${target} completed.` }
-  if (last.outcome === 'denied') return { text: `Rejected. ${target} was denied.` }
-  if (last.outcome === 'cancelled') return { text: `Cancelled. ${target} was not executed.` }
+export function acknowledgementOf(resolution: ApprovalResolution): { readonly text: string } {
+  const target = resolution.capability && resolution.operation ? `${resolution.capability}.${resolution.operation}` : 'action'
+  if (resolution.outcome === 'completed') return { text: `Approved. ${target} completed.` }
+  if (resolution.outcome === 'denied') return { text: `Rejected. ${target} was denied.` }
+  if (resolution.outcome === 'cancelled') return { text: `Cancelled. ${target} was not executed.` }
   return { text: `Failed. ${target} did not complete.` }
 }
 

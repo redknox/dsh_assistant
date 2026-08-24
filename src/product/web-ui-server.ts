@@ -5,7 +5,9 @@ import { fileURLToPath } from 'node:url'
 import { ActivationDeniedError, GovernanceContractError, RollbackDeniedError, UninstallDeniedError } from '../domain/governance/errors.js'
 import { SimulatedCrashError } from '../domain/governance/service.js'
 import type { RecoveryRoot } from '../domain/governance/root.js'
+import { acknowledgementOf } from '../domain/workspace/approvals.js'
 import { boundActivationDiagnostics } from '../domain/workspace/failure.js'
+import { redactText } from '../domain/workspace/redact.js'
 import { AssistantControlSurface } from '../ui/controller.js'
 import type { ActivationCard, ApprovalCard, MissionControlView, RollbackCard, UserPluginView } from '../domain/workspace/types.js'
 import { PRODUCT_UI_SESSION_ID } from './constants.js'
@@ -63,7 +65,16 @@ export function startWebUiServer(options: WebUiServerOptions): Promise<WebUiServ
 
   const snapshot = (): MissionControlView => options.surface.workspace()
 
-  const envelope = () => ({ view: snapshot(), webUi: url })
+  const envelope = (extra: { readonly acknowledgement?: { readonly text: string } } = {}) => ({
+    view: snapshot(),
+    webUi: url,
+    ...(extra.acknowledgement ? { acknowledgement: extra.acknowledgement } : {}),
+  })
+
+  const acknowledgementFor = (confirmationId: string) => {
+    const resolution = snapshot().approvalResolutions.find((item) => item.confirmationId === confirmationId)
+    return resolution ? { text: redactText(acknowledgementOf(resolution).text) } : undefined
+  }
 
   const sendJson = (res: ServerResponse, status: number, body: unknown, setSession = false) => {
     const payload = assertSafePayload(JSON.stringify(body))
@@ -384,7 +395,7 @@ export function startWebUiServer(options: WebUiServerOptions): Promise<WebUiServ
         } else {
           await options.surface.cancelConfirmation(card.id)
         }
-        sendJson(res, 200, envelope())
+        sendJson(res, 200, envelope({ acknowledgement: acknowledgementFor(card.id) }))
         broadcast()
         return
       }

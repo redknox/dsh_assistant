@@ -3,6 +3,7 @@ import type { ActivationCard, ApprovalCard, MissionControlView, RollbackCard, Us
 export interface UiEnvelope {
   readonly view: MissionControlView
   readonly webUi: string
+  readonly acknowledgement?: { readonly text: string }
 }
 
 const include: RequestInit = { credentials: 'include', cache: 'no-store' }

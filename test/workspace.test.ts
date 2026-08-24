@@ -147,6 +147,36 @@ describe('TARS-NG mission-control workspace', () => {
     assert.ok(view.activity.some((item) => item.source === 'approval/resolved' && item.summary.includes('denied')))
     assert.match(view.conversation.at(-1)?.text ?? '', /will not create/)
     assert.doesNotMatch(JSON.stringify(view.conversation), /Confirmation /)
+    assert.equal('acknowledgement' in view, false)
+    assert.equal('acknowledgement' in failed, false)
+    const mixed = projectMissionControl(snapshot({
+      pendingConfirmations: [{
+        id: 'conf-denied',
+        capability: 'calendar',
+        operation: 'create_event',
+        fingerprint: 'fp-cal',
+        status: 'denied',
+        level: 'L4',
+        payload: { title: 'Dentist', start: '2026-08-25T15:00:00+08:00', end: '2026-08-25T16:00:00+08:00' },
+      }],
+      extensionApprovals: [{
+        id: 'apr-hist',
+        candidateId: 'cand-hist',
+        fingerprint: 'fp-ext',
+        decision: 'approved-for-exact-diff',
+        owner: 'generated/hist',
+        candidateVersion: '0.1.0',
+        digest: 'abc',
+        capabilitiesAdded: [],
+        capabilitiesRemoved: [],
+        permissionsAdded: [],
+        permissionsRemoved: [],
+        effects: [],
+      }],
+    }))
+    assert.equal('acknowledgement' in mixed, false)
+    assert.ok(mixed.approvalResolutions.some((item) => item.confirmationId === 'conf-denied' && item.outcome === 'denied'))
+    assert.ok(mixed.approvalResolutions.some((item) => item.confirmationId === 'apr-hist' && item.outcome === 'completed'))
   })
 
   it('F. provider degradation is a product state, not theater', () => {

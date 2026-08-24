@@ -29,7 +29,6 @@ export function renderMissionControlAsText(view: MissionControlView): string {
     '',
     '# Conversation / work',
     ...view.conversation.map((item) => `[${item.kind}] ${item.text}`),
-    view.acknowledgement ? `[status] ${view.acknowledgement.text}` : '',
     ...view.approvals.filter((card) => card.status === 'pending' || card.status === 'approval-requested' || card.status === 'unreviewed').map((card) => [
       `[approval-request] ${card.title}`,
       `  target: ${card.target}`,
@@ -142,7 +141,6 @@ export function renderMissionControlAsHtml(view: MissionControlView): string {
     </aside>
     <main id="work" data-workspace-pane="today">
       <h1>Conversation / work</h1>
-      ${view.acknowledgement ? `<p data-acknowledgement="true">${escapeHtml(view.acknowledgement.text)}</p>` : ''}
       <ol>${conversation}</ol>
       <section id="approvals">${approvals}</section>
       <section id="actions"><ul>${actions}</ul></section>
