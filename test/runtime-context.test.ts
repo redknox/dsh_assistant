@@ -24,14 +24,22 @@ import { ensureProductHome } from '../src/product/home.js'
 import {
   claimSessionPartition,
   commitRuntimeContext,
+  completeProfileIdentityMigration,
   DEFAULT_PROFILE_NAME,
   DEFAULT_SESSION_ID,
   inspectRuntimeContext,
+  partitionKeyOf,
+  profileIdentityMigrationFile,
+  readRuntimeBinding,
+  readSessionRootOwner,
+  recoverySessionsDir,
   resolveRuntimeContext,
   runtimeContextBindingFile,
   RuntimeContextError,
   SESSION_OWNER_SCHEMA_VERSION,
   sessionPartitionLockDir,
+  sessionPersistenceDirOf,
+  sessionRootOwnerFile,
 } from '../src/product/runtime-context.js'
 import { bootAssistantControl, bootSafeModeRuntime, createAssistantAgent } from '../src/runtime/boot.js'
 import { AssistantControlSurface } from '../src/ui/controller.js'
@@ -711,6 +719,180 @@ describe('runtime context', () => {
     } finally {
       if (previous === undefined) delete process.env.TARS_NG_PROFILE_ROOT
       else process.env.TARS_NG_PROFILE_ROOT = previous
+    }
+  })
+
+  it('does not stamp the operator Session Root during unbound recovery and can bind after restore', async () => {
+    const profiles = mkdtempSync(path.join(tmpdir(), 'tars-profiles-'))
+    cpSync(path.join(productPackageRoot(), 'profiles'), profiles, { recursive: true })
+    const previous = process.env.TARS_NG_PROFILE_ROOT
+    process.env.TARS_NG_PROFILE_ROOT = profiles
+    try {
+      const layout = ensureProductHome(isolatedHome())
+      writeFileSync(path.join(profiles, 'assistant', 'cordis.patch.yml'), 'not: yaml: [')
+      const recovered = inspectRuntimeContext(layout, {}, undefined)
+      assert.equal(recovered.bound, false)
+      assert.equal(recovered.ephemeralRecovery, true)
+      assert.equal(recovered.sessionPersistenceDir, recoverySessionsDir(layout))
+      const previousPort = process.env.TARS_NG_UI_PORT
+      const previousKey = process.env.DEEPSEEK_API_KEY
+      process.env.TARS_NG_UI_PORT = '0'
+      process.env.DEEPSEEK_API_KEY = 'sk-offline-not-a-live-key'
+      const startLines: string[] = []
+      try {
+        await runProductCli(['start', '--once', '--home', layout.root], {
+          log: (text) => startLines.push(text),
+          error: (text) => startLines.push(text),
+        })
+      } finally {
+        if (previousPort === undefined) delete process.env.TARS_NG_UI_PORT
+        else process.env.TARS_NG_UI_PORT = previousPort
+        if (previousKey === undefined) delete process.env.DEEPSEEK_API_KEY
+        else process.env.DEEPSEEK_API_KEY = previousKey
+      }
+      assert.match(startLines.join('\n'), /profile-composition: recovery-required|safe-mode: true/)
+      assert.equal(existsSync(runtimeContextBindingFile(layout)), false)
+      assert.equal(readSessionRootOwner(recovered.sessionRoot.value), undefined)
+      assert.equal(existsSync(recoverySessionsDir(layout)), false)
+      writeFileSync(
+        path.join(profiles, 'assistant', 'cordis.patch.yml'),
+        readFileSync(path.join(productPackageRoot(), 'profiles', 'assistant', 'cordis.patch.yml'), 'utf8'),
+      )
+      const healthy = inspectRuntimeContext(layout, {}, undefined)
+      assert.equal(healthy.profileCompositionError, undefined)
+      assert.equal(healthy.ephemeralRecovery, false)
+      const hold = claimSessionPartition(healthy)
+      const committed = commitRuntimeContext(layout, healthy, { allowFixtures: false })
+      assert.equal(hold.release(), true)
+      assert.equal(existsSync(runtimeContextBindingFile(layout)), true)
+      assert.equal(committed.bound, true)
+      const rebound = inspectRuntimeContext(layout, {}, undefined)
+      assert.equal(rebound.profileIdentity, committed.profileIdentity)
+      const startHealthy: string[] = []
+      process.env.TARS_NG_UI_PORT = '0'
+      process.env.DEEPSEEK_API_KEY = 'sk-offline-not-a-live-key'
+      try {
+        await runProductCli(['start', '--once', '--home', layout.root], {
+          log: (text) => startHealthy.push(text),
+          error: (text) => startHealthy.push(text),
+        })
+        assert.doesNotMatch(startHealthy.join('\n'), /session-root is bound to another/)
+      } finally {
+        if (previousPort === undefined) delete process.env.TARS_NG_UI_PORT
+        else process.env.TARS_NG_UI_PORT = previousPort
+        if (previousKey === undefined) delete process.env.DEEPSEEK_API_KEY
+        else process.env.DEEPSEEK_API_KEY = previousKey
+      }
+    } finally {
+      if (previous === undefined) delete process.env.TARS_NG_PROFILE_ROOT
+      else process.env.TARS_NG_PROFILE_ROOT = previous
+    }
+  })
+
+  it('migrates a legacy name identity before claim and can release the final partition lock', () => {
+    const layout = ensureProductHome(isolatedHome())
+    const inspected = inspectRuntimeContext(layout, {}, undefined)
+    mkdirSync(inspected.workspace.value, { recursive: true, mode: 0o700 })
+    mkdirSync(inspected.sessionRoot.value, { recursive: true, mode: 0o700 })
+    writeFileSync(runtimeContextBindingFile(layout), `${JSON.stringify({
+      schemaVersion: 1,
+      home: inspected.home,
+      profile: inspected.profile.value,
+      profileIdentity: inspected.profile.value,
+      workspace: inspected.workspace.value,
+      workspaceIdentity: inspected.workspaceIdentity,
+      sessionRoot: inspected.sessionRoot.value,
+      sessionRootIdentity: inspected.sessionRootIdentity,
+    }, null, 2)}\n`)
+    const legacy = {
+      home: inspected.home,
+      profileIdentity: inspected.profile.value,
+      workspaceIdentity: inspected.workspaceIdentity,
+      sessionRoot: inspected.sessionRoot,
+    }
+    const oldDir = sessionPersistenceDirOf(legacy)
+    mkdirSync(oldDir, { recursive: true, mode: 0o700 })
+    writeFileSync(path.join(oldDir, 'keep.jsonl'), 'legacy-session\n')
+    mkdirSync(path.join(oldDir, '.writer.lock'), { recursive: true, mode: 0o700 })
+    writeFileSync(path.join(oldDir, '.writer.lock', 'identity.json'), '{"stale":true}\n')
+    writeFileSync(sessionRootOwnerFile(inspected.sessionRoot.value), `${JSON.stringify({
+      schemaVersion: SESSION_OWNER_SCHEMA_VERSION,
+      home: inspected.home,
+      profileIdentity: inspected.profile.value,
+      workspaceIdentity: inspected.workspaceIdentity,
+      partitionKey: partitionKeyOf(legacy),
+    }, null, 2)}\n`)
+    const migrated = completeProfileIdentityMigration(layout, inspectRuntimeContext(layout, {}, undefined), { allowFixtures: false })
+    assert.match(migrated.profileIdentity, /^v1:[0-9a-f]{64}$/)
+    assert.notEqual(migrated.profileIdentity, inspected.profile.value)
+    assert.equal(existsSync(path.join(migrated.sessionPersistenceDir, 'keep.jsonl')), true)
+    assert.equal(existsSync(sessionPartitionLockDir(migrated.sessionPersistenceDir)), false)
+    assert.equal(existsSync(oldDir), false)
+    assert.equal(existsSync(profileIdentityMigrationFile(layout)), false)
+    const hold = claimSessionPartition(migrated)
+    assert.equal(hold.root, migrated.sessionPersistenceDir)
+    assert.equal(hold.release(), true)
+    assert.equal(existsSync(sessionPartitionLockDir(migrated.sessionPersistenceDir)), false)
+  })
+
+  it('resumes a legacy identity upgrade after an interrupt at each phase', async () => {
+    const layout = ensureProductHome(isolatedHome())
+    const inspected = inspectRuntimeContext(layout, {}, undefined)
+    mkdirSync(inspected.workspace.value, { recursive: true, mode: 0o700 })
+    mkdirSync(inspected.sessionRoot.value, { recursive: true, mode: 0o700 })
+    const writeLegacy = () => {
+      writeFileSync(runtimeContextBindingFile(layout), `${JSON.stringify({
+        schemaVersion: 1,
+        home: inspected.home,
+        profile: inspected.profile.value,
+        profileIdentity: inspected.profile.value,
+        workspace: inspected.workspace.value,
+        workspaceIdentity: inspected.workspaceIdentity,
+        sessionRoot: inspected.sessionRoot.value,
+        sessionRootIdentity: inspected.sessionRootIdentity,
+      }, null, 2)}\n`)
+      const legacy = {
+        home: inspected.home,
+        profileIdentity: inspected.profile.value,
+        workspaceIdentity: inspected.workspaceIdentity,
+        sessionRoot: inspected.sessionRoot,
+      }
+      const oldDir = sessionPersistenceDirOf(legacy)
+      mkdirSync(oldDir, { recursive: true, mode: 0o700 })
+      writeFileSync(path.join(oldDir, 'keep.jsonl'), 'legacy-session\n')
+      writeFileSync(sessionRootOwnerFile(inspected.sessionRoot.value), `${JSON.stringify({
+        schemaVersion: SESSION_OWNER_SCHEMA_VERSION,
+        home: inspected.home,
+        profileIdentity: inspected.profile.value,
+        workspaceIdentity: inspected.workspaceIdentity,
+        partitionKey: partitionKeyOf(legacy),
+      }, null, 2)}\n`)
+      return oldDir
+    }
+
+    for (const phase of ['copy', 'owner', 'binding'] as const) {
+      const oldDir = writeLegacy()
+      const current = inspectRuntimeContext(layout, {}, undefined)
+      assert.throws(
+        () => completeProfileIdentityMigration(layout, current, { allowFixtures: false, interruptAfter: phase }),
+        new RegExp(`injected migration interrupt: ${phase}`),
+      )
+      assert.equal(existsSync(profileIdentityMigrationFile(layout)), true)
+      const doctorLines: string[] = []
+      const doctorCode = await runProductCli(['doctor', '--home', layout.root], {
+        log: (text) => doctorLines.push(text),
+        error: (text) => doctorLines.push(text),
+      })
+      assert.equal(doctorCode, 0)
+      assert.equal(existsSync(profileIdentityMigrationFile(layout)), true)
+      const readable = inspectRuntimeContext(layout, {}, undefined)
+      const finished = completeProfileIdentityMigration(layout, readable, { allowFixtures: false })
+      assert.match(finished.profileIdentity, /^v1:[0-9a-f]{64}$/)
+      assert.equal(readRuntimeBinding(layout)?.profileIdentity, finished.profileIdentity)
+      assert.equal(existsSync(path.join(finished.sessionPersistenceDir, 'keep.jsonl')), true)
+      assert.equal(existsSync(oldDir), false)
+      assert.equal(existsSync(profileIdentityMigrationFile(layout)), false)
+      assert.equal(existsSync(sessionPartitionLockDir(finished.sessionPersistenceDir)), false)
     }
   })
 })

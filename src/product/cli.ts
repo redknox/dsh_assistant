@@ -33,7 +33,10 @@ import { assertAssistantAdapterContract, assertRecoveryAdapterContract, assertSe
 import {
   claimSessionPartition,
   commitRuntimeContext,
+  completeProfileIdentityMigration,
+  discardEphemeralRecoverySessions,
   inspectRuntimeContext,
+  recoverySessionsDir,
   rollbackSessionRootOwner,
   type RuntimeContext,
   type SessionPartitionHold,
@@ -430,13 +433,24 @@ export async function runProductCli(
             assertRecoveryAdapterContract()
           }
         }
+        if (!runtimeContext.bound && runtimeContext.profileCompositionError !== undefined) {
+          runtimeContext = {
+            ...runtimeContext,
+            ephemeralRecovery: true,
+            sessionPersistenceDir: recoverySessionsDir(layout),
+          }
+        }
+        if (runtimeContext.bound && runtimeContext.profileCompositionError === undefined) {
+          runtimeContext = completeProfileIdentityMigration(layout, runtimeContext, { allowFixtures })
+        }
         partition = claimSessionPartition(runtimeContext)
-        if (runtimeContext.profileCompositionError === undefined) {
+        if (!runtimeContext.bound && runtimeContext.profileCompositionError === undefined) {
           runtimeContext = commitRuntimeContext(layout, runtimeContext, { allowFixtures })
         }
       } catch (error) {
         if (partition?.createdOwner) rollbackSessionRootOwner(runtimeContext)
         partition?.release()
+        if (runtimeContext.ephemeralRecovery) discardEphemeralRecoverySessions(layout)
         hold.release()
         io.error(error instanceof Error ? error.message : 'runtime context commit failed')
         return 1
@@ -474,6 +488,7 @@ export async function runProductCli(
         }
         partition?.release()
         partition = undefined
+        if (runtimeContext?.ephemeralRecovery) discardEphemeralRecoverySessions(layout)
         if (!flushed) return false
         writerStillActive = false
         return true
@@ -592,6 +607,7 @@ export async function runProductCli(
       if (!writerStillActive) {
         if (booted !== undefined) await booted.ctx.fiber.dispose()
         partition?.release()
+        if (runtimeContext?.ephemeralRecovery) discardEphemeralRecoverySessions(layout)
         removeOwnPidFile(layout)
         hold.release()
       }

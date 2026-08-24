@@ -6,7 +6,7 @@ import { inspectCompatibility, type CompatibilityReport } from './compatibility.
 import { PRODUCT_NAME } from './constants.js'
 import { credentialInventory, missingCredentialNames, type CredentialPresence, type EnvFileLoad } from './env.js'
 import type { ProductHomeLayout } from './home.js'
-import type { RuntimeContext } from './runtime-context.js'
+import { publicRuntimeContextView, type RuntimeContext } from './runtime-context.js'
 import type { LlmDiagnosis } from './llm.js'
 
 export type IntegrationMode = 'live' | 'fake' | 'unavailable' | 'disabled'
@@ -177,7 +177,7 @@ export function formatDoctorReport(report: DoctorReport): string {
     report.runtimeContext ? `profile-identity: ${report.runtimeContext.profileIdentity}` : undefined,
     report.runtimeContext ? `workspace: ${report.runtimeContext.workspaceLabel} (${report.runtimeContext.workspace.source})` : undefined,
     report.runtimeContext ? `session-id: ${report.runtimeContext.sessionId.value} (${report.runtimeContext.sessionId.source})` : undefined,
-    report.runtimeContext ? `session-persistence: ${report.runtimeContext.safeMode ? 'recovery-required' : 'persistent'}` : undefined,
+    report.runtimeContext ? `session-persistence: ${publicRuntimeContextView(report.runtimeContext).sessionPersistence}` : undefined,
     report.runtimeContext?.profileCompositionError
       ? `profile-composition: recovery-required (${report.runtimeContext.profileCompositionError})`
       : report.runtimeContext ? `profile-composition: shipped ${report.runtimeContext.profile.value} Profile (official composeEntries; active composition)` : undefined,

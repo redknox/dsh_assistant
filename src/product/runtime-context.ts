@@ -1,5 +1,5 @@
 import { createHash, randomBytes } from 'node:crypto'
-import { chmodSync, closeSync, copyFileSync, existsSync, fsyncSync, mkdirSync, openSync, readFileSync, readdirSync, realpathSync, renameSync, rmSync, statSync, unlinkSync, writeFileSync } from 'node:fs'
+import { chmodSync, closeSync, copyFileSync, cpSync, existsSync, fsyncSync, mkdirSync, openSync, readFileSync, readdirSync, realpathSync, renameSync, rmSync, statSync, unlinkSync, writeFileSync } from 'node:fs'
 import path from 'node:path'
 import { PRODUCT_CONFIG_SCHEMA_VERSION } from './constants.js'
 import { isSafeRuntimePid, processAlive, type ProductHomeLayout } from './home.js'
@@ -39,6 +39,8 @@ export interface RuntimeContext {
   readonly sessionPersistenceDir: string
   readonly safeMode: boolean
   readonly migrated: boolean
+  readonly bound: boolean
+  readonly ephemeralRecovery: boolean
   readonly profileCompositionError?: string
 }
 
@@ -73,6 +75,18 @@ const PROFILE_PATTERN = /^[a-z][a-z0-9-]{0,31}$/
 
 export function runtimeContextBindingFile(layout: ProductHomeLayout): string {
   return path.join(layout.state, 'runtime-context.json')
+}
+
+export function profileIdentityMigrationFile(layout: ProductHomeLayout): string {
+  return path.join(layout.state, 'profile-identity-migration.json')
+}
+
+export function recoverySessionsDir(layout: ProductHomeLayout): string {
+  return path.join(layout.state, 'recovery-sessions')
+}
+
+export function discardEphemeralRecoverySessions(layout: ProductHomeLayout): void {
+  rmSync(recoverySessionsDir(layout), { recursive: true, force: true })
 }
 
 export function defaultWorkspaceDir(home: string): string {
@@ -328,6 +342,62 @@ export function readSessionRootOwner(sessionRoot: string): SessionRootOwner | un
   }
 }
 
+function isWriterLockName(name: string): boolean {
+  return name === '.writer.lock' || name.startsWith('.writer.lock.')
+}
+
+interface ProfileIdentityMigration {
+  readonly schemaVersion: 1
+  readonly fromIdentity: string
+  readonly toIdentity: string
+  readonly sessionRoot: string
+  readonly oldPartition: string
+  readonly newPartition: string
+  readonly phase: 'started' | 'copied' | 'owner' | 'binding'
+}
+
+function readProfileIdentityMigration(layout: ProductHomeLayout): ProfileIdentityMigration | undefined {
+  const file = profileIdentityMigrationFile(layout)
+  if (!existsSync(file)) return undefined
+  try {
+    const raw = JSON.parse(readFileSync(file, 'utf8')) as Partial<ProfileIdentityMigration>
+    if (raw.schemaVersion !== 1) return undefined
+    if (
+      typeof raw.fromIdentity !== 'string'
+      || typeof raw.toIdentity !== 'string'
+      || typeof raw.sessionRoot !== 'string'
+      || typeof raw.oldPartition !== 'string'
+      || typeof raw.newPartition !== 'string'
+      || (raw.phase !== 'started' && raw.phase !== 'copied' && raw.phase !== 'owner' && raw.phase !== 'binding')
+    ) {
+      return undefined
+    }
+    return {
+      schemaVersion: 1,
+      fromIdentity: raw.fromIdentity,
+      toIdentity: raw.toIdentity,
+      sessionRoot: raw.sessionRoot,
+      oldPartition: raw.oldPartition,
+      newPartition: raw.newPartition,
+      phase: raw.phase,
+    }
+  } catch {
+    return undefined
+  }
+}
+
+function writeProfileIdentityMigration(layout: ProductHomeLayout, journal: ProfileIdentityMigration): void {
+  writeJsonAtomic(profileIdentityMigrationFile(layout), journal)
+}
+
+function copyPartitionWithoutLocks(from: string, to: string): void {
+  mkdirSync(path.dirname(to), { recursive: true, mode: 0o700 })
+  cpSync(from, to, {
+    recursive: true,
+    filter: (src) => !isWriterLockName(path.basename(src)),
+  })
+}
+
 export function assertSessionRootOwner(
   sessionRoot: string,
   context: Pick<RuntimeContext, 'home' | 'profileIdentity' | 'workspaceIdentity'>,
@@ -344,6 +414,46 @@ export function assertSessionRootOwner(
   ) {
     throw new RuntimeContextError('session-root is bound to another Home/Profile/Workspace')
   }
+}
+
+function assertSessionRootOwnerAllowingMigration(
+  layout: ProductHomeLayout,
+  sessionRoot: string,
+  context: Pick<RuntimeContext, 'home' | 'profileIdentity' | 'workspaceIdentity'>,
+): void {
+  const journal = readProfileIdentityMigration(layout)
+  if (!journal) {
+    assertSessionRootOwner(sessionRoot, context)
+    return
+  }
+  if (!existsSync(sessionRoot)) return
+  const owner = readSessionRootOwner(sessionRoot)
+  if (!owner) return
+  const allowedIdentities = new Set([journal.fromIdentity, journal.toIdentity, context.profileIdentity])
+  const allowedKeys = new Set([
+    partitionKeyOf({ ...context, profileIdentity: journal.fromIdentity }),
+    partitionKeyOf({ ...context, profileIdentity: journal.toIdentity }),
+    partitionKeyOf(context),
+  ])
+  if (
+    owner.home !== context.home
+    || owner.workspaceIdentity !== context.workspaceIdentity
+    || !allowedIdentities.has(owner.profileIdentity)
+    || !allowedKeys.has(owner.partitionKey)
+  ) {
+    throw new RuntimeContextError('session-root is bound to another Home/Profile/Workspace')
+  }
+}
+
+export function reclaimOrphanSessionRootOwner(home: string, sessionRoot: string): boolean {
+  const owner = readSessionRootOwner(sessionRoot)
+  if (!owner || owner.home !== home) return false
+  try {
+    unlinkSync(sessionRootOwnerFile(sessionRoot))
+  } catch {
+    return false
+  }
+  return true
 }
 
 export function stampSessionRootOwner(context: RuntimeContext): boolean {
@@ -504,11 +614,16 @@ export function removePartitionLockIfRunId(root: string, runId: string): boolean
 const localPartitionHolds = new Map<string, string>()
 
 export function claimSessionPartition(context: RuntimeContext): SessionPartitionHold {
-  const existedOwner = readSessionRootOwner(context.sessionRoot.value) !== undefined
   let createdOwner = false
   try {
-    createdOwner = stampSessionRootOwner(context) && !existedOwner
-    const root = sessionPersistenceDirOf(context)
+    if (!context.ephemeralRecovery) {
+      if (!context.bound) {
+        reclaimOrphanSessionRootOwner(context.home, context.sessionRoot.value)
+      }
+      const existedOwner = readSessionRootOwner(context.sessionRoot.value) !== undefined
+      createdOwner = stampSessionRootOwner(context) && !existedOwner
+    }
+    const root = context.sessionPersistenceDir
     mkdirSync(root, { recursive: true, mode: 0o700 })
     try {
       chmodSync(root, 0o700)
@@ -570,6 +685,8 @@ function contextFromResolved(
   options: {
     readonly safeMode?: boolean
     readonly migrated: boolean
+    readonly bound?: boolean
+    readonly ephemeralRecovery?: boolean
     readonly profileIdentity: string
     readonly profileCompositionError?: string
   },
@@ -590,9 +707,16 @@ function contextFromResolved(
     sessionPersistenceDir: '',
     safeMode: options.safeMode === true,
     migrated: options.migrated,
+    bound: options.bound === true,
+    ephemeralRecovery: options.ephemeralRecovery === true,
     ...(options.profileCompositionError === undefined ? {} : { profileCompositionError: options.profileCompositionError }),
   }
-  return { ...assembled, sessionPersistenceDir: sessionPersistenceDirOf(assembled) }
+  return {
+    ...assembled,
+    sessionPersistenceDir: assembled.ephemeralRecovery
+      ? recoverySessionsDir(layout)
+      : sessionPersistenceDirOf(assembled),
+  }
 }
 
 export function inspectRuntimeContext(
@@ -667,6 +791,8 @@ export function inspectRuntimeContext(
     {
       safeMode,
       migrated: false,
+      bound: false,
+      ephemeralRecovery: false,
       profileIdentity,
       ...(profileCompositionError === undefined ? {} : { profileCompositionError }),
     },
@@ -680,6 +806,7 @@ export function inspectRuntimeContext(
       !legacyNameIdentity
       && existing.profileIdentity !== inspected.profileIdentity
       && profileCompositionError === undefined
+      && readProfileIdentityMigration(layout) === undefined
     ) {
       throw new RuntimeContextError('Profile migration required: this Home is bound to a different resolved Profile identity')
     }
@@ -691,11 +818,13 @@ export function inspectRuntimeContext(
     }
     const bound = {
       ...inspected,
+      bound: true,
+      ephemeralRecovery: false,
       profileIdentity: existing.profileIdentity,
       workspace: { ...workspace, value: existing.workspace },
       sessionRoot: { ...sessionRoot, value: existing.sessionRoot },
     }
-    assertSessionRootOwner(existing.sessionRoot, bound)
+    assertSessionRootOwnerAllowingMigration(layout, existing.sessionRoot, bound)
     return {
       ...bound,
       sessionPersistenceDir: sessionPersistenceDirOf({
@@ -706,16 +835,57 @@ export function inspectRuntimeContext(
       }),
     }
   }
-  assertSessionRootOwner(resolvedSessionRoot, inspected)
-  return inspected
+  const owner = existsSync(resolvedSessionRoot) ? readSessionRootOwner(resolvedSessionRoot) : undefined
+  if (owner && owner.home !== layout.root) {
+    throw new RuntimeContextError('session-root is bound to another Home/Profile/Workspace')
+  }
+  return contextFromResolved(
+    layout,
+    profile,
+    workspace,
+    sessionRoot,
+    sessionId,
+    resolvedWorkspace,
+    resolvedSessionRoot,
+    {
+      safeMode,
+      migrated: false,
+      bound: false,
+      ephemeralRecovery: profileCompositionError !== undefined,
+      profileIdentity,
+      ...(profileCompositionError === undefined ? {} : { profileCompositionError }),
+    },
+  )
 }
 
-function upgradeLegacyProfileBinding(
+export function completeProfileIdentityMigration(
   layout: ProductHomeLayout,
-  existing: RuntimeBinding,
   inspected: RuntimeContext,
-  options: { readonly allowFixtures: boolean },
+  options: {
+    readonly allowFixtures: boolean
+    readonly interruptAfter?: 'copy' | 'owner' | 'binding'
+  },
 ): RuntimeContext {
+  const existing = readRuntimeBinding(layout)
+  if (!existing || inspected.profileCompositionError !== undefined) {
+    return inspected
+  }
+  const journal = readProfileIdentityMigration(layout)
+  const legacy = existing.profileIdentity === existing.profile
+  if (!journal && !legacy) {
+    return inspectRuntimeContext(layout, {
+      profile: inspected.profile.value,
+      workspace: inspected.workspace.value,
+      sessionRoot: inspected.sessionRoot.value,
+      sessionId: inspected.sessionId.value,
+    }, {
+      schemaVersion: RUNTIME_CONTEXT_SCHEMA_VERSION,
+      profile: existing.profile,
+      workspace: existing.workspace,
+      sessionRoot: existing.sessionRoot,
+      sessionId: inspected.sessionId.value,
+    }, { safeMode: inspected.safeMode })
+  }
   const loaded = tryLoadGovernedAssistantComposition()
   if (!loaded.ok) {
     return inspectRuntimeContext(layout, {
@@ -732,59 +902,117 @@ function upgradeLegacyProfileBinding(
     }, { safeMode: true })
   }
   const nextIdentity = profileIdentityOf(loaded.composition)
-  if (nextIdentity === existing.profileIdentity) {
-    return inspected
-  }
+  const fromIdentity = journal?.fromIdentity ?? existing.profileIdentity
+  const toIdentity = journal?.toIdentity ?? nextIdentity
   const previous = {
     home: existing.home,
-    profileIdentity: existing.profileIdentity,
+    profileIdentity: fromIdentity,
     workspaceIdentity: existing.workspaceIdentity,
     sessionRoot: { value: existing.sessionRoot, source: inspected.sessionRoot.source },
   }
   const next = {
-    home: existing.home,
-    profileIdentity: nextIdentity,
-    workspaceIdentity: existing.workspaceIdentity,
-    sessionRoot: previous.sessionRoot,
+    ...previous,
+    profileIdentity: toIdentity,
   }
-  const oldDir = sessionPersistenceDirOf(previous)
-  const newDir = sessionPersistenceDirOf(next)
-  if (existsSync(oldDir) && oldDir !== newDir && !existsSync(newDir)) {
-    mkdirSync(path.dirname(newDir), { recursive: true, mode: 0o700 })
-    renameSync(oldDir, newDir)
-  }
-  const owner = readSessionRootOwner(existing.sessionRoot)
-  if (owner && owner.profileIdentity === existing.profileIdentity) {
-    writeJsonAtomic(sessionRootOwnerFile(existing.sessionRoot), {
-      ...owner,
-      profileIdentity: nextIdentity,
-      partitionKey: partitionKeyOf(next),
-    })
-  }
-  const upgraded: RuntimeContext = {
-    ...inspected,
-    profileIdentity: nextIdentity,
-    sessionPersistenceDir: newDir,
-    migrated: true,
-  }
-  writeRuntimeBinding(layout, {
-    schemaVersion: RUNTIME_CONTEXT_SCHEMA_VERSION,
-    home: existing.home,
-    profile: existing.profile,
-    profileIdentity: nextIdentity,
-    workspace: existing.workspace,
-    workspaceIdentity: existing.workspaceIdentity,
+  const oldDir = journal?.oldPartition ?? sessionPersistenceDirOf(previous)
+  const newDir = journal?.newPartition ?? sessionPersistenceDirOf(next)
+  let current: ProfileIdentityMigration = journal ?? {
+    schemaVersion: 1,
+    fromIdentity,
+    toIdentity,
     sessionRoot: existing.sessionRoot,
-    sessionRootIdentity: existing.sessionRootIdentity,
-  })
-  writeProductRuntimeSection(layout, options.allowFixtures, {
+    oldPartition: oldDir,
+    newPartition: newDir,
+    phase: 'started',
+  }
+  if (!journal) {
+    writeProfileIdentityMigration(layout, current)
+  }
+
+  if (current.phase === 'started') {
+    if (existsSync(oldDir) && oldDir !== newDir) {
+      mkdirSync(path.dirname(newDir), { recursive: true, mode: 0o700 })
+      if (existsSync(newDir)) {
+        rmSync(newDir, { recursive: true, force: true })
+      }
+      copyPartitionWithoutLocks(oldDir, newDir)
+    }
+    current = { ...current, phase: 'copied' }
+    writeProfileIdentityMigration(layout, current)
+    if (options.interruptAfter === 'copy') {
+      throw new RuntimeContextError('injected migration interrupt: copy')
+    }
+  }
+
+  if (current.phase === 'copied') {
+    const owner = readSessionRootOwner(existing.sessionRoot)
+    if (
+      owner
+      && owner.home === existing.home
+      && (owner.profileIdentity === fromIdentity || owner.profileIdentity === toIdentity)
+    ) {
+      writeJsonAtomic(sessionRootOwnerFile(existing.sessionRoot), {
+        ...owner,
+        profileIdentity: toIdentity,
+        partitionKey: partitionKeyOf(next),
+      })
+    }
+    current = { ...current, phase: 'owner' }
+    writeProfileIdentityMigration(layout, current)
+    if (options.interruptAfter === 'owner') {
+      throw new RuntimeContextError('injected migration interrupt: owner')
+    }
+  }
+
+  if (current.phase === 'owner') {
+    writeRuntimeBinding(layout, {
+      schemaVersion: RUNTIME_CONTEXT_SCHEMA_VERSION,
+      home: existing.home,
+      profile: existing.profile,
+      profileIdentity: toIdentity,
+      workspace: existing.workspace,
+      workspaceIdentity: existing.workspaceIdentity,
+      sessionRoot: existing.sessionRoot,
+      sessionRootIdentity: existing.sessionRootIdentity,
+    })
+    writeProductRuntimeSection(layout, options.allowFixtures, {
+      schemaVersion: RUNTIME_CONTEXT_SCHEMA_VERSION,
+      profile: existing.profile,
+      workspace: existing.workspace,
+      sessionRoot: existing.sessionRoot,
+      sessionId: inspected.sessionId.value,
+    })
+    current = { ...current, phase: 'binding' }
+    writeProfileIdentityMigration(layout, current)
+    if (options.interruptAfter === 'binding') {
+      throw new RuntimeContextError('injected migration interrupt: binding')
+    }
+  }
+
+  if (current.phase === 'binding') {
+    if (oldDir !== newDir && existsSync(oldDir)) {
+      rmSync(oldDir, { recursive: true, force: true })
+    }
+    try {
+      unlinkSync(profileIdentityMigrationFile(layout))
+    } catch {
+      // journal may already be gone
+    }
+  }
+
+  const upgraded = inspectRuntimeContext(layout, {
+    profile: inspected.profile.value,
+    workspace: inspected.workspace.value,
+    sessionRoot: inspected.sessionRoot.value,
+    sessionId: inspected.sessionId.value,
+  }, {
     schemaVersion: RUNTIME_CONTEXT_SCHEMA_VERSION,
     profile: existing.profile,
     workspace: existing.workspace,
     sessionRoot: existing.sessionRoot,
     sessionId: inspected.sessionId.value,
-  })
-  return upgraded
+  }, { safeMode: inspected.safeMode })
+  return { ...upgraded, migrated: true }
 }
 
 export function commitRuntimeContext(
@@ -794,8 +1022,8 @@ export function commitRuntimeContext(
 ): RuntimeContext {
   const existing = readRuntimeBinding(layout)
   if (existing) {
-    if (existing.profileIdentity === existing.profile && inspected.profileCompositionError === undefined) {
-      return upgradeLegacyProfileBinding(layout, existing, inspected, options)
+    if (inspected.profileCompositionError === undefined) {
+      return completeProfileIdentityMigration(layout, inspected, options)
     }
     return inspectRuntimeContext(layout, {
       profile: inspected.profile.value,
@@ -830,7 +1058,14 @@ export function commitRuntimeContext(
     inspected.sessionId,
     ownedWorkspace,
     ownedSessionRoot,
-    { safeMode: inspected.safeMode, migrated: true, profileIdentity: inspected.profileIdentity, profileCompositionError: inspected.profileCompositionError },
+    {
+      safeMode: inspected.safeMode,
+      migrated: true,
+      bound: true,
+      ephemeralRecovery: false,
+      profileIdentity: inspected.profileIdentity,
+      profileCompositionError: inspected.profileCompositionError,
+    },
   )
   backupBeforeMigration(layout)
   writeProductRuntimeSection(layout, options.allowFixtures, {
@@ -886,7 +1121,9 @@ export function publicRuntimeContextView(context: RuntimeContext): {
     workspaceLabel: context.workspaceLabel,
     workspaceIdentity: context.workspaceIdentity,
     sessionId: context.sessionId.value,
-    sessionPersistence: context.safeMode ? 'recovery-required' : 'persistent',
+    sessionPersistence: context.ephemeralRecovery
+      ? 'unavailable'
+      : context.safeMode ? 'recovery-required' : 'persistent',
     safeMode: context.safeMode,
     ...(context.profileCompositionError === undefined ? {} : { profileCompositionError: context.profileCompositionError }),
     sources: {
