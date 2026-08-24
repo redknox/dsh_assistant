@@ -55,6 +55,11 @@ export function sanitizeMissionControlView(view: MissionControlView): MissionCon
     ...view,
     conversation: view.conversation.map((item) => ({ ...item, text: redactText(item.text) })),
     activity: view.activity.map((item) => ({ ...item, summary: redactText(item.summary) })),
+    approvalResolutions: (view.approvalResolutions ?? []).map((item) => ({
+      ...item,
+      ...(item.capability ? { capability: redactText(item.capability) } : {}),
+      ...(item.operation ? { operation: redactText(item.operation) } : {}),
+    })),
     approvals: view.approvals.map((card) => ({
       ...card,
       target: redactText(card.target),

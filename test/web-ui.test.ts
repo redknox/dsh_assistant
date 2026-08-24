@@ -33,6 +33,7 @@ function fixtureView(overrides: Partial<MissionControlView> = {}): MissionContro
     ],
     activity: [{ id: 'a1', kind: 'COMPLETED', summary: 'Calendar inspected', source: 'calendar' }],
     approvals: [],
+    approvalResolutions: [],
     activations: [],
     plugins: [],
     extensions: [],
@@ -55,10 +56,12 @@ async function withServer(
     agent: Awaited<ReturnType<typeof createAssistantAgent>>,
     ctx: Awaited<ReturnType<typeof bootAssistantControl>>['ctx'],
     recoveryRoot: Awaited<ReturnType<typeof bootAssistantControl>>['recoveryRoot'],
+    adapter: FakeReplyAdapter,
   ) => Promise<void>,
 ) {
   const control = await boot()
-  control.ctx.llm.registerAdapter(['fake'], new FakeReplyAdapter('ack'))
+  const adapter = new FakeReplyAdapter('ack')
+  control.ctx.llm.registerAdapter(['fake'], adapter)
   const agent = await createAssistantAgent(control.ctx, sessionId, { provider: 'fake', model: 'fake-echo' })
   const surface = new AssistantControlSurface(control.ctx, sessionId)
   const assets = mkdtempSync(join(tmpdir(), 'tars-web-assets-'))
@@ -72,7 +75,7 @@ async function withServer(
   })
   const detach = attachWebUiBroadcast(control.ctx, () => web.notify())
   try {
-    await run(web.url, surface, agent, control.ctx, control.recoveryRoot)
+    await run(web.url, surface, agent, control.ctx, control.recoveryRoot, adapter)
   } finally {
     detach()
     await web.close()
@@ -267,7 +270,7 @@ describe('local Mission-Control Web UI', () => {
   })
 
   it('approves and rejects through the existing policy path', async () => {
-    await withServer(bootAssistantControl, 'web-ui-approve', async (url, surface, agent) => {
+    await withServer(bootAssistantControl, 'web-ui-approve', async (url, surface, agent, _ctx, _root, adapter) => {
       const pending = surface.requestExecute('calendar', 'create_event', {
         calendarId: 'Personal',
         title: 'Team review',
@@ -284,17 +287,157 @@ describe('local Mission-Control Web UI', () => {
       assert.match(card?.fingerprint ?? '', /./)
       assert.match(card?.details.join('\n') ?? '', /Team review/)
 
+      surface.sendMessage('Confirmation is still a human word')
+      await agent.agent.whenIdle()
+      const before = await fetch(`${url}/api/view`).then((res) => res.json()) as { view: MissionControlView }
+      const beforeUsers = before.view.conversation.filter((item) => item.kind === 'user-message')
+      const afterTalk = adapter.invocations
       const denied = await fetch(`${url}/api/deny`, {
         method: 'POST',
         headers: { 'content-type': 'application/json', ...authHeaders(cookie) },
         body: JSON.stringify({ id: pending.confirmationId, fingerprint: card?.fingerprint }),
-      }).then((res) => res.json()) as { view: MissionControlView }
+      }).then((res) => res.json()) as { view: MissionControlView; acknowledgement?: { text: string } }
       const after = denied.view.approvals.find((item) => item.id === pending.confirmationId)
       assert.equal(after?.status, 'denied')
       assert.notEqual(after?.status, 'pending')
+      assert.equal(denied.view.approvalResolutions.some((item) => item.confirmationId === pending.confirmationId && item.outcome === 'denied'), true)
+      assert.ok(denied.view.activity.some((item) => item.source === 'approval/resolved' && item.summary.includes('denied')))
+      assert.match(denied.acknowledgement?.text ?? '', /Rejected/)
+      assert.match(denied.acknowledgement?.text ?? '', /calendar\.create_event/)
+      assert.equal('acknowledgement' in denied.view, false)
+      assert.equal(adapter.invocations, afterTalk)
       await agent.agent.whenIdle()
-      const talked = await fetch(`${url}/api/view`).then((res) => res.json()) as { view: MissionControlView }
-      assert.equal(talked.view.conversation.some((item) => item.kind === 'user-message' && item.text.includes(pending.confirmationId) && item.text.includes('deny')), true)
+      const talked = await fetch(`${url}/api/view`).then((res) => res.json()) as { view: MissionControlView; acknowledgement?: { text: string } }
+      assert.equal('acknowledgement' in talked, false)
+      assert.equal('acknowledgement' in talked.view, false)
+      const afterUsers = talked.view.conversation.filter((item) => item.kind === 'user-message')
+      assert.deepEqual(afterUsers.map((item) => item.text), beforeUsers.map((item) => item.text))
+      assert.equal(talked.view.conversation.some((item) => item.kind === 'user-message' && item.text.includes('Confirmation is still a human word')), true)
+      assert.equal(talked.view.conversation.some((item) => item.text.includes(pending.confirmationId) && item.text.includes('deny')), false)
+      const replay = await fetch(`${url}/api/deny`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', ...authHeaders(cookie) },
+        body: JSON.stringify({ id: pending.confirmationId, fingerprint: card?.fingerprint }),
+      })
+      assert.equal(replay.status, 409)
+      const created = surface.requestExecute('calendar', 'create_event', {
+        calendarId: 'Personal',
+        title: 'Standup',
+        start: '2026-08-22T11:00:00+08:00',
+        end: '2026-08-22T11:15:00+08:00',
+      })
+      assert.equal(created.kind, 'pending_confirmation')
+      if (created.kind !== 'pending_confirmation') throw new Error('expected pending')
+      const createCard = (await fetch(`${url}/api/view`).then((res) => res.json()) as { view: MissionControlView })
+        .view.approvals.find((item) => item.id === created.confirmationId)
+      const beforeApprove = adapter.invocations
+      const approved = await fetch(`${url}/api/approve`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', ...authHeaders(cookie) },
+        body: JSON.stringify({ id: created.confirmationId, fingerprint: createCard?.fingerprint }),
+      })
+      assert.equal(approved.status, 200)
+      const approvedBody = await approved.json() as { view: MissionControlView; acknowledgement?: { text: string } }
+      assert.equal(approvedBody.view.approvals.find((item) => item.id === created.confirmationId)?.status, 'consumed')
+      assert.equal(approvedBody.view.approvalResolutions.some((item) => item.confirmationId === created.confirmationId && item.outcome === 'completed'), true)
+      assert.match(approvedBody.acknowledgement?.text ?? '', /Approved/)
+      assert.equal('acknowledgement' in approvedBody.view, false)
+      assert.equal(approvedBody.view.conversation.some((item) => item.text.includes(created.confirmationId)), false)
+      assert.equal(adapter.invocations, beforeApprove)
+      const replayApprove = await fetch(`${url}/api/approve`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', ...authHeaders(cookie) },
+        body: JSON.stringify({ id: created.confirmationId, fingerprint: createCard?.fingerprint }),
+      })
+      assert.equal(replayApprove.status, 409)
+    })
+  })
+
+  it('keeps cancel and failed execution out of conversation without extra model turns', async () => {
+    await withServer(bootAssistantControl, 'web-ui-cancel-fail', async (url, surface, agent, ctx, _root, adapter) => {
+      const cookie = await cookieHeader(url)
+      surface.sendMessage('Confirmation is still a human word')
+      await agent.agent.whenIdle()
+      const afterTalk = adapter.invocations
+      const before = await fetch(`${url}/api/view`).then((res) => res.json()) as { view: MissionControlView }
+      const beforeUsers = before.view.conversation.filter((item) => item.kind === 'user-message').map((item) => item.text)
+
+      const pending = surface.requestExecute('calendar', 'create_event', {
+        calendarId: 'Personal',
+        title: 'Optional slot',
+        start: '2026-08-22T12:00:00+08:00',
+        end: '2026-08-22T12:15:00+08:00',
+      })
+      assert.equal(pending.kind, 'pending_confirmation')
+      if (pending.kind !== 'pending_confirmation') throw new Error('expected pending')
+      const cancelCard = (await fetch(`${url}/api/view`).then((res) => res.json()) as { view: MissionControlView })
+        .view.approvals.find((item) => item.id === pending.confirmationId)
+      const cancelled = await fetch(`${url}/api/cancel`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', ...authHeaders(cookie) },
+        body: JSON.stringify({ id: pending.confirmationId, fingerprint: cancelCard?.fingerprint }),
+      })
+      assert.equal(cancelled.status, 200)
+      const cancelledBody = await cancelled.json() as { view: MissionControlView; acknowledgement?: { text: string } }
+      assert.equal(cancelledBody.view.approvals.find((item) => item.id === pending.confirmationId)?.status, 'cancelled')
+      assert.equal(cancelledBody.view.approvalResolutions.filter((item) => item.confirmationId === pending.confirmationId).length, 1)
+      assert.equal(cancelledBody.view.approvalResolutions.some((item) => item.confirmationId === pending.confirmationId && item.outcome === 'cancelled'), true)
+      assert.ok(cancelledBody.view.activity.some((item) => item.source === 'approval/resolved' && item.summary.includes('cancelled')))
+      assert.match(cancelledBody.acknowledgement?.text ?? '', /Cancelled/)
+      assert.equal('acknowledgement' in cancelledBody.view, false)
+      assert.equal(adapter.invocations, afterTalk)
+      const afterCancel = await fetch(`${url}/api/view`).then((res) => res.json()) as { view: MissionControlView; acknowledgement?: { text: string } }
+      assert.equal('acknowledgement' in afterCancel, false)
+      assert.deepEqual(afterCancel.view.conversation.filter((item) => item.kind === 'user-message').map((item) => item.text), beforeUsers)
+      const replayCancel = await fetch(`${url}/api/cancel`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', ...authHeaders(cookie) },
+        body: JSON.stringify({ id: pending.confirmationId, fingerprint: cancelCard?.fingerprint }),
+      })
+      assert.equal(replayCancel.status, 409)
+      assert.equal(afterCancel.view.approvalResolutions.filter((item) => item.confirmationId === pending.confirmationId).length, 1)
+
+      let executions = 0
+      ctx.actionPolicy.policy.registerExecutor('calendar', 'create_event', async () => {
+        executions += 1
+        throw new Error('provider down')
+      })
+      const failing = surface.requestExecute('calendar', 'create_event', {
+        calendarId: 'Personal',
+        title: 'Broken create',
+        start: '2026-08-22T13:00:00+08:00',
+        end: '2026-08-22T13:15:00+08:00',
+      })
+      assert.equal(failing.kind, 'pending_confirmation')
+      if (failing.kind !== 'pending_confirmation') throw new Error('expected pending')
+      const failCard = (await fetch(`${url}/api/view`).then((res) => res.json()) as { view: MissionControlView })
+        .view.approvals.find((item) => item.id === failing.confirmationId)
+      const failed = await fetch(`${url}/api/approve`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', ...authHeaders(cookie) },
+        body: JSON.stringify({ id: failing.confirmationId, fingerprint: failCard?.fingerprint }),
+      })
+      assert.equal(failed.status, 200)
+      const failedBody = await failed.json() as { view: MissionControlView; acknowledgement?: { text: string } }
+      assert.equal(failedBody.view.approvals.find((item) => item.id === failing.confirmationId)?.status, 'failed')
+      assert.equal(failedBody.view.approvalResolutions.filter((item) => item.confirmationId === failing.confirmationId).length, 1)
+      assert.equal(failedBody.view.approvalResolutions.some((item) => item.confirmationId === failing.confirmationId && item.outcome === 'failed'), true)
+      assert.ok(failedBody.view.activity.some((item) => item.source === 'approval/resolved' && item.kind === 'FAILED' && item.summary.includes('failed')))
+      assert.match(failedBody.acknowledgement?.text ?? '', /Failed/)
+      assert.equal('acknowledgement' in failedBody.view, false)
+      assert.equal(executions, 1)
+      assert.equal(adapter.invocations, afterTalk)
+      const afterFail = await fetch(`${url}/api/view`).then((res) => res.json()) as { view: MissionControlView; acknowledgement?: { text: string } }
+      assert.equal('acknowledgement' in afterFail, false)
+      assert.deepEqual(afterFail.view.conversation.filter((item) => item.kind === 'user-message').map((item) => item.text), beforeUsers)
+      const replayFail = await fetch(`${url}/api/approve`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', ...authHeaders(cookie) },
+        body: JSON.stringify({ id: failing.confirmationId, fingerprint: failCard?.fingerprint }),
+      })
+      assert.equal(replayFail.status, 409)
+      assert.equal(executions, 1)
+      assert.equal(afterFail.view.approvalResolutions.filter((item) => item.confirmationId === failing.confirmationId).length, 1)
     })
   })
 
@@ -603,6 +746,8 @@ export function apply(ctx) {
       assert.equal(approved.status, 200)
       const afterApprove = await approved.json() as { view: MissionControlView }
       assert.equal(afterApprove.view.approvals.some((item) => item.candidateId === sealed.id), false)
+      assert.equal(afterApprove.view.approvalResolutions.some((item) => item.outcome === 'completed' && item.capability === 'self-extension'), true)
+      assert.equal(afterApprove.view.conversation.some((item) => item.kind === 'user-message' && item.text.includes('Confirmation')), false)
       const card = afterApprove.view.activations.find((item) => item.candidateId === sealed.id)
       assert.ok(card)
       assert.equal(card.status, 'APPROVED_NOT_ACTIVE')
@@ -1985,6 +2130,14 @@ export function apply(ctx) {
           fingerprint: 'fp-calendar',
           status: 'denied',
         }],
+        approvalResolutions: [{
+          type: 'approval/resolved',
+          confirmationId: 'c1',
+          decision: 'deny',
+          outcome: 'denied',
+          capability: 'calendar',
+          operation: 'create_event',
+        }],
       }),
       connected: true,
       sending: false,
@@ -1995,8 +2148,27 @@ export function apply(ctx) {
       onReject() {},
       onRecovery() {},
     }))
-    assert.match(rejected, /Status denied/)
+    assert.match(rejected, /data-approval-resolution="c1"/)
+    assert.match(rejected, /data-approval-outcome="denied"/)
+    assert.doesNotMatch(rejected, /data-approval-action="approve"/)
     assert.doesNotMatch(rejected, />APPROVE</)
+    assert.doesNotMatch(rejected, /data-acknowledgement/)
+
+    const toasted = renderToStaticMarkup(createElement(MissionControlScreen, {
+      view: fixtureView(),
+      acknowledgement: { text: 'Rejected. calendar.create_event was denied.' },
+      connected: true,
+      sending: false,
+      draft: '',
+      onDraft() {},
+      onSend() {},
+      onApprove() {},
+      onReject() {},
+      onRecovery() {},
+    }))
+    assert.match(toasted, /data-acknowledgement-region="toast"/)
+    assert.match(toasted, /Rejected\. calendar\.create_event was denied/)
+    assert.doesNotMatch(toasted, /conversation-scroll[\s\S]*data-acknowledgement/)
 
     const extension = renderToStaticMarkup(createElement(MissionControlScreen, {
       view: fixtureView({

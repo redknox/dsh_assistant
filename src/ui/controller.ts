@@ -24,6 +24,7 @@ export interface EditMemoryInput {
 /**
  * Product control surface. Actions call public DSH/application services.
  * No policy, memory, or integration rules live here.
+ * A control-plane decision is not a human conversation message.
  */
 export class AssistantControlSurface {
   private retrieval?: KnowledgeRetrieval
@@ -71,21 +72,15 @@ export class AssistantControlSurface {
   }
 
   async approve(confirmationId: string): Promise<PolicyOutcome> {
-    const outcome = await this.ctx.actionPolicy.policy.resolve(confirmationId, 'approve')
-    this.announceDecision(confirmationId, 'approve', outcome)
-    return outcome
+    return this.ctx.actionPolicy.policy.resolve(confirmationId, 'approve')
   }
 
   async deny(confirmationId: string): Promise<PolicyOutcome> {
-    const outcome = await this.ctx.actionPolicy.policy.resolve(confirmationId, 'deny')
-    this.announceDecision(confirmationId, 'deny', outcome)
-    return outcome
+    return this.ctx.actionPolicy.policy.resolve(confirmationId, 'deny')
   }
 
   async cancelConfirmation(confirmationId: string): Promise<PolicyOutcome> {
-    const outcome = await this.ctx.actionPolicy.policy.resolve(confirmationId, 'cancel')
-    this.announceDecision(confirmationId, 'cancel', outcome)
-    return outcome
+    return this.ctx.actionPolicy.policy.resolve(confirmationId, 'cancel')
   }
 
   startJob(name: string, input: Record<string, unknown> = {}) {
@@ -153,13 +148,6 @@ export class AssistantControlSurface {
       intent: 'execute',
       payload,
     })
-  }
-
-  private announceDecision(confirmationId: string, decision: 'approve' | 'deny' | 'cancel', outcome: PolicyOutcome): void {
-    const result = outcome.kind === 'allow'
-      ? 'The bound action completed.'
-      : `${outcome.kind}${outcome.kind === 'deny' ? ` (${outcome.code})` : ''}: ${outcome.reason}`
-    this.sendMessage(`Confirmation ${confirmationId} ${decision}: ${result}`)
   }
 
   private requireAgent() {

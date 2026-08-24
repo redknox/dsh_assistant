@@ -51,6 +51,8 @@ Projected from authoritative runtime/governance/policy/integration state, never 
 
 Calendar create is an ordinary external side-effect card: target, when, attendees, external side effect, no authority change.
 
+A control-plane decision is not a human conversation message. Approve, Reject, and Cancel resolve through the trusted host and appear in Actions history and Activity. They do not append a synthetic `Confirmation ...` user message or start an extra model turn. A successful decision may return a one-shot acknowledgement on the POST response for a dismissible toast; `/api/view` and SSE snapshots do not re-project that toast into Conversation.
+
 Self-Extension is a capability/permission/effect diff bound to digest/fingerprint. Effect diffs include secret-access metadata (name/scope/type only); secret values are never rendered. It is not self-authorization. UI approve still goes through the existing policy/governance roots and leaves the candidate `APPROVED_NOT_ACTIVE` until a distinct trusted activation.
 
 Workbench/Mission-Control DTOs split `reviewState`, `governanceApproval`, and `activationState`. Independent Review may still say it is not a human approval; public Workbench inspect no longer prints `NOT APPROVED` next to an already-approved candidate.

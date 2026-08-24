@@ -414,7 +414,7 @@ function ConversationWorkspace(props: {
             </article>
           )
         })}
-        {props.view.approvals.map((card) => (
+        {props.view.approvals.filter((card) => isPendingApproval(card.status)).map((card) => (
           <ApprovalCardView key={card.id} card={card} locked={locked} onApprove={props.onApprove} onReject={props.onReject} />
         ))}
         {props.activations.map((card) => (
@@ -689,6 +689,24 @@ function OperationsPanel(props: {
         </ol>
       </section>
       <WorkbenchPanel candidates={props.view.candidates ?? []} />
+      <section className="capability-section" id="actions" aria-labelledby="actions-title">
+        <h2 id="actions-title">ACTIONS</h2>
+        <ul className="workbench-list" data-actions-history="true">
+          {(props.view.approvalResolutions ?? []).length === 0 ? (
+            <li className="workbench-item">No resolved approvals yet.</li>
+          ) : (props.view.approvalResolutions ?? []).map((item) => (
+            <li
+              key={item.confirmationId}
+              className="workbench-item"
+              data-approval-resolution={item.confirmationId}
+              data-approval-outcome={item.outcome}
+            >
+              <div className="workbench-identity">{item.capability ?? 'action'}.{item.operation ?? item.decision}</div>
+              <div className="workbench-meta">{item.decision} · {item.outcome}</div>
+            </li>
+          ))}
+        </ul>
+      </section>
       <section className="capability-section" aria-labelledby="extensions-ops-title">
         <h2 id="extensions-ops-title">EXTENSIONS</h2>
         <p className="workbench-meta">{(props.view.extensions ?? []).length} generated/user revision{(props.view.extensions ?? []).length === 1 ? '' : 's'}</p>
@@ -875,6 +893,8 @@ export function MissionControlScreen(props: {
   readonly onAskRollback?: (card: RollbackCard) => void
   readonly onDeferRollback?: (card: RollbackCard) => void
   readonly onRecovery: (action: 'diagnostics' | 'rollback' | 'exit-safe-mode') => void
+  readonly acknowledgement?: { readonly text: string }
+  readonly onDismissAcknowledgement?: () => void
 }) {
   const { view } = props
   const safe = view.systemState === 'SAFE_MODE' || view.systemState === 'RECOVERY'
@@ -890,6 +910,12 @@ export function MissionControlScreen(props: {
         connected={props.connected}
       />
       {!props.connected ? <p className="transport" role="status">Disconnected from local runtime</p> : null}
+      {props.acknowledgement ? (
+        <div className="acknowledgement" role="status" data-acknowledgement-region="toast" data-acknowledgement="true">
+          <span>{props.acknowledgement.text}</span>
+          <button type="button" className="button button--secondary" data-acknowledgement-dismiss="true" onClick={() => props.onDismissAcknowledgement?.()}>Dismiss</button>
+        </div>
+      ) : null}
       {safe && view.recovery ? (
         <RecoveryPanel
           systemState={view.systemState}
@@ -968,12 +994,19 @@ export function App() {
   const [armedRollback, setArmedRollback] = useState(false)
   const [pane, setPane] = useState<WorkspacePane>(paneFromHash)
   const [inspectingExtension, setInspectingExtension] = useState<string>()
+  const [acknowledgement, setAcknowledgement] = useState<{ readonly text: string }>()
 
   useEffect(() => {
     const sync = () => { setPane(paneFromHash()) }
     globalThis.addEventListener?.('hashchange', sync)
     return () => globalThis.removeEventListener?.('hashchange', sync)
   }, [])
+
+  useEffect(() => {
+    if (!acknowledgement) return
+    const timer = globalThis.setTimeout(() => setAcknowledgement(undefined), 4000)
+    return () => globalThis.clearTimeout(timer)
+  }, [acknowledgement])
 
   const navigate = (next: WorkspacePane) => {
     setPane(next)
@@ -1019,7 +1052,9 @@ export function App() {
   const act = async (run: () => Promise<UiEnvelope>) => {
     setError(undefined)
     try {
-      setEnvelope(await run())
+      const next = await run()
+      setEnvelope(next)
+      if (next.acknowledgement) setAcknowledgement(next.acknowledgement)
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : 'action failed')
     }
@@ -1040,6 +1075,8 @@ export function App() {
       armedRecovery={armedRecovery}
       onDraft={setDraft}
       onSend={() => { void onSend() }}
+      acknowledgement={acknowledgement}
+      onDismissAcknowledgement={() => setAcknowledgement(undefined)}
       onApprove={(card) => { void act(() => decideApproval(card, 'approve')) }}
       onReject={(card) => { void act(() => decideApproval(card, 'deny')) }}
       deferredActivations={deferredActivations}

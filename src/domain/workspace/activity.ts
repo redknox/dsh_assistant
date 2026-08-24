@@ -1,3 +1,4 @@
+import { projectApprovalResolutions } from './approvals.js'
 import type { ActivityItem, WorkspaceSnapshotInput } from './types.js'
 
 const TOOL_LABELS: Record<string, string> = {
@@ -38,6 +39,17 @@ export function projectActivity(input: WorkspaceSnapshotInput): readonly Activit
       kind: 'APPROVAL_REQUIRED',
       summary: `${ticket.capability}.${ticket.operation} waiting for approval`,
       source: 'actionPolicy',
+    })
+  }
+  for (const resolution of projectApprovalResolutions(input)) {
+    const target = resolution.capability && resolution.operation
+      ? `${resolution.capability}.${resolution.operation}`
+      : resolution.confirmationId
+    items.push({
+      id: `approval-resolved-${resolution.confirmationId}`,
+      kind: resolution.outcome === 'failed' ? 'FAILED' : 'COMPLETED',
+      summary: `${target} ${resolution.outcome}`,
+      source: 'approval/resolved',
     })
   }
   if (input.blockedReason) {

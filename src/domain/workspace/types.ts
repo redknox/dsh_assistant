@@ -52,6 +52,16 @@ export interface ActivityItem {
   readonly source: string
 }
 
+export interface ApprovalResolution {
+  readonly type: 'approval/resolved'
+  readonly confirmationId: string
+  readonly decision: 'approve' | 'deny' | 'cancel'
+  readonly outcome: 'completed' | 'denied' | 'cancelled' | 'failed'
+  readonly capability?: string
+  readonly operation?: string
+  readonly occurredAt?: string
+}
+
 export interface ApprovalCard {
   readonly id: string
   readonly kind: 'calendar-create' | 'self-extension' | 'other-side-effect'
@@ -210,6 +220,7 @@ export interface MissionControlView {
   readonly conversation: readonly { readonly kind: WorkObjectKind; readonly text: string }[]
   readonly activity: readonly ActivityItem[]
   readonly approvals: readonly ApprovalCard[]
+  readonly approvalResolutions: readonly ApprovalResolution[]
   readonly activations: readonly ActivationCard[]
   readonly plugins: readonly UserPluginView[]
   readonly extensions: readonly ExtensionRecord[]

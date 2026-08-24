@@ -3,6 +3,7 @@ export type {
   ActivityItem,
   ActivityKind,
   ApprovalCard,
+  ApprovalResolution,
   ControlStrip,
   ExtensionRecord,
   MissionControlView,
@@ -27,7 +28,7 @@ export { formatExactDiff, projectActivationCards } from './activations.js'
 export { boundActivationDiagnostics } from './failure.js'
 export { deriveSystemState } from './state.js'
 export { projectActivity } from './activity.js'
-export { projectApprovalCards } from './approvals.js'
+export { acknowledgementOf, projectApprovalCards, projectApprovalResolutions } from './approvals.js'
 export { projectUserCapabilities } from './capabilities.js'
 export { projectExtensions } from './extensions.js'
 export { projectUserPlugins } from './plugins.js'
