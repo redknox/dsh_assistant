@@ -1,5 +1,5 @@
-# Safe Mode DSH profile
+# Safe Mode overlay
 
-Same bundles as `profiles/assistant/`, but the overlay sets `safeMode: true` on `dsh-assistant` so optional integrations, jobs, and generated extensions are never loaded. Recovery, Registry, and governance inspect/request stay available.
+Applied on top of `profiles/assistant` during recovery. Disables official `jobs` and sets `dsh-assistant.safeMode`. Ordinary Profile patches cannot disable `dsh-assistant` or remove governance/registry authority.
 
-This directory is a repo example. It is not included in the npm pack.
+Shipped in the npm pack. See [docs/runtime-context.md](../../docs/runtime-context.md).

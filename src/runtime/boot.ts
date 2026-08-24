@@ -15,7 +15,7 @@ import { persistCandidates, persistGovernance, openDurableSelfExtension, hydrate
 import { resolveAssistantHome } from '../domain/self-extension/home.js'
 import { reconstructCommittedExtensions } from '../domain/self-extension/reconstruct.js'
 import * as assistantProduct from '../product/bundle.js'
-import { ASSISTANT_OFFICIAL_COMPOSED_IDS, assertOfficialEquivalentToAdapter, mountedAdapterPluginIds } from '../product/profile-composition.js'
+import { assertMountedAdapterContract } from '../product/profile-composition.js'
 import { DEFAULT_LLM_CREDENTIAL, DEFAULT_LLM_MODEL, DEFAULT_LLM_PROVIDER } from '../product/constants.js'
 import { productHomeLayout } from '../product/home.js'
 import { appendProductLog } from '../product/log.js'
@@ -142,7 +142,7 @@ async function bootStack(options: BootOptions = {}): Promise<AssistantControl> {
     : durable === undefined ? 'absent' : 'ok'
 
   try {
-    assertOfficialEquivalentToAdapter(ASSISTANT_OFFICIAL_COMPOSED_IDS, mountedAdapterPluginIds(ctx), {
+    assertMountedAdapterContract(ctx, {
       safeMode,
       sessionPersistence: Boolean(options.sessionRoot),
     })

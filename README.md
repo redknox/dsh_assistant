@@ -111,7 +111,7 @@ See [ARCHITECTURE.md](./ARCHITECTURE.md) for layers. See [ENGINEERING.md](./ENGI
 | UI projection + control surface | no | **Verified** by `npm test` | Framework-independent DTOs remain |
 | Local Mission-Control Web UI | no | **Verified** by `test/web-ui.test.ts` and packaging | Loopback-only; pixel/mobile **Unsupported** |
 | Plan My Day vertical slice | no | **Verified** by `test/vertical-slice.test.ts` | Scripted adapter + fake calendar |
-| DSH bundle + example profile + remount | yes (metadata) | **Verified** by `test/packaging.test.ts` | See [docs/packaging.md](./docs/packaging.md) |
+| DSH bundle + shipped assistant Profile + remount | yes (metadata) | **Verified** by `test/packaging.test.ts` | See [docs/packaging.md](./docs/packaging.md) |
 | Self-Extension governance | no | **Verified** | Operator: `tars-ng self-extension` / [docs/self-extension-operations.md](./docs/self-extension-operations.md) |
 | Capability Registry / Resolution / Discovery | no | **Verified** | See docs/capability-*.md |
 | Candidate workspace + reliability + independent review | no | **Verified** | `review-complete` is not approval |

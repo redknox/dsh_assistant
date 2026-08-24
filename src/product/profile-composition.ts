@@ -1,9 +1,15 @@
 import type { Context } from '@deepseek-ai/cordis'
+import {
+  activeComposedIds,
+  loadGovernedAssistantComposition,
+  type ComposedProfileEntry,
+  type GovernedProfileComposition,
+} from './profile-load.js'
 import { RuntimeContextError } from './runtime-context.js'
 
 export const ASSISTANT_PROFILE_BUNDLES = Object.freeze(['@deepseek-ai/dsh-base', 'dsh-assistant'] as const)
 
-/** Official `loadProfile` / `composeEntries` ids for packaged `assistant`. Extra unknown ids fail closed. */
+/** Unpatched `dsh-base` + `dsh-assistant` compose order. Extra unknown ids fail closed. */
 export const ASSISTANT_OFFICIAL_COMPOSED_IDS = Object.freeze([
   'timer',
   'hmr',
@@ -86,105 +92,30 @@ export const ASSISTANT_OFFICIAL_COMPOSED_IDS = Object.freeze([
   'dsh-assistant',
 ] as const)
 
-export type OfficialExclusionReason =
-  | 'dsh-host-cli'
-  | 'dsh-dev-loader'
-  | 'dsh-host-telemetry'
-  | 'ungoverned-cli-tool'
-  | 'multi-agent-out-of-scope'
-  | 'skill-lifecycle-out-of-scope'
-  | 'replaced-by-product-policy'
-  | 'replaced-by-product-sandbox'
-
 export type AdapterWhen = 'always' | 'ready' | 'session-persistence'
 
-export type OfficialIdMapping =
-  | { readonly official: string; readonly kind: 'mount'; readonly runtime: string; readonly when: AdapterWhen }
-  | { readonly official: string; readonly kind: 'exclude'; readonly reason: OfficialExclusionReason }
+export type OfficialRuntimeMount = {
+  readonly official: string
+  readonly runtime: string
+  readonly when: AdapterWhen
+}
 
 export type ProductOnlySeam = { readonly runtime: string; readonly when: AdapterWhen; readonly reason: string }
 
-export const OFFICIAL_ID_CONTRACT = Object.freeze([
-  { official: 'dsh-assistant', kind: 'mount', runtime: 'dsh-assistant', when: 'always' },
-  { official: 'agent', kind: 'mount', runtime: 'AgentRegistry', when: 'always' },
-  { official: 'agent-default-model', kind: 'mount', runtime: 'AgentDefaultModelConfig', when: 'always' },
-  { official: 'agent-loop', kind: 'mount', runtime: 'AgentLoop', when: 'always' },
-  { official: 'session', kind: 'mount', runtime: 'SessionStore', when: 'always' },
-  { official: 'llm', kind: 'mount', runtime: 'LlmRuntime', when: 'always' },
-  { official: 'llm-deepseek', kind: 'mount', runtime: 'llm-deepseek', when: 'always' },
-  { official: 'system-prompt', kind: 'mount', runtime: 'SystemPrompt', when: 'always' },
-  { official: 'tools', kind: 'mount', runtime: 'ToolRuntime', when: 'always' },
-  { official: 'jobs', kind: 'mount', runtime: 'LocalJobRegistry', when: 'ready' },
-  { official: 'session-persistence-jsonl', kind: 'mount', runtime: 'JsonlSessionPersistence', when: 'session-persistence' },
-  { official: 'timer', kind: 'exclude', reason: 'dsh-host-cli' },
-  { official: 'hmr', kind: 'exclude', reason: 'dsh-dev-loader' },
-  { official: 'typert', kind: 'exclude', reason: 'dsh-host-cli' },
-  { official: 'typert-loader', kind: 'exclude', reason: 'dsh-dev-loader' },
-  { official: 'typert-gateway', kind: 'exclude', reason: 'dsh-host-cli' },
-  { official: 'session-title', kind: 'exclude', reason: 'dsh-host-cli' },
-  { official: 'session-title-llm', kind: 'exclude', reason: 'dsh-host-cli' },
-  { official: 'user-questions', kind: 'exclude', reason: 'dsh-host-cli' },
-  { official: 'llm-retry', kind: 'exclude', reason: 'dsh-host-cli' },
-  { official: 'settings', kind: 'exclude', reason: 'dsh-host-cli' },
-  { official: 'credentials', kind: 'exclude', reason: 'dsh-host-cli' },
-  { official: 'llm-pi-ai', kind: 'exclude', reason: 'dsh-host-cli' },
-  { official: 'attachment-local', kind: 'exclude', reason: 'dsh-host-cli' },
-  { official: 'session-query-sqlite', kind: 'exclude', reason: 'dsh-host-telemetry' },
-  { official: 'session-projection', kind: 'exclude', reason: 'dsh-host-telemetry' },
-  { official: 'session-telemetry-otel', kind: 'exclude', reason: 'dsh-host-telemetry' },
-  { official: 'subprocess', kind: 'exclude', reason: 'ungoverned-cli-tool' },
-  { official: 'sandbox', kind: 'exclude', reason: 'replaced-by-product-sandbox' },
-  { official: 'sandbox-policy', kind: 'exclude', reason: 'replaced-by-product-sandbox' },
-  { official: 'bash-sandbox', kind: 'exclude', reason: 'replaced-by-product-sandbox' },
-  { official: 'pwsh-sandbox', kind: 'exclude', reason: 'replaced-by-product-sandbox' },
-  { official: 'approval', kind: 'exclude', reason: 'replaced-by-product-policy' },
-  { official: 'permission', kind: 'exclude', reason: 'replaced-by-product-policy' },
-  { official: 'shell-env', kind: 'exclude', reason: 'ungoverned-cli-tool' },
-  { official: 'tool-bash', kind: 'exclude', reason: 'ungoverned-cli-tool' },
-  { official: 'tool-pwsh', kind: 'exclude', reason: 'ungoverned-cli-tool' },
-  { official: 'tool-jobs', kind: 'exclude', reason: 'ungoverned-cli-tool' },
-  { official: 'fs-observation-policy', kind: 'exclude', reason: 'replaced-by-product-sandbox' },
-  { official: 'tool-fs', kind: 'exclude', reason: 'replaced-by-product-sandbox' },
-  { official: 'tool-fs-search', kind: 'exclude', reason: 'replaced-by-product-sandbox' },
-  { official: 'agent-instructions', kind: 'exclude', reason: 'dsh-host-cli' },
-  { official: 'skill', kind: 'exclude', reason: 'skill-lifecycle-out-of-scope' },
-  { official: 'skill-filesystem', kind: 'exclude', reason: 'skill-lifecycle-out-of-scope' },
-  { official: 'skill-badge', kind: 'exclude', reason: 'skill-lifecycle-out-of-scope' },
-  { official: 'tool-skill', kind: 'exclude', reason: 'skill-lifecycle-out-of-scope' },
-  { official: 'commands', kind: 'exclude', reason: 'dsh-host-cli' },
-  { official: 'command-feedback', kind: 'exclude', reason: 'dsh-host-cli' },
-  { official: 'goal', kind: 'exclude', reason: 'dsh-host-cli' },
-  { official: 'goal-round-driver', kind: 'exclude', reason: 'dsh-host-cli' },
-  { official: 'command-goal', kind: 'exclude', reason: 'dsh-host-cli' },
-  { official: 'plan-mode', kind: 'exclude', reason: 'dsh-host-cli' },
-  { official: 'token-meter', kind: 'exclude', reason: 'dsh-host-telemetry' },
-  { official: 'compaction-basic', kind: 'exclude', reason: 'dsh-host-cli' },
-  { official: 'command-compact', kind: 'exclude', reason: 'dsh-host-cli' },
-  { official: 'subagent', kind: 'exclude', reason: 'multi-agent-out-of-scope' },
-  { official: 'subagent-spawn-in-process', kind: 'exclude', reason: 'multi-agent-out-of-scope' },
-  { official: 'subagent-fork-in-process', kind: 'exclude', reason: 'multi-agent-out-of-scope' },
-  { official: 'tool-subagent-control', kind: 'exclude', reason: 'multi-agent-out-of-scope' },
-  { official: 'tool-subagent-list-agents', kind: 'exclude', reason: 'multi-agent-out-of-scope' },
-  { official: 'tool-subagent', kind: 'exclude', reason: 'multi-agent-out-of-scope' },
-  { official: 'tool-subagent-fork', kind: 'exclude', reason: 'multi-agent-out-of-scope' },
-  { official: 'tool-subagent-report', kind: 'exclude', reason: 'multi-agent-out-of-scope' },
-  { official: 'workflow-worker-thread', kind: 'exclude', reason: 'multi-agent-out-of-scope' },
-  { official: 'tool-workflow', kind: 'exclude', reason: 'dsh-host-cli' },
-  { official: 'timeout-policy', kind: 'exclude', reason: 'dsh-host-cli' },
-  { official: 'spill-local', kind: 'exclude', reason: 'dsh-host-telemetry' },
-  { official: 'spill-policy', kind: 'exclude', reason: 'dsh-host-telemetry' },
-  { official: 'session-checkpoint-policy', kind: 'exclude', reason: 'dsh-host-telemetry' },
-  { official: 'tool-result-pruner', kind: 'exclude', reason: 'dsh-host-cli' },
-  { official: 'tool-todo', kind: 'exclude', reason: 'dsh-host-cli' },
-  { official: 'tool-goal', kind: 'exclude', reason: 'dsh-host-cli' },
-  { official: 'tool-ralph', kind: 'exclude', reason: 'dsh-host-cli' },
-  { official: 'tool-str-replace-editor', kind: 'exclude', reason: 'ungoverned-cli-tool' },
-  { official: 'repeat-tool-reminder', kind: 'exclude', reason: 'dsh-host-cli' },
-  { official: 'web', kind: 'exclude', reason: 'dsh-host-cli' },
-  { official: 'web-search-deepseek', kind: 'exclude', reason: 'dsh-host-cli' },
-  { official: 'tool-web', kind: 'exclude', reason: 'dsh-host-cli' },
-  { official: 'fs-sandbox', kind: 'exclude', reason: 'replaced-by-product-sandbox' },
-] as const satisfies readonly OfficialIdMapping[])
+/** Official ids that remain active after the shipped assistant Profile patch. */
+export const OFFICIAL_RUNTIME_MOUNTS = Object.freeze([
+  { official: 'dsh-assistant', runtime: 'dsh-assistant', when: 'always' },
+  { official: 'agent', runtime: 'AgentRegistry', when: 'always' },
+  { official: 'agent-default-model', runtime: 'AgentDefaultModelConfig', when: 'always' },
+  { official: 'agent-loop', runtime: 'AgentLoop', when: 'always' },
+  { official: 'session', runtime: 'SessionStore', when: 'always' },
+  { official: 'llm', runtime: 'LlmRuntime', when: 'always' },
+  { official: 'llm-deepseek', runtime: 'llm-deepseek', when: 'always' },
+  { official: 'system-prompt', runtime: 'SystemPrompt', when: 'always' },
+  { official: 'tools', runtime: 'ToolRuntime', when: 'always' },
+  { official: 'jobs', runtime: 'LocalJobRegistry', when: 'ready' },
+  { official: 'session-persistence-jsonl', runtime: 'JsonlSessionPersistence', when: 'session-persistence' },
+] as const satisfies readonly OfficialRuntimeMount[])
 
 export const PRODUCT_ONLY_SEAMS = Object.freeze([
   { runtime: 'InvariantRegistry', when: 'always', reason: 'product recovery/governance invariants' },
@@ -206,7 +137,7 @@ export const PROTECTED_PLUGIN_IDS = Object.freeze(['dsh-assistant'] as const)
 
 export interface ProfilePatchRow {
   readonly id?: string
-  readonly disabled?: boolean
+  readonly disabled?: boolean | null
   readonly config?: unknown
 }
 
@@ -216,13 +147,15 @@ function mappingApplies(when: AdapterWhen, options: { readonly safeMode?: boolea
   return true
 }
 
-export function expectedProductionAdapterIds(options: {
-  readonly safeMode?: boolean
-  readonly sessionPersistence?: boolean
-} = {}): readonly string[] {
+export function expectedProductionAdapterIds(
+  activeOfficialIds: readonly string[],
+  options: { readonly safeMode?: boolean; readonly sessionPersistence?: boolean } = {},
+): readonly string[] {
+  const active = new Set(activeOfficialIds)
   const ids = new Set<string>()
-  for (const row of OFFICIAL_ID_CONTRACT) {
-    if (row.kind === 'mount' && mappingApplies(row.when, options)) ids.add(row.runtime)
+  for (const row of OFFICIAL_RUNTIME_MOUNTS) {
+    if (!active.has(row.official)) continue
+    if (mappingApplies(row.when, options)) ids.add(row.runtime)
   }
   for (const row of PRODUCT_ONLY_SEAMS) {
     if (mappingApplies(row.when, options)) ids.add(row.runtime)
@@ -241,21 +174,16 @@ export function assertAssistantBundles(bundles: readonly string[]): void {
   }
 }
 
-export function assertOfficialIdContract(): void {
+export function assertOfficialMountContract(): void {
   const official = new Set<string>(ASSISTANT_OFFICIAL_COMPOSED_IDS)
   const mapped = new Set<string>()
-  for (const row of OFFICIAL_ID_CONTRACT) {
+  for (const row of OFFICIAL_RUNTIME_MOUNTS) {
     if (mapped.has(row.official)) {
       throw new RuntimeContextError(`official id ${row.official} is mapped twice`)
     }
     mapped.add(row.official)
     if (!official.has(row.official)) {
-      throw new RuntimeContextError(`official id contract contains unknown id ${row.official}`)
-    }
-  }
-  for (const id of ASSISTANT_OFFICIAL_COMPOSED_IDS) {
-    if (!mapped.has(id)) {
-      throw new RuntimeContextError(`official composed id ${id} has no adapter mapping or exclusion`)
+      throw new RuntimeContextError(`official mount contract contains unknown id ${row.official}`)
     }
   }
 }
@@ -275,14 +203,44 @@ export function assertOfficialComposedIds(composedIds: readonly string[]): void 
   }
 }
 
+export function assertGovernedActiveComposition(entries: readonly ComposedProfileEntry[]): string[] {
+  assertOfficialMountContract()
+  const ids = entries.flatMap((row) => (typeof row.id === 'string' ? [row.id] : []))
+  assertOfficialComposedIds(ids)
+  const active = activeComposedIds(entries)
+  const allowed = new Set<string>(OFFICIAL_RUNTIME_MOUNTS.map((row) => row.official))
+  for (const id of active) {
+    if (!allowed.has(id)) {
+      throw new RuntimeContextError(`governed Profile left ${id} active without a production mount`)
+    }
+  }
+  for (const row of OFFICIAL_RUNTIME_MOUNTS) {
+    if (row.when === 'always' && !active.includes(row.official)) {
+      throw new RuntimeContextError(`governed Profile disabled required official id ${row.official}`)
+    }
+  }
+  return active
+}
+
 export function assertOfficialEquivalentToAdapter(
   composedIds: readonly string[],
   mountedIds: readonly string[],
   options: { readonly safeMode?: boolean; readonly sessionPersistence?: boolean } = {},
 ): void {
-  assertOfficialIdContract()
+  const composition = loadGovernedAssistantComposition({ safeMode: options.safeMode })
   assertOfficialComposedIds(composedIds)
-  const expected = expectedProductionAdapterIds(options)
+  assertActiveProfileMatchesAdapter(composition, mountedIds, options)
+}
+
+export function assertActiveProfileMatchesAdapter(
+  composition: GovernedProfileComposition,
+  mountedIds: readonly string[],
+  options: { readonly safeMode?: boolean; readonly sessionPersistence?: boolean } = {},
+): void {
+  assertAssistantBundles(composition.bundles)
+  assertProfilePatchSafe(composition.patches)
+  const active = assertGovernedActiveComposition(composition.entries)
+  const expected = expectedProductionAdapterIds(active, options)
   const actual = [...new Set(mountedIds)].sort()
   if (actual.length !== expected.length || expected.some((id, index) => actual[index] !== id)) {
     throw new RuntimeContextError(`official composition is not equivalent to the production adapter: expected ${expected.join(',')} actual ${actual.join(',')}`)
@@ -293,7 +251,7 @@ export function assertMountedAdapterContract(
   ctx: Context,
   options: { readonly safeMode?: boolean; readonly sessionPersistence?: boolean } = {},
 ): void {
-  assertOfficialEquivalentToAdapter(ASSISTANT_OFFICIAL_COMPOSED_IDS, mountedAdapterPluginIds(ctx), options)
+  assertActiveProfileMatchesAdapter(loadGovernedAssistantComposition({ safeMode: options.safeMode }), mountedAdapterPluginIds(ctx), options)
 }
 
 export function assertProfilePatchSafe(patches: readonly ProfilePatchRow[]): void {
@@ -317,9 +275,8 @@ export function assertSelectedProfile(profile: string): void {
 }
 
 export function assertAssistantAdapterContract(): void {
-  assertAssistantBundles(ASSISTANT_PROFILE_BUNDLES)
-  assertOfficialIdContract()
-  if (expectedProductionAdapterIds({}).filter((id) => id === 'dsh-assistant').length !== 1) {
-    throw new RuntimeContextError('production adapter contract is missing dsh-assistant')
-  }
+  const composition = loadGovernedAssistantComposition()
+  assertAssistantBundles(composition.bundles)
+  assertProfilePatchSafe(composition.patches)
+  assertGovernedActiveComposition(composition.entries)
 }

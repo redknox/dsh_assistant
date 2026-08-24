@@ -431,7 +431,7 @@ export function inspectSessionPartition(root: string): SessionPartitionInspectio
   if (!existsSync(lockDir)) return { state: 'empty' }
   const identity = readSessionPartitionIdentity(root)
   if (!identity) {
-    return { state: 'empty' }
+    return { state: 'ambiguous', detail: 'session partition lock exists without a verifiable identity' }
   }
   if (!processAlive(identity.pid)) return { state: 'stale', identity }
   if (localPartitionHolds.get(root) !== undefined && runIdEquals(localPartitionHolds.get(root)!, identity.runId)) {
@@ -442,16 +442,6 @@ export function inspectSessionPartition(root: string): SessionPartitionInspectio
 
 export function sweepIncompletePartitionLocks(root: string): void {
   if (!existsSync(root)) return
-  const official = sessionPartitionLockDir(root)
-  if (existsSync(official) && readSessionPartitionIdentity(root) === undefined) {
-    const tomb = path.join(root, `.writer.lock.incomplete.${randomBytes(8).toString('hex')}.retired`)
-    try {
-      renameSync(official, tomb)
-      rmSync(tomb, { recursive: true, force: true })
-    } catch {
-      // another writer may be sweeping the same unpublished lock
-    }
-  }
   for (const name of readdirSync(root)) {
     const staged = /^\.writer\.lock\.([0-9a-f]{64})\.staging$/.exec(name)
     if (!staged) continue

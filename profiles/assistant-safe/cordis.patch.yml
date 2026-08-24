@@ -1,4 +1,7 @@
-# Safe Mode overlay: keep recovery/governance, skip optional product plugins.
+# Recovery overlay on the governed assistant Profile. Ordinary patches cannot
+# disable dsh-assistant or remove governance/registry authority.
+- id: jobs
+  disabled: true
 - id: dsh-assistant
   config:
     safeMode: true
