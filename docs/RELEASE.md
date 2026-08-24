@@ -53,10 +53,12 @@ The directional milestones are:
 | Milestone | Product question |
 | --- | --- |
 | **v0.4.0 — Runtime Foundation + Governed Extension Baseline** | Can TARS-NG bind one Home to a Profile, Workspace, and durable current Session, then construct, validate, review, approve, activate, observe, and recover a generated capability without self-authorization? |
+| **Typed Capability Broker** | Can a generated capability safely compose narrowly scoped host operations without receiving arbitrary runtime, filesystem, network, process, or secret access? |
 | **Domain Construction Slice** | Can a professional who does not know TypeScript or DSH describe one bounded domain need and obtain an explicit, testable, governed capability? |
+| **Host-Rendered Domain UI** | Can that governed capability produce a useful professional work surface without creating frontend-owned authority or state? |
 | **Professional Application Composition** | Can several governed capabilities, domain adapters, policies, and UI components be composed into a coherent professional AI system? |
 
-These later names are directional, not release commitments. Finance, HR, Legal, and Operations kits remain future product layers. They must reuse the same governance invariants rather than introducing a privileged generation or activation path. See [product-vision.md](./product-vision.md).
+These later names are directional, not release commitments. The longer hypothesis also includes durable domain workspaces, governed triggers, professional capability packs, and domain-professional vibe coding. Finance, HR, Legal, and Operations kits remain future product layers. They must reuse the same governance invariants rather than introducing a privileged generation or activation path. See [product-vision.md](./product-vision.md).
 
 ## v0.2.0 Verified (Governed Self-Extension)
 

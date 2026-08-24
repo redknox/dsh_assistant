@@ -87,6 +87,96 @@ Through v0.4.0, TARS-NG is validating the lower half of the stack: a usable refe
 
 This baseline is necessary but not sufficient for domain-professional vibe coding.
 
+## Long-term roadmap
+
+The roadmap after v0.4.0 is a product hypothesis, not a sequence of committed releases. Each stage should be justified by daily use and one bounded domain proof before TARS-NG expands into a broader platform.
+
+### 1. Typed Capability Broker
+
+The current generated-extension contract proves low-risk R0 capabilities that run without host I/O. The next runtime step is a typed, policy-gated broker through which a generated capability may request narrowly scoped host operations.
+
+For example, a candidate may declare that it needs `files.read`, `files.write`, or `knowledge.retrieve`, while still receiving no arbitrary `fs`, network, process, secret, or live Cordis access. Broker dependencies, permissions, effects, and failure semantics must be visible in the candidate diff and bound to the exact approval.
+
+This is the bridge from pure transformations such as slug generation to useful local and domain capabilities. It must not become a generic escape hatch around the generated-runtime sandbox.
+
+### 2. Domain Construction Workbench
+
+A domain professional should not need to ask for a TypeScript plugin. They should describe a need in their own language, after which TARS-NG helps separate:
+
+- goal and non-goals;
+- domain rules and authoritative data sources;
+- required inputs and expected outputs;
+- permissions and external effects;
+- representative examples, edge cases, and failure cases;
+- human review and mandatory approval points.
+
+The output is an inspectable capability specification before it is code. TARS-NG may then resolve whether to reuse, configure, evolve, or create a capability and generate the implementation and tests from that approved specification.
+
+### 3. Host-rendered domain UI
+
+Professional work cannot remain entirely in a conversation stream. A governed capability should be able to declare a bounded UI schema for host-rendered forms, tables, comparisons, timelines, risk summaries, evidence requests, and approval cards.
+
+Generated UI does not receive independent authority. It renders authoritative runtime projections and invokes named capabilities through the same policy and approval paths as conversation or operator actions. The browser must not invent lifecycle, permission, execution, or recovery state.
+
+The product outcome is not merely that TARS-NG installs a plugin. It is that the system can grow a small, understandable professional application around that capability.
+
+### 4. Capability composition and dynamic Agent orchestration
+
+DSH is most valuable where the task path cannot be completely fixed in advance. TARS-NG should let the Agent dynamically choose and order governed capabilities, ask for missing evidence, react to partial results, and re-plan while remaining inside fixed authority boundaries.
+
+A reimbursement review, for example, may require a different sequence for every claim: load the request, match travel records, inspect invoices, retrieve the applicable policy, request missing material, evaluate anomalies, and propose an approval route. The Agent may plan this sequence dynamically; authoritative posting, payment, identity, accounting, retention, and mandatory approvals remain in enterprise systems and host policy.
+
+### 5. Durable professional workspaces
+
+The personal assistant should evolve from one current conversation into durable workspaces such as Personal, Finance, Travel, HR, Contract, or Research. A workspace may own an explicit set of:
+
+- conversations, objectives, and action history;
+- domain knowledge and bounded data roots;
+- enabled capabilities and permission policy;
+- generated pages and domain vocabulary;
+- evaluation fixtures, results, and operational evidence.
+
+Workspace state must be durable and auditable. It must not create a second frontend-owned source of truth or blur authority between unrelated domains.
+
+### 6. Governed triggers and continuous work
+
+TARS-NG may later start bounded jobs from schedules, new files, enterprise events, or webhooks. A trigger starts an observable Agent job; it does not grant new authority. The resulting tool use, policy checks, approvals, cancellation, retries, and uncertain outcomes use the same runtime contracts as an interactive request.
+
+This enables assistants that prepare work before the user opens the WUI, for example checking newly submitted expense claims and presenting exceptions without approving or posting them.
+
+### 7. Professional capability packs
+
+Finance, HR, Legal, Travel, and Operations packs may package domain models, capability contracts, policy templates, knowledge structures, UI schemas, tests, evaluation criteria, and adapter seams. They are not privileged marketplaces or bundles of unreviewed generated code.
+
+An enterprise should be able to adapt a pack to its own rules while preserving provenance, versioning, permission diffs, review, exact approval, rollback, and recovery.
+
+### 8. Domain-professional vibe coding
+
+The long-term experience is not "everyone writes code with AI." It is:
+
+> Domain professionals express rules, examples, data mappings, and risk boundaries; TARS-NG turns them into testable, governed software capabilities and applications.
+
+The professional remains responsible for business meaning and acceptance examples. TARS-NG is responsible for clarification, specification, implementation, validation evidence, runtime composition, and operability. Human or enterprise authority remains responsible for approval and activation.
+
+## Reference domain proof
+
+The recommended first proof after the v0.4.0 soak is a low-risk finance slice: **expense risk review and approval recommendation**, without payment or automatic authoritative approval.
+
+A finance professional should be able to describe rules such as different over-standard approval paths for different company entities. TARS-NG should:
+
+1. clarify amount basis, organization scope, thresholds, exceptions, and authoritative sources;
+2. generate a readable specification and decision examples;
+3. resolve and construct the required bounded capabilities;
+4. generate tests for normal, boundary, missing-evidence, and conflicting-rule cases;
+5. present the capability, permission, data-access, and effect diff for review;
+6. let a trusted human approve and activate the exact candidate;
+7. render a useful expense-review workspace in the WUI;
+8. dynamically gather the evidence needed for each claim and explain bounded findings;
+9. leave posting, payment, and mandatory approval in authoritative enterprise systems; and
+10. allow the operator to diagnose, disable, reactivate, or roll back the capability without developer intervention.
+
+If a finance professional who does not know TypeScript or DSH can complete that loop on representative claims, TARS-NG has demonstrated more than plugin generation: it has demonstrated a new, governed method of producing professional AI-native software.
+
 ## What remains for domain-professional construction
 
 Later work should be driven by one bounded real domain slice rather than speculative generic platform features. A complete slice needs:
