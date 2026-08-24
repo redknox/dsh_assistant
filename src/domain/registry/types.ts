@@ -50,6 +50,7 @@ export interface RegistryRecord {
   readonly tools: readonly string[]
   readonly services: readonly string[]
   readonly providers: readonly string[]
+  readonly pluginDependencies: readonly { readonly capability: string; readonly strength: 'hard' | 'optional' }[]
 }
 
 export interface RegistryQuery {
@@ -90,6 +91,7 @@ export interface RegistryRegisterInput {
   readonly tools?: readonly string[]
   readonly services?: readonly string[]
   readonly providers?: readonly string[]
+  readonly pluginDependencies?: readonly { readonly capability: string; readonly strength: 'hard' | 'optional' }[]
 }
 
 export interface CapabilityRegistry {

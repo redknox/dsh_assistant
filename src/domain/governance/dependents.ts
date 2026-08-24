@@ -20,36 +20,37 @@ export function analyzePluginDependents(input: {
     readonly owner: string
     readonly version: string
     readonly status: string
-    readonly runtimeSeams?: readonly string[]
-    readonly providers?: readonly string[]
+    readonly pluginDependencies?: readonly { readonly capability?: string; readonly strength?: string }[]
   }[]
 }): PluginDependencyResult {
   try {
-    const provided = new Set(input.capabilities)
     if (input.owner === '' || input.version === '') {
       return { severity: 'unresolved', dependents: [] }
     }
+    const provided = new Set(input.capabilities)
     const dependents: PluginDependent[] = []
     for (const record of input.registry) {
       if (record.owner === input.owner && record.version === input.version) continue
       if (record.owner === '' || record.version === '') {
         return { severity: 'unresolved', dependents: [] }
       }
-      const seams = record.runtimeSeams ?? []
-      const providers = record.providers ?? []
-      const hardCap = seams.find((item) => provided.has(item))
-      const optionalCap = hardCap === undefined ? providers.find((item) => provided.has(item)) : undefined
-      const required = hardCap ?? optionalCap
-      if (required === undefined) continue
-      const kind: PluginDependentKind = record.status === 'active'
-        ? (hardCap !== undefined ? 'hard' : 'optional')
-        : 'historical'
-      dependents.push({
-        owner: record.owner,
-        version: record.version,
-        requiredCapability: required,
-        kind,
-      })
+      const declared = record.pluginDependencies
+      if (declared === undefined) continue
+      for (const item of declared) {
+        if (item.capability === undefined || item.capability === '') {
+          return { severity: 'unresolved', dependents: [] }
+        }
+        if (item.strength !== 'hard' && item.strength !== 'optional') {
+          return { severity: 'unresolved', dependents: [] }
+        }
+        if (!provided.has(item.capability)) continue
+        dependents.push({
+          owner: record.owner,
+          version: record.version,
+          requiredCapability: item.capability,
+          kind: record.status === 'active' ? item.strength : 'historical',
+        })
+      }
     }
     const activeHard = dependents.some((item) => item.kind === 'hard')
     const activeOptional = dependents.some((item) => item.kind === 'optional')

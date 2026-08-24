@@ -110,7 +110,7 @@ export function apply(ctx) {
 function authorGenerated(
   ctx: Awaited<ReturnType<typeof bootAssistantControl>>['ctx'],
   capability: string,
-  extra: { readonly runtimeSeams?: readonly string[]; readonly providers?: readonly string[] } = {},
+  extra: { readonly pluginDependencies?: readonly { capability: string; strength: 'hard' | 'optional' }[] } = {},
 ) {
   const toolName = capability.replaceAll('.', '_')
   const plan = ctx.candidateWorkbench.rememberPlan(ctx.capabilityResolution.review({
@@ -128,8 +128,7 @@ function authorGenerated(
     tools: [...manifest.tools],
     entryPoints: [...manifest.entryPoints],
     runtimeContractVersion: GENERATED_EXTENSION_API_V1,
-    ...(extra.runtimeSeams ? { runtimeSeams: [...extra.runtimeSeams] } : {}),
-    ...(extra.providers ? { providers: [...extra.providers] } : {}),
+    ...(extra.pluginDependencies ? { pluginDependencies: [...extra.pluginDependencies] } : {}),
   })
   ctx.candidateWorkbench.writeFile(created.id, 'src/plugin.js', generatedPlugin(toolName))
   ctx.candidateWorkbench.writeFile(created.id, 'package.json', `${JSON.stringify({ name: `dsh-generated-${toolName}`, type: 'module', main: 'src/plugin.js' }, null, 2)}\n`)
@@ -154,6 +153,17 @@ async function approveActivationCard(url: string, cookie: string, candidateId: s
   const card = after.view.activations.find((item) => item.candidateId === candidateId)
   assert.ok(card)
   return card
+}
+
+function uninstallBody(plugin: MissionControlView['plugins'][number]) {
+  return {
+    id: plugin.id,
+    owner: plugin.owner,
+    version: plugin.version,
+    candidateId: plugin.candidateId,
+    digest: plugin.digest,
+    registryGeneration: plugin.registryGeneration,
+  }
 }
 
 describe('local Mission-Control Web UI', () => {
@@ -768,20 +778,21 @@ export function apply(ctx) {
       assert.equal(stale.status, 409)
       assert.ok(ctx.tools.get('text_slugify'))
 
-      const dependent = authorGenerated(ctx, 'other.dep', { runtimeSeams: ['text.slugify'] })
-      const depCard = await approveActivationCard(url, cookie, dependent.id)
-      const depActivated = await fetch(`${url}/api/activate`, {
+      const hard = authorGenerated(ctx, 'other.dep', {
+        pluginDependencies: [{ capability: 'text.slugify', strength: 'hard' }],
+      })
+      const hardCard = await approveActivationCard(url, cookie, hard.id)
+      assert.equal((await fetch(`${url}/api/activate`, {
         method: 'POST',
         headers: { 'content-type': 'application/json', ...authHeaders(cookie) },
         body: JSON.stringify({
-          id: depCard.id,
-          candidateId: depCard.candidateId,
-          digest: depCard.digest,
-          fingerprint: depCard.fingerprint,
+          id: hardCard.id,
+          candidateId: hardCard.candidateId,
+          digest: hardCard.digest,
+          fingerprint: hardCard.fingerprint,
           confirm: true,
         }),
-      })
-      assert.equal(depActivated.status, 200, await depActivated.clone().text())
+      })).status, 200)
       const blockedView = await fetch(`${url}/api/view`).then((res) => res.json()) as { view: MissionControlView }
       const blockedPlugin = blockedView.view.plugins.find((item) => item.owner === 'generated/text-slugify')
       assert.ok(blockedPlugin)
@@ -789,15 +800,7 @@ export function apply(ctx) {
       const blocked = await fetch(`${url}/api/uninstall`, {
         method: 'POST',
         headers: { 'content-type': 'application/json', ...authHeaders(cookie) },
-        body: JSON.stringify({
-          id: blockedPlugin.id,
-          owner: blockedPlugin.owner,
-          version: blockedPlugin.version,
-          candidateId: blockedPlugin.candidateId,
-          digest: blockedPlugin.digest,
-          registryGeneration: blockedPlugin.registryGeneration,
-          confirm: true,
-        }),
+        body: JSON.stringify({ ...uninstallBody(blockedPlugin), confirm: true }),
       })
       assert.equal(blocked.status, 409)
       const blockedBody = await blocked.json() as { error: string; denials?: { reason: string; detail: string }[] }
@@ -806,91 +809,186 @@ export function apply(ctx) {
       assert.match(JSON.stringify(blockedBody.denials), /generated\/other-dep/)
       assert.ok(ctx.tools.get('text_slugify'))
 
-      const depPlugin = blockedView.view.plugins.find((item) => item.owner === 'generated/other-dep')
-      assert.ok(depPlugin)
-      const removedDep = await fetch(`${url}/api/uninstall`, {
+      const hardPlugin = blockedView.view.plugins.find((item) => item.owner === 'generated/other-dep')
+      assert.ok(hardPlugin)
+      assert.equal((await fetch(`${url}/api/uninstall`, {
         method: 'POST',
         headers: { 'content-type': 'application/json', ...authHeaders(cookie) },
-        body: JSON.stringify({
-          id: depPlugin.id,
-          owner: depPlugin.owner,
-          version: depPlugin.version,
-          candidateId: depPlugin.candidateId,
-          digest: depPlugin.digest,
-          registryGeneration: depPlugin.registryGeneration,
-          confirm: true,
-        }),
-      })
-      assert.equal(removedDep.status, 200, await removedDep.clone().text())
+        body: JSON.stringify({ ...uninstallBody(hardPlugin), confirm: true }),
+      })).status, 200)
       assert.equal(ctx.tools.get('other_dep'), undefined)
-      assert.equal(ctx.capabilityRegistry.get('generated/other-dep', '0.1.0')?.status, 'disabled')
 
-      const afterDep = await fetch(`${url}/api/view`).then((res) => res.json()) as { view: MissionControlView }
-      const remaining = afterDep.view.plugins.find((item) => item.owner === 'generated/text-slugify')
-      assert.ok(remaining)
-      recoveryRoot.service.failUninstall = 'secret /Users/secret/home/.tars-ng Bearer sk-uninstall-secret-999'
-      const failed = await fetch(`${url}/api/uninstall`, {
+      const optional = authorGenerated(ctx, 'other.opt', {
+        pluginDependencies: [{ capability: 'text.slugify', strength: 'optional' }],
+      })
+      const optionalCard = await approveActivationCard(url, cookie, optional.id)
+      assert.equal((await fetch(`${url}/api/activate`, {
         method: 'POST',
         headers: { 'content-type': 'application/json', ...authHeaders(cookie) },
         body: JSON.stringify({
-          id: remaining.id,
-          owner: remaining.owner,
-          version: remaining.version,
-          candidateId: remaining.candidateId,
-          digest: remaining.digest,
-          registryGeneration: remaining.registryGeneration,
+          id: optionalCard.id,
+          candidateId: optionalCard.candidateId,
+          digest: optionalCard.digest,
+          fingerprint: optionalCard.fingerprint,
           confirm: true,
         }),
+      })).status, 200)
+      const warnedView = await fetch(`${url}/api/view`).then((res) => res.json()) as { view: MissionControlView }
+      const warned = warnedView.view.plugins.find((item) => item.owner === 'generated/text-slugify')
+      assert.ok(warned)
+      assert.equal(warned.dependency.severity, 'optional')
+      const warning = await fetch(`${url}/api/uninstall`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', ...authHeaders(cookie) },
+        body: JSON.stringify({ ...uninstallBody(warned), confirm: true }),
       })
-      assert.equal(failed.status, 409)
-      const failedBody = await failed.json() as { error: string; diagnostics?: string }
-      assert.equal(failedBody.error, 'uninstall-failed')
-      assert.doesNotMatch(JSON.stringify(failedBody), /sk-uninstall-secret-999|\/Users\/secret\/home/)
+      assert.equal(warning.status, 409)
+      const warningBody = await warning.json() as { error: string; denials?: { reason: string }[] }
+      assert.ok(warningBody.denials?.some((item) => item.reason === 'optional-dependents'))
       assert.ok(ctx.tools.get('text_slugify'))
+      recoveryRoot.service.failUninstall = { phase: 'after-unload', diagnostics: 'secret /Users/secret/home/.tars-ng Bearer sk-uninstall-secret-999' }
+      const afterUnload = await fetch(`${url}/api/uninstall`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', ...authHeaders(cookie) },
+        body: JSON.stringify({ ...uninstallBody(warned), confirm: true, acknowledgeDependents: true }),
+      })
+      assert.equal(afterUnload.status, 409)
+      const afterUnloadBody = await afterUnload.json() as { error: string; diagnostics?: string }
+      assert.equal(afterUnloadBody.error, 'uninstall-failed')
+      assert.doesNotMatch(JSON.stringify(afterUnloadBody), /sk-uninstall-secret-999|\/Users\/secret\/home/)
+      assert.ok(ctx.tools.get('text_slugify'))
+      assert.equal(ctx.capabilityRegistry.get('generated/text-slugify', '0.1.0')?.status, 'active')
+      recoveryRoot.service.failUninstall = { phase: 'after-registry', diagnostics: 'registry commit failed' }
+      const afterRegistry = await fetch(`${url}/api/uninstall`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', ...authHeaders(cookie) },
+        body: JSON.stringify({
+          ...uninstallBody((await fetch(`${url}/api/view`).then((res) => res.json()) as { view: MissionControlView }).view.plugins.find((item) => item.owner === 'generated/text-slugify')!),
+          confirm: true,
+          acknowledgeDependents: true,
+        }),
+      })
+      assert.equal(afterRegistry.status, 409)
+      assert.ok(ctx.tools.get('text_slugify'))
+      assert.equal(ctx.capabilityRegistry.get('generated/text-slugify', '0.1.0')?.status, 'active')
+      recoveryRoot.service.failUninstall = { phase: 'after-persist', diagnostics: 'authority persist failed' }
+      const afterPersist = await fetch(`${url}/api/uninstall`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', ...authHeaders(cookie) },
+        body: JSON.stringify({
+          ...uninstallBody((await fetch(`${url}/api/view`).then((res) => res.json()) as { view: MissionControlView }).view.plugins.find((item) => item.owner === 'generated/text-slugify')!),
+          confirm: true,
+          acknowledgeDependents: true,
+        }),
+      })
+      assert.equal(afterPersist.status, 409)
+      assert.ok(ctx.tools.get('text_slugify'))
+      assert.equal(ctx.capabilityRegistry.get('generated/text-slugify', '0.1.0')?.status, 'active')
       recoveryRoot.service.failUninstall = undefined
 
       const latest = await fetch(`${url}/api/view`).then((res) => res.json()) as { view: MissionControlView }
       const target = latest.view.plugins.find((item) => item.owner === 'generated/text-slugify')
       assert.ok(target)
-      const removed = await fetch(`${url}/api/uninstall`, {
+      const acknowledged = await fetch(`${url}/api/uninstall`, {
         method: 'POST',
         headers: { 'content-type': 'application/json', ...authHeaders(cookie) },
-        body: JSON.stringify({
-          id: target.id,
-          owner: target.owner,
-          version: target.version,
-          candidateId: target.candidateId,
-          digest: target.digest,
-          registryGeneration: target.registryGeneration,
-          confirm: true,
-        }),
+        body: JSON.stringify({ ...uninstallBody(target), confirm: true, acknowledgeDependents: true }),
       })
-      assert.equal(removed.status, 200, await removed.clone().text())
-      const after = await removed.json() as { view: MissionControlView }
+      assert.equal(acknowledged.status, 200, await acknowledged.clone().text())
+      const after = await acknowledged.json() as { view: MissionControlView }
       assert.equal(after.view.plugins.some((item) => item.owner === 'generated/text-slugify'), false)
       assert.equal(ctx.tools.get('text_slugify'), undefined)
       assert.equal(ctx.capabilityRegistry.get('generated/text-slugify', '0.1.0')?.status, 'disabled')
+      assert.ok(ctx.tools.get('other_opt'))
       assert.ok(ctx.candidateWorkspace.get(base.id).sealed)
-      const refreshed = await fetch(`${url}/api/view`).then((res) => res.json()) as { view: MissionControlView }
-      assert.equal(refreshed.view.plugins.some((item) => item.owner === 'generated/text-slugify'), false)
       const replay = await fetch(`${url}/api/uninstall`, {
         method: 'POST',
         headers: { 'content-type': 'application/json', ...authHeaders(cookie) },
+        body: JSON.stringify({ ...uninstallBody(target), confirm: true, acknowledgeDependents: true }),
+      })
+      assert.equal(replay.status, 409)
+
+      const optionalPlugin = (await fetch(`${url}/api/view`).then((res) => res.json()) as { view: MissionControlView }).view.plugins.find((item) => item.owner === 'generated/other-opt')
+      assert.ok(optionalPlugin)
+      let release!: () => void
+      recoveryRoot.service.holdUninstall = new Promise<void>((resolve) => {
+        release = resolve
+      })
+      const inFlight = fetch(`${url}/api/uninstall`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', ...authHeaders(cookie) },
+        body: JSON.stringify({ ...uninstallBody(optionalPlugin), confirm: true }),
+      })
+      for (let i = 0; i < 50 && recoveryRoot.inspect().lifecycleBusy !== 'uninstall'; i += 1) {
+        await new Promise((resolve) => setTimeout(resolve, 20))
+      }
+      assert.equal(recoveryRoot.inspect().lifecycleBusy, 'uninstall')
+      const unused = authorGenerated(ctx, 'other.idle')
+      const unusedCard = await approveActivationCard(url, cookie, unused.id)
+      const crossed = await fetch(`${url}/api/activate`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', ...authHeaders(cookie) },
         body: JSON.stringify({
-          id: target.id,
-          owner: target.owner,
-          version: target.version,
-          candidateId: target.candidateId,
-          digest: target.digest,
-          registryGeneration: target.registryGeneration,
+          id: unusedCard.id,
+          candidateId: unusedCard.candidateId,
+          digest: unusedCard.digest,
+          fingerprint: unusedCard.fingerprint,
           confirm: true,
         }),
       })
-      assert.equal(replay.status, 409)
-      assert.equal(ctx.capabilityRegistry.get('generated/other-dep', '0.1.0')?.status, 'disabled')
-      await recoveryRoot.remountCommittedGenerated()
-      assert.equal(ctx.tools.get('text_slugify'), undefined)
+      assert.equal(crossed.status, 409)
+      const crossedBody = await crossed.json() as { error: string }
+      assert.equal(crossedBody.error, 'uninstall-in-flight')
+      release()
+      assert.equal((await inFlight).status, 200)
+      recoveryRoot.service.holdUninstall = undefined
+      assert.equal(ctx.tools.get('other_opt'), undefined)
+      assert.equal(ctx.tools.get('other_idle'), undefined)
     })
+  })
+
+  it('preserves uninstalled generated plugins across a fresh boot of the same home', async () => {
+    const home = mkdtempSync(join(tmpdir(), 'tars-uninstall-boot-'))
+    try {
+      await withServer(() => bootAssistantControl({ home }), 'web-ui-uninstall-boot', async (url, _surface, _agent, ctx) => {
+        const cookie = await cookieHeader(url)
+        const base = authorGenerated(ctx, 'text.slugify')
+        const card = await approveActivationCard(url, cookie, base.id)
+        assert.equal((await fetch(`${url}/api/activate`, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json', ...authHeaders(cookie) },
+          body: JSON.stringify({
+            id: card.id,
+            candidateId: card.candidateId,
+            digest: card.digest,
+            fingerprint: card.fingerprint,
+            confirm: true,
+          }),
+        })).status, 200)
+        const view = await fetch(`${url}/api/view`).then((res) => res.json()) as { view: MissionControlView }
+        const plugin = view.view.plugins.find((item) => item.owner === 'generated/text-slugify')
+        assert.ok(plugin)
+        assert.equal((await fetch(`${url}/api/uninstall`, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json', ...authHeaders(cookie) },
+          body: JSON.stringify({ ...uninstallBody(plugin), confirm: true }),
+        })).status, 200)
+        assert.equal(ctx.tools.get('text_slugify'), undefined)
+      })
+      const second = await bootAssistantControl({ home })
+      try {
+        assert.equal(second.ctx.capabilityRegistry.get('generated/text-slugify', '0.1.0')?.status, 'disabled')
+        assert.equal(second.ctx.tools.get('text_slugify'), undefined)
+        const leftover = second.ctx.candidateWorkspace.list().find((item) => item.owner === 'generated/text-slugify')
+        assert.ok(leftover)
+        assert.equal(leftover.sealed, true)
+        assert.ok(second.ctx.extensionGovernance.inspectApproval(leftover.id))
+      } finally {
+        await second.ctx.fiber.dispose()
+      }
+    } finally {
+      rmSync(home, { recursive: true, force: true })
+    }
   })
 
   it('returns bounded diagnostics for failed, interrupted, duplicate, and stale-eligibility WUI activation', async () => {

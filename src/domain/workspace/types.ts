@@ -254,6 +254,7 @@ export interface WorkspaceSnapshotInput {
     readonly providers?: readonly string[]
     readonly tools?: readonly string[]
     readonly runtimeSeams?: readonly string[]
+    readonly pluginDependencies?: readonly { readonly capability: string; readonly strength: 'hard' | 'optional' }[]
   }[]
   readonly extensionApprovals?: readonly {
     readonly id: string

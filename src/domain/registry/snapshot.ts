@@ -25,6 +25,7 @@ export interface RegistryRecordSnapshot {
   readonly tools: readonly string[]
   readonly services: readonly string[]
   readonly providers: readonly string[]
+  readonly pluginDependencies?: readonly { readonly capability: string; readonly strength: string }[]
 }
 
 const SNAPSHOT_KEYS = new Set([
@@ -41,6 +42,7 @@ const SNAPSHOT_KEYS = new Set([
   'tools',
   'services',
   'providers',
+  'pluginDependencies',
 ])
 
 function asObject(raw: unknown, label: string): Record<string, unknown> {
@@ -54,6 +56,22 @@ function rejectUnknownKeys(raw: Record<string, unknown>, allowed: Set<string>, l
   for (const key of Object.keys(raw)) {
     if (!allowed.has(key)) throw new RegistryContractError(`${label} has unknown field ${key}`)
   }
+}
+
+function parsePluginDependencies(raw: unknown): readonly { capability: string; strength: 'hard' | 'optional' }[] {
+  if (raw === undefined) return []
+  if (!Array.isArray(raw)) throw new RegistryContractError('pluginDependencies must be an array')
+  return raw.map((item, index) => {
+    const dep = asObject(item, `pluginDependencies[${index}]`)
+    rejectUnknownKeys(dep, new Set(['capability', 'strength']), `pluginDependencies[${index}]`)
+    if (typeof dep.capability !== 'string') {
+      throw new RegistryContractError(`pluginDependencies[${index}].capability must be a string`)
+    }
+    if (dep.strength !== 'hard' && dep.strength !== 'optional') {
+      throw new RegistryContractError(`pluginDependencies[${index}].strength must be hard or optional`)
+    }
+    return { capability: dep.capability, strength: dep.strength }
+  })
 }
 
 function asStringArray(raw: unknown, label: string): string[] {
@@ -82,6 +100,7 @@ export function toRegistrySnapshot(record: RegistryRecord): RegistryRecordSnapsh
     tools: [...record.tools],
     services: [...record.services],
     providers: [...record.providers],
+    pluginDependencies: [...(record.pluginDependencies ?? [])],
   }
 }
 
@@ -126,6 +145,7 @@ export function parseRegistryRecord(raw: unknown): RegistryRecord {
     tools: snapshot.tools === undefined ? [] : asStringArray(snapshot.tools, 'tools'),
     services: snapshot.services === undefined ? [] : asStringArray(snapshot.services, 'services'),
     providers: snapshot.providers === undefined ? [] : asStringArray(snapshot.providers, 'providers'),
+    pluginDependencies: parsePluginDependencies(snapshot.pluginDependencies),
   })
   return { ...record, approval: approval as ApprovalState }
 }

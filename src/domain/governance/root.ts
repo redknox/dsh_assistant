@@ -93,8 +93,13 @@ export class RecoveryRoot {
     return this.service.disable(credential, owner, version)
   }
 
-  uninstall(credential: TrustedAuthorityCredential, owner: string, version: string) {
-    return this.service.uninstall(credential, owner, version)
+  uninstall(
+    credential: TrustedAuthorityCredential,
+    owner: string,
+    version: string,
+    options: { readonly acknowledgeDependents?: boolean } = {},
+  ) {
+    return this.service.uninstall(credential, owner, version, options)
   }
 
   migrateAuthoringContract(credential: TrustedAuthorityCredential, candidateId: string) {

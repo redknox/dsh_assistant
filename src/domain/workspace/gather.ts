@@ -61,7 +61,7 @@ export function gatherWorkspaceSnapshot(input: GatherWorkspaceInput): WorkspaceS
         available: availability.available,
         ...(availability.reason ? { reason: availability.reason } : {}),
       })),
-    registry: (ctx.get('capabilityRegistry') as { list(): { owner: string; version: string; provenance: { kind: string }; status: string; capabilities: { id: string }[]; permissions?: readonly string[]; provider?: string; providers?: readonly string[]; tools?: readonly string[]; runtimeSeams?: readonly string[] }[] } | undefined)
+    registry: (ctx.get('capabilityRegistry') as { list(): { owner: string; version: string; provenance: { kind: string }; status: string; capabilities: { id: string }[]; permissions?: readonly string[]; provider?: string; providers?: readonly string[]; tools?: readonly string[]; runtimeSeams?: readonly string[]; pluginDependencies?: readonly { capability: string; strength: 'hard' | 'optional' }[] }[] } | undefined)
       ?.list().map((record) => ({
         owner: record.owner,
         version: record.version,
@@ -73,6 +73,7 @@ export function gatherWorkspaceSnapshot(input: GatherWorkspaceInput): WorkspaceS
         ...(record.providers ? { providers: [...record.providers] } : {}),
         ...(record.tools ? { tools: [...record.tools] } : {}),
         ...(record.runtimeSeams ? { runtimeSeams: [...record.runtimeSeams] } : {}),
+        ...(record.pluginDependencies ? { pluginDependencies: [...record.pluginDependencies] } : {}),
       })) ?? [],
     extensionApprovals: extensionApprovals(ctx),
     activation: {

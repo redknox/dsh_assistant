@@ -2,8 +2,8 @@ import { parseCapabilityId, parseOwnerId, parseVersion } from '../registry/norma
 import type { ExtensionProvenance } from '../registry/types.js'
 import type { ResolutionKind, ResolutionReview } from '../resolution/types.js'
 import { CandidateContractError } from './errors.js'
-import type { CandidateManifest, CandidateManifestInput, OperationalEffects, RemoteSideEffect } from './types.js'
-import { REMOTE_SIDE_EFFECTS } from './types.js'
+import type { CandidateManifest, CandidateManifestInput, OperationalEffects, PluginCapabilityDependency, RemoteSideEffect } from './types.js'
+import { PLUGIN_DEPENDENCY_STRENGTHS, REMOTE_SIDE_EFFECTS } from './types.js'
 
 const CHANGE_KINDS: readonly ResolutionKind[] = [
   'configure',
@@ -85,7 +85,18 @@ export function normalizeManifest(
     })),
     riskModel: input.riskModel,
     runtimeContractVersion: resolveRuntimeContractVersion(provenance.kind, input.runtimeContractVersion),
+    pluginDependencies: normalizePluginDependencies(input.pluginDependencies),
   }
+}
+
+function normalizePluginDependencies(input?: readonly PluginCapabilityDependency[]): readonly PluginCapabilityDependency[] {
+  if (input === undefined) return []
+  return input.map((item, index) => {
+    if (!item || typeof item.capability !== 'string' || !(PLUGIN_DEPENDENCY_STRENGTHS as readonly string[]).includes(item.strength)) {
+      throw new CandidateContractError(`malformed pluginDependencies[${index}]`)
+    }
+    return { capability: parseCapabilityId(item.capability), strength: item.strength }
+  })
 }
 
 function resolveRuntimeContractVersion(provenanceKind: string, requested?: string): string | undefined {

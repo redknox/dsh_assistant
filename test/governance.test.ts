@@ -15,6 +15,8 @@ import {
   InMemoryActivationRuntime,
   RecoveryRoot,
   TrustedAuthorityCredential,
+  UninstallDeniedError,
+  analyzePluginDependents,
 } from '../src/domain/governance/index.js'
 import {
   InMemoryRegistryPersistence,
@@ -75,7 +77,15 @@ async function listCalendar(ctx: Context) {
 
 function ready(
   workspace: CandidateService,
-  input: { owner?: string; version?: string; permissions?: string[]; capabilities?: string[]; review?: IndependentReview; skipReview?: boolean } = {},
+  input: {
+    owner?: string
+    version?: string
+    permissions?: string[]
+    capabilities?: string[]
+    pluginDependencies?: { capability: string; strength: 'hard' | 'optional' }[]
+    review?: IndependentReview
+    skipReview?: boolean
+  } = {},
 ) {
   const candidate = workspace.create({
     review: input.owner?.startsWith('generated/')
@@ -89,6 +99,7 @@ function ready(
       permissions: input.permissions ?? ['local.fake.suite'],
       runtimeSeams: ['integrations.calendar'],
       tools: ['calendar_list_events'],
+      ...(input.pluginDependencies ? { pluginDependencies: input.pluginDependencies } : {}),
     },
   })
   workspace.writeFile(candidate.id, 'src/ok.ts', 'export const value: string = "ok"\n')
@@ -330,6 +341,121 @@ describe('extension governance and recovery', () => {
     assert.equal(runtime.mounted().includes(base.id), false)
     assert.equal(workspace.get(base.id).sealed, true)
     assert.equal(root.inspect().lastKnownGood?.owners.some((item) => item.owner === 'generated/text-slugify'), false)
+  })
+
+  it('I3b. uninstall uses declared pluginDependencies and a shared lifecycle mutex', async () => {
+    const { registry, workspace, governance, root, human, runtime } = seeded()
+    const provider = ready(workspace, {
+      owner: 'generated/text-slugify',
+      version: '0.1.0',
+      capabilities: ['text.slugify'],
+    })
+    const hardDep = ready(workspace, {
+      owner: 'generated/other-dep',
+      version: '0.1.0',
+      capabilities: ['other.dep'],
+      pluginDependencies: [{ capability: 'text.slugify', strength: 'hard' }],
+    })
+    const optionalDep = ready(workspace, {
+      owner: 'generated/other-opt',
+      version: '0.1.0',
+      capabilities: ['other.opt'],
+      pluginDependencies: [{ capability: 'text.slugify', strength: 'optional' }],
+    })
+    for (const item of [provider, hardDep, optionalDep]) {
+      const fingerprint = governance.requestApproval(item.id).fingerprint
+      root.recordApproval(human, { candidateId: item.id, fingerprint, decision: 'approved-for-exact-diff' })
+      await root.activate(item.id, human)
+    }
+    await assert.rejects(() => root.uninstall(human, 'generated/text-slugify', '0.1.0'), (error: unknown) => {
+      assert.ok(error instanceof UninstallDeniedError)
+      assert.ok(error.denials.some((item) => item.reason === 'dependency-blocked'))
+      return true
+    })
+    await root.uninstall(human, 'generated/other-dep', '0.1.0')
+    await assert.rejects(() => root.uninstall(human, 'generated/text-slugify', '0.1.0'), (error: unknown) => {
+      assert.ok(error instanceof UninstallDeniedError)
+      assert.ok(error.denials.some((item) => item.reason === 'optional-dependents'))
+      return true
+    })
+    await root.uninstall(human, 'generated/text-slugify', '0.1.0', { acknowledgeDependents: true })
+    assert.equal(registry.get('generated/text-slugify', '0.1.0')?.status, 'disabled')
+    assert.equal(runtime.mounted().includes(provider.id), false)
+    assert.ok(runtime.mounted().includes(optionalDep.id))
+
+    const inferred = analyzePluginDependents({
+      owner: 'generated/text-slugify',
+      version: '0.1.0',
+      capabilities: ['text.slugify'],
+      registry: [{
+        owner: 'generated/seamy',
+        version: '0.1.0',
+        status: 'active',
+        pluginDependencies: undefined,
+      }],
+    })
+    assert.equal(inferred.severity, 'none')
+  })
+
+  it('I3c. mid-uninstall failure remounts the plugin or enters Safe Mode', async () => {
+    const afterUnload = seeded()
+    const first = ready(afterUnload.workspace, { owner: 'generated/text-slugify', version: '0.1.0', capabilities: ['text.slugify'] })
+    afterUnload.root.recordApproval(afterUnload.human, {
+      candidateId: first.id,
+      fingerprint: afterUnload.governance.requestApproval(first.id).fingerprint,
+      decision: 'approved-for-exact-diff',
+    })
+    await afterUnload.root.activate(first.id, afterUnload.human)
+    afterUnload.governance.failUninstall = { phase: 'after-unload', diagnostics: 'unload boom' }
+    await assert.rejects(() => afterUnload.root.uninstall(afterUnload.human, 'generated/text-slugify', '0.1.0'))
+    assert.equal(afterUnload.registry.get('generated/text-slugify', '0.1.0')?.status, 'active')
+    assert.ok(afterUnload.runtime.mounted().includes(first.id))
+    assert.equal(afterUnload.root.inspect().safeMode, false)
+
+    const restoreFail = seeded()
+    const second = ready(restoreFail.workspace, { owner: 'generated/text-slugify', version: '0.1.0', capabilities: ['text.slugify'] })
+    restoreFail.root.recordApproval(restoreFail.human, {
+      candidateId: second.id,
+      fingerprint: restoreFail.governance.requestApproval(second.id).fingerprint,
+      decision: 'approved-for-exact-diff',
+    })
+    await restoreFail.root.activate(second.id, restoreFail.human)
+    restoreFail.governance.failUninstall = { phase: 'after-registry', diagnostics: 'registry boom' }
+    restoreFail.governance.failUninstallRestore = true
+    await assert.rejects(() => restoreFail.root.uninstall(restoreFail.human, 'generated/text-slugify', '0.1.0'))
+    assert.equal(restoreFail.root.inspect().safeMode, true)
+    assert.equal(restoreFail.root.inspect().state, 'safe-mode')
+  })
+
+  it('I3d. activate and uninstall share one mutation lock', async () => {
+    const { workspace, governance, root, human } = seeded()
+    const active = ready(workspace, { owner: 'generated/text-slugify', version: '0.1.0', capabilities: ['text.slugify'] })
+    const idle = ready(workspace, { owner: 'generated/other-idle', version: '0.1.0', capabilities: ['other.idle'] })
+    for (const item of [active, idle]) {
+      root.recordApproval(human, {
+        candidateId: item.id,
+        fingerprint: governance.requestApproval(item.id).fingerprint,
+        decision: 'approved-for-exact-diff',
+      })
+    }
+    await root.activate(active.id, human)
+    let release!: () => void
+    governance.holdUninstall = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    const pending = root.uninstall(human, 'generated/text-slugify', '0.1.0')
+    for (let i = 0; i < 50 && root.inspect().lifecycleBusy !== 'uninstall'; i += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 10))
+    }
+    assert.equal(root.inspect().lifecycleBusy, 'uninstall')
+    await assert.rejects(() => root.activate(idle.id, human), (error: unknown) => {
+      assert.ok(error instanceof ActivationDeniedError)
+      assert.ok(error.denials.some((item) => item.reason === 'uninstall-in-flight'))
+      return true
+    })
+    release()
+    await pending
+    assert.equal(root.inspect().lifecycleBusy, undefined)
   })
 
   it('J. rejects attempts to rewrite the recovery root', () => {

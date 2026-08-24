@@ -77,6 +77,15 @@ export interface CandidateManifest {
   readonly validationTasks: readonly ValidationTaskRequest[]
   readonly riskModel?: RiskModel
   readonly runtimeContractVersion?: string
+  readonly pluginDependencies?: readonly PluginCapabilityDependency[]
+}
+
+export const PLUGIN_DEPENDENCY_STRENGTHS = ['hard', 'optional'] as const
+export type PluginDependencyStrength = (typeof PLUGIN_DEPENDENCY_STRENGTHS)[number]
+
+export interface PluginCapabilityDependency {
+  readonly capability: string
+  readonly strength: PluginDependencyStrength
 }
 
 export interface CandidateManifestInput {
@@ -93,6 +102,7 @@ export interface CandidateManifestInput {
   readonly validationTasks?: readonly ValidationTaskRequest[]
   readonly riskModel?: RiskModel
   readonly runtimeContractVersion?: string
+  readonly pluginDependencies?: readonly PluginCapabilityDependency[]
 }
 
 export interface CandidateIdentity {

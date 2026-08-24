@@ -145,6 +145,7 @@ export class RegistryService implements CapabilityRegistry {
       tools: [...current.tools],
       services: [...current.services],
       providers: patch.providers ?? [...current.providers],
+      pluginDependencies: [...(current.pluginDependencies ?? [])],
     })
     const next = { ...normalized, approval: current.approval, status: current.status }
     if (next.status === 'active') this.assertNoActiveConflict(next, key)

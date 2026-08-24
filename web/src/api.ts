@@ -70,6 +70,7 @@ export async function uninstallPlugin(plugin: UserPluginView, confirm: boolean):
       version: plugin.version,
       registryGeneration: plugin.registryGeneration,
       confirm,
+      acknowledgeDependents: true,
       ...(plugin.candidateId ? { candidateId: plugin.candidateId } : {}),
       ...(plugin.digest ? { digest: plugin.digest } : {}),
     }),

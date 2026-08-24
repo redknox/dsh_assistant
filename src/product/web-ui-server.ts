@@ -162,10 +162,13 @@ export function startWebUiServer(options: WebUiServerOptions): Promise<WebUiServ
   let activationBusy = false
   let uninstallBusy = false
 
-  const activationInFlight = () => {
-    if (activationBusy) return true
-    const state = options.recoveryRoot.inspect().state
-    return state === 'activating' || state === 'activation-pending'
+  const mutationInFlight = (): 'activation' | 'uninstall' | undefined => {
+    if (uninstallBusy) return 'uninstall'
+    if (activationBusy) return 'activation'
+    const inspected = options.recoveryRoot.inspect()
+    if (inspected.lifecycleBusy !== undefined) return inspected.lifecycleBusy
+    if (inspected.state === 'activating' || inspected.state === 'activation-pending') return 'activation'
+    return undefined
   }
 
   const bindActivation = (body: {
@@ -332,8 +335,8 @@ export function startWebUiServer(options: WebUiServerOptions): Promise<WebUiServ
           sendJson(res, 409, { error: 'confirmation-required' })
           return
         }
-        if (activationInFlight()) {
-          sendJson(res, 409, { error: 'activation-in-flight', view: snapshot(), webUi: url })
+        if (mutationInFlight() !== undefined) {
+          sendJson(res, 409, { error: `${mutationInFlight()}-in-flight`, view: snapshot(), webUi: url })
           return
         }
         const bound = bindActivation(body, snapshot().activations)
@@ -402,13 +405,14 @@ export function startWebUiServer(options: WebUiServerOptions): Promise<WebUiServ
           digest?: unknown
           registryGeneration?: unknown
           confirm?: unknown
+          acknowledgeDependents?: unknown
         }
         if (body.confirm !== true) {
           sendJson(res, 409, { error: 'confirmation-required' })
           return
         }
-        if (uninstallBusy || activationInFlight()) {
-          sendJson(res, 409, { error: 'uninstall-in-flight', view: snapshot(), webUi: url })
+        if (mutationInFlight() !== undefined) {
+          sendJson(res, 409, { error: `${mutationInFlight()}-in-flight`, view: snapshot(), webUi: url })
           return
         }
         const bound = bindUninstall(body, snapshot().plugins)
@@ -419,7 +423,9 @@ export function startWebUiServer(options: WebUiServerOptions): Promise<WebUiServ
         const human = options.recoveryRoot.issueAuthority({ kind: 'human-control', source: 'application-ui' })
         uninstallBusy = true
         try {
-          await options.recoveryRoot.uninstall(human, bound.card.owner, bound.card.version)
+          await options.recoveryRoot.uninstall(human, bound.card.owner, bound.card.version, {
+            acknowledgeDependents: body.acknowledgeDependents === true,
+          })
           sendJson(res, 200, envelope())
           broadcast()
         } catch (error) {

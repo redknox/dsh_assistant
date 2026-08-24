@@ -77,8 +77,11 @@ export class GovernanceService implements ExtensionGovernance, ExtensionActivati
   private pendingCandidateId?: string
   interruptAfter?: ActivationInterrupt
   failActivation?: { phase: ActivationPhase; diagnostics: string }
-  failUninstall?: string
+  failUninstall?: { phase: 'after-unload' | 'after-registry' | 'after-persist'; diagnostics: string }
+  failUninstallRestore = false
   holdActivation?: Promise<void>
+  holdUninstall?: Promise<void>
+  private mutation: 'idle' | 'activation' | 'uninstall' = 'idle'
   private readonly persistHook?: () => void
   private readonly beginAuthorityCommit?: () => void
   private readonly finishAuthorityCommit?: () => void
@@ -212,6 +215,7 @@ export class GovernanceService implements ExtensionGovernance, ExtensionActivati
       safeMode: this.safeMode,
       recoveryRequired: this.isRecoveryRequired(),
       integrityVerified: this.integrityVerified,
+      ...(this.lifecycleBusy() === undefined ? {} : { lifecycleBusy: this.lifecycleBusy() }),
     }
   }
 
@@ -245,9 +249,13 @@ export class GovernanceService implements ExtensionGovernance, ExtensionActivati
 
   async activate(candidateId: string, credential: TrustedAuthorityCredential): Promise<ActivationStatus> {
     this.assertCredential(credential)
+    if (this.mutation !== 'idle') {
+      throw new ActivationDeniedError([{ reason: `${this.mutation}-in-flight`, detail: 'another trusted lifecycle mutation is in progress' }])
+    }
     const gate = this.eligibility(candidateId)
     if (!gate.ok) throw new ActivationDeniedError(gate.denials)
     const { record } = this.facts(candidateId)
+    this.mutation = 'activation'
     this.state = 'activation-pending'
     this.pendingCandidateId = candidateId
     this.phase = 'verify-eligibility'
@@ -311,6 +319,8 @@ export class GovernanceService implements ExtensionGovernance, ExtensionActivati
       this.flush()
       this.finishAuthorityCommit?.()
       return this.status()
+    } finally {
+      if (this.state !== 'activation-pending' && this.state !== 'activating') this.mutation = 'idle'
     }
   }
 
@@ -358,9 +368,17 @@ export class GovernanceService implements ExtensionGovernance, ExtensionActivati
     this.flush()
   }
 
-  async uninstall(credential: TrustedAuthorityCredential, owner: string, version: string): Promise<ActivationStatus> {
+  async uninstall(
+    credential: TrustedAuthorityCredential,
+    owner: string,
+    version: string,
+    options: { readonly acknowledgeDependents?: boolean } = {},
+  ): Promise<ActivationStatus> {
     this.assertCredential(credential)
-    const denials = this.uninstallDenials(owner, version)
+    if (this.lifecycleBusy() !== undefined) {
+      throw new UninstallDeniedError([{ reason: `${this.lifecycleBusy()}-in-flight`, detail: 'another trusted lifecycle mutation is in progress' }])
+    }
+    const denials = this.uninstallDenials(owner, version, options)
     if (denials.length > 0) throw new UninstallDeniedError(denials)
     const record = this.registry.get(owner, version)
     if (record === undefined) throw new UninstallDeniedError([{ reason: 'unknown-plugin', detail: `${owner}@${version}` }])
@@ -368,14 +386,18 @@ export class GovernanceService implements ExtensionGovernance, ExtensionActivati
     if (candidate === undefined) {
       throw new UninstallDeniedError([{ reason: 'unknown-artifact', detail: `${owner}@${version}` }])
     }
+    this.mutation = 'uninstall'
     const prior = this.current
     const priorLkg = this.lastKnownGood
+    if (this.holdUninstall) await this.holdUninstall
     try {
-      if (this.failUninstall) throw new Error(this.failUninstall)
       await this.runtime.unloadGenerated(candidate.id)
+      if (this.failUninstall?.phase === 'after-unload') throw new Error(this.failUninstall.diagnostics)
       this.registry.transitionStatus(owner, version, 'disabled')
+      if (this.failUninstall?.phase === 'after-registry') throw new Error(this.failUninstall.diagnostics)
       this.current = this.captureSnapshot()
       this.lastKnownGood = this.current
+      if (this.failUninstall?.phase === 'after-persist') throw new Error(this.failUninstall.diagnostics)
       this.flush()
       return this.status()
     } catch (error) {
@@ -389,6 +411,7 @@ export class GovernanceService implements ExtensionGovernance, ExtensionActivati
       }
       if (prior !== undefined) {
         try {
+          if (this.failUninstallRestore) throw new Error('uninstall restore failed')
           await this.runtime.restore(prior)
         } catch {
           this.safeMode = true
@@ -399,6 +422,8 @@ export class GovernanceService implements ExtensionGovernance, ExtensionActivati
       this.lastKnownGood = priorLkg
       this.flush()
       throw error
+    } finally {
+      this.mutation = 'idle'
     }
   }
 
@@ -412,22 +437,28 @@ export class GovernanceService implements ExtensionGovernance, ExtensionActivati
         owner: item.owner,
         version: item.version,
         status: item.status,
-        runtimeSeams: item.runtimeSeams,
-        providers: item.providers,
+        pluginDependencies: item.pluginDependencies,
       })),
     })
   }
 
-  private uninstallDenials(owner: string, version: string): { reason: string; detail: string }[] {
+  private lifecycleBusy(): 'activation' | 'uninstall' | undefined {
+    if (this.mutation !== 'idle') return this.mutation
+    if (this.state === 'activating' || this.state === 'activation-pending') return 'activation'
+    return undefined
+  }
+
+  private uninstallDenials(
+    owner: string,
+    version: string,
+    options: { readonly acknowledgeDependents?: boolean } = {},
+  ): { reason: string; detail: string }[] {
     const record = this.registry.get(owner, version)
     if (record === undefined) return [{ reason: 'unknown-plugin', detail: `${owner}@${version}` }]
     if (!isolatedRuntimeOwner(record)) {
       return [{ reason: 'managed-plugin', detail: `${owner}@${version} is not a user plugin` }]
     }
     if (record.status !== 'active') return [{ reason: 'already-uninstalled', detail: `${owner}@${version}` }]
-    if (this.state === 'activating' || this.state === 'activation-pending') {
-      return [{ reason: 'activation-in-flight', detail: 'cannot uninstall while activation is in flight' }]
-    }
     const graph = this.pluginDependents(owner, version)
     if (graph.severity === 'unresolved') {
       return [{ reason: 'dependency-unresolved', detail: 'dependency graph could not be verified' }]
@@ -440,6 +471,10 @@ export class GovernanceService implements ExtensionGovernance, ExtensionActivati
           ? `${first.owner}@${first.version} requires ${first.requiredCapability}`
           : 'active hard dependents remain',
       }]
+    }
+    if (graph.severity === 'optional' && options.acknowledgeDependents !== true) {
+      const named = graph.dependents.filter((item) => item.kind === 'optional').map((item) => `${item.owner}@${item.version}`)
+      return [{ reason: 'optional-dependents', detail: named.join(', ') || 'optional dependents require acknowledgement' }]
     }
     return []
   }
@@ -609,6 +644,7 @@ export class GovernanceService implements ExtensionGovernance, ExtensionActivati
     this.state = 'activation-failed'
     this.pendingCandidateId = undefined
     this.phase = undefined
+    this.mutation = 'idle'
     this.flush()
   }
 
@@ -920,6 +956,7 @@ export class GovernanceService implements ExtensionGovernance, ExtensionActivati
       services: record.manifest.services,
       providers: record.manifest.providers,
       provider: record.manifest.providers[0],
+      pluginDependencies: [...(record.manifest.pluginDependencies ?? [])],
     }
   }
 
@@ -968,6 +1005,7 @@ function manifestInputFrom(record: CandidateRecord, runtimeContractVersion: stri
     validationTasks: record.manifest.validationTasks,
     riskModel: record.manifest.riskModel,
     runtimeContractVersion,
+    pluginDependencies: [...(record.manifest.pluginDependencies ?? [])],
   }
 }
 
