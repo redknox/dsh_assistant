@@ -6,6 +6,7 @@ import { ActivationDeniedError, GovernanceContractError, RollbackDeniedError, Un
 import { SimulatedCrashError } from '../domain/governance/service.js'
 import type { RecoveryRoot } from '../domain/governance/root.js'
 import { acknowledgementOf } from '../domain/workspace/approvals.js'
+import { runIdEquals } from './runtime-lease.js'
 import { boundActivationDiagnostics } from '../domain/workspace/failure.js'
 import { redactText } from '../domain/workspace/redact.js'
 import { AssistantControlSurface } from '../ui/controller.js'
@@ -23,11 +24,21 @@ import {
   type WebUiListenOptions,
 } from './web-ui-protocol.js'
 
+export interface WebUiRuntimeControl {
+  readonly pid: number
+  readonly startedAt: string
+  readonly productVersion: string
+  readonly normalizedHome: string
+  readonly runId: string
+  readonly onStop: () => void
+}
+
 export interface WebUiServerOptions extends WebUiListenOptions {
   readonly surface: AssistantControlSurface
   readonly recoveryRoot: RecoveryRoot
   readonly diagnostics?: unknown
   readonly assetRoot?: string
+  readonly runtimeControl?: WebUiRuntimeControl
 }
 
 export interface WebUiServer {
@@ -331,9 +342,45 @@ export function startWebUiServer(options: WebUiServerOptions): Promise<WebUiServ
   const server: Server = createServer(async (req, res) => {
     try {
       if (rejectOrigin(req, res)) return
-      if (rejectUntrustedMutation(req, res)) return
       const hostHeader = req.headers.host ?? `${listen.host}:${boundPort()}`
       const requestUrl = new URL(req.url ?? '/', `http://${hostHeader}`)
+      if ((req.method === 'GET' || req.method === 'POST') && requestUrl.pathname === '/api/runtime-health') {
+        const control = options.runtimeControl
+        if (!control) {
+          sendJson(res, 404, { error: 'runtime-control-unavailable' })
+          return
+        }
+        if (req.method === 'POST') {
+          const body = JSON.parse(await readBody(req)) as { runId?: unknown }
+          if (typeof body.runId !== 'string' || !runIdEquals(body.runId, control.runId)) {
+            sendJson(res, 403, { error: 'identity-mismatch' })
+            return
+          }
+        }
+        sendJson(res, 200, {
+          pid: control.pid,
+          startedAt: control.startedAt,
+          productVersion: control.productVersion,
+          normalizedHome: control.normalizedHome,
+        })
+        return
+      }
+      if (req.method === 'POST' && requestUrl.pathname === '/api/runtime-stop') {
+        const control = options.runtimeControl
+        if (!control) {
+          sendJson(res, 404, { error: 'runtime-control-unavailable' })
+          return
+        }
+        const body = JSON.parse(await readBody(req)) as { runId?: unknown }
+        if (typeof body.runId !== 'string' || !runIdEquals(body.runId, control.runId)) {
+          sendJson(res, 403, { error: 'identity-mismatch' })
+          return
+        }
+        sendJson(res, 200, { ok: true, pid: control.pid })
+        setImmediate(() => control.onStop())
+        return
+      }
+      if (rejectUntrustedMutation(req, res)) return
       if (req.method === 'GET' && requestUrl.pathname === '/api/session') {
         sendJson(res, 200, { ok: true, webUi: url }, true)
         return
@@ -640,6 +687,7 @@ export function startWebUiServer(options: WebUiServerOptions): Promise<WebUiServ
           for (const client of clients) client.end()
           clients.clear()
           server.close((error) => error ? fail(error) : done())
+          if (typeof server.closeAllConnections === 'function') server.closeAllConnections()
         }),
       })
     })

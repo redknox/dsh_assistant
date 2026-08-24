@@ -16,6 +16,8 @@ Normative contributor rules: [ENGINEERING.md](./ENGINEERING.md). Product boundar
 
 **TARS-NG is the governed construction and product layer, not merely a collection of assistant features.** Its current personal-assistant capabilities are a proving ground. A future professional system should add its domain semantics above TARS-NG and keep authoritative enterprise transactions behind typed, policy-controlled adapters.
 
+A TARS-NG Home is a single-writer authority domain. A PID is liveness metadata, not process identity. Durable authority, LKG, Workbench, memory, and recovery state are never written by competing processes.
+
 ## Layers and dependency direction
 
 Dependencies point **downward only**. Upper layers may call lower layers; lower layers must not depend on UI, channels, or a specific model.

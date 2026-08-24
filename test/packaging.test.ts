@@ -372,7 +372,8 @@ describe('product package and profile', () => {
       assert.match(status, /running: yes/)
       assert.match(status, /web-ui: http:\/\/127\.0\.0\.1:\d+/)
       const stopped = execFileSync(bin, ['stop', '--home', productHome], { encoding: 'utf8', env: uiEnv })
-      assert.match(stopped, /SIGTERM/)
+      assert.match(stopped, /stopped the verified runtime/)
+      assert.doesNotMatch(stopped, /runId/)
     } finally {
       if (existsSync(pidFile) && child.exitCode === null) child.kill('SIGTERM')
       await new Promise<void>((resolve) => {

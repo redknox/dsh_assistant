@@ -1,4 +1,4 @@
-import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { chmodSync, existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { PRODUCT_CONFIG_SCHEMA_VERSION, PRODUCT_STATE_SCHEMA_VERSION } from './constants.js'
@@ -17,6 +17,8 @@ export interface ProductHomeLayout {
   readonly logFile: string
   readonly pidFile: string
   readonly lastStatusFile: string
+  readonly runtimeLockDir: string
+  readonly runtimeIdentityFile: string
 }
 
 export interface ProductUserConfig {
@@ -52,6 +54,22 @@ export function productHomeLayout(root: string): ProductHomeLayout {
     logFile: path.join(resolved, 'logs', 'tars-ng.log'),
     pidFile: path.join(resolved, 'state', 'tars-ng.pid'),
     lastStatusFile: path.join(resolved, 'state', 'last-status.json'),
+    runtimeLockDir: path.join(resolved, 'state', 'runtime.lock'),
+    runtimeIdentityFile: path.join(resolved, 'state', 'runtime.lock', 'identity.json'),
+  }
+}
+
+export function isSafeRuntimePid(pid: unknown): pid is number {
+  return typeof pid === 'number' && Number.isInteger(pid) && pid > 0
+}
+
+export function processAlive(pid: number): boolean {
+  if (!isSafeRuntimePid(pid)) return false
+  try {
+    process.kill(pid, 0)
+    return true
+  } catch {
+    return false
   }
 }
 
@@ -63,8 +81,8 @@ export function xdgConfigEnvPath(): string {
 
 /** Create the product home with owner-only permissions. Does not delete existing state. */
 export function ensureProductHome(root: string): ProductHomeLayout {
-  const layout = productHomeLayout(root)
-  for (const dir of [layout.root, layout.config, layout.data, layout.state, layout.logs, layout.backups, layout.generated]) {
+  const initial = productHomeLayout(root)
+  for (const dir of [initial.root, initial.config, initial.data, initial.state, initial.logs, initial.backups, initial.generated]) {
     mkdirSync(dir, { recursive: true, mode: 0o700 })
     try {
       chmodSync(dir, 0o700)
@@ -72,7 +90,13 @@ export function ensureProductHome(root: string): ProductHomeLayout {
       // chmod may fail on some filesystems; directory still exists.
     }
   }
-  return layout
+  let normalized = initial.root
+  try {
+    normalized = realpathSync(initial.root)
+  } catch {
+    normalized = path.resolve(initial.root)
+  }
+  return productHomeLayout(normalized)
 }
 
 export function readProductUserConfig(layout: ProductHomeLayout): { config: ProductUserConfig; warning?: string } {
