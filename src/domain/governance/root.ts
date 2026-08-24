@@ -36,6 +36,7 @@ export class RecoveryRoot {
       durableHome?: string
       independentReview?: IndependentReview
       validation?: import('../candidate/types.js').CandidateValidation
+      onActivationDiagnostic?: (line: string) => void
     } = {},
   ) {
     this.independentReview = options.independentReview ?? new ReviewService(undefined, (id) => workspace.get(id), { hostLineage: true })

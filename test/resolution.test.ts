@@ -46,18 +46,19 @@ describe('capability resolution review', () => {
     assert.match(review.rationale, /already exposes/)
   })
 
-  it('B. evolves the existing calendar owner instead of a new plugin', () => {
+  it('B. does not evolve an irreplaceable host calendar owner', () => {
     const { resolver } = seededResolver()
     const review = resolver.review({
       capability: 'calendar.freebusy',
       need: 'richer attendee and free-busy filtering',
       behavior: 'attendee-freebusy',
     })
-    assert.equal(review.kind, 'evolve-owner')
+    assert.equal(review.kind, 'host-product-change-required')
     assert.equal(review.target?.owner, 'managed/integrations')
     assert.equal(review.target?.version, '0.1.0')
     rejected(review, 'reuse')
     rejected(review, 'configure')
+    rejected(review, 'evolve-owner')
     assert.equal(review.steps.some((item) => item.option === 'new-plugin'), false)
   })
 
@@ -229,6 +230,38 @@ describe('capability resolution review', () => {
     })
     assert.equal(review.kind, 'new-plugin')
     rejected(review, 'implement-provider')
+  })
+
+  it('does not recommend isolated evolve of host-owned service owners', () => {
+    const { resolver } = seededResolver()
+    const cases = [
+      ['ui.markdown', 'managed/ui-control-surface'],
+      ['memory.export', 'managed/personal-memory'],
+      ['jobs.schedule', 'managed/assistant-jobs'],
+      ['policy.audit', 'managed/trust-policy'],
+      ['calendar.freebusy', 'managed/integrations'],
+    ] as const
+    for (const [capability, owner] of cases) {
+      const review = resolver.review({
+        capability,
+        need: 'extend host-owned composition',
+        behavior: 'new-behavior',
+      })
+      assert.equal(review.kind, 'host-product-change-required', capability)
+      assert.equal(review.target?.owner, owner, capability)
+      rejected(review, 'evolve-owner')
+    }
+  })
+
+  it('still plans an independent generated tool as new-plugin', () => {
+    const { resolver } = seededResolver()
+    const review = resolver.review({
+      capability: 'text.slugify',
+      need: 'turn titles into URL slugs',
+      inventory: { complete: true, seams: CORE_KNOWN_SEAMS },
+    })
+    assert.equal(review.kind, 'new-plugin')
+    rejected(review, 'evolve-owner')
   })
 
   it('does not mutate registry state', () => {

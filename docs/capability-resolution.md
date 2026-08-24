@@ -32,10 +32,11 @@ Evaluate in this order. Stop at the first option that satisfies the need. Record
 
 1. **reuse** — an active owner already exposes the requested capability/behavior.
 2. **configure** — a supplied permission or configuration option on that owner would satisfy the need.
-3. **evolve-owner** — an active owner already covers the domain; produce a new candidate version instead of a helper/v2 plugin.
+3. **evolve-owner** — an active **replaceable** owner already covers the domain; produce a new candidate version instead of a helper/v2 plugin. Host-owned in-process owners that declare services/providers are not replaceable by isolated assistant-origin candidates.
 4. **adopt-existing** — an inactive candidate or a caller-supplied existing plugin already describes the capability.
 5. **implement-provider** — implement an adapter/provider behind an existing application/DSH seam.
-6. **new-plugin** — only when a caller-supplied **complete** inventory shows no owner, seam, or adoptable provider/plugin.
+6. **host-product-change-required** — the need is WUI/frontend composition (`ui.*`) or a new capability on an irreplaceable host owner. Do not mint an isolated tool.
+7. **new-plugin** — only when a caller-supplied **complete** inventory shows no owner, seam, or adoptable provider/plugin, and the need is a genuine independent generated capability.
 
 A `new-plugin` result must include rejected evidence for options 1–5. The resolver must not jump from “capability not active” to “create plugin.”
 
@@ -45,11 +46,11 @@ If the capability is unknown and the architecture inventory is incomplete, the r
 
 ## Ownership-aware defaults
 
-If a domain already has an active owner, the default is reuse, configure, or evolve that owner.
+If a domain already has an active **replaceable** owner, the default is reuse, configure, or evolve that owner.
 
 Examples:
 
-- richer calendar filtering while `managed/integrations` owns `calendar.read` → `evolve-owner`
+- richer calendar filtering while `managed/integrations` owns `calendar.read` → `host-product-change-required` (irreplaceable host owner)
 - a known permission on that owner would unlock the behavior → `configure`
 - replace the fake calendar provider with Google while keeping `integrations.calendar` → `implement-provider`, not a new calendar domain
 - Matter home control with a complete inventory and no owner/seam/provider → `new-plugin`

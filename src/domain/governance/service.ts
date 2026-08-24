@@ -2,11 +2,13 @@ import { createHash } from 'node:crypto'
 import { existsSync } from 'node:fs'
 import { contractDigestExtras, digestFiles } from '../candidate/digest.js'
 import { listSourceFiles } from '../candidate/files.js'
+import { evaluateActivationCompatibility } from '../activation-compatibility/index.js'
 import { isolatedRuntimeOwner, requiresIsolatedGeneratedRuntime } from '../generated-runtime/trust.js'
 import type { CapabilityRegistry, RegistryRegisterInput } from '../registry/types.js'
 import { REVIEW_POLICY_VERSION, type IndependentReview } from '../review/index.js'
 import type { CandidateManifestInput, CandidateRecord, CandidateValidation, CandidateWorkspace } from '../candidate/types.js'
 import { AUTHORING_CONTRACT_STAMP, GENERATED_EXTENSION_API_V1 } from '../workbench/authoring-contract.js'
+import { boundActivationDiagnostics } from '../workspace/failure.js'
 import { analyzePluginDependents } from './dependents.js'
 import { ActivationDeniedError, GovernanceAuthorityError, GovernanceContractError, RollbackDeniedError, UninstallDeniedError } from './errors.js'
 import { approvalSummary, fingerprintFromCandidate } from './fingerprint.js'
@@ -94,6 +96,7 @@ export class GovernanceService implements ExtensionGovernance, ExtensionActivati
   private readonly finishAuthorityCommit?: () => void
   private readonly independentReview?: IndependentReview
   private readonly validation?: CandidateValidation
+  private readonly onActivationDiagnostic?: (line: string) => void
 
   constructor(
     private readonly registry: CapabilityRegistry,
@@ -107,6 +110,7 @@ export class GovernanceService implements ExtensionGovernance, ExtensionActivati
       finishAuthorityCommit?: () => void
       independentReview?: IndependentReview
       validation?: CandidateValidation
+      onActivationDiagnostic?: (line: string) => void
     } = {},
   ) {
     this.persistHook = options.persist
@@ -114,6 +118,7 @@ export class GovernanceService implements ExtensionGovernance, ExtensionActivati
     this.finishAuthorityCommit = options.finishAuthorityCommit
     this.independentReview = options.independentReview
     this.validation = options.validation
+    this.onActivationDiagnostic = options.onActivationDiagnostic
     if (options.hydrate && (options.hydrate.generation > 0 || options.hydrate.current !== undefined)) {
       this.applyHydrate(options.hydrate)
     } else {
@@ -259,7 +264,12 @@ export class GovernanceService implements ExtensionGovernance, ExtensionActivati
     this.assertCredential(credential)
     this.assertMutationIdle('activation')
     const gate = this.eligibility(candidateId)
-    if (!gate.ok) throw new ActivationDeniedError(gate.denials)
+    if (!gate.ok) {
+      this.emitActivationDiagnostic(
+        `activation-denied candidate=${candidateId} ${gate.denials.map((item) => item.reason).join(',')}`,
+      )
+      throw new ActivationDeniedError(gate.denials)
+    }
     const { record } = this.facts(candidateId)
     this.mutation = 'activation'
     this.state = 'activation-pending'
@@ -310,7 +320,7 @@ export class GovernanceService implements ExtensionGovernance, ExtensionActivati
       this.current = this.captureSnapshot()
       this.lastKnownGood = previousGood
       this.state = 'activation-failed'
-      this.lastFailure = {
+      this.recordLastFailure({
         candidateId,
         version: record.version,
         digest: record.digest ?? '',
@@ -320,7 +330,7 @@ export class GovernanceService implements ExtensionGovernance, ExtensionActivati
         rollbackSucceeded: restored,
         restoredLkgGeneration: previousGood.generation,
         safeModeRequired: !restored,
-      }
+      })
       if (!restored) this.safeMode = true
       this.flush()
       this.finishAuthorityCommit?.()
@@ -933,6 +943,41 @@ export class GovernanceService implements ExtensionGovernance, ExtensionActivati
     this.persistHook?.()
   }
 
+  private compatibilityDenials(record: CandidateRecord): EligibilityDenial[] {
+    const active = this.registry.list({ owner: record.owner, status: 'active' })[0]
+    return [...evaluateActivationCompatibility({
+      owner: record.owner,
+      provenanceKind: record.provenance.kind,
+      origin: record.provenance.origin,
+      resolutionKind: record.manifest.resolutionKind,
+      resolutionCapability: record.manifest.resolutionCapability,
+      capabilities: record.manifest.capabilities,
+      services: record.manifest.services,
+      providers: record.manifest.providers,
+      runtimeContractVersion: record.manifest.runtimeContractVersion,
+      activeOwner: active === undefined
+        ? undefined
+        : {
+          owner: active.owner,
+          provenanceKind: active.provenance.kind,
+          origin: active.provenance.origin,
+          services: active.services,
+          providers: active.providers,
+        },
+    }).denials]
+  }
+
+  private recordLastFailure(failure: ActivationFailure): void {
+    this.lastFailure = failure
+    this.emitActivationDiagnostic(
+      `activation-failed candidate=${failure.candidateId} phase=${failure.phase} ${failure.diagnostics}`,
+    )
+  }
+
+  private emitActivationDiagnostic(line: string): void {
+    this.onActivationDiagnostic?.(boundActivationDiagnostics(line))
+  }
+
   private async maybeInterrupt(point: ActivationInterrupt): Promise<void> {
     if (this.interruptAfter === point) throw new SimulatedCrashError(point)
   }
@@ -993,6 +1038,7 @@ export class GovernanceService implements ExtensionGovernance, ExtensionActivati
       }
     }
     denials.push(...this.reviewDenials(record))
+    denials.push(...this.compatibilityDenials(record))
     return denials
   }
 
@@ -1073,7 +1119,7 @@ export class GovernanceService implements ExtensionGovernance, ExtensionActivati
     }
     const target = this.rollbackTarget ?? this.lastKnownGood
     this.state = 'activation-failed'
-    this.lastFailure = {
+    this.recordLastFailure({
       candidateId: failure.candidateId,
       version: record?.version ?? '',
       digest: record?.digest ?? '',
@@ -1083,7 +1129,7 @@ export class GovernanceService implements ExtensionGovernance, ExtensionActivati
       rollbackSucceeded: false,
       restoredLkgGeneration: target?.generation,
       safeModeRequired: target === undefined,
-    }
+    })
     if (target === undefined) {
       this.current = this.captureSnapshot()
       this.integrityVerified = false
@@ -1096,13 +1142,17 @@ export class GovernanceService implements ExtensionGovernance, ExtensionActivati
     this.current = this.captureSnapshot()
     if (restored) await this.remountCommittedGenerated()
     const recovered = restored && !this.safeMode
-    this.lastFailure = {
-      ...this.lastFailure,
+    this.recordLastFailure({
+      candidateId: this.lastFailure?.candidateId ?? failure.candidateId,
+      version: this.lastFailure?.version ?? record?.version ?? '',
+      digest: this.lastFailure?.digest ?? record?.digest ?? '',
+      phase: this.lastFailure?.phase ?? 'health',
+      diagnostics: this.lastFailure?.diagnostics ?? failure.diagnostics,
       rollbackAttempted: true,
       rollbackSucceeded: recovered,
       restoredLkgGeneration: target.generation,
       safeModeRequired: !recovered,
-    }
+    })
     this.state = recovered ? 'rolled-back' : 'activation-failed'
     this.integrityVerified = recovered && this.verifyRestoredIntegrity(target)
     if (!recovered) this.safeMode = true

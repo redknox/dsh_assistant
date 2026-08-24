@@ -5,7 +5,9 @@ import { contractDigestExtras, digestFiles } from './digest.js'
 import { listSourceFiles } from './files.js'
 import { detectOsNetworkSandbox } from './os-sandbox.js'
 import { runRestrictedCandidateTests, runnerUnavailable } from './restricted-runner.js'
+import { evaluateActivationCompatibility } from '../activation-compatibility/index.js'
 import { evaluateReliability, reliabilitySummary } from '../reliability/index.js'
+import type { OwnerExecutionFacts } from '../activation-compatibility/index.js'
 import type { CandidateRecord, ValidationReport, ValidationStageResult, ValidationStageStatus } from './types.js'
 import { ALLOWED_VALIDATION_TASKS } from './types.js'
 
@@ -70,6 +72,33 @@ function inspectPackage(root: string, generatedV1: boolean): ValidationStageResu
     'passed',
     `Inspected ${Object.keys(deps).length} declared dependencies; no install lifecycle scripts.`,
     { diagnostics },
+  )
+}
+
+function inspectActivationCompatibility(
+  record: CandidateRecord,
+  activeOwner?: OwnerExecutionFacts,
+): ValidationStageResult {
+  const result = evaluateActivationCompatibility({
+    owner: record.owner,
+    provenanceKind: record.provenance.kind,
+    origin: record.provenance.origin,
+    resolutionKind: record.manifest.resolutionKind,
+    resolutionCapability: record.manifest.resolutionCapability,
+    capabilities: record.manifest.capabilities,
+    services: record.manifest.services,
+    providers: record.manifest.providers,
+    runtimeContractVersion: record.manifest.runtimeContractVersion,
+    activeOwner,
+  })
+  if (result.ok) {
+    return stage('activation.compatibility', 'passed', 'Candidate is structurally eligible for its execution contract.')
+  }
+  return stage(
+    'activation.compatibility',
+    'failed',
+    result.denials.map((item) => item.reason).join('; '),
+    { diagnostics: result.denials.map((item) => `${item.reason}: ${item.detail}`).join('; ') },
   )
 }
 
@@ -197,7 +226,7 @@ function requestedUnsafe(record: CandidateRecord): string[] {
   return blocked
 }
 
-export function runValidation(record: CandidateRecord): ValidationReport {
+export function runValidation(record: CandidateRecord, activeOwner?: OwnerExecutionFacts): ValidationReport {
   const files = listSourceFiles(record.workspaceRoot)
   const blocked = requestedUnsafe(record)
   const stages: ValidationStageResult[] = []
@@ -222,6 +251,7 @@ export function runValidation(record: CandidateRecord): ValidationReport {
     record.manifest.runtimeContractVersion === 'generated-extension-api/v1',
   ))
   stages.push(inspectRuntimeContract(record))
+  stages.push(inspectActivationCompatibility(record, activeOwner))
   stages.push(inspectBoundary(record.workspaceRoot, files))
   stages.push(runTypecheck(record.workspaceRoot, files))
   stages.push(runTests(record.workspaceRoot, files))

@@ -47,7 +47,7 @@ export class ReviewService implements IndependentReview {
       return this.finish(pkg, [lineageUnavailableFinding(pkg.candidate.digest)], false)
     }
     const policy = { version: pkg.policyVersion, riskClass: pkg.riskClass }
-    const prechecks = deterministicPrechecks(pkg)
+    const prechecks = deterministicPrechecks(pkg, this.compatibilityFacts(pkg))
     const semantic = this.semantic.semanticReview(pkg, policy)
     const current = bindResolutionToDigest(dedupe([...prechecks, ...semantic]), pkg)
     const parent = resolveHostParent(pkg, {
@@ -82,6 +82,22 @@ export class ReviewService implements IndependentReview {
 
   lastReport(candidateId: string): ReviewReport | undefined {
     return this.byCandidate.get(candidateId)
+  }
+
+  private compatibilityFacts(pkg: ReviewPackage) {
+    if (!this.loadCandidate) return undefined
+    try {
+      const record = this.loadCandidate(pkg.candidate.id)
+      return {
+        origin: record.provenance.origin,
+        provenanceKind: record.provenance.kind,
+        services: record.manifest.services,
+        providers: record.manifest.providers,
+        capabilities: record.manifest.capabilities,
+      }
+    } catch {
+      return undefined
+    }
   }
 
   private finish(pkg: ReviewPackage, findings: readonly ReviewFinding[], persist: boolean): ReviewReport {

@@ -1,5 +1,6 @@
 import { isEligible, type CapabilityDiscovery } from '../discovery/index.js'
 import type { DiscoveryFacts } from '../discovery/types.js'
+import { isHostOwnedIrreplaceable, isHostProductChangeNeed } from '../activation-compatibility/index.js'
 import { parseCapabilityId } from '../registry/normalize.js'
 import type { RegistryRecord } from '../registry/types.js'
 import type {
@@ -116,6 +117,16 @@ export class ResolutionService implements CapabilityResolution {
     const domainOwner = exactOwner ?? records.find((record) => (
       record.status === 'active' && record.capabilities.some((item) => domainOf(item.id) === domain)
     ))
+    const domainOwnerFacts = domainOwner === undefined
+      ? undefined
+      : {
+        owner: domainOwner.owner,
+        provenanceKind: domainOwner.provenance.kind,
+        origin: domainOwner.provenance.origin,
+        services: domainOwner.services,
+        providers: domainOwner.providers,
+      }
+    const hostOwnedIrreplaceable = domainOwnerFacts !== undefined && isHostOwnedIrreplaceable(domainOwnerFacts)
     const explicitProviderSwap = exactOwner === undefined
       ? undefined
       : wantsProviderSwap(request.knownProviders, exactOwner, capability)
@@ -177,10 +188,12 @@ export class ResolutionService implements CapabilityResolution {
       }, `Change configuration/permissions on ${configure.owner}.`, 'The existing owner can satisfy the need if a known permission or config is enabled.', discoveryFacts)
     }
 
-    const evolveAccepted = domainOwner !== undefined && providerSwap === undefined
+    const evolveAccepted = domainOwner !== undefined && providerSwap === undefined && !hostOwnedIrreplaceable
     steps.push(this.step('evolve-owner', evolveAccepted, evolveAccepted
       ? `${domainOwner!.owner}@${domainOwner!.version} owns the ${domain} domain; evolve it instead of minting a parallel plugin.`
-      : 'No active owner in this capability domain.'))
+      : hostOwnedIrreplaceable && domainOwner !== undefined
+        ? `${domainOwner.owner} is a host-owned in-process owner; isolated assistant-origin candidates cannot replace it.`
+        : 'No active owner in this capability domain.'))
     if (evolveAccepted && domainOwner) {
       return this.recommend(request, capability, 'evolve-owner', steps, exact, domainOwners, conflicts, {
         owner: domainOwner.owner,
@@ -216,6 +229,26 @@ export class ResolutionService implements CapabilityResolution {
         seam: provider.seam,
         provider: provider.provider,
       }, `Implement provider ${provider.provider} on ${provider.seam}.`, 'The application already has a public seam. Prefer a provider/adapter over a parallel capability domain or duplicate tool.', discoveryFacts)
+    }
+
+    if (isHostProductChangeNeed(capability, domainOwnerFacts)) {
+      return this.finish(request, capability, 'host-product-change-required', {
+        discoveryFacts,
+        registryFacts: { exact, domainOwners, conflicts },
+        steps,
+        target: domainOwner === undefined
+          ? undefined
+          : { owner: domainOwner.owner, version: domainOwner.version, seam: domainOwner.runtimeSeams[0] },
+        recommendation: 'Make a trusted host product change; do not generate an isolated tool or evolve this owner.',
+        rationale: 'This need is host-owned composition or an irreplaceable in-process owner. An isolated generated candidate cannot satisfy it without Registry/runtime divergence.',
+        implications: [
+          ...this.discoveryImplications(discoveryFacts),
+          'This is a proposal only. It does not approve, install, or mount anything.',
+          'Ship the change as reviewed product code, or through a later host-owned frontend-extension seam.',
+        ],
+        assumptions: [],
+        unresolved: [],
+      })
     }
 
     const discoveryStatus = discovered?.status

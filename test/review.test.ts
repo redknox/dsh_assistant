@@ -236,17 +236,16 @@ describe('independent review', () => {
     try {
       const created = ctx.candidateWorkspace.create({
         review: resolution({
-          kind: 'evolve-owner',
-          capability: 'calendar.read',
+          kind: 'new-plugin',
+          capability: 'r0.review.probe',
           need: 'filter',
-          target: { owner: 'managed/integrations', version: '0.1.0' },
+          target: undefined,
         }),
-        owner: 'managed/integrations',
-        version: '0.2.0',
-        baseVersion: '0.1.0',
+        owner: 'generated/review-probe',
+        version: '0.1.0',
         manifest: {
-          capabilities: ['calendar.read', 'calendar.freebusy'],
-          permissions: ['local.fake.suite'],
+          capabilities: ['r0.review.probe'],
+          permissions: [],
         },
       })
       ctx.candidateWorkspace.writeFile(created.id, 'src/ok.ts', 'export const value: string = "ok"\n')

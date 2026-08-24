@@ -88,17 +88,17 @@ function ready(
   } = {},
 ) {
   const candidate = workspace.create({
-    review: input.owner?.startsWith('generated/')
-      ? review({ kind: 'new-plugin', capability: 'matter.light.set', need: 'matter', target: undefined })
-      : review(),
-    owner: input.owner ?? 'managed/integrations',
-    version: input.version ?? '0.2.0',
-    baseVersion: input.owner?.startsWith('generated/') ? undefined : '0.1.0',
+    review: input.owner?.startsWith('managed/')
+      ? review()
+      : review({ kind: 'new-plugin', capability: 'matter.light.set', need: 'matter', target: undefined }),
+    owner: input.owner ?? 'generated/matter-home',
+    version: input.version ?? '0.1.0',
+    baseVersion: input.owner?.startsWith('managed/') ? '0.1.0' : undefined,
     manifest: {
-      capabilities: input.capabilities ?? ['calendar.read', 'calendar.freebusy'],
-      permissions: input.permissions ?? ['local.fake.suite'],
-      runtimeSeams: ['integrations.calendar'],
-      tools: ['calendar_list_events'],
+      capabilities: input.capabilities ?? ['matter.light.set'],
+      permissions: input.permissions ?? [],
+      runtimeSeams: [],
+      tools: [],
       ...(input.pluginDependencies ? { pluginDependencies: input.pluginDependencies } : {}),
     },
   })
@@ -191,14 +191,14 @@ describe('extension governance and recovery', () => {
     assert.ok(before.lastKnownGood?.owners.some((item) => item.owner === 'managed/integrations' && item.version === '0.1.0'))
     const after = await root.activate(candidate.id, human)
     assert.equal(after.state, 'active')
-    assert.equal(registry.get('managed/integrations', '0.1.0')?.status, 'disabled')
-    assert.equal(registry.get('managed/integrations', '0.2.0')?.status, 'active')
-    assert.equal(registry.resolveActiveOwner('calendar.read').kind, 'owner')
-    const owner = registry.resolveActiveOwner('calendar.read')
+    assert.equal(registry.get('managed/integrations', '0.1.0')?.status, 'active')
+    assert.equal(registry.get('generated/matter-home', '0.1.0')?.status, 'active')
+    assert.equal(registry.resolveActiveOwner('matter.light.set').kind, 'owner')
+    const owner = registry.resolveActiveOwner('matter.light.set')
     assert.equal(owner.kind, 'owner')
-    if (owner.kind === 'owner') assert.equal(owner.record.version, '0.2.0')
-    assert.ok(after.lastKnownGood?.owners.some((item) => item.version === '0.2.0'))
-    assert.ok(after.rollbackTarget?.owners.some((item) => item.version === '0.1.0'))
+    if (owner.kind === 'owner') assert.equal(owner.record.version, '0.1.0')
+    assert.ok(after.lastKnownGood?.owners.some((item) => item.owner === 'generated/matter-home' && item.version === '0.1.0'))
+    assert.ok(after.rollbackTarget?.owners.some((item) => item.owner === 'managed/integrations' && item.version === '0.1.0'))
     assert.notEqual(after.current?.generation, after.rollbackTarget?.generation)
   })
 
@@ -214,8 +214,8 @@ describe('extension governance and recovery', () => {
     assert.equal(status.lastFailure?.phase, 'health')
     assert.equal(status.lastFailure?.rollbackSucceeded, true)
     assert.equal(registry.get('managed/integrations', '0.1.0')?.status, 'active')
-    assert.equal(registry.get('managed/integrations', '0.2.0'), undefined)
-    assert.ok(status.lastKnownGood?.owners.some((item) => item.version === '0.1.0'))
+    assert.equal(registry.get('generated/matter-home', '0.1.0'), undefined)
+    assert.ok(status.lastKnownGood?.owners.some((item) => item.owner === 'managed/integrations'))
   })
 
   it('H. restores the previous LKG after a committed activation', async () => {
@@ -227,7 +227,7 @@ describe('extension governance and recovery', () => {
     const restored = await root.rollback(human)
     assert.equal(restored.state, 'rolled-back')
     assert.equal(registry.get('managed/integrations', '0.1.0')?.status, 'active')
-    assert.equal(registry.get('managed/integrations', '0.2.0')?.status, 'disabled')
+    assert.equal(registry.get('generated/matter-home', '0.1.0')?.status, 'disabled')
     assert.equal(registry.conflicts().length, 0)
   })
 
@@ -613,7 +613,7 @@ describe('extension governance and recovery', () => {
     root.recordApproval(human, { candidateId: candidate.id, fingerprint, decision: 'approved-for-exact-diff' })
     await root.activate(candidate.id, human)
     assert.equal(registry.get('managed/integrations', '0.1.0')?.status, 'active')
-    assert.equal(registry.list({ owner: 'managed/integrations', status: 'active' }).length, 1)
+    assert.equal(registry.get('generated/matter-home', '0.1.0'), undefined)
     assert.equal(registry.conflicts().length, 0)
   })
 
@@ -624,7 +624,7 @@ describe('extension governance and recovery', () => {
     const fingerprint = governance.requestApproval(candidate.id).fingerprint
     governance.recordApproval(human, { candidateId: candidate.id, fingerprint, decision: 'approved-for-exact-diff' })
     assert.deepEqual(registry.get('managed/integrations', '0.1.0'), before)
-    assert.equal(registry.get('managed/integrations', '0.2.0'), undefined)
+    assert.equal(registry.get('generated/matter-home', '0.1.0'), undefined)
     assert.equal(governance.status().state, 'idle')
   })
 })

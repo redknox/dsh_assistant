@@ -15,6 +15,10 @@ import { resolveAssistantHome } from '../domain/self-extension/home.js'
 import { reconstructCommittedExtensions } from '../domain/self-extension/reconstruct.js'
 import * as assistantProduct from '../product/bundle.js'
 import { DEFAULT_LLM_CREDENTIAL, DEFAULT_LLM_MODEL, DEFAULT_LLM_PROVIDER } from '../product/constants.js'
+import { productHomeLayout } from '../product/home.js'
+import { appendProductLog } from '../product/log.js'
+import { mkdirSync } from 'node:fs'
+import path from 'node:path'
 import type { MemoryPluginConfig } from '../plugins/memory-plugin.js'
 
 /**
@@ -93,6 +97,13 @@ async function bootStack(options: BootOptions = {}): Promise<AssistantControl> {
       beginAuthorityCommit: durable === undefined ? undefined : () => durable.authority.beginDeferredWrites(),
       finishAuthorityCommit: durable === undefined ? undefined : () => durable.authority.endDeferredWrites(),
       durableHome: durable === undefined ? undefined : resolveAssistantHome(options.home),
+      onActivationDiagnostic: durable === undefined
+        ? undefined
+        : (line) => {
+          const layout = productHomeLayout(path.dirname(durable.home.root))
+          mkdirSync(layout.logs, { recursive: true })
+          appendProductLog(layout.logFile, line)
+        },
       attachRecoveryRoot: (root) => {
         holder.root = root
         recoveryRoot = root

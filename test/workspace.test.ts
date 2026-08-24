@@ -866,23 +866,21 @@ describe('TARS-NG mission-control workspace', () => {
     const handle = await createAssistantAgent(ctx, 'ws-secret-approval')
     try {
       const review: ResolutionReview = {
-        kind: 'evolve-owner',
+        kind: 'new-plugin',
         capability: 'calendar.read',
         need: 'Google Calendar read with declared oauth scope',
-        recommendation: 'evolve managed/integrations',
-        rationale: 'owned',
+        recommendation: 'new plugin',
+        rationale: 'independent generated owner',
         implications: [],
         assumptions: [],
         unresolved: [],
         steps: [],
         registryFacts: { exact: { kind: 'unknown', capability: 'calendar.read' }, domainOwners: [], conflicts: [] },
-        target: { owner: 'managed/integrations', version: '0.1.0' },
       }
       const created = ctx.candidateWorkspace.create({
         review,
-        owner: 'managed/integrations',
-        version: '0.2.0',
-        baseVersion: '0.1.0',
+        owner: 'generated/calendar-secret-probe',
+        version: '0.1.0',
         manifest: {
           capabilities: ['calendar.read', 'calendar.freebusy'],
           permissions: ['local.fake.suite'],
