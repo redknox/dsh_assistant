@@ -1,6 +1,6 @@
 # Self-Extension operator runbook (v0.2.0)
 
-Trusted control lives on `RecoveryRoot` / `npm run self-extension`, and on the local Mission-Control Web UI for exact-diff **approve** plus a separate **activate** confirmation. The model may inspect and request approval only.
+Trusted control lives on `RecoveryRoot` / `npm run self-extension`, and on the local Mission-Control Web UI for exact-diff **approve** plus a separate **activate** confirmation. The model may inspect and request approval only. A control-plane decision is not a human conversation message.
 
 Set `TARS_NG_HOME` (preferred) or `DSH_ASSISTANT_HOME`, or pass `bootAssistantControl({ home })`. Product CLI: `tars-ng self-extension <command>`.
 

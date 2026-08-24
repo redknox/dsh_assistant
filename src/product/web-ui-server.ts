@@ -188,6 +188,9 @@ export function startWebUiServer(options: WebUiServerOptions): Promise<WebUiServ
         return { error: 'stale-candidate' as const }
       }
     }
+    if (card.status !== 'pending' && card.status !== 'approval-requested' && card.status !== 'unreviewed') {
+      return { error: 'stale-approval' as const }
+    }
     return { card }
   }
 

@@ -322,6 +322,15 @@ button.nav-item { cursor: pointer; font: inherit; }
 }
 .message--assistant .message-body { padding: 0; border: 0; border-radius: 0; background: transparent; }
 .message--alert .message-body { color: #6b241c; }
+.acknowledgement {
+  max-width: 820px;
+  margin: 0 auto 20px;
+  padding: 10px 14px;
+  border: 1px solid #c5beb1;
+  border-radius: 8px;
+  background: #e8e2d6;
+  font: 650 14px/1.4 var(--font-instrument);
+}
 
 .approval-card {
   margin-top: 28px;

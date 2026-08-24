@@ -143,7 +143,10 @@ describe('TARS-NG mission-control workspace', () => {
     }))
     assert.equal(failed.approvals[0]?.status, 'failed')
     assert.equal(failed.approvals[0]?.kind, 'calendar-create')
+    assert.equal(view.approvalResolutions[0]?.outcome, 'denied')
+    assert.ok(view.activity.some((item) => item.source === 'approval/resolved' && item.summary.includes('denied')))
     assert.match(view.conversation.at(-1)?.text ?? '', /will not create/)
+    assert.doesNotMatch(JSON.stringify(view.conversation), /Confirmation /)
   })
 
   it('F. provider degradation is a product state, not theater', () => {

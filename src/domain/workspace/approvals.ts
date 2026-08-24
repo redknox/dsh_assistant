@@ -1,16 +1,103 @@
-import type { ApprovalCard, WorkspaceSnapshotInput } from './types.js'
+import type { ApprovalCard, ApprovalResolution, WorkspaceSnapshotInput } from './types.js'
 import { allowedApprovalPayload } from './redact.js'
+
+const RESOLVED_TICKET = new Set(['denied', 'cancelled', 'consumed', 'failed'])
+const HISTORY_EXTENSION = new Set(['approval-requested', 'unreviewed'])
 
 export function projectApprovalCards(input: WorkspaceSnapshotInput): readonly ApprovalCard[] {
   const cards: ApprovalCard[] = []
-  for (const ticket of input.pendingConfirmations.filter((item) => item.status === 'pending' || item.status === 'denied' || item.status === 'cancelled' || item.status === 'consumed' || item.status === 'failed')) {
+  for (const ticket of input.pendingConfirmations.filter((item) => item.status === 'pending' || RESOLVED_TICKET.has(item.status))) {
     cards.push(sideEffectCard(ticket))
   }
   for (const approval of input.extensionApprovals ?? []) {
-    if (approval.decision !== 'approval-requested' && approval.decision !== 'unreviewed') continue
+    if (!HISTORY_EXTENSION.has(approval.decision)) continue
     cards.push(selfExtensionCard(approval))
   }
   return cards
+}
+
+export function projectApprovalResolutions(input: WorkspaceSnapshotInput): readonly ApprovalResolution[] {
+  const items: ApprovalResolution[] = []
+  for (const ticket of input.pendingConfirmations) {
+    const resolution = resolutionFromTicket(ticket)
+    if (resolution) items.push(resolution)
+  }
+  for (const approval of input.extensionApprovals ?? []) {
+    if (approval.decision === 'approved-for-exact-diff') {
+      items.push({
+        type: 'approval/resolved',
+        confirmationId: approval.id,
+        decision: 'approve',
+        outcome: 'completed',
+        capability: 'self-extension',
+        operation: 'approve-exact-diff',
+      })
+    } else if (approval.decision === 'rejected') {
+      items.push({
+        type: 'approval/resolved',
+        confirmationId: approval.id,
+        decision: 'deny',
+        outcome: 'denied',
+        capability: 'self-extension',
+        operation: 'approve-exact-diff',
+      })
+    }
+  }
+  return items
+}
+
+export function acknowledgementOf(resolutions: readonly ApprovalResolution[]): { readonly text: string } | undefined {
+  const last = resolutions.at(-1)
+  if (!last) return undefined
+  const target = last.capability && last.operation ? `${last.capability}.${last.operation}` : 'action'
+  if (last.outcome === 'completed') return { text: `Approved. ${target} completed.` }
+  if (last.outcome === 'denied') return { text: `Rejected. ${target} was denied.` }
+  if (last.outcome === 'cancelled') return { text: `Cancelled. ${target} was not executed.` }
+  return { text: `Failed. ${target} did not complete.` }
+}
+
+function resolutionFromTicket(ticket: WorkspaceSnapshotInput['pendingConfirmations'][number]): ApprovalResolution | undefined {
+  if (ticket.status === 'consumed') {
+    return {
+      type: 'approval/resolved',
+      confirmationId: ticket.id,
+      decision: 'approve',
+      outcome: 'completed',
+      capability: ticket.capability,
+      operation: ticket.operation,
+    }
+  }
+  if (ticket.status === 'denied') {
+    return {
+      type: 'approval/resolved',
+      confirmationId: ticket.id,
+      decision: 'deny',
+      outcome: 'denied',
+      capability: ticket.capability,
+      operation: ticket.operation,
+    }
+  }
+  if (ticket.status === 'cancelled') {
+    return {
+      type: 'approval/resolved',
+      confirmationId: ticket.id,
+      decision: 'cancel',
+      outcome: 'cancelled',
+      capability: ticket.capability,
+      operation: ticket.operation,
+    }
+  }
+  if (ticket.status === 'failed') {
+    return {
+      type: 'approval/resolved',
+      confirmationId: ticket.id,
+      decision: 'approve',
+      outcome: 'failed',
+      capability: ticket.capability,
+      operation: ticket.operation,
+    }
+  }
+  return undefined
 }
 
 function sideEffectCard(ticket: WorkspaceSnapshotInput['pendingConfirmations'][number]): ApprovalCard {

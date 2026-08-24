@@ -197,7 +197,8 @@ function conversationWithoutReasoning(events: readonly SessionEvent[]): Workspac
 function isHumanUserMessage(message: { readonly source: { readonly kind: string; readonly form?: string }; readonly content: readonly ContentBlock[] }): boolean {
   const source = message.source
   if (source.kind === 'plugin') return false
-  if (source.form === 'snapshot' || source.form === 'instructions' || source.form === 'catalog') return false
+  if (source.form === 'snapshot' || source.form === 'instructions' || source.form === 'catalog' || source.form === 'control') return false
+  if (source.kind === 'host' || source.kind === 'system') return false
   const text = visibleText(message.content)
   if (text.startsWith('Current runtime context')) return false
   return source.kind === 'user'

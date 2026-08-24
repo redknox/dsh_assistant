@@ -414,7 +414,10 @@ function ConversationWorkspace(props: {
             </article>
           )
         })}
-        {props.view.approvals.map((card) => (
+        {props.view.acknowledgement ? (
+          <p className="acknowledgement" role="status" data-acknowledgement="true">{props.view.acknowledgement.text}</p>
+        ) : null}
+        {props.view.approvals.filter((card) => isPendingApproval(card.status)).map((card) => (
           <ApprovalCardView key={card.id} card={card} locked={locked} onApprove={props.onApprove} onReject={props.onReject} />
         ))}
         {props.activations.map((card) => (
@@ -689,6 +692,24 @@ function OperationsPanel(props: {
         </ol>
       </section>
       <WorkbenchPanel candidates={props.view.candidates ?? []} />
+      <section className="capability-section" id="actions" aria-labelledby="actions-title">
+        <h2 id="actions-title">ACTIONS</h2>
+        <ul className="workbench-list" data-actions-history="true">
+          {(props.view.approvalResolutions ?? []).length === 0 ? (
+            <li className="workbench-item">No resolved approvals yet.</li>
+          ) : (props.view.approvalResolutions ?? []).map((item) => (
+            <li
+              key={item.confirmationId}
+              className="workbench-item"
+              data-approval-resolution={item.confirmationId}
+              data-approval-outcome={item.outcome}
+            >
+              <div className="workbench-identity">{item.capability ?? 'action'}.{item.operation ?? item.decision}</div>
+              <div className="workbench-meta">{item.decision} · {item.outcome}</div>
+            </li>
+          ))}
+        </ul>
+      </section>
       <section className="capability-section" aria-labelledby="extensions-ops-title">
         <h2 id="extensions-ops-title">EXTENSIONS</h2>
         <p className="workbench-meta">{(props.view.extensions ?? []).length} generated/user revision{(props.view.extensions ?? []).length === 1 ? '' : 's'}</p>

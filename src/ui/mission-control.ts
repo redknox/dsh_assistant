@@ -29,7 +29,8 @@ export function renderMissionControlAsText(view: MissionControlView): string {
     '',
     '# Conversation / work',
     ...view.conversation.map((item) => `[${item.kind}] ${item.text}`),
-    ...view.approvals.map((card) => [
+    view.acknowledgement ? `[status] ${view.acknowledgement.text}` : '',
+    ...view.approvals.filter((card) => card.status === 'pending' || card.status === 'approval-requested' || card.status === 'unreviewed').map((card) => [
       `[approval-request] ${card.title}`,
       `  target: ${card.target}`,
       `  side effect: ${card.sideEffect}`,
@@ -44,6 +45,9 @@ export function renderMissionControlAsText(view: MissionControlView): string {
       `  status: ${card.status}`,
       ...card.details.map((line) => `  ${line}`),
     ]).flat(),
+    '',
+    '# Actions',
+    ...(view.approvalResolutions ?? []).map((item) => `- ${item.decision}  ${item.outcome}  ${item.confirmationId}`),
     '',
     '# Activity',
     ...view.activity.map((item) => `- ${item.kind}  ${item.summary}`),
@@ -84,7 +88,8 @@ export function renderMissionControlAsHtml(view: MissionControlView): string {
       : []),
   ].join('')
   const conversation = view.conversation.map((item) => `<li data-kind="${escapeHtml(item.kind)}">${escapeHtml(item.text)}</li>`).join('')
-  const approvals = view.approvals.map((card) => `<article data-approval-id="${escapeHtml(card.id)}" data-kind="${escapeHtml(card.kind)}" data-fingerprint="${escapeHtml(card.fingerprint)}">
+  const pendingApprovals = view.approvals.filter((card) => card.status === 'pending' || card.status === 'approval-requested' || card.status === 'unreviewed')
+  const approvals = pendingApprovals.map((card) => `<article data-approval-id="${escapeHtml(card.id)}" data-kind="${escapeHtml(card.kind)}" data-fingerprint="${escapeHtml(card.fingerprint)}">
       <h2>${escapeHtml(card.title)}</h2>
       <p>Target ${escapeHtml(card.target)}</p>
       <p>External side effect: ${escapeHtml(card.sideEffect)}</p>
@@ -97,6 +102,7 @@ export function renderMissionControlAsHtml(view: MissionControlView): string {
       <p>Status ${escapeHtml(card.status)}</p>
       <ul>${card.details.map((line) => `<li>${escapeHtml(line)}</li>`).join('')}</ul>
     </article>`).join('')
+  const actions = (view.approvalResolutions ?? []).map((item) => `<li data-approval-resolution="${escapeHtml(item.confirmationId)}" data-approval-outcome="${escapeHtml(item.outcome)}">${escapeHtml(item.decision)} ${escapeHtml(item.outcome)}</li>`).join('')
   const activity = view.activity.map((item) => `<li data-activity="${escapeHtml(item.kind)}" data-source="${escapeHtml(item.source)}">${escapeHtml(item.summary)}</li>`).join('')
   return `<!doctype html>
 <html lang="en">
@@ -136,8 +142,10 @@ export function renderMissionControlAsHtml(view: MissionControlView): string {
     </aside>
     <main id="work" data-workspace-pane="today">
       <h1>Conversation / work</h1>
+      ${view.acknowledgement ? `<p data-acknowledgement="true">${escapeHtml(view.acknowledgement.text)}</p>` : ''}
       <ol>${conversation}</ol>
       <section id="approvals">${approvals}</section>
+      <section id="actions"><ul>${actions}</ul></section>
       <section id="activations">${activations}</section>
       <section id="extensions" data-workspace-pane="extensions">${(view.extensions ?? []).map((item) => `<article data-extension-id="${escapeHtml(item.id)}" data-extension-lifecycle="${escapeHtml(item.lifecycle)}" data-extension-action="inspect">${escapeHtml(item.owner)}@${escapeHtml(item.version)}</article>`).join('')}</section>
       ${view.rollback ? `<section id="rollback"><article data-rollback-id="${escapeHtml(view.rollback.id)}" data-kind="${escapeHtml(view.rollback.kind)}" data-fingerprint="${escapeHtml(view.rollback.fingerprint)}"><h2>${escapeHtml(view.rollback.title)}</h2></article></section>` : ''}
