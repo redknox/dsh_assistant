@@ -665,13 +665,83 @@ describe('TARS-NG mission-control workspace', () => {
         effects: [],
       }],
     }))
-    assert.equal(view.activations.length, 0)
+    const retry = view.activations.find((item) => item.candidateId === 'cand-obsidian')
+    assert.ok(retry)
+    assert.equal(retry.status, 'ACTIVATION_FAILED')
+    assert.equal(retry.id, 'act-retry-apr-2')
+    assert.equal(retry.title, 'Retry activation')
+    assert.equal(retry.eligibilityOk, true)
     assert.equal(view.activationFailure?.phase, 'health')
     assert.equal(view.activationFailure?.rollbackSucceeded, true)
     assert.equal(view.activationFailure?.registryActive, false)
     assert.ok(view.activity.some((item) => item.kind === 'FAILED' && item.summary.includes('health')))
     assert.match(renderMissionControlAsText(view), /ACTIVATION FAILED/)
     assert.match(renderMissionControlAsHtml(view), /data-activation-failed="true"/)
+    assert.match(renderMissionControlAsHtml(view), /data-activation-id="act-retry-apr-2"/)
+
+    const blocked = projectMissionControl(snapshot({
+      recoveryRequired: true,
+      activation: {
+        state: 'activation-failed',
+        lastFailureCandidateId: 'cand-obsidian',
+        lastFailure: {
+          candidateId: 'cand-obsidian',
+          phase: 'commit',
+          diagnostics: 'authority commit failed',
+          rollbackSucceeded: false,
+          safeModeRequired: true,
+        },
+      },
+      extensionApprovals: [{
+        id: 'apr-2',
+        candidateId: 'cand-obsidian',
+        fingerprint: 'fp-ext',
+        decision: 'approved-for-exact-diff',
+        owner: 'generated/obsidian-vault',
+        candidateVersion: '0.1.0',
+        digest: 'abc123',
+        capabilitiesAdded: [],
+        capabilitiesRemoved: [],
+        permissionsAdded: [],
+        permissionsRemoved: [],
+        effects: [],
+        eligibilityOk: true,
+        eligibilityDenials: [],
+      }],
+    }))
+    assert.equal(blocked.activations.length, 0)
+    assert.equal(blocked.activationFailure?.recoveryRequired, true)
+
+    const stale = projectMissionControl(snapshot({
+      activation: {
+        state: 'activation-failed',
+        lastFailureCandidateId: 'cand-obsidian',
+        lastFailure: {
+          candidateId: 'cand-obsidian',
+          phase: 'prepare',
+          diagnostics: 'digest drifted',
+          rollbackSucceeded: true,
+          safeModeRequired: false,
+        },
+      },
+      extensionApprovals: [{
+        id: 'apr-2',
+        candidateId: 'cand-obsidian',
+        fingerprint: 'fp-old',
+        decision: 'approved-for-exact-diff',
+        owner: 'generated/obsidian-vault',
+        candidateVersion: '0.1.0',
+        digest: 'old-digest',
+        capabilitiesAdded: [],
+        capabilitiesRemoved: [],
+        permissionsAdded: [],
+        permissionsRemoved: [],
+        effects: [],
+        eligibilityOk: false,
+        eligibilityDenials: ['digest-mismatch'],
+      }],
+    }))
+    assert.equal(stale.activations.length, 0)
   })
 
   it('H. Safe Mode is a dedicated comprehensible product state', () => {

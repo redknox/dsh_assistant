@@ -1,5 +1,5 @@
 import { isolatedRuntimeOwner } from '../generated-runtime/trust.js'
-import { compareOwnerVersion, extensionLifecycleOf } from './lifecycle.js'
+import { compareOwnerVersion, extensionLifecycleOf, isActivationRetryEligible } from './lifecycle.js'
 import type { ExtensionRecord, WorkspaceSnapshotInput } from './types.js'
 
 export function projectExtensions(input: WorkspaceSnapshotInput): readonly ExtensionRecord[] {
@@ -52,7 +52,17 @@ function rowFromCandidate(
     lifecycle,
     registryStatus: record?.status ?? 'absent',
     mounted: input.activation?.mounted?.includes(candidate.id) === true,
-    eligibilityOk: (approval?.eligibilityOk !== false) && (lifecycle === 'DISABLED_REACTIVATABLE' || lifecycle === 'APPROVED_NOT_ACTIVE'),
+    eligibilityOk: (approval?.eligibilityOk !== false) && (
+      lifecycle === 'DISABLED_REACTIVATABLE'
+      || lifecycle === 'APPROVED_NOT_ACTIVE'
+      || isActivationRetryEligible({
+        lifecycle,
+        eligibilityOk: approval?.eligibilityOk,
+        eligibilityDenials: approval?.eligibilityDenials ?? candidate.requestDenials,
+        recoveryRequired: input.recoveryRequired,
+        safeMode: input.safeMode,
+      })
+    ),
     eligibilityDenials: approval?.eligibilityDenials ?? candidate.requestDenials ?? [],
     newerAuthoritative: newer,
     reviewState: candidate.reviewState,

@@ -1,5 +1,5 @@
 import type { ActivationCard, WorkspaceSnapshotInput } from './types.js'
-import { compareOwnerVersion, extensionLifecycleOf } from './lifecycle.js'
+import { activationCardId, compareOwnerVersion, extensionLifecycleOf, isActivationRetryEligible } from './lifecycle.js'
 
 export function formatExactDiff(
   added: readonly string[],
@@ -33,7 +33,17 @@ export function projectActivationCards(input: WorkspaceSnapshotInput): readonly 
         && compareOwnerVersion(item.version, approval.candidateVersion) > 0
       )),
     })
-    if (lifecycle !== 'APPROVED_NOT_ACTIVE' && lifecycle !== 'ACTIVATING' && lifecycle !== 'DISABLED_REACTIVATABLE') continue
+    if (lifecycle === 'ACTIVATION_FAILED') {
+      if (!isActivationRetryEligible({
+        lifecycle,
+        eligibilityOk: approval.eligibilityOk,
+        eligibilityDenials: approval.eligibilityDenials,
+        recoveryRequired: input.recoveryRequired,
+        safeMode: input.safeMode,
+      })) continue
+    } else if (lifecycle !== 'APPROVED_NOT_ACTIVE' && lifecycle !== 'ACTIVATING' && lifecycle !== 'DISABLED_REACTIVATABLE') {
+      continue
+    }
     cards.push(selfExtensionActivationCard(approval, lifecycle))
   }
   return cards
@@ -49,9 +59,13 @@ function selfExtensionActivationCard(
   const permissionsChanged = approval.permissionsChanged ?? []
   const toolsChanged = approval.toolsChanged ?? []
   return {
-    id: approval.id,
+    id: activationCardId(approval.id, status),
     kind: 'self-extension-activate',
-    title: status === 'DISABLED_REACTIVATABLE' ? 'Reactivate extension' : 'SELF-EXTENSION ACTIVATION',
+    title: status === 'DISABLED_REACTIVATABLE'
+      ? 'Reactivate extension'
+      : status === 'ACTIVATION_FAILED'
+        ? 'Retry activation'
+        : 'SELF-EXTENSION ACTIVATION',
     owner: approval.owner,
     version: approval.candidateVersion,
     candidateId: approval.candidateId,
@@ -86,7 +100,9 @@ function selfExtensionActivationCard(
       eligibilityOk ? 'Eligible for trusted activation.' : `Not eligible: ${denials.join(', ') || 'denied'}`,
       status === 'DISABLED_REACTIVATABLE'
         ? 'This reactivates the exact disabled revision. It is not uninstall rollback and does not create a new version.'
-        : 'Approval did not activate this candidate. Conversation yes cannot activate it.',
+        : status === 'ACTIVATION_FAILED'
+          ? 'Previous trusted activation failed. This card rebinds the exact sealed digest and fingerprint after current eligibility is rechecked.'
+          : 'Approval did not activate this candidate. Conversation yes cannot activate it.',
     ],
   }
 }

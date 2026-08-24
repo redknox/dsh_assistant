@@ -228,7 +228,7 @@ function ActivationCardView(props: {
   readonly onDefer: (card: ActivationCard) => void
 }) {
   const { card } = props
-  const actionable = (card.status === 'APPROVED_NOT_ACTIVE' || card.status === 'DISABLED_REACTIVATABLE') && card.eligibilityOk
+  const actionable = (card.status === 'APPROVED_NOT_ACTIVE' || card.status === 'DISABLED_REACTIVATABLE' || card.status === 'ACTIVATION_FAILED') && card.eligibilityOk
   return (
     <article
       className="approval-card"
@@ -270,8 +270,8 @@ function ActivationCardView(props: {
             onClick={() => props.onActivate(card)}
           >
             {props.armed
-              ? (card.status === 'DISABLED_REACTIVATABLE' ? 'CONFIRM REACTIVATE' : 'CONFIRM ACTIVATE')
-              : (card.status === 'DISABLED_REACTIVATABLE' ? 'REACTIVATE' : 'ACTIVATE')}
+              ? (card.status === 'DISABLED_REACTIVATABLE' ? 'CONFIRM REACTIVATE' : card.status === 'ACTIVATION_FAILED' ? 'CONFIRM RETRY' : 'CONFIRM ACTIVATE')
+              : (card.status === 'DISABLED_REACTIVATABLE' ? 'REACTIVATE' : card.status === 'ACTIVATION_FAILED' ? 'RETRY' : 'ACTIVATE')}
           </button>
         </div>
       ) : <p className="approval-status">Status {card.status}</p>}

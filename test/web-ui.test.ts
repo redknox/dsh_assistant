@@ -1524,6 +1524,87 @@ export function apply(ctx) {
     }
   })
 
+  it('rebinds a Retry card after a recoverable activation failure', async () => {
+    await withServer(bootAssistantControl, 'web-ui-activate-retry', async (url, _surface, _agent, ctx, recoveryRoot) => {
+      const cookie = await cookieHeader(url)
+      const prepared = authorGenerated(ctx, 'r0.wui.retry')
+      const first = await approveActivationCard(url, cookie, prepared.id)
+      recoveryRoot.service.failActivation = { phase: 'prepare', diagnostics: 'transient prepare fault' }
+      assert.equal((await fetch(`${url}/api/activate`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', ...authHeaders(cookie) },
+        body: JSON.stringify({
+          id: first.id,
+          candidateId: first.candidateId,
+          digest: first.digest,
+          fingerprint: first.fingerprint,
+          confirm: true,
+        }),
+      })).status, 409)
+      recoveryRoot.service.failActivation = undefined
+      const failed = await fetch(`${url}/api/view`).then((res) => res.json()) as { view: MissionControlView }
+      const row = failed.view.extensions.find((item) => item.candidateId === prepared.id)
+      assert.ok(row)
+      assert.equal(row.lifecycle, 'ACTIVATION_FAILED')
+      assert.equal(row.eligibilityOk, true)
+      const retry = failed.view.activations.find((item) => item.candidateId === prepared.id)
+      assert.ok(retry)
+      assert.equal(retry.status, 'ACTIVATION_FAILED')
+      assert.equal(retry.title, 'Retry activation')
+      assert.notEqual(retry.id, first.id)
+      assert.match(retry.id, /^act-retry-/)
+      const markup = renderToStaticMarkup(createElement(MissionControlScreen, {
+        view: failed.view,
+        pane: 'extensions',
+        connected: true,
+        sending: false,
+        draft: '',
+        onDraft() {},
+        onSend() {},
+        onApprove() {},
+        onReject() {},
+        onRecovery() {},
+      }))
+      assert.match(markup, /data-extension-lifecycle="ACTIVATION_FAILED"/)
+      assert.match(markup, /data-extension-action="retry"/)
+      assert.equal((await fetch(`${url}/api/activate`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', ...authHeaders(cookie) },
+        body: JSON.stringify({
+          id: first.id,
+          candidateId: first.candidateId,
+          digest: first.digest,
+          fingerprint: first.fingerprint,
+          confirm: true,
+        }),
+      })).status, 409)
+      assert.equal((await fetch(`${url}/api/activate`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', ...authHeaders(cookie) },
+        body: JSON.stringify({
+          id: retry.id,
+          candidateId: retry.candidateId,
+          digest: retry.digest,
+          fingerprint: 'stale-fingerprint',
+          confirm: true,
+        }),
+      })).status, 409)
+      assert.equal((await fetch(`${url}/api/activate`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', ...authHeaders(cookie) },
+        body: JSON.stringify({
+          id: retry.id,
+          candidateId: retry.candidateId,
+          digest: retry.digest,
+          fingerprint: retry.fingerprint,
+          confirm: true,
+        }),
+      })).status, 200)
+      assert.ok(ctx.tools.get('r0_wui_retry'))
+      assert.equal(ctx.capabilityRegistry.get(prepared.owner, '0.1.0')?.status, 'active')
+    })
+  })
+
   it('keeps the prior LKG when uninstall is interrupted between Registry and authority commit', async () => {
     const home = mkdtempSync(join(tmpdir(), 'tars-uninstall-atomic-'))
     try {
@@ -2002,6 +2083,30 @@ export function apply(ctx) {
           eligibilityDenials: [],
           status: 'DISABLED_REACTIVATABLE',
           details: [],
+        }, {
+          id: 'act-retry-apr-fail',
+          kind: 'self-extension-activate',
+          title: 'Retry activation',
+          owner: 'generated/search',
+          version: '0.0.3',
+          candidateId: 'cand-fail',
+          digest: 'abc',
+          fingerprint: 'fp-fail',
+          isolatedRuntime: true,
+          capabilitiesAdded: [],
+          capabilitiesRemoved: [],
+          capabilitiesChanged: [],
+          permissionsAdded: [],
+          permissionsRemoved: [],
+          permissionsChanged: [],
+          toolsAdded: [],
+          toolsRemoved: [],
+          toolsChanged: [],
+          effects: [],
+          eligibilityOk: true,
+          eligibilityDenials: [],
+          status: 'ACTIVATION_FAILED',
+          details: [],
         }],
         plugins: [{
           id: 'uninst-generated/search@0.2.0',
@@ -2028,7 +2133,7 @@ export function apply(ctx) {
           { id: 'ext-off', owner: 'generated/search', version: '0.1.0', candidateId: 'cand-off', provenance: 'generated', capabilities: [], tools: [], lifecycle: 'DISABLED_REACTIVATABLE', registryStatus: 'disabled', mounted: false, eligibilityOk: true, eligibilityDenials: [], newerAuthoritative: false },
           { id: 'ext-on', owner: 'generated/search', version: '0.2.0', provenance: 'generated', capabilities: [], tools: [], lifecycle: 'ACTIVE', registryStatus: 'active', mounted: true, eligibilityOk: false, eligibilityDenials: [], newerAuthoritative: false },
           { id: 'ext-block', owner: 'generated/search', version: '0.0.2', provenance: 'generated', capabilities: [], tools: [], lifecycle: 'DISABLED_BLOCKED', registryStatus: 'disabled', mounted: false, eligibilityOk: false, eligibilityDenials: ['approval-rejected'], newerAuthoritative: false },
-          { id: 'ext-fail', owner: 'generated/search', version: '0.0.3', candidateId: 'cand-fail', provenance: 'generated', capabilities: [], tools: [], lifecycle: 'ACTIVATION_FAILED', registryStatus: 'absent', mounted: false, eligibilityOk: false, eligibilityDenials: [], newerAuthoritative: false },
+          { id: 'ext-fail', owner: 'generated/search', version: '0.0.3', candidateId: 'cand-fail', provenance: 'generated', capabilities: [], tools: [], lifecycle: 'ACTIVATION_FAILED', registryStatus: 'absent', mounted: false, eligibilityOk: true, eligibilityDenials: [], newerAuthoritative: false },
           { id: 'ext-old', owner: 'generated/search', version: '0.0.0', provenance: 'generated', capabilities: [], tools: [], lifecycle: 'SUPERSEDED', registryStatus: 'disabled', mounted: false, eligibilityOk: false, eligibilityDenials: [], newerAuthoritative: true },
         ],
       }),
@@ -2050,6 +2155,7 @@ export function apply(ctx) {
     assert.match(extensionsPane, /data-uninstall-action="ask"/)
     assert.match(extensionsPane, /data-extension-action="inspect-denials"/)
     assert.match(extensionsPane, /data-extension-action="diagnostics"/)
+    assert.match(extensionsPane, /data-extension-action="retry"/)
     assert.match(extensionsPane, /data-extension-action="view-history"/)
 
     const workbench = renderToStaticMarkup(createElement(MissionControlScreen, {

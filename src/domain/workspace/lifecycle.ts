@@ -37,6 +37,28 @@ export function isTerminalStaleDenial(reason: string): boolean {
   return (TERMINAL_STALE_DENIALS as readonly string[]).includes(reason)
 }
 
+export function isBlockedActivationDenial(reason: string): boolean {
+  return (BLOCKED_REACTIVATION_DENIALS as readonly string[]).includes(reason)
+}
+
+export function isActivationRetryEligible(input: {
+  readonly lifecycle: ExtensionLifecycleState
+  readonly eligibilityOk?: boolean
+  readonly eligibilityDenials?: readonly string[]
+  readonly recoveryRequired?: boolean
+  readonly safeMode?: boolean
+}): boolean {
+  if (input.lifecycle !== 'ACTIVATION_FAILED') return false
+  if (input.recoveryRequired === true || input.safeMode === true) return false
+  if (input.eligibilityOk === false) return false
+  if (input.eligibilityDenials?.some(isBlockedActivationDenial) === true) return false
+  return true
+}
+
+export function activationCardId(approvalId: string, lifecycle: ExtensionLifecycleState): string {
+  return lifecycle === 'ACTIVATION_FAILED' ? `act-retry-${approvalId}` : approvalId
+}
+
 export function compareOwnerVersion(left: string, right: string): number {
   const a = left.split('.').map((part) => Number.parseInt(part, 10) || 0)
   const b = right.split('.').map((part) => Number.parseInt(part, 10) || 0)
