@@ -138,8 +138,12 @@ export function startWebUiServer(options: WebUiServerOptions): Promise<WebUiServ
     if (busy !== undefined) {
       return { status: 409 as const, body: { error: `${busy}-in-flight`, action } }
     }
-    const human = options.recoveryRoot.issueAuthority({ kind: 'human-control', source: 'application-ui' })
     if (action === 'rollback') {
+      const inspected = options.recoveryRoot.inspect()
+      if (!inspected.safeMode && !inspected.recoveryRequired) {
+        return { status: 409 as const, body: { error: 'ready-state-rollback', action } }
+      }
+      const human = options.recoveryRoot.issueAuthority({ kind: 'human-control', source: 'application-ui' })
       recoveryBusy = true
       try {
         return { status: 200 as const, body: { action, result: await options.recoveryRoot.rollback(human) } }
@@ -159,6 +163,7 @@ export function startWebUiServer(options: WebUiServerOptions): Promise<WebUiServ
     if (status.recoveryRequired) {
       return { status: 409 as const, body: { error: 'integrity-failure', action: 'exit-safe-mode' } }
     }
+    const human = options.recoveryRoot.issueAuthority({ kind: 'human-control', source: 'application-ui' })
     recoveryBusy = true
     try {
       return { status: 200 as const, body: { action, result: options.recoveryRoot.exitSafeMode(human) } }

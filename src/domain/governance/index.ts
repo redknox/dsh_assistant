@@ -4,6 +4,7 @@ export type {
   ActivationSnapshot,
   ActivationState,
   ActivationStatus,
+  RollbackPlan,
   ApprovalAuthority,
   ApprovalDecision,
   ApprovalFingerprintInput,

@@ -389,6 +389,14 @@ describe('TARS-NG mission-control workspace', () => {
           mounted: [],
           owners: [{ owner: 'managed/integrations', version: '0.1.0' }],
         },
+        rollbackPlan: {
+          id: 'rollback-5-4',
+          currentGeneration: 5,
+          targetGeneration: 4,
+          fingerprint: 'authoritative-rollback-plan',
+          available: true,
+          denials: [],
+        },
       },
       registry: [
         {
@@ -437,6 +445,32 @@ describe('TARS-NG mission-control workspace', () => {
     assert.equal(recovering.systemState === 'SAFE_MODE' || recovering.systemState === 'RECOVERY', true)
     assert.equal(recovering.rollback, undefined)
     assert.ok(recovering.recovery)
+    const unverified = projectMissionControl(snapshot({
+      activation: {
+        state: 'active',
+        generation: 5,
+        current: {
+          generation: 5,
+          owners: [
+            { owner: 'managed/integrations', version: '0.1.0' },
+            { owner: 'generated/text-slugify', version: '0.1.0' },
+          ],
+        },
+        rollbackTarget: {
+          generation: 4,
+          owners: [{ owner: 'managed/integrations', version: '0.1.0' }],
+        },
+        rollbackPlan: {
+          id: 'rollback-5-4',
+          currentGeneration: 5,
+          targetGeneration: 4,
+          fingerprint: 'stale',
+          available: false,
+          denials: [{ reason: 'digest-mismatch', detail: 'generated/text-slugify@0.1.0' }],
+        },
+      },
+    }))
+    assert.equal(unverified.rollback, undefined)
   })
 
   it('G3. activation failure stays visible after a successful rollback', () => {

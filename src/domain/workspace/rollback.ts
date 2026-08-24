@@ -1,5 +1,3 @@
-import { createHash } from 'node:crypto'
-import { isolatedRuntimeOwner } from '../generated-runtime/trust.js'
 import type { RollbackCard, WorkspaceSnapshotInput } from './types.js'
 
 type SnapshotOwners = readonly { readonly owner: string; readonly version: string; readonly capabilities?: readonly string[] }[]
@@ -8,34 +6,23 @@ export function projectRollbackCard(input: WorkspaceSnapshotInput, systemState: 
   if (systemState === 'SAFE_MODE' || systemState === 'RECOVERY') return undefined
   if (input.recoveryRequired || input.safeMode) return undefined
   if (input.activation?.lifecycleBusy !== undefined) return undefined
-  if (input.activation?.state === 'activating' || input.activation?.state === 'activation-pending' || input.activation?.state === 'rollback-pending') {
-    return undefined
-  }
+  const plan = input.activation?.rollbackPlan
+  if (plan === undefined || !plan.available) return undefined
   const current = input.activation?.current
   const target = input.activation?.rollbackTarget ?? input.activation?.lastKnownGood
   if (current === undefined || target === undefined) return undefined
-  const currentOwners = keys(current.owners)
-  const targetOwners = keys(target.owners)
-  if (currentOwners.join('\n') === targetOwners.join('\n')) return undefined
-  if (current.generation === target.generation) return undefined
-  if (unverifiedTarget(input, target.owners)) return undefined
+  if (current.generation !== plan.currentGeneration || target.generation !== plan.targetGeneration) return undefined
   const ownerChanges = diffOwners(current.owners, target.owners)
   const capabilityDiff = namedDiff(capabilitiesOf(input, current.owners), capabilitiesOf(input, target.owners))
   const toolDiff = namedDiff(toolsOf(input, current.owners), toolsOf(input, target.owners))
   const mountDiff = namedDiff(current.mounted ?? [], target.mounted ?? [])
-  const fingerprint = rollbackFingerprint({
-    currentGeneration: current.generation,
-    targetGeneration: target.generation,
-    currentOwners,
-    targetOwners,
-  })
   return {
-    id: `rollback-${current.generation}-${target.generation}`,
+    id: plan.id,
     kind: 'system-state-rollback',
     title: 'Rollback system state',
-    currentGeneration: current.generation,
-    targetGeneration: target.generation,
-    fingerprint,
+    currentGeneration: plan.currentGeneration,
+    targetGeneration: plan.targetGeneration,
+    fingerprint: plan.fingerprint,
     reason: 'An authoritative previous last-known-good snapshot is available and differs from the current system state.',
     ownerChanges,
     capabilitiesAdded: capabilityDiff.added,
@@ -47,20 +34,6 @@ export function projectRollbackCard(input: WorkspaceSnapshotInput, systemState: 
     recoveryRequired: false,
     actionable: true,
   }
-}
-
-export function rollbackFingerprint(input: {
-  readonly currentGeneration: number
-  readonly targetGeneration: number
-  readonly currentOwners: readonly string[]
-  readonly targetOwners: readonly string[]
-}): string {
-  return createHash('sha256').update(JSON.stringify({
-    currentGeneration: input.currentGeneration,
-    targetGeneration: input.targetGeneration,
-    currentOwners: [...input.currentOwners].sort(),
-    targetOwners: [...input.targetOwners].sort(),
-  })).digest('hex')
 }
 
 function keys(owners: SnapshotOwners): string[] {
@@ -115,18 +88,4 @@ function namedDiff(current: readonly string[], target: readonly string[]): { add
     added: [...next].filter((item) => !now.has(item)).sort(),
     removed: [...now].filter((item) => !next.has(item)).sort(),
   }
-}
-
-function unverifiedTarget(input: WorkspaceSnapshotInput, owners: SnapshotOwners): boolean {
-  const candidates = input.candidates ?? []
-  for (const owner of owners) {
-    const record = input.registry.find((item) => item.owner === owner.owner && item.version === owner.version)
-    if (record === undefined) return true
-    if (!isolatedRuntimeOwner({ owner: record.owner, provenance: { kind: record.provenance } })) continue
-    const candidate = candidates.find((item) => item.owner === owner.owner && item.version === owner.version)
-    if (candidate === undefined || candidate.sealed !== true || candidate.digest === undefined || candidate.digest === '') {
-      return true
-    }
-  }
-  return false
 }

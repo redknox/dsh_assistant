@@ -774,6 +774,37 @@ export function apply(ctx) {
         })
         assert.equal(stale.status, 409)
         assert.ok(ctx.tools.get('text_slugify'))
+        const bypass = await fetch(`${url}/api/recovery`, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json', ...authHeaders(cookie) },
+          body: JSON.stringify({ action: 'rollback', confirm: true }),
+        })
+        assert.equal(bypass.status, 409)
+        const bypassBody = await bypass.json() as { error: string }
+        assert.equal(bypassBody.error, 'ready-state-rollback')
+        assert.ok(ctx.tools.get('text_slugify'))
+        ctx.capabilityRegistry.revise('generated/text-slugify', '0.1.0', {
+          capabilities: [
+            { id: 'text.slugify', permissions: [] },
+            { id: 'text.other', permissions: [] },
+          ],
+        })
+        const shifted = await fetch(`${url}/api/view`).then((res) => res.json()) as { view: MissionControlView }
+        assert.ok(shifted.view.rollback)
+        assert.notEqual(shifted.view.rollback.fingerprint, rollback.fingerprint)
+        const staleMeta = await fetch(`${url}/api/rollback`, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json', ...authHeaders(cookie) },
+          body: JSON.stringify({
+            id: rollback.id,
+            fingerprint: rollback.fingerprint,
+            currentGeneration: rollback.currentGeneration,
+            targetGeneration: rollback.targetGeneration,
+            confirm: true,
+          }),
+        })
+        assert.equal(staleMeta.status, 409)
+        const live = shifted.view.rollback
 
         let release!: () => void
         recoveryRoot.service.holdRollback = new Promise<void>((resolve) => {
@@ -783,10 +814,10 @@ export function apply(ctx) {
           method: 'POST',
           headers: { 'content-type': 'application/json', ...authHeaders(cookie) },
           body: JSON.stringify({
-            id: rollback.id,
-            fingerprint: rollback.fingerprint,
-            currentGeneration: rollback.currentGeneration,
-            targetGeneration: rollback.targetGeneration,
+            id: live.id,
+            fingerprint: live.fingerprint,
+            currentGeneration: live.currentGeneration,
+            targetGeneration: live.targetGeneration,
             confirm: true,
           }),
         })
@@ -835,6 +866,151 @@ export function apply(ctx) {
         assert.notEqual(second.ctx.capabilityRegistry.get('generated/text-slugify', '0.1.0')?.status, 'active')
         assert.equal(second.ctx.tools.get('text_slugify'), undefined)
         assert.ok(second.ctx.candidateWorkspace.list().some((item) => item.owner === 'generated/text-slugify' && item.sealed))
+      } finally {
+        await second.ctx.fiber.dispose()
+      }
+    } finally {
+      rmSync(home, { recursive: true, force: true })
+    }
+  })
+
+  it('hides the READY rollback card when the target artifact is tampered', async () => {
+    await withServer(bootAssistantControl, 'web-ui-rollback-tamper', async (url, _surface, _agent, ctx) => {
+      const cookie = await cookieHeader(url)
+      const first = authorGenerated(ctx, 'text.slugify')
+      const firstCard = await approveActivationCard(url, cookie, first.id)
+      assert.equal((await fetch(`${url}/api/activate`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', ...authHeaders(cookie) },
+        body: JSON.stringify({
+          id: firstCard.id,
+          candidateId: firstCard.candidateId,
+          digest: firstCard.digest,
+          fingerprint: firstCard.fingerprint,
+          confirm: true,
+        }),
+      })).status, 200)
+      const second = authorGenerated(ctx, 'other.opt')
+      const secondCard = await approveActivationCard(url, cookie, second.id)
+      assert.equal((await fetch(`${url}/api/activate`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', ...authHeaders(cookie) },
+        body: JSON.stringify({
+          id: secondCard.id,
+          candidateId: secondCard.candidateId,
+          digest: secondCard.digest,
+          fingerprint: secondCard.fingerprint,
+          confirm: true,
+        }),
+      })).status, 200)
+      const before = await fetch(`${url}/api/view`).then((res) => res.json()) as { view: MissionControlView }
+      assert.ok(before.view.rollback)
+      writeFileSync(join(ctx.candidateWorkspace.get(first.id).workspaceRoot, 'src/plugin.js'), 'tampered\n')
+      const after = await fetch(`${url}/api/view`).then((res) => res.json()) as { view: MissionControlView }
+      assert.equal(after.view.rollback, undefined)
+      const denied = await fetch(`${url}/api/rollback`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', ...authHeaders(cookie) },
+        body: JSON.stringify({
+          id: before.view.rollback.id,
+          fingerprint: before.view.rollback.fingerprint,
+          currentGeneration: before.view.rollback.currentGeneration,
+          targetGeneration: before.view.rollback.targetGeneration,
+          confirm: true,
+        }),
+      })
+      assert.equal(denied.status, 409)
+      assert.ok(ctx.tools.get('other_opt'))
+    })
+  })
+
+  it('restores the prior READY snapshot when WUI rollback restore fails', async () => {
+    await withServer(bootAssistantControl, 'web-ui-rollback-fail', async (url, _surface, _agent, ctx, recoveryRoot) => {
+      const cookie = await cookieHeader(url)
+      const base = authorGenerated(ctx, 'text.slugify')
+      const card = await approveActivationCard(url, cookie, base.id)
+      assert.equal((await fetch(`${url}/api/activate`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', ...authHeaders(cookie) },
+        body: JSON.stringify({
+          id: card.id,
+          candidateId: card.candidateId,
+          digest: card.digest,
+          fingerprint: card.fingerprint,
+          confirm: true,
+        }),
+      })).status, 200)
+      const ready = await fetch(`${url}/api/view`).then((res) => res.json()) as { view: MissionControlView }
+      assert.ok(ready.view.rollback)
+      recoveryRoot.service.failRollback = { phase: 'after-restore', diagnostics: 'secret /Users/secret/home/.tars-ng Bearer sk-rollback-secret-1' }
+      const failed = await fetch(`${url}/api/rollback`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', ...authHeaders(cookie) },
+        body: JSON.stringify({
+          id: ready.view.rollback.id,
+          fingerprint: ready.view.rollback.fingerprint,
+          currentGeneration: ready.view.rollback.currentGeneration,
+          targetGeneration: ready.view.rollback.targetGeneration,
+          confirm: true,
+        }),
+      })
+      assert.equal(failed.status, 409)
+      const body = await failed.json() as { error: string; diagnostics?: string }
+      assert.doesNotMatch(JSON.stringify(body), /sk-rollback-secret-1|\/Users\/secret\/home/)
+      assert.ok(ctx.tools.get('text_slugify'))
+      assert.equal(ctx.capabilityRegistry.get('generated/text-slugify', '0.1.0')?.status, 'active')
+      assert.equal(recoveryRoot.inspect().lifecycleBusy, undefined)
+      assert.equal(recoveryRoot.inspect().safeMode, false)
+    })
+  })
+
+  it('keeps the prior LKG when rollback is interrupted between Registry and authority commit', async () => {
+    const home = mkdtempSync(join(tmpdir(), 'tars-rollback-interrupt-'))
+    try {
+      await withServer(() => bootAssistantControl({ home }), 'web-ui-rollback-interrupt', async (url, _surface, _agent, ctx, recoveryRoot) => {
+        const cookie = await cookieHeader(url)
+        const base = authorGenerated(ctx, 'text.slugify')
+        const card = await approveActivationCard(url, cookie, base.id)
+        assert.equal((await fetch(`${url}/api/activate`, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json', ...authHeaders(cookie) },
+          body: JSON.stringify({
+            id: card.id,
+            candidateId: card.candidateId,
+            digest: card.digest,
+            fingerprint: card.fingerprint,
+            confirm: true,
+          }),
+        })).status, 200)
+        const ready = await fetch(`${url}/api/view`).then((res) => res.json()) as { view: MissionControlView }
+        assert.ok(ready.view.rollback)
+        recoveryRoot.simulateInterrupt('rollback-registry-commit')
+        const interrupted = await fetch(`${url}/api/rollback`, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json', ...authHeaders(cookie) },
+          body: JSON.stringify({
+            id: ready.view.rollback.id,
+            fingerprint: ready.view.rollback.fingerprint,
+            currentGeneration: ready.view.rollback.currentGeneration,
+            targetGeneration: ready.view.rollback.targetGeneration,
+            confirm: true,
+          }),
+        })
+        assert.equal(interrupted.status, 409)
+        const authority = JSON.parse(readFileSync(join(home, 'self-extension', 'authority.json'), 'utf8')) as {
+          registry: { records: { owner: string; status: string }[] }
+          recovery: { lastKnownGood?: { owners: { owner: string; status: string }[] } }
+        }
+        assert.equal(authority.registry.records.some((row) => row.owner === 'generated/text-slugify' && row.status === 'active'), true)
+        assert.equal(authority.recovery.lastKnownGood?.owners.some((row) => row.owner === 'generated/text-slugify' && row.status === 'active'), true)
+      })
+      const second = await bootAssistantControl({ home })
+      try {
+        const status = second.recoveryRoot.inspect()
+        const active = second.ctx.capabilityRegistry.list({ status: 'active' }).map((item) => `${item.owner}@${item.version}`).sort()
+        const current = (status.current?.owners ?? []).map((item) => `${item.owner}@${item.version}`).sort()
+        assert.deepEqual(active, current)
+        assert.equal(status.lifecycleBusy, undefined)
       } finally {
         await second.ctx.fiber.dispose()
       }

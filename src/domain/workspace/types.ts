@@ -322,6 +322,14 @@ export interface WorkspaceSnapshotInput {
       readonly rollbackSucceeded: boolean
       readonly safeModeRequired: boolean
     }
+    readonly rollbackPlan?: {
+      readonly id: string
+      readonly currentGeneration: number
+      readonly targetGeneration: number
+      readonly fingerprint: string
+      readonly available: boolean
+      readonly denials: readonly { readonly reason: string; readonly detail: string }[]
+    }
   }
   readonly candidates?: readonly WorkbenchProjection[]
   readonly memory: readonly WorkspaceMemoryItem[]

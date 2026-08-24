@@ -37,6 +37,14 @@ export function gatherWorkspaceSnapshot(input: GatherWorkspaceInput): WorkspaceS
       current?: { generation: number; mounted: readonly string[]; owners: readonly { owner: string; version: string; status: string; capabilities: readonly string[] }[] }
       rollbackTarget?: { generation: number; mounted: readonly string[]; owners: readonly { owner: string; version: string; status: string; capabilities: readonly string[] }[] }
       lastKnownGood?: { generation: number; mounted: readonly string[]; owners: readonly { owner: string; version: string; status: string; capabilities: readonly string[] }[] }
+      rollbackPlan?: {
+        id: string
+        currentGeneration: number
+        targetGeneration: number
+        fingerprint: string
+        available: boolean
+        denials: readonly { reason: string; detail: string }[]
+      }
     }
   } | undefined
   const activation = recovery?.inspect()
@@ -100,6 +108,7 @@ export function gatherWorkspaceSnapshot(input: GatherWorkspaceInput): WorkspaceS
           },
         }
         : {}),
+      ...(activation?.rollbackPlan ? { rollbackPlan: activation.rollbackPlan } : {}),
     },
     candidates: workbenchCandidates(ctx),
     memory: (ctx.get('personalMemory') as { query(): { records: { id: string; statement: string; topicKey: string; status: string }[] } } | undefined)
