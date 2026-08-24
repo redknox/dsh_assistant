@@ -26,7 +26,9 @@ export {
   ActivationDeniedError,
   GovernanceAuthorityError,
   GovernanceContractError,
+  UninstallDeniedError,
 } from './errors.js'
+export { analyzePluginDependents, type PluginDependencyResult, type PluginDependent } from './dependents.js'
 export { approvalFingerprint, approvalSummary, fingerprintFromCandidate } from './fingerprint.js'
 export { InMemoryActivationRuntime, type ActivationPrepareContext, type ActivationRuntime } from './runtime.js'
 export { GovernanceService, SimulatedCrashError, type ActivationInterrupt, type GovernanceHydrate } from './service.js'

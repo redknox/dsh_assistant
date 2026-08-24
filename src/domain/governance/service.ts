@@ -6,7 +6,8 @@ import type { CapabilityRegistry, RegistryRegisterInput } from '../registry/type
 import { REVIEW_POLICY_VERSION, type IndependentReview } from '../review/index.js'
 import type { CandidateManifestInput, CandidateRecord, CandidateValidation, CandidateWorkspace } from '../candidate/types.js'
 import { AUTHORING_CONTRACT_STAMP, GENERATED_EXTENSION_API_V1 } from '../workbench/authoring-contract.js'
-import { ActivationDeniedError, GovernanceAuthorityError, GovernanceContractError } from './errors.js'
+import { analyzePluginDependents } from './dependents.js'
+import { ActivationDeniedError, GovernanceAuthorityError, GovernanceContractError, UninstallDeniedError } from './errors.js'
 import { approvalSummary, fingerprintFromCandidate } from './fingerprint.js'
 import { InMemoryActivationRuntime, type ActivationPrepareContext, type ActivationRuntime } from './runtime.js'
 import type {
@@ -76,6 +77,7 @@ export class GovernanceService implements ExtensionGovernance, ExtensionActivati
   private pendingCandidateId?: string
   interruptAfter?: ActivationInterrupt
   failActivation?: { phase: ActivationPhase; diagnostics: string }
+  failUninstall?: string
   holdActivation?: Promise<void>
   private readonly persistHook?: () => void
   private readonly beginAuthorityCommit?: () => void
@@ -354,6 +356,92 @@ export class GovernanceService implements ExtensionGovernance, ExtensionActivati
     this.registry.transitionStatus(owner, version, 'disabled')
     this.current = this.captureSnapshot()
     this.flush()
+  }
+
+  async uninstall(credential: TrustedAuthorityCredential, owner: string, version: string): Promise<ActivationStatus> {
+    this.assertCredential(credential)
+    const denials = this.uninstallDenials(owner, version)
+    if (denials.length > 0) throw new UninstallDeniedError(denials)
+    const record = this.registry.get(owner, version)
+    if (record === undefined) throw new UninstallDeniedError([{ reason: 'unknown-plugin', detail: `${owner}@${version}` }])
+    const candidate = this.workspace.list().find((item) => item.owner === owner && item.version === version)
+    if (candidate === undefined) {
+      throw new UninstallDeniedError([{ reason: 'unknown-artifact', detail: `${owner}@${version}` }])
+    }
+    const prior = this.current
+    const priorLkg = this.lastKnownGood
+    try {
+      if (this.failUninstall) throw new Error(this.failUninstall)
+      await this.runtime.unloadGenerated(candidate.id)
+      this.registry.transitionStatus(owner, version, 'disabled')
+      this.current = this.captureSnapshot()
+      this.lastKnownGood = this.current
+      this.flush()
+      return this.status()
+    } catch (error) {
+      if (this.registry.get(owner, version)?.status !== 'active') {
+        try {
+          this.registry.transitionStatus(owner, version, 'active')
+        } catch {
+          this.safeMode = true
+          this.state = 'safe-mode'
+        }
+      }
+      if (prior !== undefined) {
+        try {
+          await this.runtime.restore(prior)
+        } catch {
+          this.safeMode = true
+          this.state = 'safe-mode'
+        }
+      }
+      this.current = prior
+      this.lastKnownGood = priorLkg
+      this.flush()
+      throw error
+    }
+  }
+
+  pluginDependents(owner: string, version: string) {
+    const record = this.registry.get(owner, version)
+    return analyzePluginDependents({
+      owner,
+      version,
+      capabilities: record?.capabilities.map((item) => item.id) ?? [],
+      registry: this.registry.list().map((item) => ({
+        owner: item.owner,
+        version: item.version,
+        status: item.status,
+        runtimeSeams: item.runtimeSeams,
+        providers: item.providers,
+      })),
+    })
+  }
+
+  private uninstallDenials(owner: string, version: string): { reason: string; detail: string }[] {
+    const record = this.registry.get(owner, version)
+    if (record === undefined) return [{ reason: 'unknown-plugin', detail: `${owner}@${version}` }]
+    if (!isolatedRuntimeOwner(record)) {
+      return [{ reason: 'managed-plugin', detail: `${owner}@${version} is not a user plugin` }]
+    }
+    if (record.status !== 'active') return [{ reason: 'already-uninstalled', detail: `${owner}@${version}` }]
+    if (this.state === 'activating' || this.state === 'activation-pending') {
+      return [{ reason: 'activation-in-flight', detail: 'cannot uninstall while activation is in flight' }]
+    }
+    const graph = this.pluginDependents(owner, version)
+    if (graph.severity === 'unresolved') {
+      return [{ reason: 'dependency-unresolved', detail: 'dependency graph could not be verified' }]
+    }
+    if (graph.severity === 'hard') {
+      const first = graph.dependents.find((item) => item.kind === 'hard')
+      return [{
+        reason: 'dependency-blocked',
+        detail: first
+          ? `${first.owner}@${first.version} requires ${first.requiredCapability}`
+          : 'active hard dependents remain',
+      }]
+    }
+    return []
   }
 
   migrateAuthoringContract(credential: TrustedAuthorityCredential, candidateId: string): CandidateRecord {

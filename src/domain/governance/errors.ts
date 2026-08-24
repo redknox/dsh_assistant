@@ -21,3 +21,13 @@ export class ActivationDeniedError extends GovernanceContractError {
     this.denials = denials
   }
 }
+
+export class UninstallDeniedError extends GovernanceContractError {
+  readonly denials: readonly { reason: string; detail: string }[]
+
+  constructor(denials: readonly { reason: string; detail: string }[]) {
+    super(`uninstall denied: ${denials.map((item) => item.reason).join(', ')}`)
+    this.name = 'UninstallDeniedError'
+    this.denials = denials
+  }
+}

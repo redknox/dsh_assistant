@@ -3,6 +3,7 @@ import { projectActivity } from './activity.js'
 import { projectActivationCards } from './activations.js'
 import { projectApprovalCards } from './approvals.js'
 import { projectUserCapabilities } from './capabilities.js'
+import { projectUserPlugins } from './plugins.js'
 import { sanitizeMissionControlView } from './redact.js'
 import { deriveSystemState } from './state.js'
 import type { MissionControlView, WorkObjectKind, WorkspaceSnapshotInput } from './types.js'
@@ -25,6 +26,7 @@ export function projectMissionControl(input: WorkspaceSnapshotInput): MissionCon
     activity: projectActivity(input),
     approvals,
     activations,
+    plugins: projectUserPlugins(input),
     capabilities: projectUserCapabilities(input),
     memory: input.memory,
     knowledge: input.knowledge,

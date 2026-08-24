@@ -10,7 +10,7 @@ function textOutput() {
   }
 }
 
-/** Read/request only. Cannot approve, activate, rollback, or rewrite recovery. */
+/** Read/request only. Cannot approve, activate, uninstall, rollback, or rewrite recovery. */
 export function registerGovernanceTools(
   tools: Pick<ToolRuntime, 'register'>,
   governance: ExtensionGovernance,

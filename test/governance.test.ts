@@ -314,6 +314,24 @@ describe('extension governance and recovery', () => {
     assert.equal(gate.denials.some((item) => item.reason === 'base-changed'), false)
   })
 
+  it('I3. trusted uninstall unmounts one generated owner and keeps history', async () => {
+    const { registry, workspace, governance, root, human, runtime } = seeded()
+    const base = ready(workspace, {
+      owner: 'generated/text-slugify',
+      version: '0.1.0',
+      capabilities: ['text.slugify'],
+    })
+    const fingerprint = governance.requestApproval(base.id).fingerprint
+    root.recordApproval(human, { candidateId: base.id, fingerprint, decision: 'approved-for-exact-diff' })
+    await root.activate(base.id, human)
+    assert.ok(runtime.mounted().includes(base.id))
+    await root.uninstall(human, 'generated/text-slugify', '0.1.0')
+    assert.equal(registry.get('generated/text-slugify', '0.1.0')?.status, 'disabled')
+    assert.equal(runtime.mounted().includes(base.id), false)
+    assert.equal(workspace.get(base.id).sealed, true)
+    assert.equal(root.inspect().lastKnownGood?.owners.some((item) => item.owner === 'generated/text-slugify'), false)
+  })
+
   it('J. rejects attempts to rewrite the recovery root', () => {
     const { governance, root } = seeded()
     assert.throws(() => governance.rewriteRecoveryRoot(), GovernanceAuthorityError)

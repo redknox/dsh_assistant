@@ -1,6 +1,6 @@
 # M6C conversation soak record
 
-Status: **unresolved**. Issues #70 and #72 stay open. The conversation-operable Workbench slice and WUI activation path are **Implemented** only; they are not Verified and do not satisfy those issues' Definition of done.
+Status: **unresolved**. Issues #70 and #72 stay open. The conversation-operable Workbench slice, WUI activation path, and READY-state user-plugin uninstall path are **Implemented** only; they are not Verified and do not satisfy those issues' Definition of done. Targeted uninstall is not the remaining global LKG rollback discoverability item.
 
 This implementation environment has no configured `DEEPSEEK_API_KEY` / `deepseek-official` soak route. Packed `tars-ng doctor` / `start --once` remain covered by `test/packaging.test.ts`. Do not treat that as a live-model soak.
 

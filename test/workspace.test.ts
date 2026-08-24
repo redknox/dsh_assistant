@@ -329,6 +329,45 @@ describe('TARS-NG mission-control workspace', () => {
     assert.deepEqual(card.eligibilityDenials, ['safe-mode'])
   })
 
+  it('G5. READY-state user plugins project a trash uninstall action', () => {
+    const plugins = projectMissionControl(snapshot({
+      activation: { state: 'active', generation: 4, mounted: ['generated--text-slugify@0.1.0'] },
+      candidates: [{
+        id: 'generated--text-slugify@0.1.0',
+        owner: 'generated/text-slugify',
+        version: '0.1.0',
+        digest: 'abc123',
+        lifecycle: 'sealed',
+        sealed: true,
+        canRequestApproval: false,
+      }],
+      registry: [
+        {
+          owner: 'managed/integrations',
+          version: '0.1.0',
+          provenance: 'managed',
+          status: 'active',
+          capabilities: ['calendar.read'],
+        },
+        {
+          owner: 'generated/text-slugify',
+          version: '0.1.0',
+          provenance: 'generated',
+          status: 'active',
+          capabilities: ['text.slugify'],
+          tools: ['text_slugify'],
+        },
+      ],
+    }))
+    assert.equal(plugins.systemState, 'READY')
+    assert.equal(plugins.plugins.length, 1)
+    assert.equal(plugins.plugins[0]?.owner, 'generated/text-slugify')
+    assert.equal(plugins.plugins[0]?.uninstallable, true)
+    assert.equal(plugins.plugins.some((item) => item.owner.startsWith('managed/')), false)
+    assert.match(renderMissionControlAsText(plugins), /generated\/text-slugify@0.1.0/)
+    assert.match(renderMissionControlAsHtml(plugins), /data-plugin-id="uninst-generated\/text-slugify@0.1.0"/)
+  })
+
   it('G3. activation failure stays visible after a successful rollback', () => {
     const view = projectMissionControl(snapshot({
       activation: {

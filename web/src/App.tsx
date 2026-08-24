@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState, type FormEvent } from 'react'
-import type { ActivationCard, ApprovalCard, MissionControlView, UserCapabilityStatus, WorkObjectKind, WorkbenchProjection } from '../../src/domain/workspace/types'
+import type { ActivationCard, ApprovalCard, MissionControlView, UserCapabilityStatus, UserPluginView, WorkObjectKind, WorkbenchProjection } from '../../src/domain/workspace/types'
 import {
   activateCandidate,
   decideApproval,
@@ -10,6 +10,7 @@ import {
   recoveryActionId,
   runRecovery,
   sendMessage,
+  uninstallPlugin,
   type UiEnvelope,
 } from './api'
 import { Glyph } from './icons'
@@ -378,7 +379,85 @@ function ConversationWorkspace(props: {
   )
 }
 
-function OperationsPanel(props: { readonly view: MissionControlView }) {
+function PluginRow(props: {
+  readonly plugin: UserPluginView
+  readonly locked: boolean
+  readonly confirming: boolean
+  readonly onAsk: (plugin: UserPluginView) => void
+  readonly onCancel: () => void
+  readonly onConfirm: (plugin: UserPluginView) => void
+}) {
+  const { plugin } = props
+  const blocked = plugin.dependency.severity === 'hard' || plugin.dependency.severity === 'unresolved'
+  const hard = plugin.dependency.dependents.filter((item) => item.kind === 'hard')
+  const optional = plugin.dependency.dependents.filter((item) => item.kind === 'optional')
+  return (
+    <div
+      className="plugin-row"
+      data-plugin-id={plugin.id}
+      data-owner={plugin.owner}
+      data-version={plugin.version}
+      data-uninstallable={plugin.uninstallable ? 'yes' : 'no'}
+    >
+      <dt>
+        <span className="capability-area">{plugin.owner}@{plugin.version}</span>
+        <span className="capability-action">{plugin.capabilities.join(', ') || 'user plugin'}</span>
+      </dt>
+      <dd>
+        {props.confirming ? (
+          <div className="uninstall-dialog" role="dialog" aria-labelledby={`uninstall-title-${plugin.id}`} aria-describedby={`uninstall-body-${plugin.id}`}>
+            <h3 id={`uninstall-title-${plugin.id}`}>Uninstall {plugin.owner}@{plugin.version}</h3>
+            <p id={`uninstall-body-${plugin.id}`}>
+              Will remove:
+              {plugin.capabilities.length > 0 ? ` Capability: ${plugin.capabilities.join(', ')}.` : ''}
+              {plugin.tools.length > 0 ? ` Tool: ${plugin.tools.join(', ')}.` : ''}
+              {` Runtime mount: ${plugin.mounted ? 1 : 0}.`}
+            </p>
+            <p>
+              Dependency check: {plugin.dependency.severity === 'none' ? 'no active dependents' : plugin.dependency.severity}
+              {hard.length > 0 ? ` — ${hard.map((item) => `${item.owner}@${item.version} requires ${item.requiredCapability}`).join('; ')}` : ''}
+              {optional.length > 0 ? ` Optional dependents will degrade: ${optional.map((item) => `${item.owner}@${item.version}`).join(', ')}.` : ''}
+            </p>
+            <p>Candidate files and audit history will be retained.</p>
+            <div className="approval-actions">
+              <button type="button" className="button button--secondary" data-uninstall-action="cancel" onClick={props.onCancel}>Cancel</button>
+              <button
+                type="button"
+                className="button button--approval"
+                data-uninstall-action="confirm"
+                disabled={props.locked || blocked}
+                onClick={() => props.onConfirm(plugin)}
+              >
+                Confirm uninstall
+              </button>
+            </div>
+          </div>
+        ) : (
+          <button
+            type="button"
+            className="plugin-uninstall"
+            data-uninstall-action="ask"
+            aria-label="Uninstall plugin"
+            title="Uninstall plugin"
+            disabled={props.locked}
+            onClick={() => props.onAsk(plugin)}
+          >
+            <Glyph name="trash" />
+          </button>
+        )}
+      </dd>
+    </div>
+  )
+}
+
+function OperationsPanel(props: {
+  readonly view: MissionControlView
+  readonly locked?: boolean
+  readonly confirmingPlugin?: string
+  readonly onAskUninstall?: (plugin: UserPluginView) => void
+  readonly onCancelUninstall?: () => void
+  readonly onConfirmUninstall?: (plugin: UserPluginView) => void
+}) {
   return (
     <aside className="ops-panel instrument-panel" id="activity" aria-label="Operational state">
       <div className="panel-code"><span>OPS 04</span><span>AUTHORITATIVE</span></div>
@@ -398,6 +477,17 @@ function OperationsPanel(props: { readonly view: MissionControlView }) {
       <section className="capability-section" id="capabilities" aria-labelledby="capability-title">
         <h2 id="capability-title">CAPABILITY STATUS</h2>
         <dl className="capability-list">
+          {(props.view.plugins ?? []).map((plugin) => (
+            <PluginRow
+              key={plugin.id}
+              plugin={plugin}
+              locked={props.locked === true}
+              confirming={props.confirmingPlugin === plugin.id}
+              onAsk={props.onAskUninstall ?? (() => {})}
+              onCancel={props.onCancelUninstall ?? (() => {})}
+              onConfirm={props.onConfirmUninstall ?? (() => {})}
+            />
+          ))}
           {props.view.capabilities.map((item) => (
             <div key={`${item.area}-${item.action}`}>
               <dt>
@@ -548,6 +638,10 @@ export function MissionControlScreen(props: {
   readonly onDeferActivation?: (card: ActivationCard) => void
   readonly deferredActivations?: readonly string[]
   readonly armedActivation?: string
+  readonly confirmingPlugin?: string
+  readonly onAskUninstall?: (plugin: UserPluginView) => void
+  readonly onCancelUninstall?: () => void
+  readonly onConfirmUninstall?: (plugin: UserPluginView) => void
   readonly onRecovery: (action: 'diagnostics' | 'rollback' | 'exit-safe-mode') => void
 }) {
   const { view } = props
@@ -589,7 +683,14 @@ export function MissionControlScreen(props: {
           onActivate={props.onActivate ?? (() => {})}
           onDefer={props.onDeferActivation ?? (() => {})}
         />
-        <OperationsPanel view={view} />
+        <OperationsPanel
+          view={view}
+          locked={locked}
+          confirmingPlugin={props.confirmingPlugin}
+          onAskUninstall={props.onAskUninstall}
+          onCancelUninstall={props.onCancelUninstall}
+          onConfirmUninstall={props.onConfirmUninstall}
+        />
       </div>
       <ControlStripView view={view} connected={props.connected} />
     </div>
@@ -606,6 +707,7 @@ export function App() {
   const [armedRecovery, setArmedRecovery] = useState<string>()
   const [armedActivation, setArmedActivation] = useState<string>()
   const [deferredActivations, setDeferredActivations] = useState<string[]>([])
+  const [confirmingPlugin, setConfirmingPlugin] = useState<string>()
 
   useEffect(() => {
     let closed = false
@@ -681,6 +783,13 @@ export function App() {
         }
         setArmedActivation(undefined)
         void act(() => activateCandidate(card, true))
+      }}
+      confirmingPlugin={confirmingPlugin}
+      onAskUninstall={(plugin) => { setConfirmingPlugin(plugin.id) }}
+      onCancelUninstall={() => { setConfirmingPlugin(undefined) }}
+      onConfirmUninstall={(plugin) => {
+        setConfirmingPlugin(undefined)
+        void act(() => uninstallPlugin(plugin, true))
       }}
       onRecovery={(action) => {
         if (action !== 'diagnostics' && armedRecovery !== action) {
