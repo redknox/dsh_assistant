@@ -346,43 +346,55 @@ function isWriterLockName(name: string): boolean {
   return name === '.writer.lock' || name.startsWith('.writer.lock.')
 }
 
+export const PROFILE_IDENTITY_MIGRATION_SCHEMA_VERSION = 1
+
 interface ProfileIdentityMigration {
   readonly schemaVersion: 1
   readonly fromIdentity: string
   readonly toIdentity: string
-  readonly sessionRoot: string
-  readonly oldPartition: string
-  readonly newPartition: string
   readonly phase: 'started' | 'copied' | 'owner' | 'binding'
+}
+
+function isDirectManagedPartition(sessionRoot: string, partition: string): boolean {
+  const sessions = path.resolve(sessionRoot, '.tars-ng-sessions')
+  const resolved = path.resolve(partition)
+  const relative = path.relative(sessions, resolved)
+  return relative !== '' && !relative.startsWith('..') && !path.isAbsolute(relative) && path.dirname(relative) === '.'
+}
+
+function assertManagedSessionPartition(sessionRoot: string, partition: string): void {
+  if (!isDirectManagedPartition(sessionRoot, partition)) {
+    throw new RuntimeContextError('profile identity migration partition is outside the Session Root')
+  }
 }
 
 function readProfileIdentityMigration(layout: ProductHomeLayout): ProfileIdentityMigration | undefined {
   const file = profileIdentityMigrationFile(layout)
   if (!existsSync(file)) return undefined
+  let raw: Partial<ProfileIdentityMigration>
   try {
-    const raw = JSON.parse(readFileSync(file, 'utf8')) as Partial<ProfileIdentityMigration>
-    if (raw.schemaVersion !== 1) return undefined
-    if (
-      typeof raw.fromIdentity !== 'string'
-      || typeof raw.toIdentity !== 'string'
-      || typeof raw.sessionRoot !== 'string'
-      || typeof raw.oldPartition !== 'string'
-      || typeof raw.newPartition !== 'string'
-      || (raw.phase !== 'started' && raw.phase !== 'copied' && raw.phase !== 'owner' && raw.phase !== 'binding')
-    ) {
-      return undefined
-    }
-    return {
-      schemaVersion: 1,
-      fromIdentity: raw.fromIdentity,
-      toIdentity: raw.toIdentity,
-      sessionRoot: raw.sessionRoot,
-      oldPartition: raw.oldPartition,
-      newPartition: raw.newPartition,
-      phase: raw.phase,
-    }
+    raw = JSON.parse(readFileSync(file, 'utf8')) as Partial<ProfileIdentityMigration>
   } catch {
-    return undefined
+    throw new RuntimeContextError('profile identity migration journal is corrupt')
+  }
+  if (typeof raw.schemaVersion === 'number' && raw.schemaVersion > PROFILE_IDENTITY_MIGRATION_SCHEMA_VERSION) {
+    throw new RuntimeContextError(`unsupported profile identity migration schema ${raw.schemaVersion}`)
+  }
+  if (
+    raw.schemaVersion !== PROFILE_IDENTITY_MIGRATION_SCHEMA_VERSION
+    || typeof raw.fromIdentity !== 'string'
+    || raw.fromIdentity.length === 0
+    || typeof raw.toIdentity !== 'string'
+    || raw.toIdentity.length === 0
+    || (raw.phase !== 'started' && raw.phase !== 'copied' && raw.phase !== 'owner' && raw.phase !== 'binding')
+  ) {
+    throw new RuntimeContextError('profile identity migration journal is corrupt')
+  }
+  return {
+    schemaVersion: 1,
+    fromIdentity: raw.fromIdentity,
+    toIdentity: raw.toIdentity,
+    phase: raw.phase,
   }
 }
 
@@ -443,17 +455,6 @@ function assertSessionRootOwnerAllowingMigration(
   ) {
     throw new RuntimeContextError('session-root is bound to another Home/Profile/Workspace')
   }
-}
-
-export function reclaimOrphanSessionRootOwner(home: string, sessionRoot: string): boolean {
-  const owner = readSessionRootOwner(sessionRoot)
-  if (!owner || owner.home !== home) return false
-  try {
-    unlinkSync(sessionRootOwnerFile(sessionRoot))
-  } catch {
-    return false
-  }
-  return true
 }
 
 export function stampSessionRootOwner(context: RuntimeContext): boolean {
@@ -617,9 +618,6 @@ export function claimSessionPartition(context: RuntimeContext): SessionPartition
   let createdOwner = false
   try {
     if (!context.ephemeralRecovery) {
-      if (!context.bound) {
-        reclaimOrphanSessionRootOwner(context.home, context.sessionRoot.value)
-      }
       const existedOwner = readSessionRootOwner(context.sessionRoot.value) !== undefined
       createdOwner = stampSessionRootOwner(context) && !existedOwner
     }
@@ -836,8 +834,14 @@ export function inspectRuntimeContext(
     }
   }
   const owner = existsSync(resolvedSessionRoot) ? readSessionRootOwner(resolvedSessionRoot) : undefined
-  if (owner && owner.home !== layout.root) {
-    throw new RuntimeContextError('session-root is bound to another Home/Profile/Workspace')
+  if (owner) {
+    if (profileCompositionError !== undefined) {
+      if (owner.home !== layout.root) {
+        throw new RuntimeContextError('session-root is bound to another Home/Profile/Workspace')
+      }
+    } else {
+      assertSessionRootOwner(resolvedSessionRoot, inspected)
+    }
   }
   return contextFromResolved(
     layout,
@@ -903,7 +907,23 @@ export function completeProfileIdentityMigration(
   }
   const nextIdentity = profileIdentityOf(loaded.composition)
   const fromIdentity = journal?.fromIdentity ?? existing.profileIdentity
-  const toIdentity = journal?.toIdentity ?? nextIdentity
+  if (journal) {
+    if (journal.toIdentity !== nextIdentity) {
+      throw new RuntimeContextError('profile identity migration journal does not match the resolved Profile')
+    }
+    if (existing.profileIdentity === existing.profile) {
+      if (journal.fromIdentity !== existing.profileIdentity) {
+        throw new RuntimeContextError('profile identity migration journal does not match this Home binding')
+      }
+    } else if (existing.profileIdentity === nextIdentity) {
+      if (journal.fromIdentity !== existing.profile) {
+        throw new RuntimeContextError('profile identity migration journal does not match this Home binding')
+      }
+    } else {
+      throw new RuntimeContextError('profile identity migration journal does not match this Home binding')
+    }
+  }
+  const toIdentity = nextIdentity
   const previous = {
     home: existing.home,
     profileIdentity: fromIdentity,
@@ -914,15 +934,14 @@ export function completeProfileIdentityMigration(
     ...previous,
     profileIdentity: toIdentity,
   }
-  const oldDir = journal?.oldPartition ?? sessionPersistenceDirOf(previous)
-  const newDir = journal?.newPartition ?? sessionPersistenceDirOf(next)
+  const oldDir = sessionPersistenceDirOf(previous)
+  const newDir = sessionPersistenceDirOf(next)
+  assertManagedSessionPartition(existing.sessionRoot, oldDir)
+  assertManagedSessionPartition(existing.sessionRoot, newDir)
   let current: ProfileIdentityMigration = journal ?? {
     schemaVersion: 1,
     fromIdentity,
     toIdentity,
-    sessionRoot: existing.sessionRoot,
-    oldPartition: oldDir,
-    newPartition: newDir,
     phase: 'started',
   }
   if (!journal) {
@@ -931,8 +950,8 @@ export function completeProfileIdentityMigration(
 
   if (current.phase === 'started') {
     if (existsSync(oldDir) && oldDir !== newDir) {
-      mkdirSync(path.dirname(newDir), { recursive: true, mode: 0o700 })
       if (existsSync(newDir)) {
+        assertManagedSessionPartition(existing.sessionRoot, newDir)
         rmSync(newDir, { recursive: true, force: true })
       }
       copyPartitionWithoutLocks(oldDir, newDir)
@@ -991,6 +1010,7 @@ export function completeProfileIdentityMigration(
 
   if (current.phase === 'binding') {
     if (oldDir !== newDir && existsSync(oldDir)) {
+      assertManagedSessionPartition(existing.sessionRoot, oldDir)
       rmSync(oldDir, { recursive: true, force: true })
     }
     try {

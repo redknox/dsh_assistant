@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { spawnSync } from 'node:child_process'
-import { chmodSync, cpSync, existsSync, mkdirSync, mkdtempSync, realpathSync, readFileSync, statSync, writeFileSync } from 'node:fs'
+import { chmodSync, cpSync, existsSync, mkdirSync, mkdtempSync, realpathSync, readFileSync, statSync, unlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -894,5 +894,81 @@ describe('runtime context', () => {
       assert.equal(existsSync(profileIdentityMigrationFile(layout)), false)
       assert.equal(existsSync(sessionPartitionLockDir(finished.sessionPersistenceDir)), false)
     }
+  })
+
+  it('fails closed on a tampered or unsupported identity-migration journal and does not delete external paths', () => {
+    const layout = ensureProductHome(isolatedHome())
+    const inspected = inspectRuntimeContext(layout, {}, undefined)
+    mkdirSync(inspected.workspace.value, { recursive: true, mode: 0o700 })
+    mkdirSync(inspected.sessionRoot.value, { recursive: true, mode: 0o700 })
+    writeFileSync(runtimeContextBindingFile(layout), `${JSON.stringify({
+      schemaVersion: 1,
+      home: inspected.home,
+      profile: inspected.profile.value,
+      profileIdentity: inspected.profile.value,
+      workspace: inspected.workspace.value,
+      workspaceIdentity: inspected.workspaceIdentity,
+      sessionRoot: inspected.sessionRoot.value,
+      sessionRootIdentity: inspected.sessionRootIdentity,
+    }, null, 2)}\n`)
+    const victim = mkdtempSync(path.join(tmpdir(), 'tars-journal-victim-'))
+    writeFileSync(path.join(victim, 'keep.txt'), 'do-not-delete\n')
+    const resolved = profileIdentityOf(loadGovernedAssistantComposition())
+    writeFileSync(profileIdentityMigrationFile(layout), `${JSON.stringify({
+      schemaVersion: 1,
+      fromIdentity: inspected.profile.value,
+      toIdentity: resolved,
+      sessionRoot: victim,
+      oldPartition: victim,
+      newPartition: victim,
+      phase: 'binding',
+    }, null, 2)}\n`)
+    const current = inspectRuntimeContext(layout, {}, undefined)
+    completeProfileIdentityMigration(layout, current, { allowFixtures: false })
+    assert.equal(existsSync(path.join(victim, 'keep.txt')), true)
+    assert.equal(readFileSync(path.join(victim, 'keep.txt'), 'utf8'), 'do-not-delete\n')
+
+    writeFileSync(profileIdentityMigrationFile(layout), `${JSON.stringify({
+      schemaVersion: 1,
+      fromIdentity: inspected.profile.value,
+      toIdentity: 'v1:' + 'ab'.repeat(32),
+      phase: 'binding',
+    }, null, 2)}\n`)
+    assert.throws(
+      () => completeProfileIdentityMigration(layout, inspectRuntimeContext(layout, {}, undefined), { allowFixtures: false }),
+      /does not match the resolved Profile/,
+    )
+    assert.equal(existsSync(path.join(victim, 'keep.txt')), true)
+
+    writeFileSync(profileIdentityMigrationFile(layout), '{not json\n')
+    assert.throws(() => inspectRuntimeContext(layout, {}, undefined), /migration journal is corrupt/)
+    assert.equal(existsSync(path.join(victim, 'keep.txt')), true)
+
+    writeFileSync(profileIdentityMigrationFile(layout), `${JSON.stringify({ schemaVersion: 99, fromIdentity: 'x', toIdentity: 'y', phase: 'binding' }, null, 2)}\n`)
+    assert.throws(() => inspectRuntimeContext(layout, {}, undefined), /unsupported profile identity migration schema/)
+    assert.equal(existsSync(path.join(victim, 'keep.txt')), true)
+  })
+
+  it('does not silently rebind a different Workspace when Home binding is missing but Session Root still has an owner', () => {
+    const workspaceA = mkdtempSync(path.join(tmpdir(), 'tars-ws-keep-'))
+    const workspaceB = mkdtempSync(path.join(tmpdir(), 'tars-ws-other-'))
+    const sessionRoot = mkdtempSync(path.join(tmpdir(), 'tars-session-keep-'))
+    const layout = ensureProductHome(isolatedHome())
+    const context = resolveRuntimeContext(layout, { workspace: workspaceA, sessionRoot }, undefined, { allowFixtures: false })
+    const hold = claimSessionPartition(context)
+    mkdirSync(context.sessionPersistenceDir, { recursive: true, mode: 0o700 })
+    writeFileSync(path.join(context.sessionPersistenceDir, 'history.jsonl'), 'original-session\n')
+    const ownerBefore = readSessionRootOwner(sessionRoot)
+    hold.release()
+    unlinkSync(runtimeContextBindingFile(layout))
+    assert.throws(
+      () => inspectRuntimeContext(layout, { workspace: workspaceB, sessionRoot }, undefined),
+      /session-root is bound to another Home\/Profile\/Workspace/,
+    )
+    assert.deepEqual(readSessionRootOwner(sessionRoot), ownerBefore)
+    assert.equal(readFileSync(path.join(context.sessionPersistenceDir, 'history.jsonl'), 'utf8'), 'original-session\n')
+    const restored = inspectRuntimeContext(layout, { workspace: workspaceA, sessionRoot }, undefined)
+    assert.equal(restored.workspaceIdentity, context.workspaceIdentity)
+    assert.equal(restored.sessionPersistenceDir, context.sessionPersistenceDir)
   })
 })
