@@ -253,6 +253,40 @@ describe('capability resolution review', () => {
     }
   })
 
+  it('does not let a catalog plugin adopt ui.markdown', () => {
+    const { resolver } = seededResolver()
+    const review = resolver.review({
+      capability: 'ui.markdown',
+      need: 'render markdown',
+      knownPlugins: [{
+        owner: 'catalog/markdown',
+        version: '1.0.0',
+        capabilities: ['ui.markdown'],
+      }],
+    })
+    assert.equal(review.kind, 'host-product-change-required')
+    rejected(review, 'evolve-owner')
+    rejected(review, 'adopt-existing')
+    rejected(review, 'implement-provider')
+  })
+
+  it('does not let a catalog provider implement ui.markdown', () => {
+    const { resolver } = seededResolver()
+    const review = resolver.review({
+      capability: 'ui.markdown',
+      need: 'render markdown',
+      knownProviders: [{
+        provider: 'markdown',
+        seam: 'ui',
+        capabilities: ['ui.markdown'],
+      }],
+    })
+    assert.equal(review.kind, 'host-product-change-required')
+    rejected(review, 'evolve-owner')
+    rejected(review, 'adopt-existing')
+    rejected(review, 'implement-provider')
+  })
+
   it('still plans an independent generated tool as new-plugin', () => {
     const { resolver } = seededResolver()
     const review = resolver.review({

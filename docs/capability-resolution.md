@@ -35,7 +35,7 @@ Evaluate in this order. Stop at the first option that satisfies the need. Record
 3. **evolve-owner** — an active **replaceable** owner already covers the domain; produce a new candidate version instead of a helper/v2 plugin. Host-owned in-process owners that declare services/providers are not replaceable by isolated assistant-origin candidates.
 4. **adopt-existing** — an inactive candidate or a caller-supplied existing plugin already describes the capability.
 5. **implement-provider** — implement an adapter/provider behind an existing application/DSH seam.
-6. **host-product-change-required** — the need is WUI/frontend composition (`ui.*`) or a new capability on an irreplaceable host owner. Do not mint an isolated tool.
+6. **host-product-change-required** — the need is WUI/frontend composition (`ui.*`) or a new capability on an irreplaceable host owner. Do not mint an isolated tool. Catalog plugins and a generic `ui` provider/seam do not bypass this unless the host inventory declares an executable `ui.frontend-extension` seam.
 7. **new-plugin** — only when a caller-supplied **complete** inventory shows no owner, seam, or adoptable provider/plugin, and the need is a genuine independent generated capability.
 
 A `new-plugin` result must include rejected evidence for options 1–5. The resolver must not jump from “capability not active” to “create plugin.”
