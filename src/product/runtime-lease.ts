@@ -1,5 +1,5 @@
 import { randomBytes, timingSafeEqual } from 'node:crypto'
-import { chmodSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs'
+import { chmodSync, closeSync, existsSync, fsyncSync, mkdirSync, openSync, readFileSync, renameSync, rmSync, unlinkSync, writeFileSync } from 'node:fs'
 import path from 'node:path'
 import { readProductVersion } from './compatibility.js'
 import { isSafeRuntimePid, processAlive, type ProductHomeLayout } from './home.js'
@@ -20,7 +20,7 @@ export type PublicRuntimeIdentity = Omit<RuntimeIdentity, 'runId'>
 
 export interface RuntimeLeaseHold {
   readonly identity: RuntimeIdentity
-  publishControlEndpoint(url: string): void
+  publishControlEndpoint(url: string): boolean
   release(): boolean
 }
 
@@ -35,7 +35,17 @@ export type RuntimeLeaseInspection =
   | { readonly state: 'ambiguous'; readonly identity?: PublicRuntimeIdentity; readonly detail: string }
 
 const HOME_BUSY = 'TARS-NG home is already owned by a verified runtime. A TARS-NG Home has at most one verified writer.'
-const HOME_AMBIGUOUS = 'A PID is alive but TARS-NG identity cannot be verified. A PID is liveness metadata, not process identity. Refusing automatic takeover.'
+const HOME_AMBIGUOUS = 'A PID is alive but TARS-NG identity cannot be verified. A PID is liveness metadata, not process identity.'
+export const HOME_AMBIGUOUS_RECOVERY = 'Refusing automatic takeover. Confirm no verified TARS-NG writer is using this Home, then delete state/runtime.lock. Do not copy identity.json between Homes.'
+
+const localHolds = new Map<string, string>()
+
+export function ownsLocalRuntimeLease(layout: ProductHomeLayout): boolean {
+  const runId = localHolds.get(layout.root)
+  if (runId === undefined) return false
+  const identity = readRuntimeIdentity(layout)
+  return identity !== undefined && runIdEquals(identity.runId, runId)
+}
 
 export function publicRuntimeIdentity(identity: RuntimeIdentity): PublicRuntimeIdentity {
   return {
@@ -50,15 +60,18 @@ export function publicRuntimeIdentity(identity: RuntimeIdentity): PublicRuntimeI
 
 export async function inspectRuntimeLease(layout: ProductHomeLayout): Promise<RuntimeLeaseInspection> {
   if (!existsSync(layout.runtimeLockDir)) return { state: 'empty' }
-  const identity = readRuntimeIdentity(layout)
-  if (!identity) {
-    return { state: 'ambiguous', detail: 'runtime lock directory exists without a readable identity record' }
+  const parsed = parseRuntimeIdentityFile(layout)
+  if (!parsed) {
+    return { state: 'ambiguous', detail: `runtime lock directory exists without a readable identity record. ${HOME_AMBIGUOUS_RECOVERY}` }
   }
-  const published = publicRuntimeIdentity(identity)
-  const verdict = await classifyOwner(identity)
+  if (parsed.normalizedHome !== layout.root) {
+    return { state: 'ambiguous', detail: `identity.normalizedHome does not match this Home. ${HOME_AMBIGUOUS_RECOVERY}` }
+  }
+  const published = publicRuntimeIdentity(parsed)
+  const verdict = await classifyOwner(parsed, layout)
   if (verdict === 'live') return { state: 'held', identity: published }
   if (verdict === 'dead') return { state: 'stale', identity: published }
-  return { state: 'ambiguous', identity: published, detail: HOME_AMBIGUOUS }
+  return { state: 'ambiguous', identity: published, detail: `${HOME_AMBIGUOUS} ${HOME_AMBIGUOUS_RECOVERY}` }
 }
 
 export async function acquireRuntimeLease(layout: ProductHomeLayout): Promise<RuntimeLeaseAcquire> {
@@ -79,7 +92,7 @@ export async function acquireRuntimeLease(layout: ProductHomeLayout): Promise<Ru
         await delay(20)
         continue
       }
-      const verdict = await classifyOwner(current)
+      const verdict = await classifyOwner(current, layout)
       if (verdict === 'dead') {
         removeLeaseIfRunId(layout, current.runId)
         continue
@@ -87,10 +100,10 @@ export async function acquireRuntimeLease(layout: ProductHomeLayout): Promise<Ru
       if (verdict === 'live') {
         return { ok: false, error: 'home-busy', detail: `${HOME_BUSY} pid=${current.pid}` }
       }
-      return { ok: false, error: 'home-ambiguous', detail: `${HOME_AMBIGUOUS} pid=${current.pid}` }
+      return { ok: false, error: 'home-ambiguous', detail: `${HOME_AMBIGUOUS} pid=${current.pid} ${HOME_AMBIGUOUS_RECOVERY}` }
     }
   }
-  return { ok: false, error: 'home-ambiguous', detail: HOME_AMBIGUOUS }
+  return { ok: false, error: 'home-ambiguous', detail: `${HOME_AMBIGUOUS} ${HOME_AMBIGUOUS_RECOVERY}` }
 }
 
 export function removeLeaseIfRunId(layout: ProductHomeLayout, runId: string): boolean {
@@ -121,6 +134,12 @@ export function removeLeaseIfRunId(layout: ProductHomeLayout, runId: string): bo
 }
 
 export function readRuntimeIdentity(layout: ProductHomeLayout): RuntimeIdentity | undefined {
+  const parsed = parseRuntimeIdentityFile(layout)
+  if (!parsed || parsed.normalizedHome !== layout.root) return undefined
+  return parsed
+}
+
+function parseRuntimeIdentityFile(layout: ProductHomeLayout): RuntimeIdentity | undefined {
   if (!existsSync(layout.runtimeIdentityFile)) return undefined
   try {
     const raw = JSON.parse(readFileSync(layout.runtimeIdentityFile, 'utf8')) as Partial<RuntimeIdentity>
@@ -180,8 +199,8 @@ export function runIdEquals(left: string, right: string): boolean {
   return timingSafeEqual(a, b)
 }
 
-export async function challengeRuntimeIdentity(identity: RuntimeIdentity): Promise<boolean> {
-  if (!isSafeRuntimePid(identity.pid)) return false
+export async function challengeRuntimeIdentity(identity: RuntimeIdentity, expectedHome = identity.normalizedHome): Promise<boolean> {
+  if (!isSafeRuntimePid(identity.pid) || identity.normalizedHome !== expectedHome) return false
   if (identity.controlEndpoint === undefined || !isLoopbackControlEndpoint(identity.controlEndpoint)) return false
   try {
     const response = await fetch(runtimeHealthUrl(identity.controlEndpoint), {
@@ -191,19 +210,23 @@ export async function challengeRuntimeIdentity(identity: RuntimeIdentity): Promi
       signal: AbortSignal.timeout(500),
     })
     if (!response.ok) return false
-    const body = await response.json() as { pid?: unknown; startedAt?: unknown; productVersion?: unknown }
+    const body = await response.json() as { pid?: unknown; startedAt?: unknown; productVersion?: unknown; normalizedHome?: unknown }
     return body.pid === identity.pid
       && body.startedAt === identity.startedAt
       && body.productVersion === identity.productVersion
+      && body.normalizedHome === identity.normalizedHome
+      && body.normalizedHome === expectedHome
   } catch {
     return false
   }
 }
 
-async function classifyOwner(identity: RuntimeIdentity): Promise<'live' | 'dead' | 'ambiguous'> {
+async function classifyOwner(identity: RuntimeIdentity, layout: ProductHomeLayout): Promise<'live' | 'dead' | 'ambiguous'> {
+  if (identity.normalizedHome !== layout.root) return 'ambiguous'
   if (!isSafeRuntimePid(identity.pid) || !processAlive(identity.pid)) return 'dead'
-  if (identity.pid === process.pid) return 'live'
-  return await challengeRuntimeIdentity(identity) ? 'live' : 'ambiguous'
+  const localRunId = localHolds.get(layout.root)
+  if (localRunId !== undefined && runIdEquals(localRunId, identity.runId)) return 'live'
+  return await challengeRuntimeIdentity(identity, layout.root) ? 'live' : 'ambiguous'
 }
 
 export function writeNewRuntimeIdentity(layout: ProductHomeLayout): RuntimeIdentity {
@@ -225,29 +248,70 @@ export function writeNewRuntimeIdentity(layout: ProductHomeLayout): RuntimeIdent
 }
 
 function writeIdentity(layout: ProductHomeLayout, identity: RuntimeIdentity): void {
-  writeFileSync(layout.runtimeIdentityFile, `${JSON.stringify(identity)}\n`, { mode: 0o600 })
+  const tmp = path.join(layout.runtimeLockDir, `.identity.${process.pid}.${randomBytes(8).toString('hex')}.tmp`)
+  writeFileSync(tmp, `${JSON.stringify(identity)}\n`, { mode: 0o600 })
   try {
-    chmodSync(layout.runtimeIdentityFile, 0o600)
-  } catch {
-    // chmod may fail on some filesystems
+    const fd = openSync(tmp, 'r+')
+    try {
+      fsyncSync(fd)
+    } finally {
+      closeSync(fd)
+    }
+    try {
+      chmodSync(tmp, 0o600)
+    } catch {
+      // chmod may fail on some filesystems
+    }
+    renameSync(tmp, layout.runtimeIdentityFile)
+    try {
+      const dirFd = openSync(layout.runtimeLockDir, 'r')
+      try {
+        fsyncSync(dirFd)
+      } finally {
+        closeSync(dirFd)
+      }
+    } catch {
+      // directory fsync is best-effort
+    }
+  } catch (error) {
+    try {
+      unlinkSync(tmp)
+    } catch {
+      // temp file may already be gone
+    }
+    throw error
+  }
+}
+
+function rememberLocalHold(identity: RuntimeIdentity): void {
+  localHolds.set(identity.normalizedHome, identity.runId)
+}
+
+function forgetLocalHold(identity: RuntimeIdentity): void {
+  const current = localHolds.get(identity.normalizedHome)
+  if (current !== undefined && runIdEquals(current, identity.runId)) {
+    localHolds.delete(identity.normalizedHome)
   }
 }
 
 function holdOf(layout: ProductHomeLayout, identity: RuntimeIdentity): RuntimeLeaseHold {
   let current = identity
+  rememberLocalHold(current)
   return {
     get identity() {
       return current
     },
     publishControlEndpoint(url: string) {
       const endpoint = normalizeLoopbackControlEndpoint(url)
-      if (endpoint === undefined) return
+      if (endpoint === undefined) return false
       const latest = readRuntimeIdentity(layout)
-      if (!latest || !runIdEquals(latest.runId, current.runId)) return
+      if (!latest || !runIdEquals(latest.runId, current.runId) || latest.normalizedHome !== layout.root) return false
       current = { ...latest, controlEndpoint: endpoint }
       writeIdentity(layout, current)
+      return true
     },
     release() {
+      forgetLocalHold(current)
       return removeLeaseIfRunId(layout, current.runId)
     },
   }

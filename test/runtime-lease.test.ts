@@ -1,15 +1,17 @@
 import assert from 'node:assert/strict'
 import { createServer } from 'node:http'
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, symlinkSync, writeFileSync } from 'node:fs'
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, symlinkSync, writeFileSync } from 'node:fs'
 import { spawn } from 'node:child_process'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { describe, it } from 'node:test'
 import { readProductVersion } from '../src/product/compatibility.js'
 import { runProductCli } from '../src/product/cli.js'
 import { ensureProductHome } from '../src/product/home.js'
 import {
   acquireRuntimeLease,
+  HOME_AMBIGUOUS_RECOVERY,
   inspectRuntimeLease,
   isLoopbackControlEndpoint,
   publicRuntimeIdentity,
@@ -412,6 +414,213 @@ describe('TARS-NG Home runtime lease', () => {
       else process.env.TARS_NG_HOME = previous
     }
   })
+
+  it('binds identity to the exact Home and does not trust a reused PID', async () => {
+    const homeA = ensureProductHome(isolatedHome())
+    const homeB = ensureProductHome(isolatedHome())
+    mkdirSync(homeB.runtimeLockDir)
+    writeFileSync(homeB.runtimeIdentityFile, `${JSON.stringify({
+      schemaVersion: RUNTIME_LEASE_SCHEMA_VERSION,
+      pid: process.pid,
+      runId: 'ab'.repeat(32),
+      startedAt: '2026-08-24T00:00:00.000Z',
+      productVersion: readProductVersion(),
+      normalizedHome: homeA.root,
+      controlEndpoint: 'http://127.0.0.1:9',
+    })}\n`)
+    const copied = await inspectRuntimeLease(homeB)
+    assert.equal(copied.state, 'ambiguous')
+    assert.match(copied.detail ?? '', /normalizedHome|Do not copy/)
+    assert.equal(readRuntimeIdentity(homeB), undefined)
+
+    mkdirSync(homeA.runtimeLockDir)
+    writeFileSync(homeA.runtimeIdentityFile, `${JSON.stringify({
+      schemaVersion: RUNTIME_LEASE_SCHEMA_VERSION,
+      pid: process.pid,
+      runId: 'cd'.repeat(32),
+      startedAt: '2026-08-24T00:00:00.000Z',
+      productVersion: readProductVersion(),
+      normalizedHome: homeA.root,
+      controlEndpoint: 'http://127.0.0.1:9',
+    })}\n`)
+    const reused = await inspectRuntimeLease(homeA)
+    assert.equal(reused.state, 'ambiguous')
+    const previous = process.env.TARS_NG_HOME
+    process.env.TARS_NG_HOME = homeA.root
+    let booted = false
+    const errors: string[] = []
+    const original = console.error
+    console.error = (text) => {
+      errors.push(String(text))
+    }
+    try {
+      const code = await runSelfExtensionCli(['status'], {
+        boot: async () => {
+          booted = true
+          throw new Error('should not boot')
+        },
+      })
+      assert.equal(code, 1)
+      assert.equal(booted, false)
+      assert.match(errors.join('\n'), /home-ambiguous/)
+    } finally {
+      console.error = original
+      if (previous === undefined) delete process.env.TARS_NG_HOME
+      else process.env.TARS_NG_HOME = previous
+    }
+  })
+
+  it('treats a malformed lock as ambiguous and keeps new-owner pid metadata', async () => {
+    const layout = ensureProductHome(isolatedHome())
+    mkdirSync(layout.runtimeLockDir)
+    writeFileSync(layout.runtimeIdentityFile, '{not-json')
+    const lines: string[] = []
+    const code = await runProductCli(['stop', '--home', layout.root], {
+      log: (text) => lines.push(text),
+      error: (text) => lines.push(text),
+    })
+    assert.equal(code, 1)
+    const text = lines.join('\n')
+    assert.match(text, /home-ambiguous/)
+    assert.match(text, new RegExp(HOME_AMBIGUOUS_RECOVERY.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')))
+    assert.doesNotMatch(text, /not running/)
+    assert.equal(existsSync(layout.runtimeLockDir), true)
+
+    const sleeper = spawn('sleep', ['30'], { stdio: 'ignore' })
+    const foreignPid = sleeper.pid
+    assert.ok(foreignPid)
+    const identity = {
+      schemaVersion: RUNTIME_LEASE_SCHEMA_VERSION,
+      pid: foreignPid,
+      runId: 'ef'.repeat(32),
+      startedAt: '2026-08-24T00:00:00.000Z',
+      productVersion: readProductVersion(),
+      normalizedHome: layout.root,
+    }
+    const server = createVerifiedControl(identity, () => {
+      writeFileSync(layout.runtimeIdentityFile, `${JSON.stringify({
+        ...identity,
+        pid: 2_147_483_646,
+        runId: '11'.repeat(32),
+        controlEndpoint: 'http://127.0.0.1:9',
+      })}\n`)
+      writeFileSync(layout.pidFile, '2147483646\n', { mode: 0o600 })
+    })
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve))
+    const address = server.address()
+    assert.ok(address && typeof address === 'object')
+    writeFileSync(layout.runtimeIdentityFile, `${JSON.stringify({
+      ...identity,
+      controlEndpoint: `http://127.0.0.1:${address.port}`,
+    })}\n`)
+    writeFileSync(layout.pidFile, `${foreignPid}\n`, { mode: 0o600 })
+    const stopLines: string[] = []
+    try {
+      const stopped = await runProductCli(['stop', '--home', layout.root], {
+        log: (text) => stopLines.push(text),
+        error: (text) => stopLines.push(text),
+      }, { stopConfirmTimeoutMs: 1_000 })
+      assert.equal(stopped, 0)
+      assert.match(stopLines.join('\n'), /stopped the verified runtime/)
+      assert.equal(existsSync(layout.pidFile), true)
+      assert.equal(readFileSync(layout.pidFile, 'utf8').trim(), '2147483646')
+    } finally {
+      sleeper.kill('SIGTERM')
+      await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()))
+    }
+  })
+
+  it('cleans up and releases the lease when publish fails after WUI bind', async () => {
+    await withKeyHome(async (home) => {
+      const layout = ensureProductHome(home)
+      const previousPort = process.env.TARS_NG_UI_PORT
+      process.env.TARS_NG_UI_PORT = '0'
+      const lines: string[] = []
+      try {
+        const code = await runProductCli(['start', '--home', home], {
+          log: (text) => lines.push(text),
+          error: (text) => lines.push(text),
+        }, {
+          afterWebUiBound: () => {
+            throw new Error('injected publish failure')
+          },
+        })
+        assert.equal(code, 1)
+        assert.match(lines.join('\n'), /injected publish failure/)
+        assert.equal(existsSync(layout.runtimeIdentityFile), false)
+        assert.equal(existsSync(layout.pidFile), false)
+      } finally {
+        if (previousPort === undefined) delete process.env.TARS_NG_UI_PORT
+        else process.env.TARS_NG_UI_PORT = previousPort
+      }
+    })
+  })
+
+  it('lets exactly one of two OS start processes own the Home', async () => {
+    await withKeyHome(async (home) => {
+      const bin = fileURLToPath(new URL('../src/product/bin.ts', import.meta.url))
+      const env = {
+        ...process.env,
+        TARS_NG_HOME: home,
+        TARS_NG_UI_PORT: '0',
+        HOME: isolatedHome(),
+      }
+      delete env.DEEPSEEK_API_KEY
+      const first = spawn(process.execPath, ['--import', 'tsx', bin, 'start', '--home', home], { env, encoding: 'utf8' })
+      const ui = await new Promise<string>((resolve, reject) => {
+        let buf = ''
+        const timer = setTimeout(() => {
+          first.kill('SIGTERM')
+          reject(new Error(`first start did not report Web UI\n${buf}`))
+        }, 25_000)
+        const onData = (chunk: string) => {
+          buf += chunk
+          const match = buf.match(/Web UI: (http:\/\/127\.0\.0\.1:\d+)/)
+          if (match?.[1]) {
+            clearTimeout(timer)
+            resolve(match[1])
+          }
+        }
+        first.stdout?.on('data', onData)
+        first.stderr?.on('data', onData)
+        first.on('error', reject)
+      })
+      const second = spawn(process.execPath, ['--import', 'tsx', bin, 'start', '--home', home], {
+        env: { ...env, TARS_NG_UI_PORT: '8799' },
+        encoding: 'utf8',
+      })
+      try {
+        const secondText = await new Promise<string>((resolve, reject) => {
+          let buf = ''
+          const timer = setTimeout(() => {
+            second.kill('SIGTERM')
+            reject(new Error(`second start did not exit\n${buf}`))
+          }, 25_000)
+          const onData = (chunk: string) => {
+            buf += chunk
+          }
+          second.stdout?.on('data', onData)
+          second.stderr?.on('data', onData)
+          second.on('error', reject)
+          second.on('exit', (code) => {
+            clearTimeout(timer)
+            resolve(`code=${code}\n${buf}`)
+          })
+        })
+        assert.match(secondText, /home-busy/)
+        assert.match(secondText, /code=1/)
+        const page = await fetch(ui)
+        assert.equal(page.status, 200)
+      } finally {
+        first.kill('SIGTERM')
+        await new Promise<void>((resolve) => {
+          first.once('exit', () => resolve())
+          if (first.exitCode !== null) resolve()
+        })
+        if (second.exitCode === null) second.kill('SIGTERM')
+      }
+    })
+  })
 })
 
 function createVerifiedControl(identity: {
@@ -419,7 +628,8 @@ function createVerifiedControl(identity: {
   readonly runId: string
   readonly startedAt: string
   readonly productVersion: string
-}) {
+  readonly normalizedHome: string
+}, onStop?: () => void) {
   return createServer((req, res) => {
     const chunks: Buffer[] = []
     req.on('data', (chunk) => chunks.push(Buffer.from(chunk)))
@@ -437,6 +647,7 @@ function createVerifiedControl(identity: {
           pid: identity.pid,
           startedAt: identity.startedAt,
           productVersion: identity.productVersion,
+          normalizedHome: identity.normalizedHome,
         }))
         return
       }
@@ -446,6 +657,7 @@ function createVerifiedControl(identity: {
           res.end(JSON.stringify({ error: 'identity-mismatch' }))
           return
         }
+        onStop?.()
         res.writeHead(200, { 'content-type': 'application/json' })
         res.end(JSON.stringify({ ok: true, pid: identity.pid }))
         return

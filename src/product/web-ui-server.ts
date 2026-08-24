@@ -28,6 +28,7 @@ export interface WebUiRuntimeControl {
   readonly pid: number
   readonly startedAt: string
   readonly productVersion: string
+  readonly normalizedHome: string
   readonly runId: string
   readonly onStop: () => void
 }
@@ -360,6 +361,7 @@ export function startWebUiServer(options: WebUiServerOptions): Promise<WebUiServ
           pid: control.pid,
           startedAt: control.startedAt,
           productVersion: control.productVersion,
+          normalizedHome: control.normalizedHome,
         })
         return
       }

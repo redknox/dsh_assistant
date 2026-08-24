@@ -3,7 +3,7 @@ import { pathToFileURL } from 'node:url'
 import { bootAssistantControl, bootSafeModeRuntime, type AssistantControl } from './boot.js'
 import { formatOperatorStatus, operatorStatus } from '../domain/self-extension/status.js'
 import { ensureProductHome, resolveProductHome } from '../product/home.js'
-import { acquireRuntimeLease, inspectRuntimeLease } from '../product/runtime-lease.js'
+import { acquireRuntimeLease, inspectRuntimeLease, ownsLocalRuntimeLease } from '../product/runtime-lease.js'
 
 function usage(): string {
   return `self-extension <command>
@@ -30,7 +30,7 @@ export async function runSelfExtensionCli(argv: string[], hooks: SelfExtensionCl
   const layout = ensureProductHome(resolveProductHome())
   process.env.TARS_NG_HOME = layout.root
   const inspected = await inspectRuntimeLease(layout)
-  if (inspected.state === 'held' && inspected.identity.pid !== process.pid) {
+  if (inspected.state === 'held' && !ownsLocalRuntimeLease(layout)) {
     console.error(`home-busy: TARS-NG home is already owned by a verified runtime (pid ${inspected.identity.pid}).`)
     return 1
   }

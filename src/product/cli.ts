@@ -1,4 +1,4 @@
-import { existsSync, unlinkSync, writeFileSync } from 'node:fs'
+import { existsSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs'
 import { operatorStatus } from '../domain/self-extension/status.js'
 import { runSelfExtensionCli } from '../runtime/self-extension-cli.js'
 import { bootAssistantControl, createAssistantAgent, type AssistantControl } from '../runtime/boot.js'
@@ -29,7 +29,7 @@ import {
   type RuntimeIdentity,
 } from './runtime-lease.js'
 import { AssistantControlSurface } from '../ui/controller.js'
-import { attachWebUiBroadcast, startWebUiServer } from './web-ui-server.js'
+import { attachWebUiBroadcast, startWebUiServer, type WebUiServer } from './web-ui-server.js'
 
 export interface ProductCliOptions {
   readonly command: string
@@ -58,6 +58,7 @@ stop authenticates against the live lease holder and does not signal a PID.`
 export interface ProductCliHooks {
   readonly bootProduct?: (layout: ProductHomeLayout, allowFixtures: boolean) => Promise<AssistantControl>
   readonly stopConfirmTimeoutMs?: number
+  readonly afterWebUiBound?: (web: WebUiServer) => void
 }
 
 export function parseProductArgv(argv: readonly string[]): ProductCliOptions {
@@ -114,11 +115,13 @@ function writePidFile(layout: ProductHomeLayout): void {
   writeFileSync(layout.pidFile, `${process.pid}\n`, { mode: 0o600 })
 }
 
-function removePidFile(layout: ProductHomeLayout): void {
+function removePidFileIfMatches(layout: ProductHomeLayout, pid: number): void {
   try {
+    const recorded = readFileSync(layout.pidFile, 'utf8').trim()
+    if (recorded !== String(pid)) return
     unlinkSync(layout.pidFile)
   } catch {
-    // pid file may already be gone
+    // pid file may already be gone or belong to another run
   }
 }
 
@@ -238,17 +241,19 @@ export async function runProductCli(
   }
 
   if (parsed.command === 'stop') {
-    const identity = readRuntimeIdentity(layout)
     const inspected = await inspectRuntimeLease(layout)
-    if (inspected.state === 'empty' || inspected.state === 'stale' || identity === undefined || !processAlive(identity.pid)) {
-      if (identity !== undefined) removeLeaseIfRunId(layout, identity.runId)
-      removePidFile(layout)
-      io.log('TARS-NG is not running.')
-      return 0
-    }
     if (inspected.state === 'ambiguous') {
       io.error(`home-ambiguous: ${inspected.detail}`)
       return 1
+    }
+    const identity = readRuntimeIdentity(layout)
+    if (inspected.state === 'empty' || inspected.state === 'stale' || identity === undefined) {
+      if (identity !== undefined) {
+        removeLeaseIfRunId(layout, identity.runId)
+        removePidFileIfMatches(layout, identity.pid)
+      }
+      io.log('TARS-NG is not running.')
+      return 0
     }
     const requested = await requestAuthenticatedStop(identity)
     if (requested === 'mismatch' || requested === 'unreachable') {
@@ -264,7 +269,7 @@ export async function runProductCli(
     if (leftover !== undefined && runIdEquals(leftover.runId, identity.runId) && !processAlive(leftover.pid)) {
       removeLeaseIfRunId(layout, leftover.runId)
     }
-    removePidFile(layout)
+    removePidFileIfMatches(layout, identity.pid)
     io.log(`stopped the verified runtime (pid ${identity.pid})`)
     return 0
   }
@@ -315,7 +320,32 @@ export async function runProductCli(
     const hold = lease.hold
     const boot = hooks.bootProduct ?? defaultBootProduct
     let booted: AssistantControl | undefined
+    let handle: Awaited<ReturnType<typeof createAssistantAgent>> | undefined
+    let web: WebUiServer | undefined
+    let detach = () => {}
     let writerStillActive = false
+    const shutdownWriter = async (): Promise<boolean> => {
+      try {
+        detach()
+        detach = () => {}
+        if (web !== undefined) {
+          await web.close()
+          web = undefined
+        }
+        if (handle !== undefined) {
+          await handle.dispose()
+          handle = undefined
+        }
+        if (booted !== undefined) {
+          await booted.ctx.fiber.dispose()
+          booted = undefined
+        }
+        writerStillActive = false
+        return true
+      } catch {
+        return false
+      }
+    }
     try {
       booted = await boot(layout, allowFixtures)
       const operator = await operatorFromBoot(booted)
@@ -353,7 +383,7 @@ export async function runProductCli(
       if (parsed.once) {
         return compatibility.ok ? 0 : 1
       }
-      const handle = await createAssistantAgent(booted.ctx, PRODUCT_UI_SESSION_ID)
+      handle = await createAssistantAgent(booted.ctx, PRODUCT_UI_SESSION_ID)
       const surface = new AssistantControlSurface(booted.ctx, PRODUCT_UI_SESSION_ID)
       let requestStop = () => {}
       const stopped = new Promise<void>((resolve) => {
@@ -361,8 +391,6 @@ export async function runProductCli(
         process.once('SIGINT', resolve)
         process.once('SIGTERM', resolve)
       })
-      let detach = () => {}
-      let web
       try {
         web = await startWebUiServer({
           surface,
@@ -372,34 +400,46 @@ export async function runProductCli(
             pid: hold.identity.pid,
             startedAt: hold.identity.startedAt,
             productVersion: hold.identity.productVersion,
+            normalizedHome: hold.identity.normalizedHome,
             runId: hold.identity.runId,
             onStop: () => requestStop(),
           },
         })
       } catch (error) {
         await handle.dispose()
+        handle = undefined
         const message = error instanceof Error ? error.message : 'Web UI failed to bind'
         io.error(message)
         appendProductLog(layout.logFile, `lifecycle start failed web-ui ${message}`)
         return 1
       }
-      detach = attachWebUiBroadcast(booted.ctx, () => web.notify())
-      hold.publishControlEndpoint(web.url)
-      writeLastStatus(layout, { ...snapshot, webUi: web.url })
-      writePidFile(layout)
       writerStillActive = true
-      io.log(`TARS-NG is running.\nWeb UI: ${web.url}\nHome: ${layout.root}`)
+      const bound = web
+      detach = attachWebUiBroadcast(booted.ctx, () => bound.notify())
+      hooks.afterWebUiBound?.(bound)
+      if (!hold.publishControlEndpoint(bound.url)) {
+        throw new Error('failed to publish loopback control endpoint')
+      }
+      writeLastStatus(layout, { ...snapshot, webUi: bound.url })
+      writePidFile(layout)
+      io.log(`TARS-NG is running.\nWeb UI: ${bound.url}\nHome: ${layout.root}`)
       await stopped
-      detach()
-      await web.close()
-      await handle.dispose()
-      writerStillActive = false
-      removePidFile(layout)
+      if (!await shutdownWriter()) {
+        io.error('shutdown failed; retaining Home lease')
+        appendProductLog(layout.logFile, 'lifecycle stop incomplete')
+        return 1
+      }
+      removePidFileIfMatches(layout, hold.identity.pid)
       appendProductLog(layout.logFile, 'lifecycle stop')
       return 0
     } catch (error) {
       const message = error instanceof Error ? error.message : 'start failed'
       if (writerStillActive) {
+        if (await shutdownWriter()) {
+          io.error(message)
+          appendProductLog(layout.logFile, `lifecycle ${parsed.command} failed ${message}`)
+          return 1
+        }
         io.error(`shutdown failed; retaining Home lease. ${message}`)
         appendProductLog(layout.logFile, `lifecycle stop incomplete ${message}`)
         return 1
@@ -411,7 +451,7 @@ export async function runProductCli(
       if (!writerStillActive) {
         if (booted !== undefined) await booted.ctx.fiber.dispose()
         hold.release()
-        removePidFile(layout)
+        removePidFileIfMatches(layout, hold.identity.pid)
       }
     }
   }

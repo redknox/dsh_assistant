@@ -161,7 +161,7 @@ Tasks are stored as `tasks/*.md` inside the sandbox. `tasks_create` follows the 
 | `tars-ng start --once` | Same lease + checks and boot, then exits without serving the Web UI (packaging/smoke). Non-zero when the default LLM is unusable |
 | `tars-ng status` | Version, verified running pid, home, Web UI URL when running, DSH compatibility — no secret values and no run token |
 | `tars-ng doctor` | Version, Node, DSH packages, home, env-file safety, credential **names**, LLM provider/model/route, `ai-runtime`, integration mode, generated-runtime isolation, Safe Mode/recovery. Stays read-only when a verified runtime already owns the Home |
-| `tars-ng stop` | Authenticated loopback stop of the exact lease holder. Does not signal a PID. Unconfirmed shutdown is fail-closed |
+| `tars-ng stop` | Authenticated loopback stop of the exact lease holder. Does not signal a PID. Unconfirmed shutdown is fail-closed. A damaged or foreign identity is `home-ambiguous` and is not treated as not-running |
 | `tars-ng self-extension …` | Recovery Root operator commands. Any command that boots a runtime fails closed with `home-busy` while a verified runtime owns the Home |
 
 Doctor never prints Authorization headers, token values, credential-bearing URLs, or chain-of-thought.
