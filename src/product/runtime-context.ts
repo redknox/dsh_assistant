@@ -1,5 +1,5 @@
 import { createHash, randomBytes } from 'node:crypto'
-import { chmodSync, closeSync, copyFileSync, cpSync, existsSync, fsyncSync, mkdirSync, openSync, readFileSync, readdirSync, realpathSync, renameSync, rmSync, statSync, unlinkSync, writeFileSync } from 'node:fs'
+import { chmodSync, closeSync, copyFileSync, cpSync, existsSync, fsyncSync, lstatSync, mkdirSync, openSync, readFileSync, readdirSync, realpathSync, renameSync, rmSync, statSync, unlinkSync, writeFileSync } from 'node:fs'
 import path from 'node:path'
 import { PRODUCT_CONFIG_SCHEMA_VERSION } from './constants.js'
 import { isSafeRuntimePid, processAlive, type ProductHomeLayout } from './home.js'
@@ -346,6 +346,90 @@ function isWriterLockName(name: string): boolean {
   return name === '.writer.lock' || name.startsWith('.writer.lock.')
 }
 
+const MANAGED_SESSIONS_DIR = '.tars-ng-sessions'
+
+function assertNotSymlinkDirectory(dir: string, label: string): void {
+  const st = lstatSync(dir)
+  if (st.isSymbolicLink()) {
+    throw new RuntimeContextError(`${label} must not be a symlink`)
+  }
+  if (!st.isDirectory()) {
+    throw new RuntimeContextError(`${label} must be a directory`)
+  }
+}
+
+export function ensureManagedSessionsContainer(sessionRoot: string): string {
+  if (!existsSync(sessionRoot)) {
+    mkdirSync(sessionRoot, { recursive: true, mode: 0o700 })
+  }
+  assertNotSymlinkDirectory(sessionRoot, 'session-root')
+  const realRoot = realpathSync(sessionRoot)
+  const container = path.join(realRoot, MANAGED_SESSIONS_DIR)
+  if (!existsSync(container)) {
+    mkdirSync(container, { recursive: false, mode: 0o700 })
+  }
+  assertNotSymlinkDirectory(container, 'session persistence container')
+  try {
+    chmodSync(container, 0o700)
+  } catch {
+    // chmod may fail on some filesystems
+  }
+  const realContainer = realpathSync(container)
+  if (path.dirname(realContainer) !== realRoot || path.basename(realContainer) !== MANAGED_SESSIONS_DIR) {
+    throw new RuntimeContextError('session persistence container escaped the Session Root')
+  }
+  return realContainer
+}
+
+export function ensureManagedSessionPartition(sessionRoot: string, partition: string): string {
+  const container = ensureManagedSessionsContainer(sessionRoot)
+  const name = path.basename(path.resolve(partition))
+  if (name === '' || name === '.' || name === '..') {
+    throw new RuntimeContextError('session partition is outside the Session Root')
+  }
+  const dest = path.join(container, name)
+  const lexicalParent = path.dirname(path.resolve(partition))
+  if (existsSync(lexicalParent)) {
+    assertNotSymlinkDirectory(lexicalParent, 'session persistence container')
+  }
+  if (existsSync(dest)) {
+    assertNotSymlinkDirectory(dest, 'session partition')
+    const realDest = realpathSync(dest)
+    if (path.dirname(realDest) !== container || path.basename(realDest) !== name) {
+      throw new RuntimeContextError('session partition escaped the Session Root')
+    }
+    try {
+      chmodSync(realDest, 0o700)
+    } catch {
+      // chmod may fail on some filesystems
+    }
+    return realDest
+  }
+  mkdirSync(dest, { recursive: false, mode: 0o700 })
+  assertNotSymlinkDirectory(dest, 'session partition')
+  try {
+    chmodSync(dest, 0o700)
+  } catch {
+    // chmod may fail on some filesystems
+  }
+  return realpathSync(dest)
+}
+
+function existingManagedSessionPartition(sessionRoot: string, partition: string): string {
+  const container = ensureManagedSessionsContainer(sessionRoot)
+  const name = path.basename(path.resolve(partition))
+  const dest = path.join(container, name)
+  if (!existsSync(dest)) {
+    throw new RuntimeContextError('session partition is outside the Session Root')
+  }
+  assertNotSymlinkDirectory(dest, 'session partition')
+  const realDest = realpathSync(dest)
+  if (path.dirname(realDest) !== container || path.basename(realDest) !== name) {
+    throw new RuntimeContextError('session partition escaped the Session Root')
+  }
+  return realDest
+}
+
 export const PROFILE_IDENTITY_MIGRATION_SCHEMA_VERSION = 1
 
 interface ProfileIdentityMigration {
@@ -353,19 +437,6 @@ interface ProfileIdentityMigration {
   readonly fromIdentity: string
   readonly toIdentity: string
   readonly phase: 'started' | 'copied' | 'owner' | 'binding'
-}
-
-function isDirectManagedPartition(sessionRoot: string, partition: string): boolean {
-  const sessions = path.resolve(sessionRoot, '.tars-ng-sessions')
-  const resolved = path.resolve(partition)
-  const relative = path.relative(sessions, resolved)
-  return relative !== '' && !relative.startsWith('..') && !path.isAbsolute(relative) && path.dirname(relative) === '.'
-}
-
-function assertManagedSessionPartition(sessionRoot: string, partition: string): void {
-  if (!isDirectManagedPartition(sessionRoot, partition)) {
-    throw new RuntimeContextError('profile identity migration partition is outside the Session Root')
-  }
 }
 
 function readProfileIdentityMigration(layout: ProductHomeLayout): ProfileIdentityMigration | undefined {
@@ -402,12 +473,19 @@ function writeProfileIdentityMigration(layout: ProductHomeLayout, journal: Profi
   writeJsonAtomic(profileIdentityMigrationFile(layout), journal)
 }
 
-function copyPartitionWithoutLocks(from: string, to: string): void {
-  mkdirSync(path.dirname(to), { recursive: true, mode: 0o700 })
-  cpSync(from, to, {
+function copyPartitionWithoutLocks(sessionRoot: string, from: string, to: string): void {
+  const realFrom = existingManagedSessionPartition(sessionRoot, from)
+  const container = ensureManagedSessionsContainer(sessionRoot)
+  const name = path.basename(path.resolve(to))
+  const dest = path.join(container, name)
+  if (existsSync(dest)) {
+    rmSync(existingManagedSessionPartition(sessionRoot, dest), { recursive: true, force: true })
+  }
+  cpSync(realFrom, dest, {
     recursive: true,
     filter: (src) => !isWriterLockName(path.basename(src)),
   })
+  existingManagedSessionPartition(sessionRoot, dest)
 }
 
 export function assertSessionRootOwner(
@@ -621,7 +699,9 @@ export function claimSessionPartition(context: RuntimeContext): SessionPartition
       const existedOwner = readSessionRootOwner(context.sessionRoot.value) !== undefined
       createdOwner = stampSessionRootOwner(context) && !existedOwner
     }
-    const root = context.sessionPersistenceDir
+    const root = context.ephemeralRecovery
+      ? context.sessionPersistenceDir
+      : ensureManagedSessionPartition(context.sessionRoot.value, context.sessionPersistenceDir)
     mkdirSync(root, { recursive: true, mode: 0o700 })
     try {
       chmodSync(root, 0o700)
@@ -936,8 +1016,7 @@ export function completeProfileIdentityMigration(
   }
   const oldDir = sessionPersistenceDirOf(previous)
   const newDir = sessionPersistenceDirOf(next)
-  assertManagedSessionPartition(existing.sessionRoot, oldDir)
-  assertManagedSessionPartition(existing.sessionRoot, newDir)
+  ensureManagedSessionsContainer(existing.sessionRoot)
   let current: ProfileIdentityMigration = journal ?? {
     schemaVersion: 1,
     fromIdentity,
@@ -950,11 +1029,7 @@ export function completeProfileIdentityMigration(
 
   if (current.phase === 'started') {
     if (existsSync(oldDir) && oldDir !== newDir) {
-      if (existsSync(newDir)) {
-        assertManagedSessionPartition(existing.sessionRoot, newDir)
-        rmSync(newDir, { recursive: true, force: true })
-      }
-      copyPartitionWithoutLocks(oldDir, newDir)
+      copyPartitionWithoutLocks(existing.sessionRoot, oldDir, newDir)
     }
     current = { ...current, phase: 'copied' }
     writeProfileIdentityMigration(layout, current)
@@ -1010,8 +1085,7 @@ export function completeProfileIdentityMigration(
 
   if (current.phase === 'binding') {
     if (oldDir !== newDir && existsSync(oldDir)) {
-      assertManagedSessionPartition(existing.sessionRoot, oldDir)
-      rmSync(oldDir, { recursive: true, force: true })
+      rmSync(existingManagedSessionPartition(existing.sessionRoot, oldDir), { recursive: true, force: true })
     }
     try {
       unlinkSync(profileIdentityMigrationFile(layout))

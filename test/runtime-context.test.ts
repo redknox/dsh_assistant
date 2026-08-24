@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { spawnSync } from 'node:child_process'
-import { chmodSync, cpSync, existsSync, mkdirSync, mkdtempSync, realpathSync, readFileSync, statSync, unlinkSync, writeFileSync } from 'node:fs'
+import { chmodSync, cpSync, existsSync, mkdirSync, mkdtempSync, realpathSync, readFileSync, statSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -21,6 +21,7 @@ import {
 } from '../src/product/profile-composition.js'
 import { activeComposedIds, loadGovernedAssistantComposition, productPackageRoot, profileIdentityOf } from '../src/product/profile-load.js'
 import { ensureProductHome } from '../src/product/home.js'
+import { readRuntimeIdentity } from '../src/product/runtime-lease.js'
 import {
   claimSessionPartition,
   commitRuntimeContext,
@@ -970,5 +971,91 @@ describe('runtime context', () => {
     const restored = inspectRuntimeContext(layout, { workspace: workspaceA, sessionRoot }, undefined)
     assert.equal(restored.workspaceIdentity, context.workspaceIdentity)
     assert.equal(restored.sessionPersistenceDir, context.sessionPersistenceDir)
+  })
+
+  it('refuses a Session Root whose .tars-ng-sessions container is a symlink', () => {
+    const workspace = mkdtempSync(path.join(tmpdir(), 'tars-ws-symlink-'))
+    const sessionRoot = mkdtempSync(path.join(tmpdir(), 'tars-session-symlink-'))
+    const victim = mkdtempSync(path.join(tmpdir(), 'tars-session-victim-'))
+    writeFileSync(path.join(victim, 'sentinel.txt'), 'keep-me\n')
+    const layout = ensureProductHome(isolatedHome())
+    const inspected = inspectRuntimeContext(layout, { workspace, sessionRoot }, undefined)
+    symlinkSync(victim, path.join(sessionRoot, '.tars-ng-sessions'))
+    assert.throws(() => claimSessionPartition(inspected), /must not be a symlink|escaped the Session Root/)
+    assert.equal(readFileSync(path.join(victim, 'sentinel.txt'), 'utf8'), 'keep-me\n')
+    writeFileSync(runtimeContextBindingFile(layout), `${JSON.stringify({
+      schemaVersion: 1,
+      home: inspected.home,
+      profile: inspected.profile.value,
+      profileIdentity: inspected.profile.value,
+      workspace: inspected.workspace.value,
+      workspaceIdentity: inspected.workspaceIdentity,
+      sessionRoot: inspected.sessionRoot.value,
+      sessionRootIdentity: inspected.sessionRootIdentity,
+    }, null, 2)}\n`)
+    assert.throws(
+      () => completeProfileIdentityMigration(layout, inspectRuntimeContext(layout, { workspace, sessionRoot }, undefined), { allowFixtures: false }),
+      /must not be a symlink|escaped the Session Root/,
+    )
+    assert.equal(readFileSync(path.join(victim, 'sentinel.txt'), 'utf8'), 'keep-me\n')
+    assert.equal(existsSync(path.join(victim, 'sentinel.txt')), true)
+  })
+
+  it('refreshes the live Home lease to the resolved Profile identity before Web UI bind', async () => {
+    const layout = ensureProductHome(isolatedHome())
+    const inspected = inspectRuntimeContext(layout, {}, undefined)
+    mkdirSync(inspected.workspace.value, { recursive: true, mode: 0o700 })
+    mkdirSync(inspected.sessionRoot.value, { recursive: true, mode: 0o700 })
+    writeFileSync(runtimeContextBindingFile(layout), `${JSON.stringify({
+      schemaVersion: 1,
+      home: inspected.home,
+      profile: inspected.profile.value,
+      profileIdentity: inspected.profile.value,
+      workspace: inspected.workspace.value,
+      workspaceIdentity: inspected.workspaceIdentity,
+      sessionRoot: inspected.sessionRoot.value,
+      sessionRootIdentity: inspected.sessionRootIdentity,
+    }, null, 2)}\n`)
+    writeFileSync(layout.envFile, 'DEEPSEEK_API_KEY=sk-offline-not-a-live-key\n', { mode: 0o600 })
+    chmodSync(layout.envFile, 0o600)
+    const previous = {
+      key: process.env.DEEPSEEK_API_KEY,
+      port: process.env.TARS_NG_UI_PORT,
+      tars: process.env.TARS_NG_HOME,
+    }
+    delete process.env.DEEPSEEK_API_KEY
+    process.env.TARS_NG_UI_PORT = '0'
+    try {
+      await runProductCli(['start', '--home', layout.root], {
+        log() {},
+        error() {},
+      }, {
+        afterWebUiBound: async (web) => {
+          const payload = await fetch(`${web.url}/api/view`).then((res) => res.json()) as {
+            view: { runtimeContext?: { profileIdentity?: string; workspaceIdentity?: string; sessionId?: string } }
+          }
+          const lease = readRuntimeIdentity(layout)
+          const binding = readRuntimeBinding(layout)
+          assert.ok(lease)
+          assert.ok(binding)
+          assert.match(binding.profileIdentity, /^v1:[0-9a-f]{64}$/)
+          assert.equal(lease.profileIdentity, binding.profileIdentity)
+          assert.equal(lease.workspaceIdentity, binding.workspaceIdentity)
+          assert.equal(lease.sessionRootIdentity, binding.sessionRootIdentity)
+          assert.equal(lease.sessionId, inspected.sessionId.value)
+          assert.equal(payload.view.runtimeContext?.profileIdentity, binding.profileIdentity)
+          assert.equal(payload.view.runtimeContext?.workspaceIdentity, binding.workspaceIdentity)
+          assert.equal(payload.view.runtimeContext?.sessionId, inspected.sessionId.value)
+          throw new Error('injected stop after identity check')
+        },
+      })
+    } finally {
+      if (previous.key === undefined) delete process.env.DEEPSEEK_API_KEY
+      else process.env.DEEPSEEK_API_KEY = previous.key
+      if (previous.port === undefined) delete process.env.TARS_NG_UI_PORT
+      else process.env.TARS_NG_UI_PORT = previous.port
+      if (previous.tars === undefined) delete process.env.TARS_NG_HOME
+      else process.env.TARS_NG_HOME = previous.tars
+    }
   })
 })

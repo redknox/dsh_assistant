@@ -75,7 +75,7 @@ stop authenticates against the live lease holder and does not signal a PID.`
 export interface ProductCliHooks {
   readonly bootProduct?: (layout: ProductHomeLayout, allowFixtures: boolean) => Promise<AssistantControl>
   readonly stopConfirmTimeoutMs?: number
-  readonly afterWebUiBound?: (web: WebUiServer) => void
+  readonly afterWebUiBound?: (web: WebUiServer) => void | Promise<void>
   readonly flushSession?: () => Promise<boolean>
 }
 
@@ -442,6 +442,15 @@ export async function runProductCli(
         }
         if (runtimeContext.bound && runtimeContext.profileCompositionError === undefined) {
           runtimeContext = completeProfileIdentityMigration(layout, runtimeContext, { allowFixtures })
+          if (!hold.refreshContextStamp({
+            profile: runtimeContext.profile.value,
+            profileIdentity: runtimeContext.profileIdentity,
+            workspaceIdentity: runtimeContext.workspaceIdentity,
+            sessionRootIdentity: runtimeContext.sessionRootIdentity,
+            sessionId: runtimeContext.sessionId.value,
+          })) {
+            throw new Error('failed to refresh Home lease identity after Profile migration')
+          }
         }
         partition = claimSessionPartition(runtimeContext)
         if (!runtimeContext.bound && runtimeContext.profileCompositionError === undefined) {
@@ -572,7 +581,7 @@ export async function runProductCli(
       writerStillActive = true
       const bound = web
       detach = attachWebUiBroadcast(booted.ctx, () => bound.notify())
-      hooks.afterWebUiBound?.(bound)
+      await hooks.afterWebUiBound?.(bound)
       if (!hold.publishControlEndpoint(bound.url)) {
         throw new Error('failed to publish loopback control endpoint')
       }

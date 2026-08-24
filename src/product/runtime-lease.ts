@@ -34,6 +34,7 @@ export type PublicRuntimeIdentity = Omit<RuntimeIdentity, 'runId'>
 export interface RuntimeLeaseHold {
   readonly identity: RuntimeIdentity
   publishControlEndpoint(url: string): boolean
+  refreshContextStamp(stamp: RuntimeLeaseStamp): boolean
   release(): boolean
 }
 
@@ -335,6 +336,20 @@ function holdOf(layout: ProductHomeLayout, identity: RuntimeIdentity): RuntimeLe
       const latest = readRuntimeIdentity(layout)
       if (!latest || !runIdEquals(latest.runId, current.runId) || latest.normalizedHome !== layout.root) return false
       current = { ...latest, controlEndpoint: endpoint }
+      writeIdentity(layout, current)
+      return true
+    },
+    refreshContextStamp(stamp: RuntimeLeaseStamp) {
+      const latest = readRuntimeIdentity(layout)
+      if (!latest || !runIdEquals(latest.runId, current.runId) || latest.normalizedHome !== layout.root) return false
+      current = {
+        ...latest,
+        ...(stamp.profile ? { profile: stamp.profile } : {}),
+        ...(stamp.profileIdentity ? { profileIdentity: stamp.profileIdentity } : {}),
+        ...(stamp.workspaceIdentity ? { workspaceIdentity: stamp.workspaceIdentity } : {}),
+        ...(stamp.sessionRootIdentity ? { sessionRootIdentity: stamp.sessionRootIdentity } : {}),
+        ...(stamp.sessionId ? { sessionId: stamp.sessionId } : {}),
+      }
       writeIdentity(layout, current)
       return true
     },
