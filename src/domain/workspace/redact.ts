@@ -70,6 +70,9 @@ export function sanitizeMissionControlView(view: MissionControlView): MissionCon
       ...plugin,
       digest: plugin.digest === undefined ? undefined : redactText(plugin.digest),
     })),
+    ...(view.rollback
+      ? { rollback: { ...view.rollback, reason: redactText(view.rollback.reason) } }
+      : {}),
     memory: view.memory.map((item) => ({ ...item, statement: redactText(item.statement) })),
     knowledge: view.knowledge.map((item) => ({
       ...item,

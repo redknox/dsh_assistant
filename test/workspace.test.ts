@@ -368,6 +368,77 @@ describe('TARS-NG mission-control workspace', () => {
     assert.match(renderMissionControlAsHtml(plugins), /data-plugin-id="uninst-generated\/text-slugify@0.1.0"/)
   })
 
+  it('G6. READY-state projects a system rollback card only when LKG differs', () => {
+    const none = projectMissionControl(snapshot())
+    assert.equal(none.rollback, undefined)
+    const ready = projectMissionControl(snapshot({
+      activation: {
+        state: 'active',
+        generation: 5,
+        mounted: ['generated--text-slugify@0.1.0'],
+        current: {
+          generation: 5,
+          mounted: ['generated--text-slugify@0.1.0'],
+          owners: [
+            { owner: 'managed/integrations', version: '0.1.0' },
+            { owner: 'generated/text-slugify', version: '0.1.0' },
+          ],
+        },
+        rollbackTarget: {
+          generation: 4,
+          mounted: [],
+          owners: [{ owner: 'managed/integrations', version: '0.1.0' }],
+        },
+      },
+      registry: [
+        {
+          owner: 'managed/integrations',
+          version: '0.1.0',
+          provenance: 'managed',
+          status: 'active',
+          capabilities: ['calendar.read'],
+          tools: ['calendar_list_events'],
+        },
+        {
+          owner: 'generated/text-slugify',
+          version: '0.1.0',
+          provenance: 'generated',
+          status: 'active',
+          capabilities: ['text.slugify'],
+          tools: ['text_slugify'],
+        },
+      ],
+    }))
+    assert.equal(ready.systemState, 'READY')
+    assert.ok(ready.rollback)
+    assert.equal(ready.rollback?.title, 'Rollback system state')
+    assert.equal(ready.rollback?.currentGeneration, 5)
+    assert.equal(ready.rollback?.targetGeneration, 4)
+    assert.ok(ready.rollback?.ownerChanges.some((item) => item.owner === 'generated/text-slugify' && item.change === 'disable'))
+    assert.ok(ready.rollback?.toolsRemoved.includes('text_slugify'))
+    assert.match(renderMissionControlAsHtml(ready), /data-rollback-id=/)
+    const recovering = projectMissionControl(snapshot({
+      safeMode: true,
+      recoveryRequired: true,
+      recoveryWhy: 'integrity failure',
+      activation: {
+        state: 'safe-mode',
+        generation: 5,
+        current: {
+          generation: 5,
+          owners: [{ owner: 'managed/integrations', version: '0.1.0' }],
+        },
+        rollbackTarget: {
+          generation: 4,
+          owners: [{ owner: 'managed/integrations', version: '0.1.0' }, { owner: 'generated/text-slugify', version: '0.1.0' }],
+        },
+      },
+    }))
+    assert.equal(recovering.systemState === 'SAFE_MODE' || recovering.systemState === 'RECOVERY', true)
+    assert.equal(recovering.rollback, undefined)
+    assert.ok(recovering.recovery)
+  })
+
   it('G3. activation failure stays visible after a successful rollback', () => {
     const view = projectMissionControl(snapshot({
       activation: {

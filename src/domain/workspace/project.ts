@@ -4,6 +4,7 @@ import { projectActivationCards } from './activations.js'
 import { projectApprovalCards } from './approvals.js'
 import { projectUserCapabilities } from './capabilities.js'
 import { projectUserPlugins } from './plugins.js'
+import { projectRollbackCard } from './rollback.js'
 import { sanitizeMissionControlView } from './redact.js'
 import { deriveSystemState } from './state.js'
 import type { MissionControlView, WorkObjectKind, WorkspaceSnapshotInput } from './types.js'
@@ -15,6 +16,7 @@ export function projectMissionControl(input: WorkspaceSnapshotInput): MissionCon
   const jobsRunning = input.jobs.filter((job) => job.lastRunStatus === 'running' || job.lastRunStatus === 'pending').length
   const degraded = input.integrationStatus.filter((item) => !item.available).map((item) => item.capability)
   const activationFailure = projectActivationFailure(input)
+  const rollback = projectRollbackCard(input, systemState)
   return sanitizeMissionControlView({
     identity: 'TARS-NG',
     systemState,
@@ -27,6 +29,7 @@ export function projectMissionControl(input: WorkspaceSnapshotInput): MissionCon
     approvals,
     activations,
     plugins: projectUserPlugins(input),
+    ...(rollback ? { rollback } : {}),
     capabilities: projectUserCapabilities(input),
     memory: input.memory,
     knowledge: input.knowledge,

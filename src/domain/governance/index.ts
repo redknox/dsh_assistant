@@ -26,6 +26,7 @@ export {
   ActivationDeniedError,
   GovernanceAuthorityError,
   GovernanceContractError,
+  RollbackDeniedError,
   UninstallDeniedError,
 } from './errors.js'
 export { analyzePluginDependents, type PluginDependencyResult, type PluginDependent } from './dependents.js'

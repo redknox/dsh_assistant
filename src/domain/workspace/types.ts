@@ -134,6 +134,32 @@ export interface RecoveryView {
   readonly actions: readonly string[]
 }
 
+export interface RollbackOwnerChange {
+  readonly owner: string
+  readonly from?: string
+  readonly to?: string
+  readonly change: 'activate' | 'disable' | 'upgrade' | 'downgrade'
+}
+
+export interface RollbackCard {
+  readonly id: string
+  readonly kind: 'system-state-rollback'
+  readonly title: 'Rollback system state'
+  readonly currentGeneration: number
+  readonly targetGeneration: number
+  readonly fingerprint: string
+  readonly reason: string
+  readonly ownerChanges: readonly RollbackOwnerChange[]
+  readonly capabilitiesAdded: readonly string[]
+  readonly capabilitiesRemoved: readonly string[]
+  readonly toolsAdded: readonly string[]
+  readonly toolsRemoved: readonly string[]
+  readonly mountsAdded: readonly string[]
+  readonly mountsRemoved: readonly string[]
+  readonly recoveryRequired: boolean
+  readonly actionable: true
+}
+
 export interface ControlStrip {
   readonly pendingApprovals: number
   readonly backgroundJobs: number
@@ -165,6 +191,7 @@ export interface MissionControlView {
   readonly approvals: readonly ApprovalCard[]
   readonly activations: readonly ActivationCard[]
   readonly plugins: readonly UserPluginView[]
+  readonly rollback?: RollbackCard
   readonly capabilities: readonly UserCapabilityView[]
   readonly memory: readonly WorkspaceMemoryItem[]
   readonly knowledge: readonly WorkspaceKnowledgeItem[]
@@ -284,6 +311,10 @@ export interface WorkspaceSnapshotInput {
     readonly mounted?: readonly string[]
     readonly pendingCandidateId?: string
     readonly lastFailureCandidateId?: string
+    readonly lifecycleBusy?: 'activation' | 'uninstall' | 'recovery'
+    readonly current?: ActivationSnapshotView
+    readonly rollbackTarget?: ActivationSnapshotView
+    readonly lastKnownGood?: ActivationSnapshotView
     readonly lastFailure?: {
       readonly candidateId: string
       readonly phase: string
@@ -298,4 +329,15 @@ export interface WorkspaceSnapshotInput {
   readonly objective?: ObjectiveView
   readonly personality: MissionControlView['personality']
   readonly blockedReason?: string
+}
+
+export interface ActivationSnapshotView {
+  readonly generation: number
+  readonly mounted?: readonly string[]
+  readonly owners: readonly {
+    readonly owner: string
+    readonly version: string
+    readonly status?: string
+    readonly capabilities?: readonly string[]
+  }[]
 }

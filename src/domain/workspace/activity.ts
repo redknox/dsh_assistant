@@ -48,6 +48,17 @@ export function projectActivity(input: WorkspaceSnapshotInput): readonly Activit
       source: 'workspace',
     })
   }
+  if (input.activation?.rollbackTarget && input.activation.current
+    && input.activation.current.generation !== input.activation.rollbackTarget.generation
+    && !input.recoveryRequired
+    && !input.safeMode) {
+    items.push({
+      id: 'rollback-planned',
+      kind: 'PLANNED',
+      summary: `Rollback planned to generation ${input.activation.rollbackTarget.generation}`,
+      source: 'extensionRecovery',
+    })
+  }
   if (input.recoveryRequired && input.recoveryWhy) {
     items.push({
       id: 'recovery',

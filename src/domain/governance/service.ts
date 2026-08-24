@@ -7,7 +7,7 @@ import { REVIEW_POLICY_VERSION, type IndependentReview } from '../review/index.j
 import type { CandidateManifestInput, CandidateRecord, CandidateValidation, CandidateWorkspace } from '../candidate/types.js'
 import { AUTHORING_CONTRACT_STAMP, GENERATED_EXTENSION_API_V1 } from '../workbench/authoring-contract.js'
 import { analyzePluginDependents } from './dependents.js'
-import { ActivationDeniedError, GovernanceAuthorityError, GovernanceContractError, UninstallDeniedError } from './errors.js'
+import { ActivationDeniedError, GovernanceAuthorityError, GovernanceContractError, RollbackDeniedError, UninstallDeniedError } from './errors.js'
 import { approvalSummary, fingerprintFromCandidate } from './fingerprint.js'
 import { InMemoryActivationRuntime, type ActivationPrepareContext, type ActivationRuntime } from './runtime.js'
 import type {
@@ -83,6 +83,7 @@ export class GovernanceService implements ExtensionGovernance, ExtensionActivati
   holdActivation?: Promise<void>
   holdUninstall?: Promise<void>
   holdSafeMode?: Promise<void>
+  holdRollback?: Promise<void>
   private mutation: 'idle' | LifecycleMutation = 'idle'
   private readonly persistHook?: () => void
   private readonly beginAuthorityCommit?: () => void
@@ -329,7 +330,10 @@ export class GovernanceService implements ExtensionGovernance, ExtensionActivati
     this.assertMutationIdle('recovery')
     const target = this.rollbackTarget ?? this.lastKnownGood
     if (target === undefined) throw new GovernanceContractError('no last-known-good snapshot to restore')
+    const denials = this.rollbackDenials(target)
+    if (denials.length > 0) throw new RollbackDeniedError(denials)
     this.mutation = 'recovery'
+    if (this.holdRollback) await this.holdRollback
     try {
       this.state = 'rollback-pending'
       this.flush()
@@ -485,6 +489,33 @@ export class GovernanceService implements ExtensionGovernance, ExtensionActivati
     if (kind === 'activation') throw new ActivationDeniedError([denial])
     if (kind === 'uninstall') throw new UninstallDeniedError([denial])
     throw new GovernanceContractError(denial.reason)
+  }
+
+  private rollbackDenials(target: ActivationSnapshot): { reason: string; detail: string }[] {
+    const currentOwners = (this.current?.owners ?? ownersFromRegistry(this.registry)).map((item) => `${item.owner}@${item.version}`).sort()
+    const targetOwners = target.owners.map((item) => `${item.owner}@${item.version}`).sort()
+    if (currentOwners.join('\n') === targetOwners.join('\n') && !this.isRecoveryRequired()) {
+      return [{ reason: 'already-restored', detail: 'current owner set already matches the rollback target' }]
+    }
+    for (const owner of target.owners) {
+      const record = this.registry.get(owner.owner, owner.version)
+      if (record === undefined) {
+        return [{ reason: 'missing-target-artifact', detail: `${owner.owner}@${owner.version}` }]
+      }
+      if (!isolatedRuntimeOwner(record)) continue
+      const candidate = this.workspace.list().find((item) => item.owner === owner.owner && item.version === owner.version)
+      if (candidate === undefined) {
+        return [{ reason: 'missing-target-artifact', detail: `${owner.owner}@${owner.version}` }]
+      }
+      const integrity = this.verifySealedArtifact(candidate)
+      if (integrity !== undefined) {
+        return [{
+          reason: integrity.startsWith('digest-mismatch') ? 'digest-mismatch' : 'missing-target-artifact',
+          detail: integrity,
+        }]
+      }
+    }
+    return []
   }
 
   private uninstallDenials(

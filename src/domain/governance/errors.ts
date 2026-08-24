@@ -22,6 +22,16 @@ export class ActivationDeniedError extends GovernanceContractError {
   }
 }
 
+export class RollbackDeniedError extends GovernanceContractError {
+  readonly denials: readonly { reason: string; detail: string }[]
+
+  constructor(denials: readonly { reason: string; detail: string }[]) {
+    super(`rollback denied: ${denials.map((item) => item.reason).join(', ')}`)
+    this.name = 'RollbackDeniedError'
+    this.denials = denials
+  }
+}
+
 export class UninstallDeniedError extends GovernanceContractError {
   readonly denials: readonly { reason: string; detail: string }[]
 
