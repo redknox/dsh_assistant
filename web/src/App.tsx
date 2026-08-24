@@ -903,7 +903,6 @@ export function MissionControlScreen(props: {
   readonly onDeferRollback?: (card: RollbackCard) => void
   readonly onRecovery: (action: 'diagnostics' | 'rollback' | 'exit-safe-mode') => void
   readonly acknowledgement?: { readonly text: string }
-  readonly error?: string
   readonly onDismissAcknowledgement?: () => void
 }) {
   const { view } = props
