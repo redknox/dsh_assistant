@@ -1,4 +1,4 @@
-import { existsSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs'
+import { existsSync, unlinkSync, writeFileSync } from 'node:fs'
 import { operatorStatus } from '../domain/self-extension/status.js'
 import { runSelfExtensionCli } from '../runtime/self-extension-cli.js'
 import { bootAssistantControl, createAssistantAgent, type AssistantControl } from '../runtime/boot.js'
@@ -115,13 +115,11 @@ function writePidFile(layout: ProductHomeLayout): void {
   writeFileSync(layout.pidFile, `${process.pid}\n`, { mode: 0o600 })
 }
 
-function removePidFileIfMatches(layout: ProductHomeLayout, pid: number): void {
+function removeOwnPidFile(layout: ProductHomeLayout): void {
   try {
-    const recorded = readFileSync(layout.pidFile, 'utf8').trim()
-    if (recorded !== String(pid)) return
     unlinkSync(layout.pidFile)
   } catch {
-    // pid file may already be gone or belong to another run
+    // pid file may already be gone
   }
 }
 
@@ -248,10 +246,7 @@ export async function runProductCli(
     }
     const identity = readRuntimeIdentity(layout)
     if (inspected.state === 'empty' || inspected.state === 'stale' || identity === undefined) {
-      if (identity !== undefined) {
-        removeLeaseIfRunId(layout, identity.runId)
-        removePidFileIfMatches(layout, identity.pid)
-      }
+      if (identity !== undefined) removeLeaseIfRunId(layout, identity.runId)
       io.log('TARS-NG is not running.')
       return 0
     }
@@ -269,7 +264,6 @@ export async function runProductCli(
     if (leftover !== undefined && runIdEquals(leftover.runId, identity.runId) && !processAlive(leftover.pid)) {
       removeLeaseIfRunId(layout, leftover.runId)
     }
-    removePidFileIfMatches(layout, identity.pid)
     io.log(`stopped the verified runtime (pid ${identity.pid})`)
     return 0
   }
@@ -429,7 +423,7 @@ export async function runProductCli(
         appendProductLog(layout.logFile, 'lifecycle stop incomplete')
         return 1
       }
-      removePidFileIfMatches(layout, hold.identity.pid)
+      removeOwnPidFile(layout)
       appendProductLog(layout.logFile, 'lifecycle stop')
       return 0
     } catch (error) {
@@ -450,8 +444,8 @@ export async function runProductCli(
     } finally {
       if (!writerStillActive) {
         if (booted !== undefined) await booted.ctx.fiber.dispose()
+        removeOwnPidFile(layout)
         hold.release()
-        removePidFileIfMatches(layout, hold.identity.pid)
       }
     }
   }

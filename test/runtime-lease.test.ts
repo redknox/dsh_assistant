@@ -415,6 +415,37 @@ describe('TARS-NG Home runtime lease', () => {
     }
   })
 
+  it('does not boot a second self-extension runtime in the same process that holds the lease', async () => {
+    const layout = ensureProductHome(isolatedHome())
+    const previous = process.env.TARS_NG_HOME
+    process.env.TARS_NG_HOME = layout.root
+    const held = await acquireRuntimeLease(layout)
+    assert.equal(held.ok, true)
+    if (!held.ok) throw new Error('expected local lease')
+    let booted = false
+    const errors: string[] = []
+    const original = console.error
+    console.error = (text) => {
+      errors.push(String(text))
+    }
+    try {
+      const code = await runSelfExtensionCli(['status'], {
+        boot: async () => {
+          booted = true
+          throw new Error('should not boot')
+        },
+      })
+      assert.equal(code, 1)
+      assert.equal(booted, false)
+      assert.match(errors.join('\n'), /home-busy/)
+    } finally {
+      console.error = original
+      held.hold.release()
+      if (previous === undefined) delete process.env.TARS_NG_HOME
+      else process.env.TARS_NG_HOME = previous
+    }
+  })
+
   it('binds identity to the exact Home and does not trust a reused PID', async () => {
     const homeA = ensureProductHome(isolatedHome())
     const homeB = ensureProductHome(isolatedHome())
@@ -483,8 +514,27 @@ describe('TARS-NG Home runtime lease', () => {
     const text = lines.join('\n')
     assert.match(text, /home-ambiguous/)
     assert.match(text, new RegExp(HOME_AMBIGUOUS_RECOVERY.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')))
+    assert.match(text, /Do not delete state\/runtime.lock/)
+    assert.doesNotMatch(text, /then delete state\/runtime.lock/)
     assert.doesNotMatch(text, /not running/)
     assert.equal(existsSync(layout.runtimeLockDir), true)
+
+    const damaged = spawn('sleep', ['30'], { stdio: 'ignore' })
+    assert.ok(damaged.pid)
+    const startLines: string[] = []
+    try {
+      const started = await runProductCli(['start', '--once', '--home', layout.root], {
+        log: (text) => startLines.push(text),
+        error: (text) => startLines.push(text),
+      })
+      const startText = startLines.join('\n')
+      assert.equal(started, 1)
+      assert.match(startText, /home-ambiguous/)
+      assert.match(startText, /Do not delete state\/runtime.lock/)
+      assert.equal(existsSync(layout.runtimeLockDir), true)
+    } finally {
+      damaged.kill('SIGTERM')
+    }
 
     const sleeper = spawn('sleep', ['30'], { stdio: 'ignore' })
     const foreignPid = sleeper.pid
@@ -556,7 +606,7 @@ describe('TARS-NG Home runtime lease', () => {
     })
   })
 
-  it('lets exactly one of two OS start processes own the Home', async () => {
+  it('lets exactly one of two simultaneous OS start processes own the Home', async () => {
     await withKeyHome(async (home) => {
       const bin = fileURLToPath(new URL('../src/product/bin.ts', import.meta.url))
       const env = {
@@ -566,58 +616,56 @@ describe('TARS-NG Home runtime lease', () => {
         HOME: isolatedHome(),
       }
       delete env.DEEPSEEK_API_KEY
-      const first = spawn(process.execPath, ['--import', 'tsx', bin, 'start', '--home', home], { env, encoding: 'utf8' })
-      const ui = await new Promise<string>((resolve, reject) => {
+      const collect = (child: ReturnType<typeof spawn>) => new Promise<{ text: string; code: number | null }>((resolve, reject) => {
         let buf = ''
+        let settled = false
+        const done = (result: { text: string; code: number | null }) => {
+          if (settled) return
+          settled = true
+          clearTimeout(timer)
+          clearInterval(ui)
+          resolve(result)
+        }
         const timer = setTimeout(() => {
-          first.kill('SIGTERM')
-          reject(new Error(`first start did not report Web UI\n${buf}`))
+          child.kill('SIGTERM')
+          reject(new Error(`start did not settle\n${buf}`))
         }, 25_000)
         const onData = (chunk: string) => {
           buf += chunk
-          const match = buf.match(/Web UI: (http:\/\/127\.0\.0\.1:\d+)/)
-          if (match?.[1]) {
-            clearTimeout(timer)
-            resolve(match[1])
-          }
         }
-        first.stdout?.on('data', onData)
-        first.stderr?.on('data', onData)
-        first.on('error', reject)
+        child.stdout?.on('data', onData)
+        child.stderr?.on('data', onData)
+        child.on('error', reject)
+        child.on('exit', (code) => done({ text: buf, code }))
+        const ui = setInterval(() => {
+          if (/Web UI: http:\/\/127\.0\.0\.1:\d+/.test(buf)) done({ text: buf, code: child.exitCode })
+        }, 25)
       })
+      const first = spawn(process.execPath, ['--import', 'tsx', bin, 'start', '--home', home], { env, encoding: 'utf8' })
       const second = spawn(process.execPath, ['--import', 'tsx', bin, 'start', '--home', home], {
-        env: { ...env, TARS_NG_UI_PORT: '8799' },
+        env: { ...env, TARS_NG_UI_PORT: '0' },
         encoding: 'utf8',
       })
       try {
-        const secondText = await new Promise<string>((resolve, reject) => {
-          let buf = ''
-          const timer = setTimeout(() => {
-            second.kill('SIGTERM')
-            reject(new Error(`second start did not exit\n${buf}`))
-          }, 25_000)
-          const onData = (chunk: string) => {
-            buf += chunk
-          }
-          second.stdout?.on('data', onData)
-          second.stderr?.on('data', onData)
-          second.on('error', reject)
-          second.on('exit', (code) => {
-            clearTimeout(timer)
-            resolve(`code=${code}\n${buf}`)
-          })
-        })
-        assert.match(secondText, /home-busy/)
-        assert.match(secondText, /code=1/)
-        const page = await fetch(ui)
+        const [a, b] = await Promise.all([collect(first), collect(second)])
+        const texts = [a, b]
+        const winners = texts.filter((item) => /Web UI: http:\/\/127\.0\.0\.1:\d+/.test(item.text) && !/home-busy|home-ambiguous/.test(item.text))
+        const losers = texts.filter((item) => /home-busy|home-ambiguous/.test(item.text) && !/Web UI: http:\/\/127\.0\.0\.1:\d+/.test(item.text))
+        assert.equal(winners.length, 1, texts.map((item) => `${item.code}:${item.text}`).join('\n---\n'))
+        assert.equal(losers.length, 1, texts.map((item) => `${item.code}:${item.text}`).join('\n---\n'))
+        assert.equal(losers[0]?.code, 1)
+        const match = winners[0]?.text.match(/Web UI: (http:\/\/127\.0\.0\.1:\d+)/)
+        assert.ok(match?.[1])
+        const page = await fetch(match[1])
         assert.equal(page.status, 200)
       } finally {
-        first.kill('SIGTERM')
-        await new Promise<void>((resolve) => {
-          first.once('exit', () => resolve())
-          if (first.exitCode !== null) resolve()
-        })
-        if (second.exitCode === null) second.kill('SIGTERM')
+        for (const child of [first, second]) {
+          if (child.exitCode === null) child.kill('SIGTERM')
+          await new Promise<void>((resolve) => {
+            child.once('exit', () => resolve())
+            if (child.exitCode !== null) resolve()
+          })
+        }
       }
     })
   })

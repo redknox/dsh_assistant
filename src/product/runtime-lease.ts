@@ -36,7 +36,7 @@ export type RuntimeLeaseInspection =
 
 const HOME_BUSY = 'TARS-NG home is already owned by a verified runtime. A TARS-NG Home has at most one verified writer.'
 const HOME_AMBIGUOUS = 'A PID is alive but TARS-NG identity cannot be verified. A PID is liveness metadata, not process identity.'
-export const HOME_AMBIGUOUS_RECOVERY = 'Refusing automatic takeover. Confirm no verified TARS-NG writer is using this Home, then delete state/runtime.lock. Do not copy identity.json between Homes.'
+export const HOME_AMBIGUOUS_RECOVERY = 'Refusing automatic takeover. Locate any live tars-ng process for this Home with tars-ng status, tars-ng doctor, and the OS, then stop that process. Do not delete state/runtime.lock while identity is unverified. A later start may reclaim only a proven-dead lease. Do not copy identity.json between Homes.'
 
 const localHolds = new Map<string, string>()
 
