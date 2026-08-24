@@ -72,14 +72,22 @@ describe('candidate workbench', () => {
         need: 'richer attendee filtering',
         behavior: 'attendee-filter',
       })
-      assert.equal(evolve.kind, 'evolve-owner')
-      const plan = ctx.candidateWorkbench.rememberPlan(evolve)
+      assert.equal(evolve.kind, 'host-product-change-required')
+      const blockedEvolve = ctx.candidateWorkbench.rememberPlan(evolve)
+      assert.equal(blockedEvolve.canCreate, false)
+      assert.throws(() => ctx.candidateWorkbench.create({ planId: blockedEvolve.planId }), /does not create/)
+      const freshPlan = ctx.capabilityResolution.review({
+        capability: 'r0.workbench.owner',
+        need: 'independent generated tool',
+        inventory: { complete: true, seams: [] },
+      })
+      assert.equal(freshPlan.kind, 'new-plugin')
+      const plan = ctx.candidateWorkbench.rememberPlan(freshPlan)
       const candidate = ctx.candidateWorkbench.create({ planId: plan.planId })
-      assert.equal(candidate.owner, 'managed/integrations')
       assert.equal(candidate.provenance.origin, 'assistant')
       const projected = projectMissionControl(gatherWorkspaceSnapshot({ ctx, sessionId: 'wb-a' }))
       assert.deepEqual(projected.candidates?.find((item) => item.id === candidate.id)?.provenance, candidate.provenance)
-      assert.ok(projected.extensions.some((item) => item.owner === 'managed/integrations' && item.candidateId === candidate.id))
+      assert.ok(projected.extensions.some((item) => item.owner === candidate.owner && item.candidateId === candidate.id))
       assert.throws(() => ctx.candidateWorkbench.create({
         planId: plan.planId,
         owner: 'generated/shadow',
@@ -342,23 +350,18 @@ describe('candidate workbench', () => {
 
   it('denies request when the active base is upgraded or disabled', () => {
     const upgraded = isolatedWorkbench()
-    const evolve = new ResolutionService(upgraded.registry).review({
-      capability: 'calendar.read',
-      need: 'richer attendee filtering',
-      behavior: 'attendee-filter',
-    })
-    const plan = upgraded.workbench.rememberPlan(evolve)
+    const plan = rememberReplaceableEvolve(upgraded)
     const created = upgraded.workbench.create({
       planId: plan.planId,
-      manifest: { capabilities: ['calendar.read'], tools: ['calendar_list_events'] },
+      manifest: { capabilities: ['r0.base.probe'], tools: ['probe'] },
     })
     upgraded.workbench.writeFile(created.id, 'src/ok.ts', 'export const value: string = "ok"\n')
     upgraded.workbench.validate(created.id)
     upgraded.workbench.seal(created.id)
     upgraded.workbench.review(created.id)
-    const current = upgraded.registry.get('managed/integrations', '0.1.0')
+    const current = upgraded.registry.get('managed/r0-base-probe', '0.1.0')
     assert.ok(current)
-    upgraded.registry.transitionStatus('managed/integrations', '0.1.0', 'disabled')
+    upgraded.registry.transitionStatus('managed/r0-base-probe', '0.1.0', 'disabled')
     upgraded.registry.register({
       ...current,
       version: '0.3.0',
@@ -369,20 +372,16 @@ describe('candidate workbench', () => {
     assert.ok(afterUpgrade.denials.some((item) => item.reason === 'base-changed'))
 
     const disabled = isolatedWorkbench()
-    const disabledPlan = disabled.workbench.rememberPlan(new ResolutionService(disabled.registry).review({
-      capability: 'calendar.read',
-      need: 'richer attendee filtering',
-      behavior: 'attendee-filter',
-    }))
+    const disabledPlan = rememberReplaceableEvolve(disabled)
     const disabledCandidate = disabled.workbench.create({
       planId: disabledPlan.planId,
-      manifest: { capabilities: ['calendar.read'], tools: ['calendar_list_events'] },
+      manifest: { capabilities: ['r0.base.probe'], tools: ['probe'] },
     })
     disabled.workbench.writeFile(disabledCandidate.id, 'src/ok.ts', 'export const value: string = "ok"\n')
     disabled.workbench.validate(disabledCandidate.id)
     disabled.workbench.seal(disabledCandidate.id)
     disabled.workbench.review(disabledCandidate.id)
-    disabled.registry.transitionStatus('managed/integrations', '0.1.0', 'disabled')
+    disabled.registry.transitionStatus('managed/r0-base-probe', '0.1.0', 'disabled')
     const afterDisable = disabled.governance.requestEligibility(disabledCandidate.id)
     assert.equal(afterDisable.ok, false)
     assert.ok(afterDisable.denials.some((item) => item.reason === 'base-changed'))
@@ -390,15 +389,10 @@ describe('candidate workbench', () => {
 
   it('retires an approved Activation Card when the base or Independent Review evidence is invalid', () => {
     const upgraded = isolatedWorkbench()
-    const evolve = new ResolutionService(upgraded.registry).review({
-      capability: 'calendar.read',
-      need: 'richer attendee filtering',
-      behavior: 'attendee-filter',
-    })
-    const plan = upgraded.workbench.rememberPlan(evolve)
+    const plan = rememberReplaceableEvolve(upgraded)
     const created = upgraded.workbench.create({
       planId: plan.planId,
-      manifest: { capabilities: ['calendar.read'], tools: ['calendar_list_events'] },
+      manifest: { capabilities: ['r0.base.probe'], tools: ['probe'] },
     })
     upgraded.workbench.writeFile(created.id, 'src/ok.ts', 'export const value: string = "ok"\n')
     upgraded.workbench.validate(created.id)
@@ -407,9 +401,9 @@ describe('candidate workbench', () => {
     const fingerprint = upgraded.governance.requestApproval(created.id).fingerprint
     const human = upgraded.root.issueAuthority({ kind: 'human-control', source: 'operator-cli' })
     upgraded.root.recordApproval(human, { candidateId: created.id, fingerprint, decision: 'approved-for-exact-diff' })
-    const current = upgraded.registry.get('managed/integrations', '0.1.0')
+    const current = upgraded.registry.get('managed/r0-base-probe', '0.1.0')
     assert.ok(current)
-    upgraded.registry.transitionStatus('managed/integrations', '0.1.0', 'disabled')
+    upgraded.registry.transitionStatus('managed/r0-base-probe', '0.1.0', 'disabled')
     upgraded.registry.register({ ...current, version: '0.3.0', status: 'active' })
     const afterUpgrade = upgraded.governance.eligibility(created.id)
     assert.ok(afterUpgrade.denials.some((item) => item.reason === 'base-changed'))
@@ -757,6 +751,11 @@ describe('candidate workbench', () => {
       assert.deepEqual([...manifest.effects.process], ['child_process'])
       assert.equal(manifest.effects.remoteSideEffect, 'mutate')
       assert.equal(manifest.riskModel?.declaredClass, 'R3')
+      parse(await tool(ctx, 'set_candidate_manifest', {
+        candidateId: id,
+        services: [],
+        providers: [],
+      }))
       await tool(ctx, 'write_candidate_file', { candidateId: id, path: 'src/plugin.js', content: R0_SOURCE })
       await tool(ctx, 'write_candidate_file', {
         candidateId: id,
@@ -1151,6 +1150,34 @@ function authorIsolated(setup: ReturnType<typeof isolatedWorkbench>): string {
   setup.workbench.validate(id)
   setup.workbench.seal(id)
   return id
+}
+
+function rememberReplaceableEvolve(setup: ReturnType<typeof isolatedWorkbench>, owner = 'managed/r0-base-probe') {
+  if (setup.registry.get(owner, '0.1.0') === undefined) {
+    setup.registry.register({
+      owner,
+      version: '0.1.0',
+      provenance: { kind: 'managed', origin: 'human' },
+      status: 'active',
+      evidence: 'Implemented',
+      capabilities: [{ id: 'r0.base.probe', permissions: [] }],
+      runtimeSeams: [],
+      tools: ['probe'],
+    })
+  }
+  return setup.workbench.rememberPlan({
+    kind: 'evolve-owner',
+    capability: 'r0.base.probe',
+    need: 'evolve a replaceable generated owner',
+    recommendation: 'evolve',
+    rationale: 'replaceable',
+    implications: [],
+    assumptions: [],
+    unresolved: [],
+    steps: [],
+    registryFacts: { exact: { kind: 'unknown', capability: 'r0.base.probe' }, domainOwners: [], conflicts: [] },
+    target: { owner, version: '0.1.0' },
+  })
 }
 
 function isolatedWorkbench(provider?: PolicyReviewerProvider, options: { persist?: (state: WorkbenchPersistState) => void } = {}) {

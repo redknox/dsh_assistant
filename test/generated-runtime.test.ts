@@ -489,15 +489,34 @@ describe('isolated generated-extension runtime', () => {
   it('rejects generated candidates that declare unproxied services or providers', async () => {
     const { ctx, recoveryRoot } = await bootAssistantControl()
     try {
-      const { status } = await activateGenerated(ctx, recoveryRoot, {
+      const created = ctx.candidateWorkspace.create({
+        review: review(),
         owner: 'generated/r0-service',
-        tool: 'r0_transform',
-        source: R0,
-        services: ['generated.service'],
+        version: '0.1.0',
+        provenance: { kind: 'generated', origin: 'assistant' },
+        manifest: {
+          capabilities: ['r0.transform'],
+          tools: ['r0_transform'],
+          services: ['generated.service'],
+          entryPoints: ['src/plugin.js'],
+        },
       })
-      assert.equal(status.state, 'activation-failed')
-      assert.match(status.lastFailure?.diagnostics ?? '', /service|provider/)
+      ctx.candidateWorkspace.writeFile(created.id, 'package.json', `${JSON.stringify({ name: 'dsh-generated-r0', type: 'module', main: 'src/plugin.js' }, null, 2)}\n`)
+      ctx.candidateWorkspace.writeFile(created.id, 'src/plugin.js', R0)
+      const report = ctx.candidateValidation.validate(created.id)
+      assert.equal(report.passed, false)
+      assert.ok(report.stages.some((item) => item.name === 'activation.compatibility' && item.status === 'failed'))
+      const sealed = ctx.candidateWorkspace.seal(created.id)
+      const digest = sealed.digest
+      ctx.independentReview.reviewCandidate(sealed.id)
+      const request = ctx.extensionGovernance.requestEligibility(sealed.id)
+      assert.equal(request.ok, false)
+      assert.ok(request.denials.some((item) => item.reason === 'isolated-runtime-forbids-services-or-providers' || item.reason === 'not-validated'))
+      assert.throws(() => ctx.extensionGovernance.requestApproval(sealed.id))
+      const human = recoveryRoot.issueAuthority({ kind: 'human-control', source: 'application-ui' })
+      await assert.rejects(() => recoveryRoot.activate(sealed.id, human))
       assert.equal(ctx.tools.get('r0_transform'), undefined)
+      assert.equal(ctx.candidateWorkspace.get(sealed.id).digest, digest)
     } finally {
       await ctx.fiber.dispose()
     }

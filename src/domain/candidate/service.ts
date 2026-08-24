@@ -168,7 +168,16 @@ export class CandidateService implements CandidateWorkspace, CandidateValidation
       throw new SealedCandidateError(`sealed candidate ${id} cannot be re-validated in place`)
     }
     record.lifecycle = 'validation-pending'
-    const report = runValidation(record)
+    const active = this.registry.list({ owner: record.owner, status: 'active' })[0]
+    const report = runValidation(record, active === undefined
+      ? undefined
+      : {
+        owner: active.owner,
+        provenanceKind: active.provenance.kind,
+        origin: active.provenance.origin,
+        services: active.services,
+        providers: active.providers,
+      })
     record.digest = report.digest
     record.validation = report
     record.lifecycle = lifecycleFromReport(report)

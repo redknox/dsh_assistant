@@ -1,7 +1,42 @@
+import { evaluateActivationCompatibility, type OwnerExecutionFacts } from '../activation-compatibility/index.js'
 import { finding } from './finding.js'
 import { REVIEW_POLICY_VERSION, type ReviewFinding, type ReviewPackage, type ReviewReport } from './types.js'
 
-export function deterministicPrechecks(pkg: ReviewPackage): readonly ReviewFinding[] {
+export function activationCompatibilityFindings(
+  pkg: ReviewPackage,
+  facts?: {
+    readonly origin?: string
+    readonly provenanceKind?: string
+    readonly services?: readonly string[]
+    readonly providers?: readonly string[]
+    readonly capabilities?: readonly string[]
+    readonly activeOwner?: OwnerExecutionFacts
+  },
+): readonly ReviewFinding[] {
+  const result = evaluateActivationCompatibility({
+    owner: pkg.candidate.owner,
+    provenanceKind: facts?.provenanceKind ?? (pkg.generated === true ? 'generated' : 'managed'),
+    origin: facts?.origin ?? (pkg.generated === true ? 'assistant' : undefined),
+    resolutionKind: pkg.resolutionKind,
+    resolutionCapability: pkg.resolutionCapability,
+    capabilities: facts?.capabilities,
+    services: facts?.services,
+    providers: facts?.providers,
+    activeOwner: facts?.activeOwner,
+  })
+  return result.denials.map((denial) => gate(
+    pkg.candidate.digest,
+    denial.reason,
+    'activation.compatibility',
+    denial.detail,
+    'Do not request approval. Use a replaceable generated owner or a trusted host product change.',
+  ))
+}
+
+export function deterministicPrechecks(
+  pkg: ReviewPackage,
+  facts?: Parameters<typeof activationCompatibilityFindings>[1],
+): readonly ReviewFinding[] {
   const digest = pkg.candidate.digest
   const out: ReviewFinding[] = []
   if (pkg.builderClaims?.reviewPassed === true || pkg.builderClaims?.reviewComplete === true) {
@@ -46,6 +81,7 @@ export function deterministicPrechecks(pkg: ReviewPackage): readonly ReviewFindi
       'Satisfy the Reliability Gate for this risk class. Reviewer output cannot waive it.',
     ))
   }
+  out.push(...activationCompatibilityFindings(pkg, facts))
   if (pkg.generated && (pkg.riskClass === 'R4' || pkg.reliabilityDerivedClass === 'R4')) {
     out.push(finding({
       reviewedDigest: digest,

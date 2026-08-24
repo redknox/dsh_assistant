@@ -52,6 +52,7 @@ export interface GovernancePluginConfig {
   readonly beginAuthorityCommit?: () => void
   readonly finishAuthorityCommit?: () => void
   readonly durableHome?: string
+  readonly onActivationDiagnostic?: (line: string) => void
   /** Safe Mode omits the request tool; inspect remains. */
   readonly allowRequestTool?: boolean
 }
@@ -73,6 +74,7 @@ export async function apply(ctx: Context, config: GovernancePluginConfig = {}) {
       durableHome: config.durableHome,
       independentReview: ctx.independentReview,
       validation: ctx.candidateValidation,
+      onActivationDiagnostic: config.onActivationDiagnostic,
     },
   )
   config.attachRecoveryRoot?.(root)

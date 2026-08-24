@@ -20,6 +20,7 @@ export const RESOLUTION_KINDS = [
   'adopt-existing',
   'implement-provider',
   'new-plugin',
+  'host-product-change-required',
   'insufficient-information',
   'conflict',
 ] as const

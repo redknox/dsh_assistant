@@ -582,25 +582,23 @@ export function apply(ctx) {
   it('approves and rejects a real Self-Extension candidate by candidateId and fingerprint', async () => {
     await withServer(bootAssistantControl, 'web-ui-extension', async (url, _surface, _agent, ctx) => {
       const review: ResolutionReview = {
-        kind: 'evolve-owner',
-        capability: 'calendar.read',
+        kind: 'new-plugin',
+        capability: 'r0.webui.approval',
         need: 'Web UI approval path',
-        recommendation: 'evolve managed/integrations',
-        rationale: 'owned',
+        recommendation: 'new plugin',
+        rationale: 'independent generated tool',
         implications: [],
         assumptions: [],
         unresolved: [],
         steps: [],
-        registryFacts: { exact: { kind: 'unknown', capability: 'calendar.read' }, domainOwners: [], conflicts: [] },
-        target: { owner: 'managed/integrations', version: '0.1.0' },
+        registryFacts: { exact: { kind: 'unknown', capability: 'r0.webui.approval' }, domainOwners: [], conflicts: [] },
       }
       const created = ctx.candidateWorkspace.create({
         review,
-        owner: 'managed/integrations',
-        version: '0.2.0',
-        baseVersion: '0.1.0',
+        owner: 'generated/web-ui-approval',
+        version: '0.1.0',
         manifest: {
-          capabilities: ['calendar.read', 'calendar.freebusy'],
+          capabilities: ['r0.webui.approval'],
           permissions: ['local.fake.suite'],
           secrets: ['google.calendar.oauth'],
           effects: {
@@ -661,11 +659,10 @@ export function apply(ctx) {
 
       const second = ctx.candidateWorkspace.create({
         review,
-        owner: 'managed/integrations',
-        version: '0.3.0',
-        baseVersion: '0.1.0',
+        owner: 'generated/web-ui-approval-2',
+        version: '0.1.0',
         manifest: {
-          capabilities: ['calendar.read'],
+          capabilities: ['r0.webui.approval'],
           permissions: ['local.fake.suite'],
           riskModel: googleCalendarReadRiskModel(),
         },
@@ -687,7 +684,55 @@ export function apply(ctx) {
       const approvedRecord = ctx.extensionGovernance.inspectApproval(sealedSecond.id)
       assert.equal(approvedRecord?.decision, 'approved-for-exact-diff')
       assert.equal(approvedRecord?.fingerprint, requestedSecond.fingerprint)
-      assert.equal(ctx.capabilityRegistry.get('managed/integrations', '0.3.0'), undefined)
+      assert.equal(ctx.capabilityRegistry.get('generated/web-ui-approval-2', '0.1.0'), undefined)
+    })
+  })
+
+  it('blocks an incompatible host-owner candidate before approval', async () => {
+    await withServer(bootAssistantControl, 'web-ui-compat-block', async (url, _surface, _agent, ctx) => {
+      const review: ResolutionReview = {
+        kind: 'evolve-owner',
+        capability: 'ui.markdown',
+        need: 'render markdown in conversation',
+        recommendation: 'evolve managed/ui-control-surface',
+        rationale: 'owned',
+        implications: [],
+        assumptions: [],
+        unresolved: [],
+        steps: [],
+        registryFacts: { exact: { kind: 'unknown', capability: 'ui.markdown' }, domainOwners: [], conflicts: [] },
+        target: { owner: 'managed/ui-control-surface', version: '0.1.0' },
+      }
+      const created = ctx.candidateWorkspace.create({
+        review,
+        owner: 'managed/ui-control-surface',
+        version: '0.1.1',
+        provenance: { kind: 'managed', origin: 'assistant' },
+        manifest: {
+          capabilities: ['ui.control', 'ui.markdown'],
+          tools: ['markdown_render'],
+          services: [],
+          entryPoints: ['src/plugin.js'],
+        },
+      })
+      ctx.candidateWorkspace.writeFile(created.id, 'src/plugin.js', 'export function apply() {}\n')
+      ctx.candidateValidation.validate(created.id)
+      const sealed = ctx.candidateWorkspace.seal(created.id)
+      ctx.independentReview.reviewCandidate(sealed.id)
+      assert.throws(() => ctx.extensionGovernance.requestApproval(sealed.id))
+      const cookie = await cookieHeader(url)
+      const view = await fetch(`${url}/api/view`).then((res) => res.json()) as { view: MissionControlView }
+      const candidate = view.view.candidates?.find((item) => item.id === sealed.id)
+      assert.ok(candidate)
+      assert.equal(candidate.canRequestApproval, false)
+      assert.ok((candidate.requestDenials ?? []).length > 0)
+      assert.equal(view.view.approvals.some((item) => item.candidateId === sealed.id), false)
+      const approve = await fetch(`${url}/api/approve`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', ...authHeaders(cookie) },
+        body: JSON.stringify({ id: 'apr-missing', candidateId: sealed.id, fingerprint: 'none' }),
+      })
+      assert.equal(approve.status, 409)
     })
   })
 

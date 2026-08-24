@@ -46,18 +46,19 @@ describe('capability resolution review', () => {
     assert.match(review.rationale, /already exposes/)
   })
 
-  it('B. evolves the existing calendar owner instead of a new plugin', () => {
+  it('B. does not evolve an irreplaceable host calendar owner', () => {
     const { resolver } = seededResolver()
     const review = resolver.review({
       capability: 'calendar.freebusy',
       need: 'richer attendee and free-busy filtering',
       behavior: 'attendee-freebusy',
     })
-    assert.equal(review.kind, 'evolve-owner')
+    assert.equal(review.kind, 'host-product-change-required')
     assert.equal(review.target?.owner, 'managed/integrations')
     assert.equal(review.target?.version, '0.1.0')
     rejected(review, 'reuse')
     rejected(review, 'configure')
+    rejected(review, 'evolve-owner')
     assert.equal(review.steps.some((item) => item.option === 'new-plugin'), false)
   })
 
@@ -229,6 +230,144 @@ describe('capability resolution review', () => {
     })
     assert.equal(review.kind, 'new-plugin')
     rejected(review, 'implement-provider')
+  })
+
+  it('does not recommend isolated evolve of host-owned service owners', () => {
+    const { resolver } = seededResolver()
+    const cases = [
+      ['ui.markdown', 'managed/ui-control-surface'],
+      ['memory.export', 'managed/personal-memory'],
+      ['jobs.schedule', 'managed/assistant-jobs'],
+      ['policy.audit', 'managed/trust-policy'],
+      ['calendar.freebusy', 'managed/integrations'],
+    ] as const
+    for (const [capability, owner] of cases) {
+      const review = resolver.review({
+        capability,
+        need: 'extend host-owned composition',
+        behavior: 'new-behavior',
+      })
+      assert.equal(review.kind, 'host-product-change-required', capability)
+      assert.equal(review.target?.owner, owner, capability)
+      rejected(review, 'evolve-owner')
+    }
+  })
+
+  it('does not evolve a replaceable UI owner for new ui.markdown', () => {
+    const registry = new RegistryService(new InMemoryRegistryPersistence())
+    registry.register({
+      owner: 'generated/legacy-ui',
+      version: '0.1.0',
+      provenance: { kind: 'generated', origin: 'assistant' },
+      status: 'active',
+      evidence: 'Verified',
+      capabilities: [{ id: 'ui.control', permissions: [] }],
+      runtimeSeams: [],
+      tools: ['legacy_ui'],
+    })
+    const review = new ResolutionService(registry).review({
+      capability: 'ui.markdown',
+      need: 'render markdown',
+    })
+    assert.equal(review.kind, 'host-product-change-required')
+    rejected(review, 'reuse')
+    rejected(review, 'configure')
+    rejected(review, 'evolve-owner')
+    rejected(review, 'adopt-existing')
+    rejected(review, 'implement-provider')
+  })
+
+  it('does not let a catalog plugin adopt ui.markdown', () => {
+    const { resolver } = seededResolver()
+    const review = resolver.review({
+      capability: 'ui.markdown',
+      need: 'render markdown',
+      knownPlugins: [{
+        owner: 'catalog/markdown',
+        version: '1.0.0',
+        capabilities: ['ui.markdown'],
+      }],
+    })
+    assert.equal(review.kind, 'host-product-change-required')
+    rejected(review, 'evolve-owner')
+    rejected(review, 'adopt-existing')
+    rejected(review, 'implement-provider')
+  })
+
+  it('does not treat a claimed frontend-extension seam as host authority', () => {
+    const { registry, resolver } = seededResolver()
+    registry.register({
+      owner: 'generated/ui-seam-claim',
+      version: '0.1.0',
+      provenance: { kind: 'generated', origin: 'assistant' },
+      evidence: 'Implemented',
+      capabilities: [{ id: 'ui.markdown', permissions: [] }],
+      runtimeSeams: ['ui.frontend-extension', 'ui'],
+      status: 'candidate',
+    })
+    const viaInventory = resolver.review({
+      capability: 'ui.markdown',
+      need: 'render markdown',
+      inventory: { complete: true, seams: ['ui.frontend-extension'] },
+      knownPlugins: [{
+        owner: 'catalog/markdown',
+        version: '1.0.0',
+        capabilities: ['ui.markdown'],
+      }],
+    })
+    assert.equal(viaInventory.kind, 'host-product-change-required')
+    rejected(viaInventory, 'adopt-existing')
+    rejected(viaInventory, 'implement-provider')
+
+    const viaProvider = resolver.review({
+      capability: 'ui.markdown',
+      need: 'render markdown',
+      inventory: { complete: true, seams: ['ui.frontend-extension'] },
+      knownProviders: [{
+        provider: 'markdown',
+        seam: 'ui.frontend-extension',
+        capabilities: ['ui.markdown'],
+      }],
+    })
+    assert.equal(viaProvider.kind, 'host-product-change-required')
+    rejected(viaProvider, 'adopt-existing')
+    rejected(viaProvider, 'implement-provider')
+
+    const viaRegistry = resolver.review({
+      capability: 'ui.markdown',
+      need: 'render markdown',
+      behavior: 'new-renderer',
+    })
+    assert.equal(viaRegistry.kind, 'host-product-change-required')
+    rejected(viaRegistry, 'adopt-existing')
+  })
+
+  it('does not let a catalog provider implement ui.markdown', () => {
+    const { resolver } = seededResolver()
+    const review = resolver.review({
+      capability: 'ui.markdown',
+      need: 'render markdown',
+      knownProviders: [{
+        provider: 'markdown',
+        seam: 'ui',
+        capabilities: ['ui.markdown'],
+      }],
+    })
+    assert.equal(review.kind, 'host-product-change-required')
+    rejected(review, 'evolve-owner')
+    rejected(review, 'adopt-existing')
+    rejected(review, 'implement-provider')
+  })
+
+  it('still plans an independent generated tool as new-plugin', () => {
+    const { resolver } = seededResolver()
+    const review = resolver.review({
+      capability: 'text.slugify',
+      need: 'turn titles into URL slugs',
+      inventory: { complete: true, seams: CORE_KNOWN_SEAMS },
+    })
+    assert.equal(review.kind, 'new-plugin')
+    rejected(review, 'evolve-owner')
   })
 
   it('does not mutate registry state', () => {
