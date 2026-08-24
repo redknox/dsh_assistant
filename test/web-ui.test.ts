@@ -808,6 +808,11 @@ export function apply(ctx) {
       const staleCard = await approveActivationCard(url, cookie, stale.id)
       const human = recoveryRoot.issueAuthority({ kind: 'human-control', source: 'application-ui' })
       recoveryRoot.enterSafeMode(human)
+      const afterSafe = await fetch(`${url}/api/view`).then((res) => res.json()) as { view: MissionControlView }
+      const stillPending = afterSafe.view.activations.find((item) => item.candidateId === stale.id)
+      assert.ok(stillPending)
+      assert.equal(stillPending.status, 'APPROVED_NOT_ACTIVE')
+      assert.equal(stillPending.eligibilityOk, false)
       const denied = await fetch(`${url}/api/activate`, {
         method: 'POST',
         headers: { 'content-type': 'application/json', ...authHeaders(cookie) },
@@ -1008,12 +1013,15 @@ export function apply(ctx) {
           digest: 'abc',
           fingerprint: 'fp-ext',
           isolatedRuntime: true,
-          capabilitiesAdded: ['search'],
+          capabilitiesAdded: [],
           capabilitiesRemoved: [],
+          capabilitiesChanged: ['search'],
           permissionsAdded: [],
           permissionsRemoved: [],
-          toolsAdded: ['web_search'],
+          permissionsChanged: [],
+          toolsAdded: [],
           toolsRemoved: [],
+          toolsChanged: ['web_search'],
           effects: ['network: example.com'],
           eligibilityOk: true,
           eligibilityDenials: [],
@@ -1033,6 +1041,8 @@ export function apply(ctx) {
     assert.match(activation, /data-activation-id="apr-act"/)
     assert.match(activation, /data-activation-action="activate"/)
     assert.match(activation, /data-activation-action="defer"/)
+    assert.match(activation, /~search/)
+    assert.match(activation, /~web_search/)
     assert.match(activation, /ACTIVATE/)
     assert.match(activation, /NOT NOW/)
     assert.doesNotMatch(activation, /NOT APPROVED/)

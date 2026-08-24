@@ -79,10 +79,13 @@ export interface ActivationCard {
   readonly isolatedRuntime: true
   readonly capabilitiesAdded: readonly string[]
   readonly capabilitiesRemoved: readonly string[]
+  readonly capabilitiesChanged: readonly string[]
   readonly permissionsAdded: readonly string[]
   readonly permissionsRemoved: readonly string[]
+  readonly permissionsChanged: readonly string[]
   readonly toolsAdded: readonly string[]
   readonly toolsRemoved: readonly string[]
+  readonly toolsChanged: readonly string[]
   readonly effects: readonly string[]
   readonly eligibilityOk: boolean
   readonly eligibilityDenials: readonly string[]
@@ -235,11 +238,14 @@ export interface WorkspaceSnapshotInput {
     readonly digest: string
     readonly capabilitiesAdded: readonly string[]
     readonly capabilitiesRemoved: readonly string[]
+    readonly capabilitiesChanged?: readonly string[]
     readonly permissionsAdded: readonly string[]
     readonly permissionsRemoved: readonly string[]
+    readonly permissionsChanged?: readonly string[]
     readonly effects: readonly string[]
     readonly toolsAdded?: readonly string[]
     readonly toolsRemoved?: readonly string[]
+    readonly toolsChanged?: readonly string[]
     readonly runtimeContractVersion?: string
     readonly eligibilityOk?: boolean
     readonly eligibilityDenials?: readonly string[]

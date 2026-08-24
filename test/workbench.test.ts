@@ -309,6 +309,34 @@ describe('candidate workbench', () => {
     }
   })
 
+  it('retires a stale Activation Card after the approved digest changes', async () => {
+    const { ctx, recoveryRoot } = await bootAssistantControl()
+    try {
+      const id = authorR0(ctx)
+      parse(await tool(ctx, 'validate_candidate', { candidateId: id }))
+      parse(await tool(ctx, 'seal_candidate', { candidateId: id }))
+      parse(await tool(ctx, 'review_candidate', { candidateId: id }))
+      const requested = parse(await tool(ctx, 'request_extension_approval', { candidateId: id }))
+      const human = recoveryRoot.issueAuthority({ kind: 'human-control', source: 'application-ui' })
+      recoveryRoot.recordApproval(human, {
+        candidateId: id,
+        fingerprint: String(requested.fingerprint),
+        decision: 'approved-for-exact-diff',
+      })
+      const approved = projectMissionControl(gatherWorkspaceSnapshot({ ctx, sessionId: 'wb-stale' }))
+      assert.equal(approved.activations.some((item) => item.candidateId === id && item.status === 'APPROVED_NOT_ACTIVE'), true)
+      writeFileSync(path.join(ctx.candidateWorkspace.get(id).workspaceRoot, 'src/plugin.js'), `${R0_SOURCE}\nexport const mutated = true\n`)
+      assert.ok(ctx.extensionGovernance.eligibility(id).denials.some((item) => item.reason === 'digest-mismatch'))
+      const stale = projectMissionControl(gatherWorkspaceSnapshot({ ctx, sessionId: 'wb-stale' }))
+      assert.equal(stale.activations.some((item) => item.candidateId === id), false)
+      assert.equal(stale.candidates?.find((item) => item.id === id)?.extensionLifecycle, 'SUPERSEDED')
+      assert.equal(ctx.candidateWorkbench.inspect(id).activationState, 'inactive')
+      assert.doesNotMatch(JSON.stringify(stale.activations), /APPROVED_NOT_ACTIVE/)
+    } finally {
+      await ctx.fiber.dispose()
+    }
+  })
+
   it('denies request when the active base is upgraded or disabled', () => {
     const upgraded = isolatedWorkbench()
     const evolve = new ResolutionService(upgraded.registry).review({

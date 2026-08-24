@@ -11,6 +11,12 @@ export type ExtensionLifecycleState = (typeof EXTENSION_LIFECYCLE_STATES)[number
 export const ACTIVATION_VIEW_STATES = ['inactive', 'activating', 'active', 'failed'] as const
 export type ActivationViewState = (typeof ACTIVATION_VIEW_STATES)[number]
 
+export const TERMINAL_STALE_DENIALS = ['digest-mismatch', 'approval-stale', 'review-stale'] as const
+
+export function isTerminalStaleDenial(reason: string): boolean {
+  return (TERMINAL_STALE_DENIALS as readonly string[]).includes(reason)
+}
+
 export function extensionLifecycleOf(input: {
   readonly registryStatus?: string
   readonly decision?: string
@@ -18,9 +24,13 @@ export function extensionLifecycleOf(input: {
   readonly pendingCandidateId?: string
   readonly candidateId: string
   readonly lastFailureCandidateId?: string
+  readonly eligibilityDenials?: readonly string[]
 }): ExtensionLifecycleState {
   if (input.registryStatus === 'active') return 'ACTIVE'
   if (input.decision === 'superseded' || input.registryStatus === 'retired' || input.registryStatus === 'disabled') {
+    return 'SUPERSEDED'
+  }
+  if (input.decision === 'approved-for-exact-diff' && input.eligibilityDenials?.some(isTerminalStaleDenial)) {
     return 'SUPERSEDED'
   }
   const activating = input.activationState === 'activating' || input.activationState === 'activation-pending'

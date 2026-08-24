@@ -1,6 +1,19 @@
 import type { ActivationCard, WorkspaceSnapshotInput } from './types.js'
 import { extensionLifecycleOf } from './lifecycle.js'
 
+export function formatExactDiff(
+  added: readonly string[],
+  removed: readonly string[],
+  changed: readonly string[] = [],
+): string {
+  const parts = [
+    added.length > 0 ? `+${added.join(', ')}` : '',
+    removed.length > 0 ? `−${removed.join(', ')}` : '',
+    changed.length > 0 ? `~${changed.join(', ')}` : '',
+  ].filter((item) => item !== '')
+  return parts.join(' ') || 'none'
+}
+
 export function projectActivationCards(input: WorkspaceSnapshotInput): readonly ActivationCard[] {
   const cards: ActivationCard[] = []
   for (const approval of input.extensionApprovals ?? []) {
@@ -13,6 +26,7 @@ export function projectActivationCards(input: WorkspaceSnapshotInput): readonly 
       pendingCandidateId: input.activation?.pendingCandidateId,
       candidateId: approval.candidateId,
       lastFailureCandidateId: input.activation?.lastFailureCandidateId,
+      eligibilityDenials: approval.eligibilityDenials,
     })
     if (lifecycle !== 'APPROVED_NOT_ACTIVE' && lifecycle !== 'ACTIVATING') continue
     cards.push(selfExtensionActivationCard(approval, lifecycle))
@@ -26,6 +40,9 @@ function selfExtensionActivationCard(
 ): ActivationCard {
   const eligibilityOk = approval.eligibilityOk !== false
   const denials = approval.eligibilityDenials ?? []
+  const capabilitiesChanged = approval.capabilitiesChanged ?? []
+  const permissionsChanged = approval.permissionsChanged ?? []
+  const toolsChanged = approval.toolsChanged ?? []
   return {
     id: approval.id,
     kind: 'self-extension-activate',
@@ -39,10 +56,13 @@ function selfExtensionActivationCard(
     isolatedRuntime: true,
     capabilitiesAdded: approval.capabilitiesAdded,
     capabilitiesRemoved: approval.capabilitiesRemoved,
+    capabilitiesChanged,
     permissionsAdded: approval.permissionsAdded,
     permissionsRemoved: approval.permissionsRemoved,
+    permissionsChanged,
     toolsAdded: approval.toolsAdded ?? [],
     toolsRemoved: approval.toolsRemoved ?? [],
+    toolsChanged,
     effects: approval.effects,
     eligibilityOk,
     eligibilityDenials: denials,
@@ -52,9 +72,9 @@ function selfExtensionActivationCard(
       `Candidate   ${approval.candidateId}`,
       `Digest      ${approval.digest}`,
       `Fingerprint ${approval.fingerprint}`,
-      `Capabilities +${approval.capabilitiesAdded.join(', ') || 'none'} −${approval.capabilitiesRemoved.join(', ') || 'none'}`,
-      `Tools       +${(approval.toolsAdded ?? []).join(', ') || 'none'} −${(approval.toolsRemoved ?? []).join(', ') || 'none'}`,
-      `Permissions +${approval.permissionsAdded.join(', ') || 'none'} −${approval.permissionsRemoved.join(', ') || 'none'}`,
+      `Capabilities ${formatExactDiff(approval.capabilitiesAdded, approval.capabilitiesRemoved, capabilitiesChanged)}`,
+      `Tools       ${formatExactDiff(approval.toolsAdded ?? [], approval.toolsRemoved ?? [], toolsChanged)}`,
+      `Permissions ${formatExactDiff(approval.permissionsAdded, approval.permissionsRemoved, permissionsChanged)}`,
       `Effects     ${approval.effects.join('; ') || 'none'}`,
       `Contract    ${approval.runtimeContractVersion || 'unspecified'}`,
       'Generated code runs only in the isolated runner after this trusted activation.',

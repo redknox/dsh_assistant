@@ -18,8 +18,8 @@ export type {
   WorkbenchProjection,
 } from './types.js'
 export { ACTIVITY_KINDS, OBJECTIVE_STATUSES, USER_CAPABILITY_AREAS, USER_CAPABILITY_STATUSES, WORK_OBJECT_KINDS } from './types.js'
-export { ACTIVATION_VIEW_STATES, EXTENSION_LIFECYCLE_STATES } from './lifecycle.js'
-export { projectActivationCards } from './activations.js'
+export { ACTIVATION_VIEW_STATES, EXTENSION_LIFECYCLE_STATES, TERMINAL_STALE_DENIALS } from './lifecycle.js'
+export { formatExactDiff, projectActivationCards } from './activations.js'
 export { boundActivationDiagnostics } from './failure.js'
 export { deriveSystemState } from './state.js'
 export { projectActivity } from './activity.js'

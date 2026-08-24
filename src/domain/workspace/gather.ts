@@ -268,6 +268,8 @@ function workbenchCandidates(ctx: Context): WorkspaceSnapshotInput['candidates']
           canRequest: view.requestEligibility.ok,
           decision: (ctx.get('extensionGovernance') as { inspectApproval?(id: string): { decision: string } | undefined } | undefined)
             ?.inspectApproval?.(view.id)?.decision,
+          eligibilityDenials: (ctx.get('extensionGovernance') as { eligibility?(id: string): { denials: readonly { reason: string }[] } } | undefined)
+            ?.eligibility?.(view.id)?.denials.map((item) => item.reason),
           registry: ctx.get('capabilityRegistry') as { get(owner: string, version: string): { status: string } | undefined } | undefined,
           activation: ctx.get('extensionRecovery') as {
             inspect(): {
@@ -315,9 +317,9 @@ function extensionApprovals(ctx: Context): WorkspaceSnapshotInput['extensionAppr
       owner: string
       candidateVersion: string
       digest: string
-      capabilities: { added: readonly string[]; removed: readonly string[] }
-      permissions: { added: readonly string[]; removed: readonly string[] }
-      tools?: { added: readonly string[]; removed: readonly string[] }
+      capabilities: { added: readonly string[]; removed: readonly string[]; changed?: readonly string[] }
+      permissions: { added: readonly string[]; removed: readonly string[]; changed?: readonly string[] }
+      tools?: { added: readonly string[]; removed: readonly string[]; changed?: readonly string[] }
       secrets: readonly string[]
       effects: { filesystem: readonly string[]; network: readonly string[]; process: readonly string[]; secrets: readonly string[]; externalSystems: readonly string[] }
     }
@@ -346,11 +348,14 @@ function extensionApprovals(ctx: Context): WorkspaceSnapshotInput['extensionAppr
       digest: summary.digest,
       capabilitiesAdded: [...(summary.capabilities.added ?? [])],
       capabilitiesRemoved: [...(summary.capabilities.removed ?? [])],
+      capabilitiesChanged: [...(summary.capabilities.changed ?? [])],
       permissionsAdded: [...(summary.permissions.added ?? [])],
       permissionsRemoved: [...(summary.permissions.removed ?? [])],
+      permissionsChanged: [...(summary.permissions.changed ?? [])],
       effects: flattenEffects(summary.effects, summary.secrets ?? []),
       toolsAdded: [...(summary.tools?.added ?? [])],
       toolsRemoved: [...(summary.tools?.removed ?? [])],
+      toolsChanged: [...(summary.tools?.changed ?? [])],
       ...(contract ? { runtimeContractVersion: contract } : {}),
       eligibilityOk: eligibility?.ok !== false,
       eligibilityDenials: eligibility?.denials.map((item) => item.reason) ?? [],
@@ -371,6 +376,7 @@ function projectedLifecycle(input: {
   readonly version: string
   readonly canRequest: boolean
   readonly decision?: string
+  readonly eligibilityDenials?: readonly string[]
   readonly registry?: { get(owner: string, version: string): { status: string } | undefined }
   readonly activation?: {
     inspect(): {
@@ -388,6 +394,7 @@ function projectedLifecycle(input: {
     pendingCandidateId: inspected?.pendingCandidateId,
     candidateId: input.candidateId,
     lastFailureCandidateId: inspected?.lastFailure?.candidateId,
+    eligibilityDenials: input.eligibilityDenials,
   })
   let approvalState: import('./types.js').WorkbenchProjection['approvalState'] = approvalStateOf(lifecycle)
   if (lifecycle === 'APPROVAL_REQUIRED') {

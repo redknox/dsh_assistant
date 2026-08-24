@@ -489,6 +489,7 @@ export class WorkbenchService implements CandidateWorkbench {
       pendingCandidateId: inspected?.pendingCandidateId,
       candidateId: record.id,
       lastFailureCandidateId: inspected?.lastFailure?.candidateId,
+      eligibilityDenials: this.governance.eligibility(record.id).denials.map((item) => item.reason),
     })
     return {
       governanceApproval: decision ?? 'none',

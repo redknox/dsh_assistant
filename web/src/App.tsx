@@ -225,6 +225,9 @@ function ActivationCardView(props: {
         {card.runtimeContractVersion ? <div><dt>CONTRACT</dt><dd>{card.runtimeContractVersion}</dd></div> : null}
         <div><dt>RUNTIME</dt><dd>Isolated runner only</dd></div>
         <div><dt>STATUS</dt><dd>{card.status}</dd></div>
+        <div><dt>CAPABILITIES</dt><dd>{formatDiff(card.capabilitiesAdded, card.capabilitiesRemoved, card.capabilitiesChanged)}</dd></div>
+        <div><dt>TOOLS</dt><dd>{formatDiff(card.toolsAdded, card.toolsRemoved, card.toolsChanged)}</dd></div>
+        <div><dt>PERMISSIONS</dt><dd>{formatDiff(card.permissionsAdded, card.permissionsRemoved, card.permissionsChanged)}</dd></div>
         {card.details.map((line) => (
           <div key={line}><dt>DETAIL</dt><dd>{line}</dd></div>
         ))}
@@ -412,10 +415,11 @@ function OperationsPanel(props: { readonly view: MissionControlView }) {
   )
 }
 
-function formatDiff(added: readonly string[], removed: readonly string[]): string {
+function formatDiff(added: readonly string[], removed: readonly string[], changed: readonly string[] = []): string {
   const plus = added.map((item) => `+${item}`).join(' ')
   const minus = removed.map((item) => `-${item}`).join(' ')
-  return [plus, minus].filter((item) => item !== '').join(' ') || 'none'
+  const tilde = changed.map((item) => `~${item}`).join(' ')
+  return [plus, minus, tilde].filter((item) => item !== '').join(' ') || 'none'
 }
 
 function WorkbenchPanel(props: { readonly candidates: readonly WorkbenchProjection[] }) {
@@ -469,10 +473,10 @@ function WorkbenchPanel(props: { readonly candidates: readonly WorkbenchProjecti
                           : 'not ready for approval'}
             </div>
             <div className="workbench-diff">
-              capabilities {formatDiff(item.diff?.capabilities.added ?? [], item.diff?.capabilities.removed ?? [])}
+              capabilities {formatDiff(item.diff?.capabilities.added ?? [], item.diff?.capabilities.removed ?? [], item.diff?.capabilities.changed ?? [])}
             </div>
             <div className="workbench-diff">
-              permissions {formatDiff(item.diff?.permissions.added ?? [], item.diff?.permissions.removed ?? [])}
+              permissions {formatDiff(item.diff?.permissions.added ?? [], item.diff?.permissions.removed ?? [], item.diff?.permissions.changed ?? [])}
             </div>
             <div className="workbench-diff">
               effects {item.effectSummary?.length ? item.effectSummary.join('; ') : 'none'}
