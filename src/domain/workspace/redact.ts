@@ -96,6 +96,18 @@ export function sanitizeMissionControlView(view: MissionControlView): MissionCon
     ...(view.activationFailure
       ? { activationFailure: { ...view.activationFailure, summary: redactText(view.activationFailure.summary) } }
       : {}),
+    ...(view.sessions
+      ? {
+        sessions: {
+          ...view.sessions,
+          sessions: view.sessions.sessions.map((item) => ({
+            ...item,
+            title: redactText(item.title),
+            ...(item.preview ? { preview: redactText(item.preview) } : {}),
+          })),
+        },
+      }
+      : {}),
     controlStrip: {
       ...view.controlStrip,
       ...(view.controlStrip.degradation ? { degradation: redactText(view.controlStrip.degradation) } : {}),

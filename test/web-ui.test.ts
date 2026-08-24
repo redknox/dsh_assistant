@@ -21,6 +21,8 @@ import {
 } from '../src/product/web-ui-protocol.js'
 import { ensureProductHome } from '../src/product/home.js'
 import { inspectRuntimeContext } from '../src/product/runtime-context.js'
+import { catalogBindingOf, SessionCatalog } from '../src/product/session-catalog.js'
+import { LiveSessionHost } from '../src/product/session-lifecycle.js'
 import { attachWebUiBroadcast, startWebUiServer } from '../src/product/web-ui-server.js'
 import type { MissionControlView } from '../src/domain/workspace/types.js'
 import { MissionControlScreen } from '../web/src/App.tsx'
@@ -517,6 +519,53 @@ describe('local Mission-Control Web UI', () => {
       assert.match(body.detail ?? '', /cannot repair a broken Profile/)
     } finally {
       await web.close()
+      await control.ctx.fiber.dispose()
+    }
+  })
+
+  it('creates and switches conversations through the host catalog', async () => {
+    const home = mkdtempSync(join(tmpdir(), 'web-ui-sessions-'))
+    const layout = ensureProductHome(home)
+    const context = inspectRuntimeContext(layout, {}, undefined)
+    const control = await bootAssistantControl({
+      home: layout.root,
+      sessionRoot: context.sessionPersistenceDir,
+      sessionId: 'main',
+      workspace: context.workspace.value,
+    })
+    control.ctx.llm.registerAdapter(['fake'], new FakeReplyAdapter('ack'))
+    const catalog = new SessionCatalog(context.sessionPersistenceDir, catalogBindingOf(context))
+    catalog.ensureMigrated('main')
+    const handle = await createAssistantAgent(control.ctx, 'main', { provider: 'fake', model: 'fake-echo' }, context.workspace.value)
+    const surface = new AssistantControlSurface(control.ctx, 'main', context, catalog)
+    const host = new LiveSessionHost(control.ctx, surface, catalog, context.workspace.value, () => {}, handle, false)
+    const web = await startWebUiServer({
+      surface,
+      recoveryRoot: control.recoveryRoot,
+      sessionHost: host,
+      port: 0,
+    })
+    try {
+      const cookie = await cookieHeader(web.url)
+      const created = await fetch(`${web.url}/api/conversations`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', ...authHeaders(cookie) },
+        body: JSON.stringify({ action: 'create', title: 'Personal', sessionId: 'main', revision: catalog.inspect().revision }),
+      })
+      assert.equal(created.status, 200)
+      const createdBody = await created.json() as { view: MissionControlView }
+      const next = createdBody.view.sessions?.sessions.find((item) => item.title === 'Personal')
+      assert.ok(next)
+      assert.equal(createdBody.view.runtimeContext?.sessionId, next.id)
+      const stale = await fetch(`${web.url}/api/message`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', ...authHeaders(cookie) },
+        body: JSON.stringify({ text: 'should-not-land', sessionId: 'main' }),
+      })
+      assert.equal(stale.status, 409)
+    } finally {
+      await web.close()
+      await host.currentHandle().dispose()
       await control.ctx.fiber.dispose()
     }
   })

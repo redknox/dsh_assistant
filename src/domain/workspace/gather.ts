@@ -14,6 +14,8 @@ export interface GatherWorkspaceInput {
   readonly sessionId: string
   readonly objective?: ObjectiveView
   readonly runtimeContext?: MissionControlView['runtimeContext']
+  readonly sessions?: MissionControlView['sessions']
+  readonly approvalOrigins?: Readonly<Record<string, string>>
 }
 
 /** Fold public runtime/session/governance/policy surfaces into a workspace snapshot. */
@@ -143,6 +145,8 @@ export function gatherWorkspaceSnapshot(input: GatherWorkspaceInput): WorkspaceS
       humorSuppressed: personality.humorSuppressed,
     },
     ...(runtimeContext ? { runtimeContext } : {}),
+    ...(input.sessions ? { sessions: input.sessions } : {}),
+    ...(input.approvalOrigins ? { approvalOrigins: input.approvalOrigins } : {}),
   }
 }
 

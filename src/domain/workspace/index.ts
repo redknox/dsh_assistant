@@ -10,6 +10,8 @@ export type {
   ObjectiveStatus,
   ObjectiveView,
   RecoveryView,
+  SessionCatalogView,
+  SessionTopicView,
   RollbackCard,
   RollbackOwnerChange,
   UserCapabilityArea,

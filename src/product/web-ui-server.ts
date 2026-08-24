@@ -12,6 +12,8 @@ import { redactText } from '../domain/workspace/redact.js'
 import { AssistantControlSurface } from '../ui/controller.js'
 import type { ActivationCard, ApprovalCard, MissionControlView, RollbackCard, UserPluginView } from '../domain/workspace/types.js'
 import { PRODUCT_UI_SESSION_ID } from './constants.js'
+import { SessionCatalogError } from './session-catalog.js'
+import type { LiveSessionHost } from './session-lifecycle.js'
 import {
   assertSafePayload,
   createUiSessionToken,
@@ -39,6 +41,7 @@ export interface WebUiServerOptions extends WebUiListenOptions {
   readonly diagnostics?: unknown
   readonly assetRoot?: string
   readonly runtimeControl?: WebUiRuntimeControl
+  readonly sessionHost?: LiveSessionHost
 }
 
 export interface WebUiServer {
@@ -74,7 +77,12 @@ export function startWebUiServer(options: WebUiServerOptions): Promise<WebUiServ
   let lastPayload = ''
   let poll: ReturnType<typeof setInterval> | undefined
 
-  const snapshot = (): MissionControlView => options.surface.workspace()
+  const snapshot = (): MissionControlView => {
+    const view = options.surface.workspace()
+    const pending = view.approvals.filter((card) => card.status === 'pending').map((card) => card.id)
+    if (pending.length > 0) options.sessionHost?.noteApprovals(pending)
+    return options.surface.workspace()
+  }
 
   const envelope = (extra: { readonly acknowledgement?: { readonly text: string } } = {}) => ({
     view: snapshot(),
@@ -450,14 +458,81 @@ export function startWebUiServer(options: WebUiServerOptions): Promise<WebUiServ
         return
       }
       if (req.method === 'POST' && requestUrl.pathname === '/api/message') {
-        const body = JSON.parse(await readBody(req)) as { text?: unknown }
+        const body = JSON.parse(await readBody(req)) as { text?: unknown; sessionId?: unknown }
         if (typeof body.text !== 'string' || body.text.trim() === '') {
           sendJson(res, 400, { error: 'malformed' })
           return
         }
+        if (typeof body.sessionId === 'string' && body.sessionId !== options.surface.sessionId) {
+          sendJson(res, 409, { error: 'stale-session', detail: 'request targeted a different current session', view: snapshot(), webUi: url })
+          return
+        }
         options.surface.sendMessage(body.text.trim())
+        options.sessionHost?.touchPreview(body.text.trim())
         sendJson(res, 202, envelope())
         broadcast()
+        return
+      }
+      if (req.method === 'POST' && requestUrl.pathname === '/api/conversations') {
+        const host = options.sessionHost
+        if (!host) {
+          sendJson(res, 409, { error: 'unavailable', detail: 'session catalog is unavailable' })
+          return
+        }
+        const body = JSON.parse(await readBody(req)) as {
+          action?: unknown
+          id?: unknown
+          title?: unknown
+          sessionId?: unknown
+          revision?: unknown
+          confirm?: unknown
+        }
+        if (typeof body.action !== 'string') {
+          sendJson(res, 400, { error: 'malformed' })
+          return
+        }
+        try {
+          const expected = {
+            sessionId: typeof body.sessionId === 'string' ? body.sessionId : options.surface.sessionId,
+            revision: typeof body.revision === 'number' ? body.revision : host.inspect().revision,
+          }
+          let acknowledgement: { text: string } | undefined
+          if (body.action === 'create') {
+            await host.create(typeof body.title === 'string' ? body.title : undefined)
+            acknowledgement = { text: 'Created a new conversation.' }
+          } else if (body.action === 'switch' && typeof body.id === 'string') {
+            await host.switchTo(body.id, expected)
+            acknowledgement = { text: 'Switched conversation.' }
+          } else if (body.action === 'rename' && typeof body.id === 'string' && typeof body.title === 'string') {
+            await host.rename(body.id, body.title, expected)
+            acknowledgement = { text: 'Renamed conversation.' }
+          } else if (body.action === 'archive' && typeof body.id === 'string') {
+            await host.archive(body.id, expected)
+            acknowledgement = { text: 'Archived conversation.' }
+          } else if (body.action === 'restore' && typeof body.id === 'string') {
+            await host.restore(body.id, expected)
+            acknowledgement = { text: 'Restored conversation.' }
+          } else if (body.action === 'delete' && typeof body.id === 'string') {
+            await host.delete(body.id, { ...expected, confirm: body.confirm === true })
+            acknowledgement = { text: 'Deleted conversation.' }
+          } else {
+            sendJson(res, 409, { error: 'unsupported', action: body.action })
+            return
+          }
+          sendJson(res, 200, envelope({ acknowledgement }))
+          broadcast()
+        } catch (error) {
+          if (error instanceof SessionCatalogError) {
+            sendJson(res, error.code === 'not-found' ? 404 : 409, {
+              error: error.code,
+              detail: error.message,
+              view: snapshot(),
+              webUi: url,
+            })
+            return
+          }
+          throw error
+        }
         return
       }
       if (req.method === 'POST' && (requestUrl.pathname === '/api/approve' || requestUrl.pathname === '/api/deny' || requestUrl.pathname === '/api/cancel')) {

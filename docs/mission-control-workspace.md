@@ -2,7 +2,7 @@
 
 Status: **Verified** by `test/workspace.test.ts`.
 
-Chat is how a person talks to TARS-NG. The workspace is how they understand and control it. The header renders host-derived Runtime Context (Profile, Workspace label, Session ID, persistence state); React does not invent identity or paths.
+Chat is how a person talks to TARS-NG. The workspace is how they understand and control it. The header renders host-derived Runtime Context (Profile, Workspace label, Session ID, persistence state). Conversations lists the host Session Catalog; React does not invent identity or paths.
 
 Desktop-first layout (conceptual, not a pixel mandate):
 

@@ -21,6 +21,8 @@ function recoveryFailureText(error: string | undefined): string | undefined {
   if (error === 'profile-composition-recovery') {
     return 'Exit Safe Mode cannot repair a broken Profile. Restore profiles/assistant and restart TARS-NG.'
   }
+  if (error === 'stale-session' || error === 'stale-revision') return 'Conversation list changed; retry the action.'
+  if (error === 'last-active') return 'The last active conversation cannot be removed.'
   if (error === 'confirmation-required') return 'Confirm the recovery action.'
   if (error === 'untrusted session') return 'Web UI session is untrusted; reload the page.'
   return error
@@ -34,12 +36,24 @@ export async function fetchView(): Promise<UiEnvelope> {
   return parseEnvelope(await fetch('/api/view', include))
 }
 
-export async function sendMessage(text: string): Promise<UiEnvelope> {
+export async function sendMessage(text: string, sessionId?: string): Promise<UiEnvelope> {
   return parseEnvelope(await fetch('/api/message', {
     ...include,
     method: 'POST',
     headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ text }),
+    body: JSON.stringify({ text, ...(sessionId ? { sessionId } : {}) }),
+  }))
+}
+
+export async function runConversation(
+  action: 'create' | 'switch' | 'rename' | 'archive' | 'restore' | 'delete',
+  input: { readonly id?: string; readonly title?: string; readonly sessionId: string; readonly revision: number; readonly confirm?: boolean },
+): Promise<UiEnvelope> {
+  return parseEnvelope(await fetch('/api/conversations', {
+    ...include,
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ action, ...input }),
   }))
 }
 

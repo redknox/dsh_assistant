@@ -9,6 +9,7 @@ import {
   openViewStream,
   recoveryActionId,
   rollbackSystemState,
+  runConversation,
   runRecovery,
   sendMessage,
   uninstallPlugin,
@@ -49,10 +50,12 @@ function activityModifier(kind: string): string {
   return ''
 }
 
-type WorkspacePane = 'today' | 'extensions'
+type WorkspacePane = 'today' | 'extensions' | 'conversations'
 
 function paneFromHash(): WorkspacePane {
-  return globalThis.location?.hash === '#extensions' ? 'extensions' : 'today'
+  if (globalThis.location?.hash === '#extensions') return 'extensions'
+  if (globalThis.location?.hash === '#conversations') return 'conversations'
+  return 'today'
 }
 
 function previewText(text: string, limit = 72): string {
@@ -107,6 +110,14 @@ function WorkspaceNavigation(props: {
   readonly view: MissionControlView
   readonly pane: WorkspacePane
   readonly onNavigate: (pane: WorkspacePane) => void
+  readonly confirmingSession?: string
+  readonly onCreateConversation?: () => void
+  readonly onSwitchConversation?: (id: string) => void
+  readonly onRenameConversation?: (id: string, title: string) => void
+  readonly onArchiveConversation?: (id: string) => void
+  readonly onRestoreConversation?: (id: string) => void
+  readonly onAskDeleteConversation?: (id: string) => void
+  readonly onConfirmDeleteConversation?: (id: string) => void
 }) {
   const recentMemory = props.view.memory.slice(0, 8)
   const recentKnowledge = props.view.knowledge.slice(0, 4)
@@ -128,7 +139,13 @@ function WorkspaceNavigation(props: {
         >
           <Glyph name="today" /><span>TODAY</span>
         </button>
-        <button type="button" className={`nav-item${props.pane === 'today' ? ' nav-item--active' : ''}`} data-nav="conversations" onClick={() => props.onNavigate('today')}>
+        <button
+          type="button"
+          className={`nav-item${props.pane === 'conversations' ? ' nav-item--active' : ''}`}
+          data-nav="conversations"
+          aria-current={props.pane === 'conversations' ? 'page' : undefined}
+          onClick={() => props.onNavigate('conversations')}
+        >
           <Glyph name="conversations" /><span>CONVERSATIONS</span>
         </button>
         <span className="nav-item nav-item--idle" aria-disabled="true" title="Calendar management is not available in this soak">
@@ -150,6 +167,47 @@ function WorkspaceNavigation(props: {
           <Glyph name="capabilities" /><span>CAPABILITIES</span>
         </a>
       </nav>
+      {props.view.sessions ? (
+        <section className="recent" aria-labelledby="conversations-title">
+          <div className="section-label" id="conversations-title"><span>LOG 02</span><span>CONVERSATIONS</span></div>
+          <button type="button" className="button button--secondary" data-conversation-action="create" onClick={() => props.onCreateConversation?.()}>New conversation</button>
+          {(props.pane === 'conversations' ? props.view.sessions.sessions : props.view.sessions.sessions.filter((item) => item.lifecycle === 'active'))
+            .slice()
+            .sort((left, right) => right.lastActivityAt.localeCompare(left.lastActivityAt))
+            .map((item) => (
+              <div key={item.id} className={`conversation-link${item.current ? ' conversation-link--current' : ''}`} data-session-id={item.id}>
+                <button type="button" className="conversation-title" onClick={() => props.onSwitchConversation?.(item.id)}>
+                  {item.title}{item.lifecycle === 'archived' ? ' (archived)' : ''}
+                </button>
+                <span className="conversation-preview">{item.preview ?? item.id}</span>
+                <span className="conversation-actions">
+                  <button
+                    type="button"
+                    className="button button--secondary"
+                    data-conversation-action="rename"
+                    onClick={() => {
+                      const next = globalThis.prompt?.('Rename conversation', item.title)
+                      if (next && next.trim() !== '' && next !== item.title) props.onRenameConversation?.(item.id, next.trim())
+                    }}
+                  >
+                    Rename
+                  </button>
+                  {item.lifecycle === 'active' ? (
+                    <button type="button" className="button button--secondary" onClick={() => props.onArchiveConversation?.(item.id)}>Archive</button>
+                  ) : (
+                    <button type="button" className="button button--secondary" onClick={() => props.onRestoreConversation?.(item.id)}>Restore</button>
+                  )}
+                  {props.confirmingSession === item.id ? (
+                    <button type="button" className="button button--fault" onClick={() => props.onConfirmDeleteConversation?.(item.id)}>Confirm delete</button>
+                  ) : (
+                    <button type="button" className="button button--secondary" onClick={() => props.onAskDeleteConversation?.(item.id)}>Delete</button>
+                  )}
+                </span>
+              </div>
+            ))}
+          {props.view.sessions.health !== 'ok' ? <p className="recent-empty">Catalog {props.view.sessions.health}</p> : null}
+        </section>
+      ) : null}
       <section className="recent" id="memory" aria-labelledby="recent-title">
         <div className="section-label" id="recent-title"><span>LOG 02</span><span>RECENT</span></div>
         {current ? (
@@ -891,6 +949,14 @@ export function MissionControlScreen(props: {
   readonly armedActivation?: string
   readonly pane?: WorkspacePane
   readonly onNavigate?: (pane: WorkspacePane) => void
+  readonly confirmingSession?: string
+  readonly onCreateConversation?: () => void
+  readonly onSwitchConversation?: (id: string) => void
+  readonly onRenameConversation?: (id: string, title: string) => void
+  readonly onArchiveConversation?: (id: string) => void
+  readonly onRestoreConversation?: (id: string) => void
+  readonly onAskDeleteConversation?: (id: string) => void
+  readonly onConfirmDeleteConversation?: (id: string) => void
   readonly inspectingExtension?: string
   readonly onInspectExtension?: (id: string) => void
   readonly confirmingPlugin?: string
@@ -937,7 +1003,19 @@ export function MissionControlScreen(props: {
         />
       ) : null}
       <div className="workspace-grid">
-        <WorkspaceNavigation view={view} pane={pane} onNavigate={props.onNavigate ?? (() => {})} />
+        <WorkspaceNavigation
+          view={view}
+          pane={pane}
+          onNavigate={props.onNavigate ?? (() => {})}
+          confirmingSession={props.confirmingSession}
+          onCreateConversation={props.onCreateConversation}
+          onSwitchConversation={props.onSwitchConversation}
+          onRenameConversation={props.onRenameConversation}
+          onArchiveConversation={props.onArchiveConversation}
+          onRestoreConversation={props.onRestoreConversation}
+          onAskDeleteConversation={props.onAskDeleteConversation}
+          onConfirmDeleteConversation={props.onConfirmDeleteConversation}
+        />
         {pane === 'extensions' ? (
           <ExtensionsWorkspace
             view={view}
@@ -1004,6 +1082,7 @@ export function App() {
   const [deferredRollback, setDeferredRollback] = useState(false)
   const [armedRollback, setArmedRollback] = useState(false)
   const [pane, setPane] = useState<WorkspacePane>(paneFromHash)
+  const [confirmingSession, setConfirmingSession] = useState<string>()
   const [inspectingExtension, setInspectingExtension] = useState<string>()
   const [acknowledgement, setAcknowledgement] = useState<{ readonly text: string }>()
 
@@ -1021,7 +1100,9 @@ export function App() {
 
   const navigate = (next: WorkspacePane) => {
     setPane(next)
-    if (globalThis.location) globalThis.location.hash = next === 'extensions' ? 'extensions' : 'today'
+    if (globalThis.location) {
+      globalThis.location.hash = next === 'extensions' ? 'extensions' : next === 'conversations' ? 'conversations' : 'today'
+    }
   }
 
   useEffect(() => {
@@ -1051,7 +1132,7 @@ export function App() {
     setSending(true)
     setError(undefined)
     try {
-      setEnvelope(await sendMessage(draft.trim()))
+      setEnvelope(await sendMessage(draft.trim(), view?.runtimeContext?.sessionId))
       setDraft('')
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : 'send failed')
@@ -1070,6 +1151,11 @@ export function App() {
       setError(caught instanceof Error ? caught.message : 'action failed')
     }
   }
+
+  const catalogRef = () => ({
+    sessionId: envelope?.view.runtimeContext?.sessionId ?? envelope?.view.sessions?.currentSessionId ?? 'main',
+    revision: envelope?.view.sessions?.revision ?? 0,
+  })
 
   const empty = useMemo(() => view, [view])
   if (!empty) {
@@ -1105,6 +1191,17 @@ export function App() {
       }}
       pane={pane}
       onNavigate={navigate}
+      confirmingSession={confirmingSession}
+      onCreateConversation={() => { void act(() => runConversation('create', catalogRef())) }}
+      onSwitchConversation={(id) => { void act(() => runConversation('switch', { ...catalogRef(), id })) }}
+      onRenameConversation={(id, title) => { void act(() => runConversation('rename', { ...catalogRef(), id, title })) }}
+      onArchiveConversation={(id) => { void act(() => runConversation('archive', { ...catalogRef(), id })) }}
+      onRestoreConversation={(id) => { void act(() => runConversation('restore', { ...catalogRef(), id })) }}
+      onAskDeleteConversation={(id) => { setConfirmingSession(id) }}
+      onConfirmDeleteConversation={(id) => {
+        setConfirmingSession(undefined)
+        void act(() => runConversation('delete', { ...catalogRef(), id, confirm: true }))
+      }}
       inspectingExtension={inspectingExtension}
       onInspectExtension={(id) => { setInspectingExtension((current) => current === id ? undefined : id) }}
       confirmingPlugin={confirmingPlugin}

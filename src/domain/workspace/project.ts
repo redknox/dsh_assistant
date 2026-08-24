@@ -61,6 +61,7 @@ export function projectMissionControl(input: WorkspaceSnapshotInput): MissionCon
     ...(input.candidates ? { candidates: input.candidates } : {}),
     ...(activationFailure ? { activationFailure } : {}),
     ...(input.runtimeContext ? { runtimeContext: input.runtimeContext } : {}),
+    ...(input.sessions ? { sessions: input.sessions } : {}),
   })
 }
 
