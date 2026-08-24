@@ -259,6 +259,50 @@ describe('TARS-NG mission-control workspace', () => {
     assert.equal(stale.activations.length, 0)
     assert.doesNotMatch(JSON.stringify(stale), /APPROVED_NOT_ACTIVE/)
 
+    for (const reason of ['base-changed', 'review-required', 'review-changes-required'] as const) {
+      const retired = projectMissionControl(snapshot({
+        extensionApprovals: [{
+          id: `apr-${reason}`,
+          candidateId: `cand-${reason}`,
+          fingerprint: 'fp-old',
+          decision: 'approved-for-exact-diff',
+          owner: 'generated/obsidian-vault',
+          candidateVersion: '0.1.0',
+          digest: 'old-digest',
+          capabilitiesAdded: ['obsidian.read'],
+          capabilitiesRemoved: [],
+          permissionsAdded: [],
+          permissionsRemoved: [],
+          effects: [],
+          eligibilityOk: false,
+          eligibilityDenials: [reason],
+        }],
+      }))
+      assert.equal(retired.activations.length, 0, reason)
+      assert.doesNotMatch(JSON.stringify(retired), /APPROVED_NOT_ACTIVE/)
+    }
+
+    const conflict = projectMissionControl(snapshot({
+      extensionApprovals: [{
+        id: 'apr-conflict',
+        candidateId: 'cand-conflict',
+        fingerprint: 'fp-ext',
+        decision: 'approved-for-exact-diff',
+        owner: 'generated/obsidian-vault',
+        candidateVersion: '0.1.0',
+        digest: 'abc123',
+        capabilitiesAdded: ['obsidian.read'],
+        capabilitiesRemoved: [],
+        permissionsAdded: [],
+        permissionsRemoved: [],
+        effects: [],
+        eligibilityOk: false,
+        eligibilityDenials: ['ownership-conflict'],
+      }],
+    }))
+    assert.equal(conflict.activations[0]?.status, 'APPROVED_NOT_ACTIVE')
+    assert.equal(conflict.activations[0]?.eligibilityOk, false)
+
     const safeMode = projectMissionControl(snapshot({
       safeMode: true,
       extensionApprovals: [{

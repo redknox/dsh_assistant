@@ -11,7 +11,18 @@ export type ExtensionLifecycleState = (typeof EXTENSION_LIFECYCLE_STATES)[number
 export const ACTIVATION_VIEW_STATES = ['inactive', 'activating', 'active', 'failed'] as const
 export type ActivationViewState = (typeof ACTIVATION_VIEW_STATES)[number]
 
-export const TERMINAL_STALE_DENIALS = ['digest-mismatch', 'approval-stale', 'review-stale'] as const
+export const TERMINAL_STALE_DENIALS = [
+  'digest-mismatch',
+  'approval-stale',
+  'review-stale',
+  'base-changed',
+  'review-required',
+  'review-changes-required',
+  'not-sealed',
+  'not-validated',
+  'unknown-candidate',
+  'approval-rejected',
+] as const
 
 export function isTerminalStaleDenial(reason: string): boolean {
   return (TERMINAL_STALE_DENIALS as readonly string[]).includes(reason)
