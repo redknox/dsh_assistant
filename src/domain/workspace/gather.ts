@@ -5,7 +5,7 @@ import { humorSuppressed } from '../personality/effective.js'
 import type { TarsPersonality } from '../personality/types.js'
 import { flattenEffects, summarizeCandidateEffects } from './effects.js'
 import { boundActivationDiagnostics } from './failure.js'
-import { activationViewOf, approvalStateOf, extensionLifecycleOf } from './lifecycle.js'
+import { activationViewOf, approvalStateOf, compareOwnerVersion, extensionLifecycleOf } from './lifecycle.js'
 import type { MissionControlView, ObjectiveView, WorkspaceSnapshotInput } from './types.js'
 import { projectMissionControl } from './project.js'
 
@@ -231,6 +231,7 @@ function workbenchCandidates(ctx: Context): WorkspaceSnapshotInput['candidates']
     version: string
     digest?: string
     baseVersion?: string
+    provenance?: { kind: string; origin?: string }
     lifecycle: string
     resolutionKind?: string
     resolutionCapability?: string
@@ -249,6 +250,7 @@ function workbenchCandidates(ctx: Context): WorkspaceSnapshotInput['candidates']
       owner: string
       version: string
       baseVersion?: string
+      provenance?: { kind: string; origin?: string }
       lifecycle: string
       sealed: boolean
       digest?: string
@@ -268,6 +270,7 @@ function workbenchCandidates(ctx: Context): WorkspaceSnapshotInput['candidates']
         version: view.version,
         digest: view.digest,
         baseVersion: view.baseVersion,
+        ...(view.provenance ? { provenance: view.provenance } : {}),
         lifecycle: view.lifecycle,
         resolutionKind: view.resolutionKind,
         resolutionCapability: view.resolutionCapability,
@@ -318,6 +321,7 @@ function workbenchCandidates(ctx: Context): WorkspaceSnapshotInput['candidates']
       version: record.version,
       digest: record.digest,
       baseVersion: record.baseVersion,
+      ...(record.provenance ? { provenance: record.provenance } : {}),
       lifecycle: record.lifecycle,
       resolutionKind: record.manifest?.resolutionKind,
       resolutionCapability: record.manifest?.resolutionCapability,
@@ -402,7 +406,10 @@ function projectedLifecycle(input: {
   readonly canRequest: boolean
   readonly decision?: string
   readonly eligibilityDenials?: readonly string[]
-  readonly registry?: { get(owner: string, version: string): { status: string } | undefined }
+  readonly registry?: {
+    get(owner: string, version: string): { status: string } | undefined
+    list?(): readonly { owner: string; version: string; status: string }[]
+  }
   readonly activation?: {
     inspect(): {
       state?: string
@@ -420,8 +427,9 @@ function projectedLifecycle(input: {
     candidateId: input.candidateId,
     lastFailureCandidateId: inspected?.lastFailure?.candidateId,
     eligibilityDenials: input.eligibilityDenials,
+    newerAuthoritative: newerAuthoritative(input.registry, input.owner, input.version),
   })
-  let approvalState: import('./types.js').WorkbenchProjection['approvalState'] = approvalStateOf(lifecycle)
+  let approvalState: import('./types.js').WorkbenchProjection['approvalState'] = approvalStateOf(lifecycle, input.decision)
   if (lifecycle === 'APPROVAL_REQUIRED') {
     if (input.decision === 'approval-requested') approvalState = 'approval-requested'
     else if (input.canRequest) approvalState = 'ready-for-approval'
@@ -437,6 +445,18 @@ function projectedLifecycle(input: {
       ? { activationFailureSummary: boundActivationDiagnostics(failure.diagnostics) }
       : {}),
   }
+}
+
+function newerAuthoritative(
+  registry: { list?(): readonly { owner: string; version: string; status: string }[] } | undefined,
+  owner: string,
+  version: string,
+): boolean {
+  return registry?.list?.().some((item) => (
+    item.owner === owner
+    && item.status === 'active'
+    && compareOwnerVersion(item.version, version) > 0
+  )) === true
 }
 
 function snapshotView(input: {

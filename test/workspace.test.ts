@@ -4,6 +4,7 @@ import { PERSONALITY_CORPUS } from '../src/domain/personality/index.js'
 import { googleCalendarReadRiskModel } from '../src/domain/reliability/index.js'
 import type { ResolutionReview } from '../src/domain/resolution/index.js'
 import { flattenEffects, projectMissionControl, type WorkspaceSnapshotInput } from '../src/domain/workspace/index.js'
+import { approvalStateOf, extensionLifecycleOf } from '../src/domain/workspace/lifecycle.js'
 import { bootAssistantControl, createAssistantAgent } from '../src/runtime/boot.js'
 import { AssistantControlSurface } from '../src/ui/controller.js'
 import { renderMissionControlAsHtml, renderMissionControlAsText } from '../src/ui/mission-control.js'
@@ -368,6 +369,169 @@ describe('TARS-NG mission-control workspace', () => {
     assert.match(renderMissionControlAsHtml(plugins), /data-plugin-id="uninst-generated\/text-slugify@0.1.0"/)
   })
 
+  it('G7. disabled exact revision stays discoverable and reactivatable', () => {
+    const view = projectMissionControl(snapshot({
+      candidates: [{
+        id: 'generated--text-slugify@0.1.0',
+        owner: 'generated/text-slugify',
+        version: '0.1.0',
+        digest: 'abc123',
+        lifecycle: 'sealed',
+        sealed: true,
+        canRequestApproval: false,
+        governanceApproval: 'approved-for-exact-diff',
+        extensionLifecycle: 'DISABLED_REACTIVATABLE',
+      }],
+      extensionApprovals: [{
+        id: 'apr-disabled',
+        candidateId: 'generated--text-slugify@0.1.0',
+        fingerprint: 'fp-disabled',
+        decision: 'approved-for-exact-diff',
+        owner: 'generated/text-slugify',
+        candidateVersion: '0.1.0',
+        digest: 'abc123',
+        capabilitiesAdded: ['text.slugify'],
+        capabilitiesRemoved: [],
+        permissionsAdded: [],
+        permissionsRemoved: [],
+        effects: [],
+        eligibilityOk: true,
+        eligibilityDenials: [],
+      }],
+      registry: [
+        {
+          owner: 'managed/integrations',
+          version: '0.1.0',
+          provenance: 'managed',
+          status: 'active',
+          capabilities: ['calendar.read'],
+        },
+        {
+          owner: 'generated/text-slugify',
+          version: '0.1.0',
+          provenance: 'generated',
+          status: 'disabled',
+          capabilities: ['text.slugify'],
+          tools: ['text_slugify'],
+        },
+      ],
+    }))
+    assert.equal(view.plugins.length, 0)
+    assert.equal(view.extensions.length, 1)
+    assert.equal(view.extensions[0]?.lifecycle, 'DISABLED_REACTIVATABLE')
+    assert.equal(view.activations[0]?.status, 'DISABLED_REACTIVATABLE')
+    assert.equal(view.activations[0]?.title, 'Reactivate extension')
+    assert.match(renderMissionControlAsHtml(view), /data-extension-lifecycle="DISABLED_REACTIVATABLE"/)
+    const superseded = projectMissionControl(snapshot({
+      candidates: [{
+        id: 'generated--text-slugify@0.1.0',
+        owner: 'generated/text-slugify',
+        version: '0.1.0',
+        digest: 'abc123',
+        lifecycle: 'sealed',
+        sealed: true,
+        canRequestApproval: false,
+        governanceApproval: 'approved-for-exact-diff',
+      }],
+      extensionApprovals: [{
+        id: 'apr-old',
+        candidateId: 'generated--text-slugify@0.1.0',
+        fingerprint: 'fp-old',
+        decision: 'approved-for-exact-diff',
+        owner: 'generated/text-slugify',
+        candidateVersion: '0.1.0',
+        digest: 'abc123',
+        capabilitiesAdded: [],
+        capabilitiesRemoved: [],
+        permissionsAdded: [],
+        permissionsRemoved: [],
+        effects: [],
+        eligibilityOk: true,
+        eligibilityDenials: [],
+      }],
+      registry: [
+        {
+          owner: 'generated/text-slugify',
+          version: '0.1.0',
+          provenance: 'generated',
+          status: 'disabled',
+          capabilities: ['text.slugify'],
+        },
+        {
+          owner: 'generated/text-slugify',
+          version: '0.2.0',
+          provenance: 'generated',
+          status: 'active',
+          capabilities: ['text.slugify'],
+        },
+      ],
+    }))
+    assert.equal(superseded.extensions[0]?.lifecycle, 'SUPERSEDED')
+    assert.equal(superseded.activations.length, 0)
+  })
+
+  it('G7b. generated provenance on a non-generated owner stays visible and activatable', () => {
+    const view = projectMissionControl(snapshot({
+      candidates: [{
+        id: 'managed--integrations@0.2.0',
+        owner: 'managed/integrations',
+        version: '0.2.0',
+        digest: 'evo-digest',
+        provenance: { kind: 'generated', origin: 'assistant' },
+        lifecycle: 'sealed',
+        sealed: true,
+        canRequestApproval: false,
+        governanceApproval: 'approved-for-exact-diff',
+      }],
+      extensionApprovals: [{
+        id: 'apr-evo',
+        candidateId: 'managed--integrations@0.2.0',
+        fingerprint: 'fp-evo',
+        decision: 'approved-for-exact-diff',
+        owner: 'managed/integrations',
+        candidateVersion: '0.2.0',
+        digest: 'evo-digest',
+        capabilitiesAdded: ['calendar.read'],
+        capabilitiesRemoved: [],
+        permissionsAdded: [],
+        permissionsRemoved: [],
+        effects: [],
+        eligibilityOk: true,
+        eligibilityDenials: [],
+      }],
+    }))
+    const row = view.extensions.find((item) => item.owner === 'managed/integrations' && item.version === '0.2.0')
+    assert.ok(row)
+    assert.equal(row.lifecycle, 'APPROVED_NOT_ACTIVE')
+    assert.equal(row.provenance, 'generated')
+    assert.equal(row.provenanceOrigin, 'assistant')
+    assert.equal(view.activations.some((item) => item.candidateId === row.candidateId), true)
+  })
+
+  it('G7c. approval projection keeps the real decision for blocked and superseded states', () => {
+    const cases: readonly {
+      readonly name: string
+      readonly input: Parameters<typeof extensionLifecycleOf>[0]
+      readonly lifecycle: ReturnType<typeof extensionLifecycleOf>
+      readonly approval: ReturnType<typeof approvalStateOf>
+    }[] = [
+      { name: 'never-active approved', input: { decision: 'approved-for-exact-diff' }, lifecycle: 'APPROVED_NOT_ACTIVE', approval: 'approved' },
+      { name: 'active approved', input: { registryStatus: 'active', decision: 'approved-for-exact-diff' }, lifecycle: 'ACTIVE', approval: 'active' },
+      { name: 'disabled reactivatable', input: { registryStatus: 'disabled', decision: 'approved-for-exact-diff' }, lifecycle: 'DISABLED_REACTIVATABLE', approval: 'approved' },
+      { name: 'disabled rejected', input: { registryStatus: 'disabled', decision: 'approval-rejected' }, lifecycle: 'DISABLED_BLOCKED', approval: 'not-ready' },
+      { name: 'disabled missing approval', input: { registryStatus: 'disabled' }, lifecycle: 'DISABLED_BLOCKED', approval: 'not-ready' },
+      { name: 'explicit superseded', input: { decision: 'superseded', registryStatus: 'disabled' }, lifecycle: 'SUPERSEDED', approval: 'not-ready' },
+      { name: 'retired keeps approved fact', input: { registryStatus: 'retired', decision: 'approved-for-exact-diff' }, lifecycle: 'SUPERSEDED', approval: 'approved' },
+      { name: 'newer authoritative', input: { registryStatus: 'disabled', decision: 'approved-for-exact-diff', newerAuthoritative: true }, lifecycle: 'SUPERSEDED', approval: 'approved' },
+      { name: 'active plus superseded is fail-closed', input: { registryStatus: 'active', decision: 'superseded' }, lifecycle: 'SUPERSEDED', approval: 'not-ready' },
+    ]
+    for (const item of cases) {
+      const lifecycle = extensionLifecycleOf(item.input)
+      assert.equal(lifecycle, item.lifecycle, item.name)
+      assert.equal(approvalStateOf(lifecycle, item.input.decision), item.approval, item.name)
+    }
+  })
+
   it('G6. READY-state projects a system rollback card only when LKG differs', () => {
     const none = projectMissionControl(snapshot())
     assert.equal(none.rollback, undefined)
@@ -477,6 +641,7 @@ describe('TARS-NG mission-control workspace', () => {
     const view = projectMissionControl(snapshot({
       activation: {
         state: 'activation-failed',
+        generation: 4,
         lastFailureCandidateId: 'cand-obsidian',
         lastFailure: {
           candidateId: 'cand-obsidian',
@@ -501,13 +666,113 @@ describe('TARS-NG mission-control workspace', () => {
         effects: [],
       }],
     }))
-    assert.equal(view.activations.length, 0)
+    const retry = view.activations.find((item) => item.candidateId === 'cand-obsidian')
+    assert.ok(retry)
+    assert.equal(retry.status, 'ACTIVATION_FAILED')
+    assert.equal(retry.id, 'act-retry-apr-2-4-health')
+    assert.equal(retry.title, 'Retry activation')
+    assert.equal(retry.eligibilityOk, true)
     assert.equal(view.activationFailure?.phase, 'health')
     assert.equal(view.activationFailure?.rollbackSucceeded, true)
     assert.equal(view.activationFailure?.registryActive, false)
     assert.ok(view.activity.some((item) => item.kind === 'FAILED' && item.summary.includes('health')))
     assert.match(renderMissionControlAsText(view), /ACTIVATION FAILED/)
     assert.match(renderMissionControlAsHtml(view), /data-activation-failed="true"/)
+    assert.match(renderMissionControlAsHtml(view), /data-activation-id="act-retry-apr-2-4-health"/)
+    const nextAttempt = projectMissionControl(snapshot({
+      activation: {
+        state: 'activation-failed',
+        generation: 5,
+        lastFailureCandidateId: 'cand-obsidian',
+        lastFailure: {
+          candidateId: 'cand-obsidian',
+          phase: 'health',
+          diagnostics: 'post-activation health verification failed',
+          rollbackSucceeded: true,
+          safeModeRequired: false,
+        },
+      },
+      extensionApprovals: [{
+        id: 'apr-2',
+        candidateId: 'cand-obsidian',
+        fingerprint: 'fp-ext',
+        decision: 'approved-for-exact-diff',
+        owner: 'generated/obsidian-vault',
+        candidateVersion: '0.1.0',
+        digest: 'abc123',
+        capabilitiesAdded: ['obsidian.read'],
+        capabilitiesRemoved: [],
+        permissionsAdded: [],
+        permissionsRemoved: [],
+        effects: [],
+      }],
+    }))
+    assert.equal(nextAttempt.activations[0]?.id, 'act-retry-apr-2-5-health')
+    assert.notEqual(nextAttempt.activations[0]?.id, retry.id)
+
+    const blocked = projectMissionControl(snapshot({
+      recoveryRequired: true,
+      activation: {
+        state: 'activation-failed',
+        lastFailureCandidateId: 'cand-obsidian',
+        lastFailure: {
+          candidateId: 'cand-obsidian',
+          phase: 'commit',
+          diagnostics: 'authority commit failed',
+          rollbackSucceeded: false,
+          safeModeRequired: true,
+        },
+      },
+      extensionApprovals: [{
+        id: 'apr-2',
+        candidateId: 'cand-obsidian',
+        fingerprint: 'fp-ext',
+        decision: 'approved-for-exact-diff',
+        owner: 'generated/obsidian-vault',
+        candidateVersion: '0.1.0',
+        digest: 'abc123',
+        capabilitiesAdded: [],
+        capabilitiesRemoved: [],
+        permissionsAdded: [],
+        permissionsRemoved: [],
+        effects: [],
+        eligibilityOk: true,
+        eligibilityDenials: [],
+      }],
+    }))
+    assert.equal(blocked.activations.length, 0)
+    assert.equal(blocked.activationFailure?.recoveryRequired, true)
+
+    const stale = projectMissionControl(snapshot({
+      activation: {
+        state: 'activation-failed',
+        lastFailureCandidateId: 'cand-obsidian',
+        lastFailure: {
+          candidateId: 'cand-obsidian',
+          phase: 'prepare',
+          diagnostics: 'digest drifted',
+          rollbackSucceeded: true,
+          safeModeRequired: false,
+        },
+      },
+      extensionApprovals: [{
+        id: 'apr-2',
+        candidateId: 'cand-obsidian',
+        fingerprint: 'fp-old',
+        decision: 'approved-for-exact-diff',
+        owner: 'generated/obsidian-vault',
+        candidateVersion: '0.1.0',
+        digest: 'old-digest',
+        capabilitiesAdded: [],
+        capabilitiesRemoved: [],
+        permissionsAdded: [],
+        permissionsRemoved: [],
+        effects: [],
+        eligibilityOk: false,
+        eligibilityDenials: ['digest-mismatch'],
+      }],
+    }))
+    assert.equal(stale.activations.length, 0)
   })
 
   it('H. Safe Mode is a dedicated comprehensible product state', () => {

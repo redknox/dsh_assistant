@@ -77,6 +77,9 @@ describe('candidate workbench', () => {
       const candidate = ctx.candidateWorkbench.create({ planId: plan.planId })
       assert.equal(candidate.owner, 'managed/integrations')
       assert.equal(candidate.provenance.origin, 'assistant')
+      const projected = projectMissionControl(gatherWorkspaceSnapshot({ ctx, sessionId: 'wb-a' }))
+      assert.deepEqual(projected.candidates?.find((item) => item.id === candidate.id)?.provenance, candidate.provenance)
+      assert.ok(projected.extensions.some((item) => item.owner === 'managed/integrations' && item.candidateId === candidate.id))
       assert.throws(() => ctx.candidateWorkbench.create({
         planId: plan.planId,
         owner: 'generated/shadow',

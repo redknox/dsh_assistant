@@ -402,6 +402,26 @@ describe('extension governance and recovery', () => {
     assert.equal(root.inspect().lastKnownGood?.owners.some((item) => item.owner === 'generated/text-slugify'), false)
   })
 
+  it('I3g. eligible disabled revision reactivates the exact sealed record', async () => {
+    const { registry, workspace, governance, root, human, runtime } = seeded()
+    const base = ready(workspace, {
+      owner: 'generated/text-slugify',
+      version: '0.1.0',
+      capabilities: ['text.slugify'],
+    })
+    const fingerprint = governance.requestApproval(base.id).fingerprint
+    root.recordApproval(human, { candidateId: base.id, fingerprint, decision: 'approved-for-exact-diff' })
+    await root.activate(base.id, human)
+    await root.uninstall(human, 'generated/text-slugify', '0.1.0')
+    const gate = governance.eligibility(base.id)
+    assert.equal(gate.ok, true)
+    const restored = await root.activate(base.id, human)
+    assert.equal(registry.get('generated/text-slugify', '0.1.0')?.status, 'active')
+    assert.equal(runtime.mounted().includes(base.id), true)
+    assert.equal(restored.rollbackTarget?.owners.some((item) => item.owner === 'generated/text-slugify'), false)
+    assert.ok(workspace.get(base.id).sealed)
+  })
+
   it('I3b. uninstall uses declared pluginDependencies and a shared lifecycle mutex', async () => {
     const { registry, workspace, governance, root, human, runtime } = seeded()
     const provider = ready(workspace, {

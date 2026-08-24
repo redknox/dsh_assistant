@@ -49,6 +49,12 @@ function activityModifier(kind: string): string {
   return ''
 }
 
+type WorkspacePane = 'today' | 'extensions'
+
+function paneFromHash(): WorkspacePane {
+  return globalThis.location?.hash === '#extensions' ? 'extensions' : 'today'
+}
+
 function previewText(text: string, limit = 72): string {
   const compact = text.replace(/\s+/g, ' ').trim()
   return compact.length > limit ? `${compact.slice(0, limit - 1)}…` : compact
@@ -90,7 +96,11 @@ function SystemHeader(props: {
   )
 }
 
-function WorkspaceNavigation(props: { readonly view: MissionControlView }) {
+function WorkspaceNavigation(props: {
+  readonly view: MissionControlView
+  readonly pane: WorkspacePane
+  readonly onNavigate: (pane: WorkspacePane) => void
+}) {
   const recentMemory = props.view.memory.slice(0, 8)
   const recentKnowledge = props.view.knowledge.slice(0, 4)
   const current = [...props.view.conversation].reverse().find((item) => isUserMessage(item.kind))
@@ -102,18 +112,33 @@ function WorkspaceNavigation(props: { readonly view: MissionControlView }) {
         <span>LOCAL / PRIMARY</span>
       </div>
       <nav className="primary-nav" aria-label="Primary">
-        <a className="nav-item nav-item--active" href="#today" aria-current="page">
+        <button
+          type="button"
+          className={`nav-item${props.pane === 'today' ? ' nav-item--active' : ''}`}
+          data-nav="today"
+          aria-current={props.pane === 'today' ? 'page' : undefined}
+          onClick={() => props.onNavigate('today')}
+        >
           <Glyph name="today" /><span>TODAY</span>
-        </a>
-        <a className="nav-item" href="#today">
+        </button>
+        <button type="button" className={`nav-item${props.pane === 'today' ? ' nav-item--active' : ''}`} data-nav="conversations" onClick={() => props.onNavigate('today')}>
           <Glyph name="conversations" /><span>CONVERSATIONS</span>
-        </a>
+        </button>
         <span className="nav-item nav-item--idle" aria-disabled="true" title="Calendar management is not available in this soak">
           <Glyph name="calendar" /><span>CALENDAR</span>
         </span>
         <a className="nav-item" href="#memory">
           <Glyph name="memory" /><span>MEMORY</span>
         </a>
+        <button
+          type="button"
+          className={`nav-item${props.pane === 'extensions' ? ' nav-item--active' : ''}`}
+          data-nav="extensions"
+          aria-current={props.pane === 'extensions' ? 'page' : undefined}
+          onClick={() => props.onNavigate('extensions')}
+        >
+          <Glyph name="capabilities" /><span>EXTENSIONS</span>
+        </button>
         <a className="nav-item" href="#capabilities">
           <Glyph name="capabilities" /><span>CAPABILITIES</span>
         </a>
@@ -203,7 +228,7 @@ function ActivationCardView(props: {
   readonly onDefer: (card: ActivationCard) => void
 }) {
   const { card } = props
-  const actionable = card.status === 'APPROVED_NOT_ACTIVE' && card.eligibilityOk
+  const actionable = (card.status === 'APPROVED_NOT_ACTIVE' || card.status === 'DISABLED_REACTIVATABLE' || card.status === 'ACTIVATION_FAILED') && card.eligibilityOk
   return (
     <article
       className="approval-card"
@@ -244,7 +269,9 @@ function ActivationCardView(props: {
             disabled={props.locked}
             onClick={() => props.onActivate(card)}
           >
-            {props.armed ? 'CONFIRM ACTIVATE' : 'ACTIVATE'}
+            {props.armed
+              ? (card.status === 'DISABLED_REACTIVATABLE' ? 'CONFIRM REACTIVATE' : card.status === 'ACTIVATION_FAILED' ? 'CONFIRM RETRY' : 'CONFIRM ACTIVATE')
+              : (card.status === 'DISABLED_REACTIVATABLE' ? 'REACTIVATE' : card.status === 'ACTIVATION_FAILED' ? 'RETRY' : 'ACTIVATE')}
           </button>
         </div>
       ) : <p className="approval-status">Status {card.status}</p>}
@@ -521,6 +548,122 @@ function PluginRow(props: {
   )
 }
 
+function ExtensionsWorkspace(props: {
+  readonly view: MissionControlView
+  readonly locked: boolean
+  readonly inspecting?: string
+  readonly confirmingPlugin?: string
+  readonly armedActivation?: string
+  readonly onInspect: (id: string) => void
+  readonly onApprove: (card: ApprovalCard) => void
+  readonly onReject: (card: ApprovalCard) => void
+  readonly onActivate?: (card: ActivationCard) => void
+  readonly onAskUninstall?: (plugin: UserPluginView) => void
+  readonly onCancelUninstall?: () => void
+  readonly onConfirmUninstall?: (plugin: UserPluginView) => void
+}) {
+  return (
+    <main className="conversation-panel extensions-panel" id="extensions" data-workspace-pane="extensions">
+      <div className="conversation-scroll">
+        <section className="capability-section" aria-labelledby="extensions-title">
+          <h2 id="extensions-title">EXTENSIONS</h2>
+          <ul className="workbench-list" data-extensions="true">
+            {(props.view.extensions ?? []).length === 0 ? (
+              <li className="workbench-item">No generated or user extensions in this home.</li>
+            ) : (props.view.extensions ?? []).map((item) => {
+              const approval = (props.view.approvals ?? []).find((card) => card.candidateId === item.candidateId)
+              const card = (props.view.activations ?? []).find((activation) => activation.candidateId === item.candidateId)
+              const plugin = (props.view.plugins ?? []).find((row) => row.owner === item.owner && row.version === item.version)
+              const failure = props.view.activationFailure?.candidateId === item.candidateId ? props.view.activationFailure : undefined
+              const open = props.inspecting === item.id
+              const pending = approval !== undefined && isPendingApproval(approval.status)
+              const canActivate = (item.lifecycle === 'DISABLED_REACTIVATABLE' || item.lifecycle === 'APPROVED_NOT_ACTIVE' || item.lifecycle === 'ACTIVATION_FAILED')
+                && card !== undefined
+                && item.eligibilityOk
+              return (
+                <li
+                  key={item.id}
+                  className="workbench-item"
+                  data-extension-id={item.id}
+                  data-extension-lifecycle={item.lifecycle}
+                  data-registry-status={item.registryStatus}
+                  data-extension-inspect={open ? 'open' : 'closed'}
+                >
+                  <div className="workbench-identity">{item.owner}@{item.version}</div>
+                  <div className="workbench-meta">lifecycle {item.lifecycle.replaceAll('_', ' ')}</div>
+                  <div className="workbench-meta">registry {item.registryStatus} · {item.mounted ? 'mounted' : 'unmounted'}</div>
+                  <div className="workbench-meta">provenance {item.provenance}{item.provenanceOrigin ? ` / ${item.provenanceOrigin}` : ''}</div>
+                  <div className="workbench-meta">capabilities {item.capabilities.join(', ') || 'none'}</div>
+                  {item.candidateId ? <div className="workbench-meta">candidate {item.candidateId}</div> : null}
+                  {item.digest ? <div className="workbench-meta">digest {item.digest}</div> : null}
+                  <div className="workbench-meta">
+                    {item.eligibilityOk ? 'eligible' : `not eligible${item.eligibilityDenials.length ? `: ${item.eligibilityDenials.join(', ')}` : ''}`}
+                  </div>
+                  {item.newerAuthoritative ? <div className="workbench-meta">newer authoritative revision exists</div> : null}
+                  {open ? (
+                    <div className="workbench-meta" data-extension-details="true">
+                      review {item.reviewState ?? 'unknown'} · validation {item.validationPassed === true ? 'passed' : 'not passed'} · approval {item.approvalDecision ?? 'none'}
+                      {failure ? ` · failed ${failure.phase}: ${failure.summary}` : ''}
+                    </div>
+                  ) : null}
+                  <div className="approval-actions">
+                    <button
+                      type="button"
+                      className="button button--secondary"
+                      data-extension-action={
+                        item.lifecycle === 'DISABLED_BLOCKED' ? 'inspect-denials'
+                          : item.lifecycle === 'ACTIVATION_FAILED' ? 'diagnostics'
+                            : item.lifecycle === 'SUPERSEDED' ? 'view-history'
+                              : 'inspect'
+                      }
+                      disabled={props.locked}
+                      onClick={() => props.onInspect(item.id)}
+                    >
+                      {item.lifecycle === 'DISABLED_BLOCKED' ? (open ? 'HIDE DENIALS' : 'INSPECT DENIALS')
+                        : item.lifecycle === 'ACTIVATION_FAILED' ? (open ? 'HIDE DIAGNOSTICS' : 'DIAGNOSTICS')
+                          : item.lifecycle === 'SUPERSEDED' ? (open ? 'HIDE HISTORY' : 'VIEW HISTORY')
+                            : (open ? 'HIDE' : 'INSPECT')}
+                    </button>
+                    {item.lifecycle === 'APPROVAL_REQUIRED' && pending && approval ? (
+                      <>
+                        <button type="button" className="button button--secondary" data-extension-action="reject" disabled={props.locked} onClick={() => props.onReject(approval)}>REJECT</button>
+                        <button type="button" className="button button--approval" data-extension-action="approve" disabled={props.locked} onClick={() => props.onApprove(approval)}>APPROVE</button>
+                      </>
+                    ) : null}
+                    {canActivate && card ? (
+                      <button
+                        type="button"
+                        className="button button--approval"
+                        data-extension-action={item.lifecycle === 'DISABLED_REACTIVATABLE' ? 'reactivate' : item.lifecycle === 'ACTIVATION_FAILED' ? 'retry' : 'activate'}
+                        disabled={props.locked}
+                        onClick={() => props.onActivate?.(card)}
+                      >
+                        {props.armedActivation === card.id
+                          ? (item.lifecycle === 'DISABLED_REACTIVATABLE' ? 'CONFIRM REACTIVATE' : item.lifecycle === 'ACTIVATION_FAILED' ? 'CONFIRM RETRY' : 'CONFIRM ACTIVATE')
+                          : (item.lifecycle === 'DISABLED_REACTIVATABLE' ? 'REACTIVATE' : item.lifecycle === 'ACTIVATION_FAILED' ? 'RETRY' : 'ACTIVATE')}
+                      </button>
+                    ) : null}
+                    {item.lifecycle === 'ACTIVE' && plugin ? (
+                      <PluginRow
+                        plugin={plugin}
+                        locked={props.locked}
+                        confirming={props.confirmingPlugin === plugin.id}
+                        onAsk={props.onAskUninstall ?? (() => {})}
+                        onCancel={props.onCancelUninstall ?? (() => {})}
+                        onConfirm={props.onConfirmUninstall ?? (() => {})}
+                      />
+                    ) : null}
+                  </div>
+                </li>
+              )
+            })}
+          </ul>
+        </section>
+      </div>
+    </main>
+  )
+}
+
 function OperationsPanel(props: {
   readonly view: MissionControlView
   readonly locked?: boolean
@@ -528,6 +671,7 @@ function OperationsPanel(props: {
   readonly onAskUninstall?: (plugin: UserPluginView) => void
   readonly onCancelUninstall?: () => void
   readonly onConfirmUninstall?: (plugin: UserPluginView) => void
+  readonly onOpenExtensions?: () => void
 }) {
   return (
     <aside className="ops-panel instrument-panel" id="activity" aria-label="Operational state">
@@ -545,6 +689,13 @@ function OperationsPanel(props: {
         </ol>
       </section>
       <WorkbenchPanel candidates={props.view.candidates ?? []} />
+      <section className="capability-section" aria-labelledby="extensions-ops-title">
+        <h2 id="extensions-ops-title">EXTENSIONS</h2>
+        <p className="workbench-meta">{(props.view.extensions ?? []).length} generated/user revision{(props.view.extensions ?? []).length === 1 ? '' : 's'}</p>
+        <button type="button" className="button button--secondary" data-open-extensions="true" onClick={() => props.onOpenExtensions?.()}>
+          Open Extensions
+        </button>
+      </section>
       <section className="capability-section" id="capabilities" aria-labelledby="capability-title">
         <h2 id="capability-title">CAPABILITY STATUS</h2>
         <dl className="capability-list">
@@ -629,9 +780,11 @@ function WorkbenchPanel(props: { readonly candidates: readonly WorkbenchProjecti
                 : item.extensionLifecycle === 'APPROVED_NOT_ACTIVE' ? 'approved, not active'
                   : item.extensionLifecycle === 'ACTIVATING' ? 'activating'
                     : item.extensionLifecycle === 'ACTIVATION_FAILED' ? 'activation failed'
-                      : item.extensionLifecycle === 'SUPERSEDED' ? 'superseded'
-                        : item.approvalState === 'approval-requested' || item.canRequestApproval ? 'ready for approval'
-                          : 'not ready for approval'}
+                      : item.extensionLifecycle === 'DISABLED_REACTIVATABLE' ? 'disabled, reactivatable'
+                        : item.extensionLifecycle === 'DISABLED_BLOCKED' ? 'disabled, blocked'
+                          : item.extensionLifecycle === 'SUPERSEDED' ? 'superseded'
+                            : item.approvalState === 'approval-requested' || item.canRequestApproval ? 'ready for approval'
+                              : 'not ready for approval'}
             </div>
             <div className="workbench-diff">
               capabilities {formatDiff(item.diff?.capabilities.added ?? [], item.diff?.capabilities.removed ?? [], item.diff?.capabilities.changed ?? [])}
@@ -709,6 +862,10 @@ export function MissionControlScreen(props: {
   readonly onDeferActivation?: (card: ActivationCard) => void
   readonly deferredActivations?: readonly string[]
   readonly armedActivation?: string
+  readonly pane?: WorkspacePane
+  readonly onNavigate?: (pane: WorkspacePane) => void
+  readonly inspectingExtension?: string
+  readonly onInspectExtension?: (id: string) => void
   readonly confirmingPlugin?: string
   readonly onAskUninstall?: (plugin: UserPluginView) => void
   readonly onCancelUninstall?: () => void
@@ -722,6 +879,7 @@ export function MissionControlScreen(props: {
   const { view } = props
   const safe = view.systemState === 'SAFE_MODE' || view.systemState === 'RECOVERY'
   const locked = !props.connected
+  const pane = props.pane ?? 'today'
   return (
     <div className="chassis">
     <div className="console" data-system-state={view.systemState} data-connected={props.connected ? 'yes' : 'no'}>
@@ -742,7 +900,23 @@ export function MissionControlScreen(props: {
         />
       ) : null}
       <div className="workspace-grid">
-        <WorkspaceNavigation view={view} />
+        <WorkspaceNavigation view={view} pane={pane} onNavigate={props.onNavigate ?? (() => {})} />
+        {pane === 'extensions' ? (
+          <ExtensionsWorkspace
+            view={view}
+            locked={locked}
+            inspecting={props.inspectingExtension}
+            confirmingPlugin={props.confirmingPlugin}
+            armedActivation={props.armedActivation}
+            onInspect={props.onInspectExtension ?? (() => {})}
+            onApprove={props.onApprove}
+            onReject={props.onReject}
+            onActivate={props.onActivate}
+            onAskUninstall={props.onAskUninstall}
+            onCancelUninstall={props.onCancelUninstall}
+            onConfirmUninstall={props.onConfirmUninstall}
+          />
+        ) : (
         <ConversationWorkspace
           view={view}
           connected={props.connected}
@@ -763,6 +937,7 @@ export function MissionControlScreen(props: {
           onAskRollback={props.onAskRollback}
           onDeferRollback={props.onDeferRollback}
         />
+        )}
         <OperationsPanel
           view={view}
           locked={locked}
@@ -770,6 +945,7 @@ export function MissionControlScreen(props: {
           onAskUninstall={props.onAskUninstall}
           onCancelUninstall={props.onCancelUninstall}
           onConfirmUninstall={props.onConfirmUninstall}
+          onOpenExtensions={() => props.onNavigate?.('extensions')}
         />
       </div>
       <ControlStripView view={view} connected={props.connected} />
@@ -790,6 +966,19 @@ export function App() {
   const [confirmingPlugin, setConfirmingPlugin] = useState<string>()
   const [deferredRollback, setDeferredRollback] = useState(false)
   const [armedRollback, setArmedRollback] = useState(false)
+  const [pane, setPane] = useState<WorkspacePane>(paneFromHash)
+  const [inspectingExtension, setInspectingExtension] = useState<string>()
+
+  useEffect(() => {
+    const sync = () => { setPane(paneFromHash()) }
+    globalThis.addEventListener?.('hashchange', sync)
+    return () => globalThis.removeEventListener?.('hashchange', sync)
+  }, [])
+
+  const navigate = (next: WorkspacePane) => {
+    setPane(next)
+    if (globalThis.location) globalThis.location.hash = next === 'extensions' ? 'extensions' : 'today'
+  }
 
   useEffect(() => {
     let closed = false
@@ -866,6 +1055,10 @@ export function App() {
         setArmedActivation(undefined)
         void act(() => activateCandidate(card, true))
       }}
+      pane={pane}
+      onNavigate={navigate}
+      inspectingExtension={inspectingExtension}
+      onInspectExtension={(id) => { setInspectingExtension((current) => current === id ? undefined : id) }}
       confirmingPlugin={confirmingPlugin}
       onAskUninstall={(plugin) => { setConfirmingPlugin(plugin.id) }}
       onCancelUninstall={() => { setConfirmingPlugin(undefined) }}

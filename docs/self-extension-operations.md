@@ -14,7 +14,7 @@ Inspect registry, request a Capability Resolution Review, write/validate/seal a 
 
 ## What only a trusted operator can do
 
-Approve an exact fingerprint, activate (CLI or WUI Activation Card with explicit confirm), uninstall one active generated/user plugin from the READY-state WUI trash action, rollback the previous LKG from the READY-state **Rollback system state** card or CLI, disable, enter/exit Safe Mode, backup/restore durable Self-Extension state, rewrite LKG indirectly via those actions. Approval never auto-activates. Uninstall is a targeted unmount of one plugin; rollback restores the authoritative previous system snapshot and may change more than one owner. Neither deletes sealed artifacts, review, approval, or audit history. Stale or replayed rollback cards fail closed.
+Approve an exact fingerprint, activate (CLI or WUI Activation Card with explicit confirm), uninstall one active generated/user plugin from the READY-state WUI trash action, reactivate that exact disabled revision from the Extensions view, rollback the previous LKG from the READY-state **Rollback system state** card or CLI, disable, enter/exit Safe Mode, backup/restore durable Self-Extension state, rewrite LKG indirectly via those actions. Approval never auto-activates. Uninstall disables one plugin and keeps it discoverable. Reactivate remounts the same sealed owner/version after revalidation. Rollback restores the authoritative previous system snapshot. None of these delete sealed artifacts, review, approval, or audit history. Stale or replayed rollback/activation cards fail closed.
 
 ## Normal lifecycle
 

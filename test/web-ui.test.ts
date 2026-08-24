@@ -35,6 +35,7 @@ function fixtureView(overrides: Partial<MissionControlView> = {}): MissionContro
     approvals: [],
     activations: [],
     plugins: [],
+    extensions: [],
     capabilities: [{ area: 'Memory', action: 'remember', status: 'active' }],
     memory: [],
     knowledge: [],
@@ -1376,6 +1377,263 @@ export function apply(ctx) {
     }
   })
 
+  it('reactivates an exact disabled generated plugin from the Extensions Center', async () => {
+    const home = mkdtempSync(join(tmpdir(), 'tars-reactivate-boot-'))
+    try {
+      await withServer(() => bootAssistantControl({ home }), 'web-ui-reactivate', async (url, _surface, _agent, ctx) => {
+        const cookie = await cookieHeader(url)
+        const base = authorGenerated(ctx, 'text.slugify')
+        const card = await approveActivationCard(url, cookie, base.id)
+        assert.equal((await fetch(`${url}/api/activate`, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json', ...authHeaders(cookie) },
+          body: JSON.stringify({
+            id: card.id,
+            candidateId: card.candidateId,
+            digest: card.digest,
+            fingerprint: card.fingerprint,
+            confirm: true,
+          }),
+        })).status, 200)
+        const ready = await fetch(`${url}/api/view`).then((res) => res.json()) as { view: MissionControlView }
+        const plugin = ready.view.plugins.find((item) => item.owner === 'generated/text-slugify')
+        assert.ok(plugin)
+        assert.ok(ctx.tools.get('text_slugify'))
+        assert.equal((await fetch(`${url}/api/uninstall`, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json', ...authHeaders(cookie) },
+          body: JSON.stringify({ ...uninstallBody(plugin), confirm: true }),
+        })).status, 200)
+        assert.equal(ctx.tools.get('text_slugify'), undefined)
+        const disabled = await fetch(`${url}/api/view`).then((res) => res.json()) as { view: MissionControlView }
+        assert.equal(disabled.view.plugins.some((item) => item.owner === 'generated/text-slugify'), false)
+        assert.equal(disabled.view.extensions.find((item) => item.owner === 'generated/text-slugify')?.lifecycle, 'DISABLED_REACTIVATABLE')
+      })
+      await withServer(() => bootAssistantControl({ home }), 'web-ui-reactivate-restart', async (url, _surface, _agent, ctx) => {
+        const cookie = await cookieHeader(url)
+        const disabled = await fetch(`${url}/api/view`).then((res) => res.json()) as { view: MissionControlView }
+        const row = disabled.view.extensions.find((item) => item.owner === 'generated/text-slugify')
+        assert.ok(row)
+        assert.equal(row.lifecycle, 'DISABLED_REACTIVATABLE')
+        const reactivate = disabled.view.activations.find((item) => item.candidateId === row.candidateId)
+        assert.ok(reactivate)
+        assert.equal(reactivate.title, 'Reactivate extension')
+        const markup = renderToStaticMarkup(createElement(MissionControlScreen, {
+          view: disabled.view,
+          pane: 'extensions',
+          connected: true,
+          sending: false,
+          draft: '',
+          onDraft() {},
+          onSend() {},
+          onApprove() {},
+          onReject() {},
+          onRecovery() {},
+        }))
+        assert.match(markup, /data-nav="extensions"/)
+        assert.match(markup, /data-workspace-pane="extensions"/)
+        assert.match(markup, /aria-current="page"/)
+        assert.match(markup, /data-extension-lifecycle="DISABLED_REACTIVATABLE"/)
+        assert.match(markup, /data-extension-action="reactivate"/)
+        assert.equal(ctx.tools.get('activate_extension'), undefined)
+        const noConfirm = await fetch(`${url}/api/activate`, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json', ...authHeaders(cookie) },
+          body: JSON.stringify({
+            id: reactivate.id,
+            candidateId: reactivate.candidateId,
+            digest: reactivate.digest,
+            fingerprint: reactivate.fingerprint,
+          }),
+        })
+        assert.equal(noConfirm.status, 409)
+        assert.equal((await fetch(`${url}/api/activate`, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json', ...authHeaders(cookie) },
+          body: JSON.stringify({
+            id: reactivate.id,
+            candidateId: reactivate.candidateId,
+            digest: reactivate.digest,
+            fingerprint: reactivate.fingerprint,
+            confirm: true,
+          }),
+        })).status, 200)
+        assert.ok(ctx.tools.get('text_slugify'))
+        assert.equal(ctx.capabilityRegistry.get('generated/text-slugify', '0.1.0')?.status, 'active')
+        const after = await fetch(`${url}/api/view`).then((res) => res.json()) as { view: MissionControlView }
+        assert.ok(after.view.rollback)
+        assert.ok(after.view.rollback.ownerChanges.some((item) => item.owner === 'generated/text-slugify' && item.change === 'disable'))
+        const replayActivate = await fetch(`${url}/api/activate`, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json', ...authHeaders(cookie) },
+          body: JSON.stringify({
+            id: reactivate.id,
+            candidateId: reactivate.candidateId,
+            digest: reactivate.digest,
+            fingerprint: reactivate.fingerprint,
+            confirm: true,
+          }),
+        })
+        assert.equal(replayActivate.status, 409)
+        const rolled = await fetch(`${url}/api/rollback`, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json', ...authHeaders(cookie) },
+          body: JSON.stringify({
+            id: after.view.rollback.id,
+            fingerprint: after.view.rollback.fingerprint,
+            currentGeneration: after.view.rollback.currentGeneration,
+            targetGeneration: after.view.rollback.targetGeneration,
+            confirm: true,
+          }),
+        })
+        assert.equal(rolled.status, 200)
+        assert.equal(ctx.tools.get('text_slugify'), undefined)
+        assert.equal(ctx.capabilityRegistry.get('generated/text-slugify', '0.1.0')?.status, 'disabled')
+        const inactive = await fetch(`${url}/api/view`).then((res) => res.json()) as { view: MissionControlView }
+        assert.equal(inactive.view.extensions.find((item) => item.owner === 'generated/text-slugify')?.lifecycle, 'DISABLED_REACTIVATABLE')
+        assert.ok(row.candidateId)
+        assert.ok(ctx.extensionGovernance.inspectApproval(row.candidateId))
+        assert.equal(ctx.independentReview.status({ id: row.candidateId, digest: row.digest }), 'review-complete')
+        const replayRollback = await fetch(`${url}/api/rollback`, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json', ...authHeaders(cookie) },
+          body: JSON.stringify({
+            id: after.view.rollback.id,
+            fingerprint: after.view.rollback.fingerprint,
+            currentGeneration: after.view.rollback.currentGeneration,
+            targetGeneration: after.view.rollback.targetGeneration,
+            confirm: true,
+          }),
+        })
+        assert.equal(replayRollback.status, 409)
+      })
+      const second = await bootAssistantControl({ home })
+      try {
+        assert.equal(second.ctx.capabilityRegistry.get('generated/text-slugify', '0.1.0')?.status, 'disabled')
+        assert.equal(second.ctx.tools.get('text_slugify'), undefined)
+        const leftover = second.ctx.candidateWorkspace.list().find((item) => item.owner === 'generated/text-slugify')
+        assert.ok(leftover)
+        assert.equal(leftover.sealed, true)
+        assert.ok(second.ctx.extensionGovernance.inspectApproval(leftover.id))
+        assert.ok(second.ctx.independentReview.lastReport(leftover.id) || second.ctx.independentReview.status({ id: leftover.id, digest: leftover.digest }))
+      } finally {
+        await second.ctx.fiber.dispose()
+      }
+    } finally {
+      rmSync(home, { recursive: true, force: true })
+    }
+  })
+
+  it('rebinds a Retry card after a recoverable activation failure', async () => {
+    await withServer(bootAssistantControl, 'web-ui-activate-retry', async (url, _surface, _agent, ctx, recoveryRoot) => {
+      const cookie = await cookieHeader(url)
+      const prepared = authorGenerated(ctx, 'r0.wui.retry')
+      const first = await approveActivationCard(url, cookie, prepared.id)
+      recoveryRoot.service.failActivation = { phase: 'prepare', diagnostics: 'transient prepare fault' }
+      assert.equal((await fetch(`${url}/api/activate`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', ...authHeaders(cookie) },
+        body: JSON.stringify({
+          id: first.id,
+          candidateId: first.candidateId,
+          digest: first.digest,
+          fingerprint: first.fingerprint,
+          confirm: true,
+        }),
+      })).status, 409)
+      const failed = await fetch(`${url}/api/view`).then((res) => res.json()) as { view: MissionControlView }
+      const row = failed.view.extensions.find((item) => item.candidateId === prepared.id)
+      assert.ok(row)
+      assert.equal(row.lifecycle, 'ACTIVATION_FAILED')
+      assert.equal(row.eligibilityOk, true)
+      const retryA = failed.view.activations.find((item) => item.candidateId === prepared.id)
+      assert.ok(retryA)
+      assert.equal(retryA.status, 'ACTIVATION_FAILED')
+      assert.equal(retryA.title, 'Retry activation')
+      assert.notEqual(retryA.id, first.id)
+      assert.match(retryA.id, /^act-retry-/)
+      const markup = renderToStaticMarkup(createElement(MissionControlScreen, {
+        view: failed.view,
+        pane: 'extensions',
+        connected: true,
+        sending: false,
+        draft: '',
+        onDraft() {},
+        onSend() {},
+        onApprove() {},
+        onReject() {},
+        onRecovery() {},
+      }))
+      assert.match(markup, /data-extension-lifecycle="ACTIVATION_FAILED"/)
+      assert.match(markup, /data-extension-action="retry"/)
+      assert.equal((await fetch(`${url}/api/activate`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', ...authHeaders(cookie) },
+        body: JSON.stringify({
+          id: retryA.id,
+          candidateId: retryA.candidateId,
+          digest: retryA.digest,
+          fingerprint: retryA.fingerprint,
+          confirm: true,
+        }),
+      })).status, 409)
+      const afterSecond = await fetch(`${url}/api/view`).then((res) => res.json()) as { view: MissionControlView }
+      const retryB = afterSecond.view.activations.find((item) => item.candidateId === prepared.id)
+      assert.ok(retryB)
+      assert.notEqual(retryB.id, retryA.id)
+      const generationAfterB = recoveryRoot.inspect().current?.generation
+      recoveryRoot.service.failActivation = undefined
+      assert.equal((await fetch(`${url}/api/activate`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', ...authHeaders(cookie) },
+        body: JSON.stringify({
+          id: retryA.id,
+          candidateId: retryA.candidateId,
+          digest: retryA.digest,
+          fingerprint: retryA.fingerprint,
+          confirm: true,
+        }),
+      })).status, 409)
+      assert.equal(recoveryRoot.inspect().current?.generation, generationAfterB)
+      assert.equal(ctx.tools.get('r0_wui_retry'), undefined)
+      assert.equal((await fetch(`${url}/api/activate`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', ...authHeaders(cookie) },
+        body: JSON.stringify({
+          id: first.id,
+          candidateId: first.candidateId,
+          digest: first.digest,
+          fingerprint: first.fingerprint,
+          confirm: true,
+        }),
+      })).status, 409)
+      assert.equal((await fetch(`${url}/api/activate`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', ...authHeaders(cookie) },
+        body: JSON.stringify({
+          id: retryB.id,
+          candidateId: retryB.candidateId,
+          digest: retryB.digest,
+          fingerprint: 'stale-fingerprint',
+          confirm: true,
+        }),
+      })).status, 409)
+      assert.equal((await fetch(`${url}/api/activate`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', ...authHeaders(cookie) },
+        body: JSON.stringify({
+          id: retryB.id,
+          candidateId: retryB.candidateId,
+          digest: retryB.digest,
+          fingerprint: retryB.fingerprint,
+          confirm: true,
+        }),
+      })).status, 200)
+      assert.ok(ctx.tools.get('r0_wui_retry'))
+      assert.equal(ctx.capabilityRegistry.get(prepared.owner, '0.1.0')?.status, 'active')
+    })
+  })
+
   it('keeps the prior LKG when uninstall is interrupted between Registry and authority commit', async () => {
     const home = mkdtempSync(join(tmpdir(), 'tars-uninstall-atomic-'))
     try {
@@ -1815,6 +2073,119 @@ export function apply(ctx) {
     assert.match(activation, /ACTIVATE/)
     assert.match(activation, /NOT NOW/)
     assert.doesNotMatch(activation, /NOT APPROVED/)
+
+    const extensionsPane = renderToStaticMarkup(createElement(MissionControlScreen, {
+      view: fixtureView({
+        approvals: [{
+          id: 'apr-req',
+          kind: 'self-extension',
+          title: 'SELF-EXTENSION APPROVAL',
+          target: 'generated/search@0.1.0',
+          sideEffect: 'none',
+          authorityChange: 'yes',
+          details: [],
+          fingerprint: 'fp-req',
+          status: 'approval-requested',
+          candidateId: 'cand-req',
+        }],
+        activations: [{
+          id: 'apr-act-ext',
+          kind: 'self-extension-activate',
+          title: 'Reactivate extension',
+          owner: 'generated/search',
+          version: '0.1.0',
+          candidateId: 'cand-off',
+          digest: 'abc',
+          fingerprint: 'fp-off',
+          isolatedRuntime: true,
+          capabilitiesAdded: [],
+          capabilitiesRemoved: [],
+          capabilitiesChanged: [],
+          permissionsAdded: [],
+          permissionsRemoved: [],
+          permissionsChanged: [],
+          toolsAdded: [],
+          toolsRemoved: [],
+          toolsChanged: [],
+          effects: [],
+          eligibilityOk: true,
+          eligibilityDenials: [],
+          status: 'DISABLED_REACTIVATABLE',
+          details: [],
+        }, {
+          id: 'act-retry-apr-fail',
+          kind: 'self-extension-activate',
+          title: 'Retry activation',
+          owner: 'generated/search',
+          version: '0.0.3',
+          candidateId: 'cand-fail',
+          digest: 'abc',
+          fingerprint: 'fp-fail',
+          isolatedRuntime: true,
+          capabilitiesAdded: [],
+          capabilitiesRemoved: [],
+          capabilitiesChanged: [],
+          permissionsAdded: [],
+          permissionsRemoved: [],
+          permissionsChanged: [],
+          toolsAdded: [],
+          toolsRemoved: [],
+          toolsChanged: [],
+          effects: [],
+          eligibilityOk: true,
+          eligibilityDenials: [],
+          status: 'ACTIVATION_FAILED',
+          details: [],
+        }],
+        plugins: [{
+          id: 'uninst-generated/search@0.2.0',
+          owner: 'generated/search',
+          version: '0.2.0',
+          provenance: 'generated',
+          mounted: true,
+          registryGeneration: 1,
+          capabilities: ['search'],
+          tools: ['web_search'],
+          dependency: { severity: 'none', dependents: [] },
+          uninstallable: true,
+        }],
+        activationFailure: {
+          candidateId: 'cand-fail',
+          phase: 'prepare',
+          summary: 'bounded',
+          rollbackSucceeded: true,
+          recoveryRequired: false,
+          registryActive: false,
+        },
+        extensions: [
+          { id: 'ext-req', owner: 'generated/search', version: '0.0.1', candidateId: 'cand-req', provenance: 'generated', capabilities: [], tools: [], lifecycle: 'APPROVAL_REQUIRED', registryStatus: 'absent', mounted: false, eligibilityOk: false, eligibilityDenials: ['review-required'], newerAuthoritative: false },
+          { id: 'ext-off', owner: 'generated/search', version: '0.1.0', candidateId: 'cand-off', provenance: 'generated', capabilities: [], tools: [], lifecycle: 'DISABLED_REACTIVATABLE', registryStatus: 'disabled', mounted: false, eligibilityOk: true, eligibilityDenials: [], newerAuthoritative: false },
+          { id: 'ext-on', owner: 'generated/search', version: '0.2.0', provenance: 'generated', capabilities: [], tools: [], lifecycle: 'ACTIVE', registryStatus: 'active', mounted: true, eligibilityOk: false, eligibilityDenials: [], newerAuthoritative: false },
+          { id: 'ext-block', owner: 'generated/search', version: '0.0.2', provenance: 'generated', capabilities: [], tools: [], lifecycle: 'DISABLED_BLOCKED', registryStatus: 'disabled', mounted: false, eligibilityOk: false, eligibilityDenials: ['approval-rejected'], newerAuthoritative: false },
+          { id: 'ext-fail', owner: 'generated/search', version: '0.0.3', candidateId: 'cand-fail', provenance: 'generated', capabilities: [], tools: [], lifecycle: 'ACTIVATION_FAILED', registryStatus: 'absent', mounted: false, eligibilityOk: true, eligibilityDenials: [], newerAuthoritative: false },
+          { id: 'ext-old', owner: 'generated/search', version: '0.0.0', provenance: 'generated', capabilities: [], tools: [], lifecycle: 'SUPERSEDED', registryStatus: 'disabled', mounted: false, eligibilityOk: false, eligibilityDenials: [], newerAuthoritative: true },
+        ],
+      }),
+      pane: 'extensions',
+      connected: true,
+      sending: false,
+      draft: '',
+      onDraft() {},
+      onSend() {},
+      onApprove() {},
+      onReject() {},
+      onRecovery() {},
+    }))
+    assert.match(extensionsPane, /data-workspace-pane="extensions"/)
+    assert.match(extensionsPane, /data-nav="extensions"[^>]*aria-current="page"/)
+    assert.match(extensionsPane, /data-extension-lifecycle="APPROVAL_REQUIRED"[^]*data-extension-action="approve"/)
+    assert.match(extensionsPane, /data-extension-action="reject"/)
+    assert.match(extensionsPane, /data-extension-action="reactivate"/)
+    assert.match(extensionsPane, /data-uninstall-action="ask"/)
+    assert.match(extensionsPane, /data-extension-action="inspect-denials"/)
+    assert.match(extensionsPane, /data-extension-action="diagnostics"/)
+    assert.match(extensionsPane, /data-extension-action="retry"/)
+    assert.match(extensionsPane, /data-extension-action="view-history"/)
 
     const workbench = renderToStaticMarkup(createElement(MissionControlScreen, {
       view: fixtureView({

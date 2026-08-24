@@ -22,7 +22,7 @@ import {
 } from './listing.js'
 import { parseWorkbenchRiskModel } from './risk-model.js'
 import { boundActivationDiagnostics } from '../workspace/failure.js'
-import { activationViewOf, extensionLifecycleOf } from '../workspace/lifecycle.js'
+import { activationViewOf, compareOwnerVersion, extensionLifecycleOf } from '../workspace/lifecycle.js'
 import { parseScaffoldNames, scaffoldFiles } from './scaffold.js'
 import {
   WORKBENCH_CHANGE_KINDS,
@@ -491,6 +491,9 @@ export class WorkbenchService implements CandidateWorkbench {
       candidateId: record.id,
       lastFailureCandidateId: inspected?.lastFailure?.candidateId,
       eligibilityDenials: this.governance.eligibility(record.id).denials.map((item) => item.reason),
+      newerAuthoritative: this.options.registry?.list({ owner: record.owner }).some((item) => (
+        item.status === 'active' && compareOwnerVersion(item.version, record.version) > 0
+      )),
     })
     return {
       governanceApproval: decision ?? 'none',

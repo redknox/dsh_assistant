@@ -22,6 +22,7 @@ export function renderMissionControlAsText(view: MissionControlView): string {
     ...view.knowledge.slice(0, 5).map((item) => `- Knowledge  ${item.sourceUri}`),
     ...view.capabilities.map((item) => `- ${item.area}  ${item.action}  ${item.status}`),
     ...(view.plugins ?? []).map((item) => `- Plugin  ${item.owner}@${item.version}  uninstallable`),
+    ...(view.extensions ?? []).map((item) => `- Extension  ${item.owner}@${item.version}  ${item.lifecycle}`),
     view.rollback
       ? `- Rollback  generation ${view.rollback.currentGeneration} → ${view.rollback.targetGeneration}  ${view.rollback.title}`
       : '',
@@ -77,6 +78,7 @@ export function renderMissionControlAsHtml(view: MissionControlView): string {
     ...view.knowledge.map((item) => `<li>${escapeHtml(item.sourceUri)}</li>`),
     ...view.capabilities.map((item) => `<li data-area="${escapeHtml(item.area)}" data-status="${escapeHtml(item.status)}">${escapeHtml(item.area)} — ${escapeHtml(item.action)} (${escapeHtml(item.status)})</li>`),
     ...(view.plugins ?? []).map((item) => `<li data-plugin-id="${escapeHtml(item.id)}" data-uninstallable="yes">${escapeHtml(item.owner)}@${escapeHtml(item.version)}</li>`),
+    ...(view.extensions ?? []).map((item) => `<li data-extension-id="${escapeHtml(item.id)}" data-extension-lifecycle="${escapeHtml(item.lifecycle)}">${escapeHtml(item.owner)}@${escapeHtml(item.version)} ${escapeHtml(item.lifecycle)}</li>`),
     ...(view.rollback
       ? [`<li data-rollback-id="${escapeHtml(view.rollback.id)}" data-rollback-fingerprint="${escapeHtml(view.rollback.fingerprint)}">${escapeHtml(view.rollback.title)} ${view.rollback.currentGeneration}→${view.rollback.targetGeneration}</li>`]
       : []),
@@ -125,12 +127,19 @@ export function renderMissionControlAsHtml(view: MissionControlView): string {
   ${recovery}
   ${activationFailure}
   <div id="layout">
-    <aside id="context"><h1>Context</h1><ul>${context}</ul></aside>
-    <main id="work">
+    <aside id="context">
+      <nav aria-label="Primary">
+        <a href="#today" data-nav="today">Today</a>
+        <a href="#extensions" data-nav="extensions">Extensions</a>
+      </nav>
+      <h1>Context</h1><ul>${context}</ul>
+    </aside>
+    <main id="work" data-workspace-pane="today">
       <h1>Conversation / work</h1>
       <ol>${conversation}</ol>
       <section id="approvals">${approvals}</section>
       <section id="activations">${activations}</section>
+      <section id="extensions" data-workspace-pane="extensions">${(view.extensions ?? []).map((item) => `<article data-extension-id="${escapeHtml(item.id)}" data-extension-lifecycle="${escapeHtml(item.lifecycle)}" data-extension-action="inspect">${escapeHtml(item.owner)}@${escapeHtml(item.version)}</article>`).join('')}</section>
       ${view.rollback ? `<section id="rollback"><article data-rollback-id="${escapeHtml(view.rollback.id)}" data-kind="${escapeHtml(view.rollback.kind)}" data-fingerprint="${escapeHtml(view.rollback.fingerprint)}"><h2>${escapeHtml(view.rollback.title)}</h2></article></section>` : ''}
     </main>
     <aside id="activity"><h1>Activity</h1><ul>${activity}</ul></aside>

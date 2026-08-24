@@ -1,5 +1,5 @@
 import type { ActivationCard, WorkspaceSnapshotInput } from './types.js'
-import { extensionLifecycleOf } from './lifecycle.js'
+import { activationCardId, compareOwnerVersion, extensionLifecycleOf, isActivationRetryEligible } from './lifecycle.js'
 
 export function formatExactDiff(
   added: readonly string[],
@@ -27,9 +27,28 @@ export function projectActivationCards(input: WorkspaceSnapshotInput): readonly 
       candidateId: approval.candidateId,
       lastFailureCandidateId: input.activation?.lastFailureCandidateId,
       eligibilityDenials: approval.eligibilityDenials,
+      newerAuthoritative: input.registry.some((item) => (
+        item.owner === approval.owner
+        && item.status === 'active'
+        && compareOwnerVersion(item.version, approval.candidateVersion) > 0
+      )),
     })
-    if (lifecycle !== 'APPROVED_NOT_ACTIVE' && lifecycle !== 'ACTIVATING') continue
-    cards.push(selfExtensionActivationCard(approval, lifecycle))
+    if (lifecycle === 'ACTIVATION_FAILED') {
+      if (input.activation?.generation === undefined) continue
+      if (!isActivationRetryEligible({
+        lifecycle,
+        eligibilityOk: approval.eligibilityOk,
+        eligibilityDenials: approval.eligibilityDenials,
+        recoveryRequired: input.recoveryRequired,
+        safeMode: input.safeMode,
+      })) continue
+    } else if (lifecycle !== 'APPROVED_NOT_ACTIVE' && lifecycle !== 'ACTIVATING' && lifecycle !== 'DISABLED_REACTIVATABLE') {
+      continue
+    }
+    cards.push(selfExtensionActivationCard(approval, lifecycle, {
+      generation: input.activation?.generation,
+      failurePhase: input.activation?.lastFailure?.phase,
+    }))
   }
   return cards
 }
@@ -37,6 +56,7 @@ export function projectActivationCards(input: WorkspaceSnapshotInput): readonly 
 function selfExtensionActivationCard(
   approval: NonNullable<WorkspaceSnapshotInput['extensionApprovals']>[number],
   status: ActivationCard['status'],
+  attempt?: { readonly generation?: number; readonly failurePhase?: string },
 ): ActivationCard {
   const eligibilityOk = approval.eligibilityOk !== false
   const denials = approval.eligibilityDenials ?? []
@@ -44,9 +64,16 @@ function selfExtensionActivationCard(
   const permissionsChanged = approval.permissionsChanged ?? []
   const toolsChanged = approval.toolsChanged ?? []
   return {
-    id: approval.id,
+    id: activationCardId(approval.id, status, attempt?.generation === undefined ? undefined : {
+      generation: attempt.generation,
+      failurePhase: attempt.failurePhase,
+    }),
     kind: 'self-extension-activate',
-    title: 'SELF-EXTENSION ACTIVATION',
+    title: status === 'DISABLED_REACTIVATABLE'
+      ? 'Reactivate extension'
+      : status === 'ACTIVATION_FAILED'
+        ? 'Retry activation'
+        : 'SELF-EXTENSION ACTIVATION',
     owner: approval.owner,
     version: approval.candidateVersion,
     candidateId: approval.candidateId,
@@ -79,7 +106,11 @@ function selfExtensionActivationCard(
       `Contract    ${approval.runtimeContractVersion || 'unspecified'}`,
       'Generated code runs only in the isolated runner after this trusted activation.',
       eligibilityOk ? 'Eligible for trusted activation.' : `Not eligible: ${denials.join(', ') || 'denied'}`,
-      'Approval did not activate this candidate. Conversation yes cannot activate it.',
+      status === 'DISABLED_REACTIVATABLE'
+        ? 'This reactivates the exact disabled revision. It is not uninstall rollback and does not create a new version.'
+        : status === 'ACTIVATION_FAILED'
+          ? 'Previous trusted activation failed. This card rebinds the exact sealed digest and fingerprint after current eligibility is rechecked.'
+          : 'Approval did not activate this candidate. Conversation yes cannot activate it.',
     ],
   }
 }
