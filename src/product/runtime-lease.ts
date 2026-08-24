@@ -2,7 +2,7 @@ import { randomBytes, timingSafeEqual } from 'node:crypto'
 import { chmodSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs'
 import path from 'node:path'
 import { readProductVersion } from './compatibility.js'
-import { processAlive, type ProductHomeLayout } from './home.js'
+import { isSafeRuntimePid, processAlive, type ProductHomeLayout } from './home.js'
 
 export const RUNTIME_LEASE_SCHEMA_VERSION = 1
 
@@ -70,7 +70,7 @@ export async function acquireRuntimeLease(layout: ProductHomeLayout): Promise<Ru
       } catch {
         // chmod may fail on some filesystems
       }
-      const identity = writeNewIdentity(layout)
+      const identity = writeNewRuntimeIdentity(layout)
       return { ok: true, hold: holdOf(layout, identity) }
     } catch (error) {
       if (!isAlreadyExists(error)) throw error
@@ -126,7 +126,7 @@ export function readRuntimeIdentity(layout: ProductHomeLayout): RuntimeIdentity 
     const raw = JSON.parse(readFileSync(layout.runtimeIdentityFile, 'utf8')) as Partial<RuntimeIdentity>
     if (raw.schemaVersion !== RUNTIME_LEASE_SCHEMA_VERSION) return undefined
     const pid = raw.pid
-    if (typeof pid !== 'number' || !Number.isInteger(pid) || typeof raw.runId !== 'string' || raw.runId.length < 32) return undefined
+    if (!isSafeRuntimePid(pid) || typeof raw.runId !== 'string' || raw.runId.length < 32) return undefined
     if (typeof raw.startedAt !== 'string' || typeof raw.productVersion !== 'string' || typeof raw.normalizedHome !== 'string') {
       return undefined
     }
@@ -144,12 +144,33 @@ export function readRuntimeIdentity(layout: ProductHomeLayout): RuntimeIdentity 
   }
 }
 
+export function isLoopbackControlEndpoint(url: string): boolean {
+  return normalizeLoopbackControlEndpoint(url) !== undefined
+}
+
+export function normalizeLoopbackControlEndpoint(url: string): string | undefined {
+  try {
+    const parsed = new URL(url)
+    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return undefined
+    if (parsed.username !== '' || parsed.password !== '') return undefined
+    if (parsed.search !== '' || parsed.hash !== '') return undefined
+    if (parsed.pathname !== '/' && parsed.pathname !== '') return undefined
+    const host = parsed.hostname.replace(/^\[|\]$/g, '').toLowerCase()
+    if (host !== '127.0.0.1' && host !== 'localhost' && host !== '::1') return undefined
+    return parsed.origin
+  } catch {
+    return undefined
+  }
+}
+
 export function runtimeHealthUrl(controlEndpoint: string): string {
-  return new URL('/api/runtime-health', controlEndpoint.endsWith('/') ? controlEndpoint : `${controlEndpoint}/`).href
+  const origin = normalizeLoopbackControlEndpoint(controlEndpoint) ?? controlEndpoint
+  return new URL('/api/runtime-health', origin.endsWith('/') ? origin : `${origin}/`).href
 }
 
 export function runtimeStopUrl(controlEndpoint: string): string {
-  return new URL('/api/runtime-stop', controlEndpoint.endsWith('/') ? controlEndpoint : `${controlEndpoint}/`).href
+  const origin = normalizeLoopbackControlEndpoint(controlEndpoint) ?? controlEndpoint
+  return new URL('/api/runtime-stop', origin.endsWith('/') ? origin : `${origin}/`).href
 }
 
 export function runIdEquals(left: string, right: string): boolean {
@@ -159,24 +180,33 @@ export function runIdEquals(left: string, right: string): boolean {
   return timingSafeEqual(a, b)
 }
 
-async function classifyOwner(identity: RuntimeIdentity): Promise<'live' | 'dead' | 'ambiguous'> {
-  if (!processAlive(identity.pid)) return 'dead'
-  if (identity.pid === process.pid) return 'live'
-  if (identity.controlEndpoint === undefined) return 'ambiguous'
+export async function challengeRuntimeIdentity(identity: RuntimeIdentity): Promise<boolean> {
+  if (!isSafeRuntimePid(identity.pid)) return false
+  if (identity.controlEndpoint === undefined || !isLoopbackControlEndpoint(identity.controlEndpoint)) return false
   try {
     const response = await fetch(runtimeHealthUrl(identity.controlEndpoint), {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ runId: identity.runId }),
       signal: AbortSignal.timeout(500),
     })
-    if (!response.ok) return 'ambiguous'
-    const body = await response.json() as { pid?: unknown; productVersion?: unknown }
-    if (body.pid === identity.pid && body.productVersion === identity.productVersion) return 'live'
-    return 'ambiguous'
+    if (!response.ok) return false
+    const body = await response.json() as { pid?: unknown; startedAt?: unknown; productVersion?: unknown }
+    return body.pid === identity.pid
+      && body.startedAt === identity.startedAt
+      && body.productVersion === identity.productVersion
   } catch {
-    return 'ambiguous'
+    return false
   }
 }
 
-function writeNewIdentity(layout: ProductHomeLayout): RuntimeIdentity {
+async function classifyOwner(identity: RuntimeIdentity): Promise<'live' | 'dead' | 'ambiguous'> {
+  if (!isSafeRuntimePid(identity.pid) || !processAlive(identity.pid)) return 'dead'
+  if (identity.pid === process.pid) return 'live'
+  return await challengeRuntimeIdentity(identity) ? 'live' : 'ambiguous'
+}
+
+export function writeNewRuntimeIdentity(layout: ProductHomeLayout): RuntimeIdentity {
   const identity: RuntimeIdentity = {
     schemaVersion: RUNTIME_LEASE_SCHEMA_VERSION,
     pid: process.pid,
@@ -185,8 +215,13 @@ function writeNewIdentity(layout: ProductHomeLayout): RuntimeIdentity {
     productVersion: readProductVersion(),
     normalizedHome: layout.root,
   }
-  writeIdentity(layout, identity)
-  return identity
+  try {
+    writeIdentity(layout, identity)
+    return identity
+  } catch (error) {
+    rmSync(layout.runtimeLockDir, { recursive: true, force: true })
+    throw error
+  }
 }
 
 function writeIdentity(layout: ProductHomeLayout, identity: RuntimeIdentity): void {
@@ -205,9 +240,11 @@ function holdOf(layout: ProductHomeLayout, identity: RuntimeIdentity): RuntimeLe
       return current
     },
     publishControlEndpoint(url: string) {
+      const endpoint = normalizeLoopbackControlEndpoint(url)
+      if (endpoint === undefined) return
       const latest = readRuntimeIdentity(layout)
       if (!latest || !runIdEquals(latest.runId, current.runId)) return
-      current = { ...latest, controlEndpoint: url }
+      current = { ...latest, controlEndpoint: endpoint }
       writeIdentity(layout, current)
     },
     release() {

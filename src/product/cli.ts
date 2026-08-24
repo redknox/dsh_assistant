@@ -1,7 +1,7 @@
 import { existsSync, unlinkSync, writeFileSync } from 'node:fs'
 import { operatorStatus } from '../domain/self-extension/status.js'
 import { runSelfExtensionCli } from '../runtime/self-extension-cli.js'
-import { bootAssistantControl, createAssistantAgent } from '../runtime/boot.js'
+import { bootAssistantControl, createAssistantAgent, type AssistantControl } from '../runtime/boot.js'
 import { inspectCompatibility } from './compatibility.js'
 import { DEFAULT_LLM_MODEL, DEFAULT_LLM_PROVIDER, PRODUCT_COMMAND, PRODUCT_NAME, PRODUCT_UI_SESSION_ID } from './constants.js'
 import { attachRuntimeDoctor, collectStaticDoctor, formatDoctorReport } from './doctor.js'
@@ -21,8 +21,10 @@ import { appendProductLog } from './log.js'
 import {
   acquireRuntimeLease,
   inspectRuntimeLease,
+  isLoopbackControlEndpoint,
   readRuntimeIdentity,
   removeLeaseIfRunId,
+  runIdEquals,
   runtimeStopUrl,
   type RuntimeIdentity,
 } from './runtime-lease.js'
@@ -50,7 +52,12 @@ TARS-NG home defaults to $TARS_NG_HOME, then $DSH_ASSISTANT_HOME, then ~/.local/
 A TARS-NG Home has at most one verified writer. A PID is liveness metadata, not process identity.
 Secrets belong in $TARS_NG_HOME/config/env or ~/.config/tars-ng/env (chmod 600).
 start prints a loopback Web UI URL (default http://127.0.0.1:8787).
-stop authenticates against the live lease holder and does not signal an unverified PID.`
+stop authenticates against the live lease holder and does not signal a PID.`
+}
+
+export interface ProductCliHooks {
+  readonly bootProduct?: (layout: ProductHomeLayout, allowFixtures: boolean) => Promise<AssistantControl>
+  readonly stopConfirmTimeoutMs?: number
 }
 
 export function parseProductArgv(argv: readonly string[]): ProductCliOptions {
@@ -115,8 +122,8 @@ function removePidFile(layout: ProductHomeLayout): void {
   }
 }
 
-async function requestAuthenticatedStop(identity: RuntimeIdentity): Promise<'stopped' | 'mismatch' | 'unreachable'> {
-  if (identity.controlEndpoint === undefined) return 'unreachable'
+async function requestAuthenticatedStop(identity: RuntimeIdentity): Promise<'accepted' | 'mismatch' | 'unreachable'> {
+  if (identity.controlEndpoint === undefined || !isLoopbackControlEndpoint(identity.controlEndpoint)) return 'unreachable'
   try {
     const response = await fetch(runtimeStopUrl(identity.controlEndpoint), {
       method: 'POST',
@@ -124,7 +131,7 @@ async function requestAuthenticatedStop(identity: RuntimeIdentity): Promise<'sto
       body: JSON.stringify({ runId: identity.runId }),
       signal: AbortSignal.timeout(2000),
     })
-    if (response.status === 200) return 'stopped'
+    if (response.status === 200) return 'accepted'
     if (response.status === 403) return 'mismatch'
     return 'unreachable'
   } catch {
@@ -136,16 +143,20 @@ function delay(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms))
 }
 
-async function waitUntilDead(pid: number, timeoutMs = 8_000): Promise<boolean> {
+async function waitUntilStopConfirmed(layout: ProductHomeLayout, identity: RuntimeIdentity, timeoutMs = 15_000): Promise<boolean> {
   const deadline = Date.now() + timeoutMs
   while (Date.now() < deadline) {
-    if (!processAlive(pid)) return true
+    const current = readRuntimeIdentity(layout)
+    if (!current || !runIdEquals(current.runId, identity.runId)) return true
+    const inspected = await inspectRuntimeLease(layout)
+    if (inspected.state === 'empty' || inspected.state === 'stale') return true
     await delay(50)
   }
-  return !processAlive(pid)
+  const current = readRuntimeIdentity(layout)
+  return current === undefined || !runIdEquals(current.runId, identity.runId) || !processAlive(current.pid)
 }
 
-async function bootProduct(layout: ProductHomeLayout, allowFixtures: boolean) {
+async function defaultBootProduct(layout: ProductHomeLayout, allowFixtures: boolean) {
   return bootAssistantControl({
     home: layout.root,
     allowFixtures,
@@ -200,7 +211,11 @@ function firstRunText(layout: ProductHomeLayout, allowFixtures: boolean): string
   ].join('\n')
 }
 
-export async function runProductCli(argv: readonly string[], io: { log: (text: string) => void; error: (text: string) => void } = console): Promise<number> {
+export async function runProductCli(
+  argv: readonly string[],
+  io: { log: (text: string) => void; error: (text: string) => void } = console,
+  hooks: ProductCliHooks = {},
+): Promise<number> {
   const parsed = parseProductArgv(argv)
   if (parsed.help || parsed.command === 'help' || parsed.command === '') {
     io.log(usage())
@@ -237,19 +252,19 @@ export async function runProductCli(argv: readonly string[], io: { log: (text: s
     }
     const requested = await requestAuthenticatedStop(identity)
     if (requested === 'mismatch' || requested === 'unreachable') {
-      io.error(`identity-mismatch: refusing to signal pid ${identity.pid}. A PID is liveness metadata, not process identity.`)
+      io.error(`identity-mismatch: refusing unverified stop for pid ${identity.pid}. A PID is liveness metadata, not process identity.`)
       return 1
     }
-    try {
-      process.kill(identity.pid, 'SIGTERM')
-    } catch {
-      // process may already be exiting after the authenticated stop
+    const confirmed = await waitUntilStopConfirmed(layout, identity, hooks.stopConfirmTimeoutMs ?? 15_000)
+    if (!confirmed) {
+      io.error('stop requested but not confirmed')
+      return 1
     }
-    await waitUntilDead(identity.pid, 1_500)
-    if (!processAlive(identity.pid)) {
-      removeLeaseIfRunId(layout, identity.runId)
-      removePidFile(layout)
+    const leftover = readRuntimeIdentity(layout)
+    if (leftover !== undefined && runIdEquals(leftover.runId, identity.runId) && !processAlive(leftover.pid)) {
+      removeLeaseIfRunId(layout, leftover.runId)
     }
+    removePidFile(layout)
     io.log(`stopped the verified runtime (pid ${identity.pid})`)
     return 0
   }
@@ -298,8 +313,11 @@ export async function runProductCli(argv: readonly string[], io: { log: (text: s
       return 1
     }
     const hold = lease.hold
-    const booted = await bootProduct(layout, allowFixtures)
+    const boot = hooks.bootProduct ?? defaultBootProduct
+    let booted: AssistantControl | undefined
+    let writerStillActive = false
     try {
+      booted = await boot(layout, allowFixtures)
       const operator = await operatorFromBoot(booted)
       const llm = await inspectLlmRuntime(booted.ctx)
       report = attachRuntimeDoctor(report, {
@@ -332,7 +350,9 @@ export async function runProductCli(argv: readonly string[], io: { log: (text: s
         appendProductLog(layout.logFile, 'lifecycle start failed LLM not configured/unavailable')
         return 1
       }
-      if (parsed.once) return compatibility.ok ? 0 : 1
+      if (parsed.once) {
+        return compatibility.ok ? 0 : 1
+      }
       const handle = await createAssistantAgent(booted.ctx, PRODUCT_UI_SESSION_ID)
       const surface = new AssistantControlSurface(booted.ctx, PRODUCT_UI_SESSION_ID)
       let requestStop = () => {}
@@ -367,21 +387,32 @@ export async function runProductCli(argv: readonly string[], io: { log: (text: s
       hold.publishControlEndpoint(web.url)
       writeLastStatus(layout, { ...snapshot, webUi: web.url })
       writePidFile(layout)
+      writerStillActive = true
       io.log(`TARS-NG is running.\nWeb UI: ${web.url}\nHome: ${layout.root}`)
-      try {
-        await stopped
-      } finally {
-        detach()
-        await Promise.race([web.close(), delay(500)]).catch(() => undefined)
-        await Promise.race([handle.dispose(), delay(2_000)]).catch(() => undefined)
-      }
+      await stopped
+      detach()
+      await web.close()
+      await handle.dispose()
+      writerStillActive = false
       removePidFile(layout)
       appendProductLog(layout.logFile, 'lifecycle stop')
       return 0
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'start failed'
+      if (writerStillActive) {
+        io.error(`shutdown failed; retaining Home lease. ${message}`)
+        appendProductLog(layout.logFile, `lifecycle stop incomplete ${message}`)
+        return 1
+      }
+      io.error(message)
+      appendProductLog(layout.logFile, `lifecycle ${parsed.command} failed ${message}`)
+      return 1
     } finally {
-      await booted.ctx.fiber.dispose()
-      hold.release()
-      removePidFile(layout)
+      if (!writerStillActive) {
+        if (booted !== undefined) await booted.ctx.fiber.dispose()
+        hold.release()
+        removePidFile(layout)
+      }
     }
   }
 

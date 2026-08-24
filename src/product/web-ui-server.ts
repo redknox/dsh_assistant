@@ -343,11 +343,18 @@ export function startWebUiServer(options: WebUiServerOptions): Promise<WebUiServ
       if (rejectOrigin(req, res)) return
       const hostHeader = req.headers.host ?? `${listen.host}:${boundPort()}`
       const requestUrl = new URL(req.url ?? '/', `http://${hostHeader}`)
-      if (req.method === 'GET' && requestUrl.pathname === '/api/runtime-health') {
+      if ((req.method === 'GET' || req.method === 'POST') && requestUrl.pathname === '/api/runtime-health') {
         const control = options.runtimeControl
         if (!control) {
           sendJson(res, 404, { error: 'runtime-control-unavailable' })
           return
+        }
+        if (req.method === 'POST') {
+          const body = JSON.parse(await readBody(req)) as { runId?: unknown }
+          if (typeof body.runId !== 'string' || !runIdEquals(body.runId, control.runId)) {
+            sendJson(res, 403, { error: 'identity-mismatch' })
+            return
+          }
         }
         sendJson(res, 200, {
           pid: control.pid,

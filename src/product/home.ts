@@ -59,7 +59,12 @@ export function productHomeLayout(root: string): ProductHomeLayout {
   }
 }
 
+export function isSafeRuntimePid(pid: unknown): pid is number {
+  return typeof pid === 'number' && Number.isInteger(pid) && pid > 0
+}
+
 export function processAlive(pid: number): boolean {
+  if (!isSafeRuntimePid(pid)) return false
   try {
     process.kill(pid, 0)
     return true

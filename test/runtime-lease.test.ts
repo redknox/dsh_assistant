@@ -11,10 +11,12 @@ import { ensureProductHome } from '../src/product/home.js'
 import {
   acquireRuntimeLease,
   inspectRuntimeLease,
+  isLoopbackControlEndpoint,
   publicRuntimeIdentity,
   readRuntimeIdentity,
   removeLeaseIfRunId,
   RUNTIME_LEASE_SCHEMA_VERSION,
+  writeNewRuntimeIdentity,
 } from '../src/product/runtime-lease.js'
 import { runSelfExtensionCli } from '../src/runtime/self-extension-cli.js'
 
@@ -211,26 +213,22 @@ describe('TARS-NG Home runtime lease', () => {
     const sleeper = spawn('sleep', ['30'], { stdio: 'ignore' })
     const foreignPid = sleeper.pid
     assert.ok(foreignPid)
-    const server = createServer((req, res) => {
-      if (req.url === '/api/runtime-health') {
-        res.writeHead(200, { 'content-type': 'application/json' })
-        res.end(JSON.stringify({ pid: foreignPid, productVersion: readProductVersion() }))
-        return
-      }
-      res.writeHead(404).end()
-    })
+    const identity = {
+      schemaVersion: RUNTIME_LEASE_SCHEMA_VERSION,
+      pid: foreignPid,
+      runId: 'c'.repeat(64),
+      startedAt: '2026-08-24T00:00:00.000Z',
+      productVersion: readProductVersion(),
+      normalizedHome: layout.root,
+    }
+    const server = createVerifiedControl(identity)
     await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve))
     const address = server.address()
     assert.ok(address && typeof address === 'object')
     try {
       mkdirSync(layout.runtimeLockDir)
       writeFileSync(layout.runtimeIdentityFile, `${JSON.stringify({
-        schemaVersion: RUNTIME_LEASE_SCHEMA_VERSION,
-        pid: foreignPid,
-        runId: 'c'.repeat(64),
-        startedAt: '2026-08-24T00:00:00.000Z',
-        productVersion: readProductVersion(),
-        normalizedHome: layout.root,
+        ...identity,
         controlEndpoint: `http://127.0.0.1:${address.port}`,
       })}\n`)
       const errors: string[] = []
@@ -246,7 +244,7 @@ describe('TARS-NG Home runtime lease', () => {
         sleeper.kill('SIGTERM')
       }
       const text = errors.join('\n')
-      assert.match(text, /home-busy|home-ambiguous/)
+      assert.match(text, /home-busy/)
       assert.doesNotMatch(text, /c{16}/)
     } finally {
       await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()))
@@ -254,4 +252,205 @@ describe('TARS-NG Home runtime lease', () => {
       else process.env.TARS_NG_HOME = previous
     }
   })
+
+  it('releases the lease when injected boot throws and cleans an incomplete lock', async () => {
+    const layout = ensureProductHome(isolatedHome())
+    mkdirSync(layout.runtimeLockDir, { recursive: true })
+    mkdirSync(layout.runtimeIdentityFile)
+    assert.throws(() => writeNewRuntimeIdentity(layout))
+    assert.equal(existsSync(layout.runtimeLockDir), false)
+
+    const lines: string[] = []
+    const code = await runProductCli(['start', '--once', '--home', layout.root], {
+      log: (text) => lines.push(text),
+      error: (text) => lines.push(text),
+    }, {
+      bootProduct: async () => {
+        throw new Error('injected boot failure')
+      },
+    })
+    assert.equal(code, 1)
+    assert.match(lines.join('\n'), /injected boot failure/)
+    assert.equal(existsSync(layout.runtimeIdentityFile), false)
+    assert.equal(existsSync(layout.runtimeLockDir), false)
+  })
+
+  it('requires a loopback run-token challenge and never signals after authenticated stop', async () => {
+    assert.equal(isLoopbackControlEndpoint('http://127.0.0.1:8787'), true)
+    assert.equal(isLoopbackControlEndpoint('http://example.com:8787'), false)
+    assert.equal(isLoopbackControlEndpoint('http://8.8.8.8:80'), false)
+
+    const layout = ensureProductHome(isolatedHome())
+    mkdirSync(layout.runtimeLockDir)
+    writeFileSync(layout.runtimeIdentityFile, `${JSON.stringify({
+      schemaVersion: RUNTIME_LEASE_SCHEMA_VERSION,
+      pid: 0,
+      runId: 'd'.repeat(64),
+      startedAt: '2026-08-24T00:00:00.000Z',
+      productVersion: readProductVersion(),
+      normalizedHome: layout.root,
+    })}\n`)
+    assert.equal(readRuntimeIdentity(layout), undefined)
+    assert.equal((await inspectRuntimeLease(layout)).state, 'ambiguous')
+
+    const sleeper = spawn('sleep', ['30'], { stdio: 'ignore' })
+    const foreignPid = sleeper.pid
+    assert.ok(foreignPid)
+    writeFileSync(layout.runtimeIdentityFile, `${JSON.stringify({
+      schemaVersion: RUNTIME_LEASE_SCHEMA_VERSION,
+      pid: foreignPid,
+      runId: 'e'.repeat(64),
+      startedAt: '2026-08-24T00:00:00.000Z',
+      productVersion: readProductVersion(),
+      normalizedHome: layout.root,
+      controlEndpoint: 'http://example.com:9',
+    })}\n`)
+    assert.equal((await inspectRuntimeLease(layout)).state, 'ambiguous')
+
+    const identity = {
+      schemaVersion: RUNTIME_LEASE_SCHEMA_VERSION,
+      pid: foreignPid,
+      runId: 'f'.repeat(64),
+      startedAt: '2026-08-24T00:00:00.000Z',
+      productVersion: readProductVersion(),
+      normalizedHome: layout.root,
+    }
+    const getOnly = createServer((req, res) => {
+      if (req.method === 'GET' && req.url === '/api/runtime-health') {
+        res.writeHead(200, { 'content-type': 'application/json' })
+        res.end(JSON.stringify({ pid: foreignPid, startedAt: identity.startedAt, productVersion: identity.productVersion }))
+        return
+      }
+      res.writeHead(404).end()
+    })
+    await new Promise<void>((resolve) => getOnly.listen(0, '127.0.0.1', resolve))
+    const getAddress = getOnly.address()
+    assert.ok(getAddress && typeof getAddress === 'object')
+    writeFileSync(layout.runtimeIdentityFile, `${JSON.stringify({
+      ...identity,
+      controlEndpoint: `http://127.0.0.1:${getAddress.port}`,
+    })}\n`)
+    assert.equal((await inspectRuntimeLease(layout)).state, 'ambiguous')
+    await new Promise<void>((resolve, reject) => getOnly.close((error) => error ? reject(error) : resolve()))
+
+    const server = createVerifiedControl(identity)
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve))
+    const address = server.address()
+    assert.ok(address && typeof address === 'object')
+    writeFileSync(layout.runtimeIdentityFile, `${JSON.stringify({
+      ...identity,
+      controlEndpoint: `http://127.0.0.1:${address.port}`,
+    })}\n`)
+    const signaled: Array<[number, unknown]> = []
+    const originalKill = process.kill
+    process.kill = ((pid: number, signal?: NodeJS.Signals | number) => {
+      if (signal !== undefined && signal !== 0) signaled.push([pid, signal])
+      return originalKill.call(process, pid, signal)
+    }) as typeof process.kill
+    const lines: string[] = []
+    try {
+      const code = await runProductCli(['stop', '--home', layout.root], {
+        log: (text) => lines.push(text),
+        error: (text) => lines.push(text),
+      }, { stopConfirmTimeoutMs: 250 })
+      assert.equal(code, 1)
+      assert.match(lines.join('\n'), /stop requested but not confirmed/)
+      assert.equal(signaled.length, 0)
+      assert.equal(sleeper.killed, false)
+    } finally {
+      process.kill = originalKill
+      sleeper.kill('SIGTERM')
+      await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()))
+    }
+  })
+
+  it('does not boot a read-only self-extension command against a live Home owner', async () => {
+    const layout = ensureProductHome(isolatedHome())
+    const previous = process.env.TARS_NG_HOME
+    process.env.TARS_NG_HOME = layout.root
+    const sleeper = spawn('sleep', ['30'], { stdio: 'ignore' })
+    const foreignPid = sleeper.pid
+    assert.ok(foreignPid)
+    const identity = {
+      schemaVersion: RUNTIME_LEASE_SCHEMA_VERSION,
+      pid: foreignPid,
+      runId: 'a1'.repeat(32),
+      startedAt: '2026-08-24T00:00:00.000Z',
+      productVersion: readProductVersion(),
+      normalizedHome: layout.root,
+    }
+    const server = createVerifiedControl(identity)
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve))
+    const address = server.address()
+    assert.ok(address && typeof address === 'object')
+    mkdirSync(layout.runtimeLockDir)
+    writeFileSync(layout.runtimeIdentityFile, `${JSON.stringify({
+      ...identity,
+      controlEndpoint: `http://127.0.0.1:${address.port}`,
+    })}\n`)
+    let booted = false
+    const errors: string[] = []
+    const original = console.error
+    console.error = (text) => {
+      errors.push(String(text))
+    }
+    try {
+      const code = await runSelfExtensionCli(['status'], {
+        boot: async () => {
+          booted = true
+          throw new Error('should not boot')
+        },
+      })
+      assert.equal(code, 1)
+      assert.equal(booted, false)
+      assert.match(errors.join('\n'), /home-busy/)
+    } finally {
+      console.error = original
+      sleeper.kill('SIGTERM')
+      await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()))
+      if (previous === undefined) delete process.env.TARS_NG_HOME
+      else process.env.TARS_NG_HOME = previous
+    }
+  })
 })
+
+function createVerifiedControl(identity: {
+  readonly pid: number
+  readonly runId: string
+  readonly startedAt: string
+  readonly productVersion: string
+}) {
+  return createServer((req, res) => {
+    const chunks: Buffer[] = []
+    req.on('data', (chunk) => chunks.push(Buffer.from(chunk)))
+    req.on('end', () => {
+      const raw = Buffer.concat(chunks).toString('utf8')
+      const body = raw === '' ? {} : JSON.parse(raw) as { runId?: unknown }
+      if (req.url === '/api/runtime-health') {
+        if (req.method !== 'POST' || typeof body.runId !== 'string' || body.runId !== identity.runId) {
+          res.writeHead(403, { 'content-type': 'application/json' })
+          res.end(JSON.stringify({ error: 'identity-mismatch' }))
+          return
+        }
+        res.writeHead(200, { 'content-type': 'application/json' })
+        res.end(JSON.stringify({
+          pid: identity.pid,
+          startedAt: identity.startedAt,
+          productVersion: identity.productVersion,
+        }))
+        return
+      }
+      if (req.url === '/api/runtime-stop' && req.method === 'POST') {
+        if (typeof body.runId !== 'string' || body.runId !== identity.runId) {
+          res.writeHead(403, { 'content-type': 'application/json' })
+          res.end(JSON.stringify({ error: 'identity-mismatch' }))
+          return
+        }
+        res.writeHead(200, { 'content-type': 'application/json' })
+        res.end(JSON.stringify({ ok: true, pid: identity.pid }))
+        return
+      }
+      res.writeHead(404).end()
+    })
+  })
+}

@@ -44,7 +44,7 @@ tars-ng stop
 
 `tars-ng start` prints a loopback URL (default `http://127.0.0.1:8787`). Open that address for daily conversation, Activity, approvals, capabilities, and Safe Mode/recovery. Override the port with `TARS_NG_UI_PORT`. The server binds loopback only; unsupported `Origin` headers are rejected; there is no wildcard CORS and no login in this release. Governance mutations require the per-launch `HttpOnly; SameSite=Strict` UI session cookie established when the page loads. Approval binds the current card id, candidate id (Self-Extension), and fingerprint. Rollback and Exit Safe Mode require an explicit confirmation. Exit Safe Mode is refused while recovery is still required; a verified rollback keeps historical `lastFailure` diagnostics but allows exit.
 
-`tars-ng status` reports whether the product is running and, when it is, the Web UI address. It does not print the runtime lease token. `tars-ng stop` authenticates against the live Home lease holder on loopback and does not signal an unverified PID. A PID is liveness metadata, not process identity. A TARS-NG Home has at most one verified writer.
+`tars-ng status` reports whether the product is running and, when it is, the Web UI address. It does not print the runtime lease token. `tars-ng stop` authenticates the exact lease holder on loopback with a run-token challenge and does not signal a PID. If the owner does not release the lease, stop reports `stop requested but not confirmed`. A PID is liveness metadata, not process identity. A TARS-NG Home has at most one verified writer.
 
 If the browser disconnects, reconnect; the UI reloads a fresh `MissionControlView`. Do not treat browser-local state as approval, activation, or recovery authority.
 
@@ -161,8 +161,8 @@ Tasks are stored as `tasks/*.md` inside the sandbox. `tasks_create` follows the 
 | `tars-ng start --once` | Same lease + checks and boot, then exits without serving the Web UI (packaging/smoke). Non-zero when the default LLM is unusable |
 | `tars-ng status` | Version, verified running pid, home, Web UI URL when running, DSH compatibility — no secret values and no run token |
 | `tars-ng doctor` | Version, Node, DSH packages, home, env-file safety, credential **names**, LLM provider/model/route, `ai-runtime`, integration mode, generated-runtime isolation, Safe Mode/recovery. Stays read-only when a verified runtime already owns the Home |
-| `tars-ng stop` | Authenticated loopback stop of the exact lease holder. Does not signal a PID whose TARS-NG identity is unproven |
-| `tars-ng self-extension …` | Recovery Root operator commands. Mutating commands fail closed with `home-busy` while a verified runtime owns the Home |
+| `tars-ng stop` | Authenticated loopback stop of the exact lease holder. Does not signal a PID. Unconfirmed shutdown is fail-closed |
+| `tars-ng self-extension …` | Recovery Root operator commands. Any command that boots a runtime fails closed with `home-busy` while a verified runtime owns the Home |
 
 Doctor never prints Authorization headers, token values, credential-bearing URLs, or chain-of-thought.
 
