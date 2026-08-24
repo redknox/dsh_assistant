@@ -291,6 +291,7 @@ function RecoveryPanel(props: {
   readonly recovery: NonNullable<MissionControlView['recovery']>
   readonly locked: boolean
   readonly armedRecovery?: string
+  readonly error?: string
   readonly onRecovery: (action: 'diagnostics' | 'rollback' | 'exit-safe-mode') => void
 }) {
   return (
@@ -298,6 +299,7 @@ function RecoveryPanel(props: {
       <h1>{props.systemState}</h1>
       <p>{props.recovery.why}</p>
       <p>Disabled: {props.recovery.disabled.join(', ') || 'generated/optional capabilities'}</p>
+      {props.error ? <p className="error" role="alert">{props.error}</p> : null}
       <div className="recovery-actions">
         {props.recovery.actions.map((action) => {
           const mapped = recoveryActionId(action)
@@ -901,6 +903,7 @@ export function MissionControlScreen(props: {
   readonly onDeferRollback?: (card: RollbackCard) => void
   readonly onRecovery: (action: 'diagnostics' | 'rollback' | 'exit-safe-mode') => void
   readonly acknowledgement?: { readonly text: string }
+  readonly error?: string
   readonly onDismissAcknowledgement?: () => void
 }) {
   const { view } = props
@@ -930,6 +933,7 @@ export function MissionControlScreen(props: {
           recovery={view.recovery}
           locked={locked}
           armedRecovery={props.armedRecovery}
+          error={props.error}
           onRecovery={props.onRecovery}
         />
       ) : null}

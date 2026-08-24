@@ -9,9 +9,21 @@ export interface UiEnvelope {
 const include: RequestInit = { credentials: 'include', cache: 'no-store' }
 
 async function parseEnvelope(response: Response): Promise<UiEnvelope> {
-  const body = await response.json() as UiEnvelope & { error?: string }
-  if (!response.ok) throw new Error(body.error ?? `request failed (${response.status})`)
+  const body = await response.json() as UiEnvelope & { error?: string; detail?: string }
+  if (!response.ok) throw new Error(body.detail ?? recoveryFailureText(body.error) ?? `request failed (${response.status})`)
   return body
+}
+
+function recoveryFailureText(error: string | undefined): string | undefined {
+  if (error === 'integrity-failure') {
+    return 'Exit Safe Mode is refused while recovery is still required. Restore the selected Profile and restart; this button does not repair a broken Profile.'
+  }
+  if (error === 'profile-composition-recovery') {
+    return 'Exit Safe Mode cannot repair a broken Profile. Restore profiles/assistant and restart TARS-NG.'
+  }
+  if (error === 'confirmation-required') return 'Confirm the recovery action.'
+  if (error === 'untrusted session') return 'Web UI session is untrusted; reload the page.'
+  return error
 }
 
 export async function establishSession(): Promise<void> {

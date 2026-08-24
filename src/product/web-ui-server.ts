@@ -151,9 +151,29 @@ export function startWebUiServer(options: WebUiServerOptions): Promise<WebUiServ
       return { status: 409 as const, body: { error: 'confirmation-required', action } }
     }
     if (action === 'diagnostics') {
+      const inspected = options.recoveryRoot.inspect()
+      const boot = options.diagnostics && typeof options.diagnostics === 'object'
+        ? options.diagnostics as { persistence?: unknown; reasons?: unknown }
+        : {}
+      const parts: string[] = []
+      if (typeof boot.persistence === 'string') parts.push(`persistence ${boot.persistence}`)
+      if (Array.isArray(boot.reasons)) {
+        for (const reason of boot.reasons.slice(0, 4)) {
+          if (typeof reason === 'string' && reason.trim() !== '') parts.push(reason.trim().slice(0, 200))
+        }
+      }
+      const live = snapshot()
+      if (live.runtimeContext?.profileCompositionError) {
+        parts.push(`profile-composition ${live.runtimeContext.profileCompositionError.slice(0, 200)}`)
+      }
+      parts.push(inspected.safeMode ? 'safe-mode true' : 'safe-mode false')
       return {
         status: 200 as const,
-        body: { action, diagnostics: options.diagnostics ?? { activation: options.recoveryRoot.inspect() } },
+        body: {
+          action,
+          diagnostics: options.diagnostics ?? { activation: inspected },
+          acknowledgement: { text: redactText(parts.join(' · ') || 'Diagnostics available.') },
+        },
       }
     }
     const busy = mutationInFlight()
@@ -182,8 +202,33 @@ export function startWebUiServer(options: WebUiServerOptions): Promise<WebUiServ
       }
     }
     const status = options.recoveryRoot.inspect()
+    const live = snapshot()
+    if (action === 'exit-safe-mode' && (
+      live.runtimeContext?.profileCompositionError !== undefined
+      || (
+        live.runtimeContext?.safeMode === true
+        && !status.safeMode
+        && !status.recoveryRequired
+      )
+    )) {
+      return {
+        status: 409 as const,
+        body: {
+          error: 'profile-composition-recovery',
+          action: 'exit-safe-mode',
+          detail: 'Exit Safe Mode cannot repair a broken Profile. Restore profiles/assistant and restart TARS-NG.',
+        },
+      }
+    }
     if (status.recoveryRequired) {
-      return { status: 409 as const, body: { error: 'integrity-failure', action: 'exit-safe-mode' } }
+      return {
+        status: 409 as const,
+        body: {
+          error: 'integrity-failure',
+          action: 'exit-safe-mode',
+          detail: 'Exit Safe Mode is refused while recovery is still required. Restore the selected Profile and restart; this button does not repair a broken Profile.',
+        },
+      }
     }
     const human = options.recoveryRoot.issueAuthority({ kind: 'human-control', source: 'application-ui' })
     recoveryBusy = true
