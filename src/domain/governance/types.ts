@@ -105,6 +105,7 @@ export interface ActivationFailure {
 
 export interface ActivationStatus {
   readonly state: ActivationState
+  readonly pendingCandidateId?: string
   readonly current?: ActivationSnapshot
   readonly lastKnownGood?: ActivationSnapshot
   readonly rollbackTarget?: ActivationSnapshot

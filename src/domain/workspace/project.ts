@@ -1,5 +1,6 @@
 import { humorSuppressed } from '../personality/effective.js'
 import { projectActivity } from './activity.js'
+import { projectActivationCards } from './activations.js'
 import { projectApprovalCards } from './approvals.js'
 import { projectUserCapabilities } from './capabilities.js'
 import { sanitizeMissionControlView } from './redact.js'
@@ -9,8 +10,10 @@ import type { MissionControlView, WorkObjectKind, WorkspaceSnapshotInput } from 
 export function projectMissionControl(input: WorkspaceSnapshotInput): MissionControlView {
   const systemState = deriveSystemState(input)
   const approvals = projectApprovalCards(input)
+  const activations = projectActivationCards(input)
   const jobsRunning = input.jobs.filter((job) => job.lastRunStatus === 'running' || job.lastRunStatus === 'pending').length
   const degraded = input.integrationStatus.filter((item) => !item.available).map((item) => item.capability)
+  const activationFailure = projectActivationFailure(input)
   return sanitizeMissionControlView({
     identity: 'TARS-NG',
     systemState,
@@ -21,6 +24,7 @@ export function projectMissionControl(input: WorkspaceSnapshotInput): MissionCon
     })),
     activity: projectActivity(input),
     approvals,
+    activations,
     capabilities: projectUserCapabilities(input),
     memory: input.memory,
     knowledge: input.knowledge,
@@ -46,7 +50,28 @@ export function projectMissionControl(input: WorkspaceSnapshotInput): MissionCon
     },
     developmentControlPlaneSeparated: true,
     ...(input.candidates ? { candidates: input.candidates } : {}),
+    ...(activationFailure ? { activationFailure } : {}),
   })
+}
+
+function projectActivationFailure(input: WorkspaceSnapshotInput): MissionControlView['activationFailure'] {
+  const failure = input.activation?.lastFailure
+  if (!failure || input.activation?.state !== 'activation-failed') return undefined
+  const approval = input.extensionApprovals?.find((item) => item.candidateId === failure.candidateId)
+  const registryActive = input.registry.some((item) => (
+    item.status === 'active'
+    && (approval
+      ? item.owner === approval.owner && item.version === approval.candidateVersion
+      : false)
+  ))
+  return {
+    candidateId: failure.candidateId,
+    phase: failure.phase,
+    summary: failure.diagnostics,
+    rollbackSucceeded: failure.rollbackSucceeded,
+    recoveryRequired: input.recoveryRequired,
+    registryActive,
+  }
 }
 
 function workKind(kind: 'user' | 'assistant' | 'tool_call' | 'tool_result'): WorkObjectKind {

@@ -50,7 +50,8 @@ export const WORKBENCH_CONVERSATION_GUIDANCE = [
   'Use scaffold_candidate, then bounded edits, then inspect_validation_diagnostics.',
   'Repair only by creating a new revision; never mutate a sealed parent.',
   'Request approval only after Independent Review is review-complete for the current digest.',
-  'Tell the user human approval is still required. review-complete is NOT APPROVED.',
+  'Tell the user Independent Review review-complete is not a governance approval.',
+  'After exact-diff approval, point the user at the Mission-Control Activation Card. Conversation yes cannot activate.',
   'Never say you cannot create plugins when Workbench tools exist.',
   'Never treat "build this" as approve or activate. Writing code is not authorization.',
   'Generated code runs only after a human approves and activates, inside the isolated runner.',
@@ -81,6 +82,7 @@ export async function apply(ctx: Context, config: WorkbenchPluginConfig = {}) {
       persist: config.persist,
       inventory: config.inventory ?? { snapshot: () => hostOwnedArchitectureInventory(ctx.capabilityRegistry) },
       registry: ctx.capabilityRegistry,
+      activation: ctx.get('extensionRecovery'),
     },
   )
   await ctx.plugin(class extends CandidateWorkbenchService {

@@ -179,6 +179,193 @@ describe('TARS-NG mission-control workspace', () => {
     assert.match(card.authorityChange, /human approval/)
   })
 
+  it('G2. approved Self-Extension projects an Activation Card without claiming NOT APPROVED', () => {
+    const view = projectMissionControl(snapshot({
+      extensionApprovals: [{
+        id: 'apr-2',
+        candidateId: 'cand-obsidian',
+        fingerprint: 'fp-ext',
+        decision: 'approved-for-exact-diff',
+        owner: 'generated/obsidian-vault',
+        candidateVersion: '0.1.0',
+        digest: 'abc123',
+        capabilitiesAdded: [],
+        capabilitiesRemoved: [],
+        capabilitiesChanged: ['obsidian.read'],
+        permissionsAdded: [],
+        permissionsRemoved: [],
+        permissionsChanged: ['files.read'],
+        effects: ['vault read'],
+        toolsAdded: [],
+        toolsRemoved: [],
+        toolsChanged: ['obsidian_read'],
+        runtimeContractVersion: 'generated-extension-api/v1',
+        eligibilityOk: true,
+        eligibilityDenials: [],
+      }],
+      candidates: [{
+        id: 'cand-obsidian',
+        owner: 'generated/obsidian-vault',
+        version: '0.1.0',
+        lifecycle: 'sealed',
+        sealed: true,
+        reviewState: 'review-complete',
+        canRequestApproval: false,
+        currentStep: 'approved',
+        approvalState: 'approved',
+        governanceApproval: 'approved-for-exact-diff',
+        activationState: 'inactive',
+        extensionLifecycle: 'APPROVED_NOT_ACTIVE',
+      }],
+    }))
+    assert.equal(view.approvals.some((item) => item.kind === 'self-extension'), false)
+    const card = view.activations.find((item) => item.candidateId === 'cand-obsidian')
+    assert.ok(card)
+    assert.equal(card.status, 'APPROVED_NOT_ACTIVE')
+    assert.deepEqual(card.capabilitiesChanged, ['obsidian.read'])
+    assert.deepEqual(card.permissionsChanged, ['files.read'])
+    assert.deepEqual(card.toolsChanged, ['obsidian_read'])
+    assert.match(card.details.join('\n'), /~obsidian\.read/)
+    assert.match(card.details.join('\n'), /~obsidian_read/)
+    assert.match(card.details.join('\n'), /~files\.read/)
+    assert.doesNotMatch(card.details.join('\n'), /Capabilities none/)
+    assert.match(card.details.join('\n'), /did not activate/)
+    assert.doesNotMatch(JSON.stringify(view), /NOT APPROVED/)
+    const text = renderMissionControlAsText(view)
+    assert.match(text, /activation-request/)
+    assert.match(renderMissionControlAsHtml(view), /data-activation-id="apr-2"/)
+  })
+
+  it('G4. stale exact-diff evidence is not projected as APPROVED_NOT_ACTIVE', () => {
+    const stale = projectMissionControl(snapshot({
+      extensionApprovals: [{
+        id: 'apr-stale',
+        candidateId: 'cand-stale',
+        fingerprint: 'fp-old',
+        decision: 'approved-for-exact-diff',
+        owner: 'generated/obsidian-vault',
+        candidateVersion: '0.1.0',
+        digest: 'old-digest',
+        capabilitiesAdded: [],
+        capabilitiesRemoved: [],
+        capabilitiesChanged: ['obsidian.read'],
+        permissionsAdded: [],
+        permissionsRemoved: [],
+        effects: [],
+        eligibilityOk: false,
+        eligibilityDenials: ['digest-mismatch'],
+      }],
+    }))
+    assert.equal(stale.activations.length, 0)
+    assert.doesNotMatch(JSON.stringify(stale), /APPROVED_NOT_ACTIVE/)
+
+    for (const reason of ['base-changed', 'review-required', 'review-changes-required'] as const) {
+      const retired = projectMissionControl(snapshot({
+        extensionApprovals: [{
+          id: `apr-${reason}`,
+          candidateId: `cand-${reason}`,
+          fingerprint: 'fp-old',
+          decision: 'approved-for-exact-diff',
+          owner: 'generated/obsidian-vault',
+          candidateVersion: '0.1.0',
+          digest: 'old-digest',
+          capabilitiesAdded: ['obsidian.read'],
+          capabilitiesRemoved: [],
+          permissionsAdded: [],
+          permissionsRemoved: [],
+          effects: [],
+          eligibilityOk: false,
+          eligibilityDenials: [reason],
+        }],
+      }))
+      assert.equal(retired.activations.length, 0, reason)
+      assert.doesNotMatch(JSON.stringify(retired), /APPROVED_NOT_ACTIVE/)
+    }
+
+    const conflict = projectMissionControl(snapshot({
+      extensionApprovals: [{
+        id: 'apr-conflict',
+        candidateId: 'cand-conflict',
+        fingerprint: 'fp-ext',
+        decision: 'approved-for-exact-diff',
+        owner: 'generated/obsidian-vault',
+        candidateVersion: '0.1.0',
+        digest: 'abc123',
+        capabilitiesAdded: ['obsidian.read'],
+        capabilitiesRemoved: [],
+        permissionsAdded: [],
+        permissionsRemoved: [],
+        effects: [],
+        eligibilityOk: false,
+        eligibilityDenials: ['ownership-conflict'],
+      }],
+    }))
+    assert.equal(conflict.activations[0]?.status, 'APPROVED_NOT_ACTIVE')
+    assert.equal(conflict.activations[0]?.eligibilityOk, false)
+
+    const safeMode = projectMissionControl(snapshot({
+      safeMode: true,
+      extensionApprovals: [{
+        id: 'apr-safe',
+        candidateId: 'cand-safe',
+        fingerprint: 'fp-ext',
+        decision: 'approved-for-exact-diff',
+        owner: 'generated/obsidian-vault',
+        candidateVersion: '0.1.0',
+        digest: 'abc123',
+        capabilitiesAdded: ['obsidian.read'],
+        capabilitiesRemoved: [],
+        permissionsAdded: [],
+        permissionsRemoved: [],
+        effects: [],
+        eligibilityOk: false,
+        eligibilityDenials: ['safe-mode'],
+      }],
+    }))
+    const card = safeMode.activations.find((item) => item.candidateId === 'cand-safe')
+    assert.ok(card)
+    assert.equal(card.status, 'APPROVED_NOT_ACTIVE')
+    assert.equal(card.eligibilityOk, false)
+    assert.deepEqual(card.eligibilityDenials, ['safe-mode'])
+  })
+
+  it('G3. activation failure stays visible after a successful rollback', () => {
+    const view = projectMissionControl(snapshot({
+      activation: {
+        state: 'activation-failed',
+        lastFailureCandidateId: 'cand-obsidian',
+        lastFailure: {
+          candidateId: 'cand-obsidian',
+          phase: 'health',
+          diagnostics: 'post-activation health verification failed',
+          rollbackSucceeded: true,
+          safeModeRequired: false,
+        },
+      },
+      extensionApprovals: [{
+        id: 'apr-2',
+        candidateId: 'cand-obsidian',
+        fingerprint: 'fp-ext',
+        decision: 'approved-for-exact-diff',
+        owner: 'generated/obsidian-vault',
+        candidateVersion: '0.1.0',
+        digest: 'abc123',
+        capabilitiesAdded: ['obsidian.read'],
+        capabilitiesRemoved: [],
+        permissionsAdded: [],
+        permissionsRemoved: [],
+        effects: [],
+      }],
+    }))
+    assert.equal(view.activations.length, 0)
+    assert.equal(view.activationFailure?.phase, 'health')
+    assert.equal(view.activationFailure?.rollbackSucceeded, true)
+    assert.equal(view.activationFailure?.registryActive, false)
+    assert.ok(view.activity.some((item) => item.kind === 'FAILED' && item.summary.includes('health')))
+    assert.match(renderMissionControlAsText(view), /ACTIVATION FAILED/)
+    assert.match(renderMissionControlAsHtml(view), /data-activation-failed="true"/)
+  })
+
   it('H. Safe Mode is a dedicated comprehensible product state', () => {
     const view = projectMissionControl(snapshot({
       safeMode: true,

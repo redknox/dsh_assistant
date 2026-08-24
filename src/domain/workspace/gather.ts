@@ -4,6 +4,8 @@ import type { Context } from '@deepseek-ai/cordis'
 import { humorSuppressed } from '../personality/effective.js'
 import type { TarsPersonality } from '../personality/types.js'
 import { flattenEffects, summarizeCandidateEffects } from './effects.js'
+import { boundActivationDiagnostics } from './failure.js'
+import { activationViewOf, approvalStateOf, extensionLifecycleOf } from './lifecycle.js'
 import type { MissionControlView, ObjectiveView, WorkspaceSnapshotInput } from './types.js'
 import { projectMissionControl } from './project.js'
 
@@ -22,17 +24,30 @@ export function gatherWorkspaceSnapshot(input: GatherWorkspaceInput): WorkspaceS
     inspect(): {
       safeMode: boolean
       recoveryRequired?: boolean
-      lastFailure?: { diagnostics: string }
+      state?: string
+      pendingCandidateId?: string
+      lastFailure?: {
+        diagnostics: string
+        candidateId?: string
+        phase?: string
+        rollbackSucceeded?: boolean
+        safeModeRequired?: boolean
+      }
     }
   } | undefined
   const activation = recovery?.inspect()
   const safeMode = Boolean(activation?.safeMode)
-  const lastFailure = activation?.lastFailure?.diagnostics
+  const lastFailure = activation?.lastFailure
+  const boundedFailure = lastFailure?.diagnostics ? boundActivationDiagnostics(lastFailure.diagnostics) : undefined
   return {
     agentStatus: agent?.status,
     safeMode,
     recoveryRequired: Boolean(activation?.recoveryRequired),
-    ...(lastFailure ? { recoveryWhy: lastFailure } : safeMode ? { recoveryWhy: 'Generated capabilities are disabled. Trusted core is available.' } : {}),
+    ...(activation?.recoveryRequired && boundedFailure
+      ? { recoveryWhy: boundedFailure }
+      : safeMode
+        ? { recoveryWhy: 'Generated capabilities are disabled. Trusted core is available.' }
+        : {}),
     pendingConfirmations: (ctx.get('actionPolicy') as { policy: { confirmations(): WorkspaceSnapshotInput['pendingConfirmations'] } } | undefined)
       ?.policy.confirmations() ?? [],
     jobs: (ctx.get('assistantJobs') as { service: { list(): { name: string; lastRun?: { status: string } }[] } } | undefined)
@@ -57,6 +72,22 @@ export function gatherWorkspaceSnapshot(input: GatherWorkspaceInput): WorkspaceS
         ...(record.providers ? { providers: [...record.providers] } : {}),
       })) ?? [],
     extensionApprovals: extensionApprovals(ctx),
+    activation: {
+      state: activation?.state ?? 'idle',
+      ...(activation?.pendingCandidateId ? { pendingCandidateId: activation.pendingCandidateId } : {}),
+      ...(lastFailure?.candidateId ? { lastFailureCandidateId: lastFailure.candidateId } : {}),
+      ...(lastFailure && boundedFailure
+        ? {
+          lastFailure: {
+            candidateId: lastFailure.candidateId ?? '',
+            phase: lastFailure.phase ?? 'prepare',
+            diagnostics: boundedFailure,
+            rollbackSucceeded: lastFailure.rollbackSucceeded === true,
+            safeModeRequired: lastFailure.safeModeRequired === true,
+          },
+        }
+        : {}),
+    },
     candidates: workbenchCandidates(ctx),
     memory: (ctx.get('personalMemory') as { query(): { records: { id: string; statement: string; topicKey: string; status: string }[] } } | undefined)
       ?.query().records.map((record) => ({
@@ -230,13 +261,23 @@ function workbenchCandidates(ctx: Context): WorkspaceSnapshotInput['candidates']
         validationFailureSummary: boundFailureSummary(view.validation?.failed),
         parentId: view.parentId,
         leftover: view.leftover,
-        approvalState: approvalStateOf({
+        ...projectedLifecycle({
+          candidateId: view.id,
+          owner: view.owner,
+          version: view.version,
           canRequest: view.requestEligibility.ok,
           decision: (ctx.get('extensionGovernance') as { inspectApproval?(id: string): { decision: string } | undefined } | undefined)
             ?.inspectApproval?.(view.id)?.decision,
-          owner: view.owner,
-          version: view.version,
+          eligibilityDenials: (ctx.get('extensionGovernance') as { eligibility?(id: string): { denials: readonly { reason: string }[] } } | undefined)
+            ?.eligibility?.(view.id)?.denials.map((item) => item.reason),
           registry: ctx.get('capabilityRegistry') as { get(owner: string, version: string): { status: string } | undefined } | undefined,
+          activation: ctx.get('extensionRecovery') as {
+            inspect(): {
+              state?: string
+              pendingCandidateId?: string
+              lastFailure?: { candidateId?: string; diagnostics?: string }
+            }
+          } | undefined,
         }),
       }
     })
@@ -276,33 +317,27 @@ function extensionApprovals(ctx: Context): WorkspaceSnapshotInput['extensionAppr
       owner: string
       candidateVersion: string
       digest: string
-      capabilities: { added: readonly string[]; removed: readonly string[] }
-      permissions: { added: readonly string[]; removed: readonly string[] }
+      capabilities: { added: readonly string[]; removed: readonly string[]; changed?: readonly string[] }
+      permissions: { added: readonly string[]; removed: readonly string[]; changed?: readonly string[] }
+      tools?: { added: readonly string[]; removed: readonly string[]; changed?: readonly string[] }
       secrets: readonly string[]
       effects: { filesystem: readonly string[]; network: readonly string[]; process: readonly string[]; secrets: readonly string[]; externalSystems: readonly string[] }
     }
+    eligibility?(id: string): { ok: boolean; denials: readonly { reason: string }[] }
   } | undefined
-  const workspace = ctx.get('candidateWorkspace') as { list(): { id: string }[] } | undefined
+  const workspace = ctx.get('candidateWorkspace') as {
+    list(): { id: string; manifest?: { runtimeContractVersion?: string } }[]
+    get?(id: string): { manifest?: { runtimeContractVersion?: string } }
+  } | undefined
   if (!governance?.inspectApproval || !workspace) return []
-  const out: Array<{
-    readonly id: string
-    readonly candidateId: string
-    readonly fingerprint: string
-    readonly decision: string
-    readonly owner: string
-    readonly candidateVersion: string
-    readonly digest: string
-    readonly capabilitiesAdded: readonly string[]
-    readonly capabilitiesRemoved: readonly string[]
-    readonly permissionsAdded: readonly string[]
-    readonly permissionsRemoved: readonly string[]
-    readonly effects: readonly string[]
-  }> = []
+  const out: Array<NonNullable<WorkspaceSnapshotInput['extensionApprovals']>[number]> = []
   for (const candidate of workspace.list()) {
     const record = governance.inspectApproval(candidate.id) as { id: string; fingerprint: string; decision: string } | undefined
     if (!record) continue
     const summary = governance.inspectSummary?.(candidate.id)
     if (!summary) continue
+    const eligibility = governance.eligibility?.(candidate.id)
+    const contract = workspace.get?.(candidate.id)?.manifest?.runtimeContractVersion ?? candidate.manifest?.runtimeContractVersion
     out.push({
       id: record.id,
       candidateId: candidate.id,
@@ -313,9 +348,17 @@ function extensionApprovals(ctx: Context): WorkspaceSnapshotInput['extensionAppr
       digest: summary.digest,
       capabilitiesAdded: [...(summary.capabilities.added ?? [])],
       capabilitiesRemoved: [...(summary.capabilities.removed ?? [])],
+      capabilitiesChanged: [...(summary.capabilities.changed ?? [])],
       permissionsAdded: [...(summary.permissions.added ?? [])],
       permissionsRemoved: [...(summary.permissions.removed ?? [])],
+      permissionsChanged: [...(summary.permissions.changed ?? [])],
       effects: flattenEffects(summary.effects, summary.secrets ?? []),
+      toolsAdded: [...(summary.tools?.added ?? [])],
+      toolsRemoved: [...(summary.tools?.removed ?? [])],
+      toolsChanged: [...(summary.tools?.changed ?? [])],
+      ...(contract ? { runtimeContractVersion: contract } : {}),
+      eligibilityOk: eligibility?.ok !== false,
+      eligibilityDenials: eligibility?.denials.map((item) => item.reason) ?? [],
     })
   }
   return out
@@ -327,16 +370,46 @@ function boundFailureSummary(failed?: readonly string[]): string | undefined {
   return text.length > 160 ? `${text.slice(0, 148)}[truncated]` : text
 }
 
-function approvalStateOf(input: {
-  readonly canRequest: boolean
-  readonly decision?: string
+function projectedLifecycle(input: {
+  readonly candidateId: string
   readonly owner: string
   readonly version: string
+  readonly canRequest: boolean
+  readonly decision?: string
+  readonly eligibilityDenials?: readonly string[]
   readonly registry?: { get(owner: string, version: string): { status: string } | undefined }
-}): import('./types.js').WorkbenchProjection['approvalState'] {
-  if (input.registry?.get(input.owner, input.version)?.status === 'active') return 'active'
-  if (input.decision === 'approved-for-exact-diff') return 'approved'
-  if (input.decision === 'approval-requested') return 'approval-requested'
-  if (input.canRequest) return 'ready-for-approval'
-  return 'not-ready'
+  readonly activation?: {
+    inspect(): {
+      state?: string
+      pendingCandidateId?: string
+      lastFailure?: { candidateId?: string; diagnostics?: string }
+    }
+  }
+}): Pick<import('./types.js').WorkbenchProjection, 'approvalState' | 'governanceApproval' | 'activationState' | 'extensionLifecycle' | 'activationFailureSummary'> {
+  const inspected = input.activation?.inspect()
+  const lifecycle = extensionLifecycleOf({
+    registryStatus: input.registry?.get(input.owner, input.version)?.status,
+    decision: input.decision,
+    activationState: inspected?.state,
+    pendingCandidateId: inspected?.pendingCandidateId,
+    candidateId: input.candidateId,
+    lastFailureCandidateId: inspected?.lastFailure?.candidateId,
+    eligibilityDenials: input.eligibilityDenials,
+  })
+  let approvalState: import('./types.js').WorkbenchProjection['approvalState'] = approvalStateOf(lifecycle)
+  if (lifecycle === 'APPROVAL_REQUIRED') {
+    if (input.decision === 'approval-requested') approvalState = 'approval-requested'
+    else if (input.canRequest) approvalState = 'ready-for-approval'
+    else approvalState = 'not-ready'
+  }
+  const failure = inspected?.lastFailure
+  return {
+    approvalState,
+    governanceApproval: input.decision,
+    activationState: activationViewOf(lifecycle),
+    extensionLifecycle: lifecycle,
+    ...(lifecycle === 'ACTIVATION_FAILED' && failure?.diagnostics
+      ? { activationFailureSummary: boundActivationDiagnostics(failure.diagnostics) }
+      : {}),
+  }
 }

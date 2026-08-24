@@ -61,6 +61,11 @@ export function sanitizeMissionControlView(view: MissionControlView): MissionCon
       sideEffect: redactText(card.sideEffect),
       details: card.details.map((line) => redactText(line)),
     })),
+    activations: view.activations.map((card) => ({
+      ...card,
+      details: card.details.map((line) => redactText(line)),
+      effects: card.effects.map((line) => redactText(line)),
+    })),
     memory: view.memory.map((item) => ({ ...item, statement: redactText(item.statement) })),
     knowledge: view.knowledge.map((item) => ({
       ...item,
@@ -70,6 +75,9 @@ export function sanitizeMissionControlView(view: MissionControlView): MissionCon
     })),
     ...(view.recovery
       ? { recovery: { ...view.recovery, why: redactText(view.recovery.why) } }
+      : {}),
+    ...(view.activationFailure
+      ? { activationFailure: { ...view.activationFailure, summary: redactText(view.activationFailure.summary) } }
       : {}),
     controlStrip: {
       ...view.controlStrip,

@@ -75,6 +75,8 @@ export class GovernanceService implements ExtensionGovernance, ExtensionActivati
   private phase?: ActivationPhase
   private pendingCandidateId?: string
   interruptAfter?: ActivationInterrupt
+  failActivation?: { phase: ActivationPhase; diagnostics: string }
+  holdActivation?: Promise<void>
   private readonly persistHook?: () => void
   private readonly beginAuthorityCommit?: () => void
   private readonly finishAuthorityCommit?: () => void
@@ -200,6 +202,7 @@ export class GovernanceService implements ExtensionGovernance, ExtensionActivati
   status(): ActivationStatus {
     return {
       state: this.safeMode ? 'safe-mode' : this.state,
+      pendingCandidateId: this.pendingCandidateId,
       current: this.current,
       lastKnownGood: this.lastKnownGood,
       rollbackTarget: this.rollbackTarget,
@@ -249,6 +252,7 @@ export class GovernanceService implements ExtensionGovernance, ExtensionActivati
     const previousGood = this.lastKnownGood ?? this.captureSnapshot()
     this.rollbackTarget = previousGood
     this.flush()
+    if (this.holdActivation) await this.holdActivation
     await this.maybeInterrupt('activation-pending')
     let phase: ActivationPhase = 'capture-lkg'
     try {
@@ -256,6 +260,7 @@ export class GovernanceService implements ExtensionGovernance, ExtensionActivati
       phase = 'prepare'
       const prepared = await this.runtime.prepare(candidateId, this.prepareContext(record))
       if (!prepared.ok) throw new Error(prepared.diagnostics ?? 'prepare failed')
+      if (this.failActivation?.phase === 'prepare') throw new Error(this.failActivation.diagnostics)
       this.flush()
       await this.maybeInterrupt('prepare')
       phase = 'health'
@@ -265,11 +270,13 @@ export class GovernanceService implements ExtensionGovernance, ExtensionActivati
         ...record.manifest.services,
       ])
       if (!health.ok) throw new Error(health.diagnostics ?? 'health failed')
+      if (this.failActivation?.phase === 'health') throw new Error(this.failActivation.diagnostics)
       phase = 'commit'
       this.beginAuthorityCommit?.()
       this.commitRegistry(record)
       await this.maybeInterrupt('registry-commit')
       await this.runtime.commit(candidateId)
+      if (this.failActivation?.phase === 'commit') throw new Error(this.failActivation.diagnostics)
       this.current = this.captureSnapshot()
       this.lastKnownGood = this.current
       this.state = 'active'
@@ -645,10 +652,17 @@ export class GovernanceService implements ExtensionGovernance, ExtensionActivati
     if (record.baseVersion !== undefined) {
       const active = this.registry.list({ owner: record.owner, status: 'active' })[0]
       if (active === undefined) {
-        denials.push({
-          reason: 'base-changed',
-          detail: `no active owner for ${record.owner}; proposal assumed ${record.baseVersion}`,
-        })
+        const withheldBySafeMode = this.safeMode && this.registry.list({ owner: record.owner }).some((item) => (
+          item.version === record.baseVersion
+          && item.status === 'disabled'
+          && isolatedRuntimeOwner(item)
+        ))
+        if (!withheldBySafeMode) {
+          denials.push({
+            reason: 'base-changed',
+            detail: `no active owner for ${record.owner}; proposal assumed ${record.baseVersion}`,
+          })
+        }
       } else if (active.version !== record.baseVersion) {
         denials.push({ reason: 'base-changed', detail: `active base is ${active.version}, proposal assumed ${record.baseVersion}` })
       }

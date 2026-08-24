@@ -31,7 +31,7 @@ Activation layer switches version transactionally
 Recovery root can revert independently of Assistant
 ```
 
-There is no `approve(candidateId)` that accepts model input. Trusted approval requires a credential issued only by the Recovery Root. A conversation that reaches `request_extension_approval` is still **NOT APPROVED** until a human records an exact-diff decision.
+There is no `approve(candidateId)` that accepts model input. Trusted approval requires a credential issued only by the Recovery Root. A conversation that reaches `request_extension_approval` still has no governance approval until a human records an exact-diff decision. That approval still does not activate; activation is a later trusted action (CLI or WUI Activation Card).
 
 ## Approval fingerprint
 
@@ -103,4 +103,4 @@ RecoveryRoot (boot return) issueAuthority, recordApproval, activate, rollback, S
 
 `issueAuthority` is not on `ctx`. Ordinary plugins share Cordis context and have no supported public path to mint a trusted credential. `bootAssistantControl()` / `bootSafeModeRuntime()` return the Recovery Root to the bootstrap/UI caller only.
 
-Model-facing tools `inspect_extension_governance` and `request_extension_approval` are read/request only. `request_extension_approval` uses the same host rule as Workbench: sealed + validated + current-digest Independent Review `review-complete` (not `review-required`, `review-stale`, or `review-changes-required`). `review-complete` remains **NOT APPROVED**. The request tool is omitted in Safe Mode.
+Model-facing tools `inspect_extension_governance` and `request_extension_approval` are read/request only. `request_extension_approval` uses the same host rule as Workbench: sealed + validated + current-digest Independent Review `review-complete` (not `review-required`, `review-stale`, or `review-changes-required`). `review-complete` is Independent Review only, not governance approval or activation. The request tool is omitted in Safe Mode.

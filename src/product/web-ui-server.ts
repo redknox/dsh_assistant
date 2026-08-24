@@ -2,9 +2,12 @@ import { createReadStream, existsSync, statSync } from 'node:fs'
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { ActivationDeniedError } from '../domain/governance/errors.js'
+import { SimulatedCrashError } from '../domain/governance/service.js'
 import type { RecoveryRoot } from '../domain/governance/root.js'
+import { boundActivationDiagnostics } from '../domain/workspace/failure.js'
 import { AssistantControlSurface } from '../ui/controller.js'
-import type { ApprovalCard, MissionControlView } from '../domain/workspace/types.js'
+import type { ActivationCard, ApprovalCard, MissionControlView } from '../domain/workspace/types.js'
 import { PRODUCT_UI_SESSION_ID } from './constants.js'
 import {
   assertSafePayload,
@@ -156,6 +159,33 @@ export function startWebUiServer(options: WebUiServerOptions): Promise<WebUiServ
     return { card }
   }
 
+  let activationBusy = false
+
+  const activationInFlight = () => {
+    if (activationBusy) return true
+    const state = options.recoveryRoot.inspect().state
+    return state === 'activating' || state === 'activation-pending'
+  }
+
+  const bindActivation = (body: {
+    id?: unknown
+    candidateId?: unknown
+    digest?: unknown
+    fingerprint?: unknown
+  }, cards: readonly ActivationCard[]) => {
+    if (typeof body.id !== 'string' || body.id === '') return { error: 'malformed' as const }
+    if (typeof body.candidateId !== 'string' || body.candidateId === '') return { error: 'malformed' as const }
+    if (typeof body.digest !== 'string' || body.digest === '') return { error: 'malformed' as const }
+    if (typeof body.fingerprint !== 'string' || body.fingerprint === '') return { error: 'malformed' as const }
+    const card = cards.find((item) => item.id === body.id)
+    if (!card) return { error: 'unknown-activation' as const }
+    if (card.candidateId !== body.candidateId) return { error: 'stale-candidate' as const }
+    if (card.digest !== body.digest) return { error: 'stale-digest' as const }
+    if (card.fingerprint !== body.fingerprint) return { error: 'stale-fingerprint' as const }
+    if (card.status !== 'APPROVED_NOT_ACTIVE') return { error: 'stale-activation' as const }
+    return { card }
+  }
+
   const serveAsset = (reqPath: string, res: ServerResponse, setSession: boolean) => {
     const relative = reqPath === '/' ? 'index.html' : reqPath.replace(/^\//, '')
     const target = path.resolve(assetRoot, relative)
@@ -256,6 +286,79 @@ export function startWebUiServer(options: WebUiServerOptions): Promise<WebUiServ
         }
         sendJson(res, 200, envelope())
         broadcast()
+        return
+      }
+      if (req.method === 'POST' && requestUrl.pathname === '/api/activate') {
+        const body = JSON.parse(await readBody(req)) as {
+          id?: unknown
+          candidateId?: unknown
+          digest?: unknown
+          fingerprint?: unknown
+          confirm?: unknown
+        }
+        if (body.confirm !== true) {
+          sendJson(res, 409, { error: 'confirmation-required' })
+          return
+        }
+        if (activationInFlight()) {
+          sendJson(res, 409, { error: 'activation-in-flight', view: snapshot(), webUi: url })
+          return
+        }
+        const bound = bindActivation(body, snapshot().activations)
+        if ('error' in bound) {
+          sendJson(res, bound.error === 'malformed' ? 400 : 409, { error: bound.error })
+          return
+        }
+        const human = options.recoveryRoot.issueAuthority({ kind: 'human-control', source: 'application-ui' })
+        activationBusy = true
+        try {
+          const status = await options.recoveryRoot.activate(bound.card.candidateId, human)
+          if (status.state === 'activation-failed' || status.state === 'safe-mode') {
+            const failure = status.lastFailure
+            sendJson(res, 409, {
+              error: 'activation-failed',
+              phase: failure?.phase,
+              diagnostics: failure?.diagnostics ? boundActivationDiagnostics(failure.diagnostics) : 'activation failed',
+              rollbackSucceeded: failure?.rollbackSucceeded === true,
+              recoveryRequired: status.recoveryRequired,
+              safeMode: status.safeMode,
+              active: false,
+              view: snapshot(),
+              webUi: url,
+            })
+            broadcast()
+            return
+          }
+          sendJson(res, 200, envelope())
+          broadcast()
+        } catch (error) {
+          if (error instanceof ActivationDeniedError) {
+            sendJson(res, 409, { error: 'activation-denied', denials: error.denials, view: snapshot(), webUi: url })
+            broadcast()
+            return
+          }
+          if (error instanceof SimulatedCrashError) {
+            sendJson(res, 409, {
+              error: 'activation-interrupted',
+              phase: error.message.replace('simulated crash after ', ''),
+              diagnostics: boundActivationDiagnostics(error.message),
+              view: snapshot(),
+              webUi: url,
+            })
+            broadcast()
+            return
+          }
+          const message = error instanceof Error ? error.message : 'activation failed'
+          sendJson(res, 409, {
+            error: 'activation-error',
+            diagnostics: boundActivationDiagnostics(message),
+            view: snapshot(),
+            webUi: url,
+          })
+          broadcast()
+        } finally {
+          activationBusy = false
+        }
         return
       }
       if (req.method === 'POST' && requestUrl.pathname === '/api/recovery') {

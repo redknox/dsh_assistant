@@ -13,6 +13,9 @@ export function renderMissionControlAsText(view: MissionControlView): string {
   const lines = [
     `${view.identity}    ${view.objective?.text ?? '(no objective)'}    ${view.systemState}`,
     view.recovery ? `SAFE/RECOVERY  ${view.recovery.why}` : '',
+    view.activationFailure
+      ? `ACTIVATION FAILED  ${view.activationFailure.phase}  ${view.activationFailure.summary}  rollback=${view.activationFailure.rollbackSucceeded}  active=${view.activationFailure.registryActive}`
+      : '',
     '',
     '# Context',
     ...view.memory.slice(0, 5).map((item) => `- Memory  ${item.topicKey}: ${item.statement}`),
@@ -26,6 +29,14 @@ export function renderMissionControlAsText(view: MissionControlView): string {
       `  target: ${card.target}`,
       `  side effect: ${card.sideEffect}`,
       `  authority change: ${card.authorityChange}`,
+      ...card.details.map((line) => `  ${line}`),
+    ]).flat(),
+    ...view.activations.map((card) => [
+      `[activation-request] ${card.title}`,
+      `  owner: ${card.owner}@${card.version}`,
+      `  candidate: ${card.candidateId}`,
+      `  digest: ${card.digest}`,
+      `  status: ${card.status}`,
       ...card.details.map((line) => `  ${line}`),
     ]).flat(),
     '',
@@ -43,6 +54,12 @@ export function renderMissionControlAsText(view: MissionControlView): string {
 
 /** Desktop-first HTML prototype. Original industrial language; not a movie UI. */
 export function renderMissionControlAsHtml(view: MissionControlView): string {
+  const activationFailure = view.activationFailure
+    ? `<section id="activation-failure" data-activation-failed="true" data-phase="${escapeHtml(view.activationFailure.phase)}" data-candidate-id="${escapeHtml(view.activationFailure.candidateId)}">
+        <p>Activation failed at ${escapeHtml(view.activationFailure.phase)}: ${escapeHtml(view.activationFailure.summary)}</p>
+        <p>Rollback ${view.activationFailure.rollbackSucceeded ? 'succeeded' : 'failed'}; registry active ${view.activationFailure.registryActive ? 'yes' : 'no'}</p>
+      </section>`
+    : ''
   const recovery = view.recovery
     ? `<section id="recovery" data-state="${escapeHtml(view.systemState)}">
         <h1>TARS-NG — ${escapeHtml(view.systemState)}</h1>
@@ -62,6 +79,12 @@ export function renderMissionControlAsHtml(view: MissionControlView): string {
       <p>Target ${escapeHtml(card.target)}</p>
       <p>External side effect: ${escapeHtml(card.sideEffect)}</p>
       <p>Authority change: ${escapeHtml(card.authorityChange)}</p>
+      <ul>${card.details.map((line) => `<li>${escapeHtml(line)}</li>`).join('')}</ul>
+    </article>`).join('')
+  const activations = view.activations.map((card) => `<article data-activation-id="${escapeHtml(card.id)}" data-kind="${escapeHtml(card.kind)}" data-fingerprint="${escapeHtml(card.fingerprint)}" data-candidate-id="${escapeHtml(card.candidateId)}" data-digest="${escapeHtml(card.digest)}">
+      <h2>${escapeHtml(card.title)}</h2>
+      <p>Owner ${escapeHtml(card.owner)}@${escapeHtml(card.version)}</p>
+      <p>Status ${escapeHtml(card.status)}</p>
       <ul>${card.details.map((line) => `<li>${escapeHtml(line)}</li>`).join('')}</ul>
     </article>`).join('')
   const activity = view.activity.map((item) => `<li data-activity="${escapeHtml(item.kind)}" data-source="${escapeHtml(item.source)}">${escapeHtml(item.summary)}</li>`).join('')
@@ -92,12 +115,14 @@ export function renderMissionControlAsHtml(view: MissionControlView): string {
     <div id="system-state">${escapeHtml(view.systemState)}</div>
   </header>
   ${recovery}
+  ${activationFailure}
   <div id="layout">
     <aside id="context"><h1>Context</h1><ul>${context}</ul></aside>
     <main id="work">
       <h1>Conversation / work</h1>
       <ol>${conversation}</ol>
       <section id="approvals">${approvals}</section>
+      <section id="activations">${activations}</section>
     </main>
     <aside id="activity"><h1>Activity</h1><ul>${activity}</ul></aside>
   </div>

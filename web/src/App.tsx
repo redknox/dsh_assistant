@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState, type FormEvent } from 'react'
-import type { ApprovalCard, MissionControlView, UserCapabilityStatus, WorkObjectKind, WorkbenchProjection } from '../../src/domain/workspace/types'
+import type { ActivationCard, ApprovalCard, MissionControlView, UserCapabilityStatus, WorkObjectKind, WorkbenchProjection } from '../../src/domain/workspace/types'
 import {
+  activateCandidate,
   decideApproval,
   establishSession,
   fetchView,
@@ -192,6 +193,63 @@ function ApprovalCardView(props: {
   )
 }
 
+function ActivationCardView(props: {
+  readonly card: ActivationCard
+  readonly locked: boolean
+  readonly armed: boolean
+  readonly onActivate: (card: ActivationCard) => void
+  readonly onDefer: (card: ActivationCard) => void
+}) {
+  const { card } = props
+  const actionable = card.status === 'APPROVED_NOT_ACTIVE' && card.eligibilityOk
+  return (
+    <article
+      className="approval-card"
+      data-activation-id={card.id}
+      data-kind={card.kind}
+      data-fingerprint={card.fingerprint}
+      data-candidate-id={card.candidateId}
+      data-digest={card.digest}
+      data-activation-status={card.status}
+      aria-labelledby={`activation-title-${card.id}`}
+    >
+      <header className="approval-header">
+        <Glyph name="shield" className="glyph approval-symbol" />
+        <h2 id={`activation-title-${card.id}`}>{card.title}</h2>
+      </header>
+      <dl className="approval-facts">
+        <div><dt>OWNER</dt><dd>{card.owner}@{card.version}</dd></div>
+        <div><dt>CANDIDATE</dt><dd>{card.candidateId}</dd></div>
+        <div><dt>DIGEST</dt><dd>{card.digest}</dd></div>
+        <div><dt>FINGERPRINT</dt><dd>{card.fingerprint}</dd></div>
+        {card.runtimeContractVersion ? <div><dt>CONTRACT</dt><dd>{card.runtimeContractVersion}</dd></div> : null}
+        <div><dt>RUNTIME</dt><dd>Isolated runner only</dd></div>
+        <div><dt>STATUS</dt><dd>{card.status}</dd></div>
+        <div><dt>CAPABILITIES</dt><dd>{formatDiff(card.capabilitiesAdded, card.capabilitiesRemoved, card.capabilitiesChanged)}</dd></div>
+        <div><dt>TOOLS</dt><dd>{formatDiff(card.toolsAdded, card.toolsRemoved, card.toolsChanged)}</dd></div>
+        <div><dt>PERMISSIONS</dt><dd>{formatDiff(card.permissionsAdded, card.permissionsRemoved, card.permissionsChanged)}</dd></div>
+        {card.details.map((line) => (
+          <div key={line}><dt>DETAIL</dt><dd>{line}</dd></div>
+        ))}
+      </dl>
+      {actionable ? (
+        <div className="approval-actions">
+          <button type="button" className="button button--secondary" data-activation-action="defer" disabled={props.locked} onClick={() => props.onDefer(card)}>NOT NOW</button>
+          <button
+            type="button"
+            className="button button--approval"
+            data-activation-action="activate"
+            disabled={props.locked}
+            onClick={() => props.onActivate(card)}
+          >
+            {props.armed ? 'CONFIRM ACTIVATE' : 'ACTIVATE'}
+          </button>
+        </div>
+      ) : <p className="approval-status">Status {card.status}</p>}
+    </article>
+  )
+}
+
 function RecoveryPanel(props: {
   readonly systemState: MissionControlView['systemState']
   readonly recovery: NonNullable<MissionControlView['recovery']>
@@ -242,6 +300,10 @@ function ConversationWorkspace(props: {
   readonly onSend: () => void
   readonly onApprove: (card: ApprovalCard) => void
   readonly onReject: (card: ApprovalCard) => void
+  readonly activations: readonly ActivationCard[]
+  readonly armedActivation?: string
+  readonly onActivate: (card: ActivationCard) => void
+  readonly onDefer: (card: ActivationCard) => void
 }) {
   const locked = !props.connected
   return (
@@ -269,6 +331,16 @@ function ConversationWorkspace(props: {
         })}
         {props.view.approvals.map((card) => (
           <ApprovalCardView key={card.id} card={card} locked={locked} onApprove={props.onApprove} onReject={props.onReject} />
+        ))}
+        {props.activations.map((card) => (
+          <ActivationCardView
+            key={`act-${card.id}`}
+            card={card}
+            locked={locked}
+            armed={props.armedActivation === card.id}
+            onActivate={props.onActivate}
+            onDefer={props.onDefer}
+          />
         ))}
       </div>
       <div>
@@ -343,10 +415,11 @@ function OperationsPanel(props: { readonly view: MissionControlView }) {
   )
 }
 
-function formatDiff(added: readonly string[], removed: readonly string[]): string {
+function formatDiff(added: readonly string[], removed: readonly string[], changed: readonly string[] = []): string {
   const plus = added.map((item) => `+${item}`).join(' ')
   const minus = removed.map((item) => `-${item}`).join(' ')
-  return [plus, minus].filter((item) => item !== '').join(' ') || 'none'
+  const tilde = changed.map((item) => `~${item}`).join(' ')
+  return [plus, minus, tilde].filter((item) => item !== '').join(' ') || 'none'
 }
 
 function WorkbenchPanel(props: { readonly candidates: readonly WorkbenchProjection[] }) {
@@ -380,17 +453,30 @@ function WorkbenchPanel(props: { readonly candidates: readonly WorkbenchProjecti
               {item.blockingFindings ? ` · ${item.blockingFindings} blockers` : ''}
               {item.blockerClaims?.length ? ` (${item.blockerClaims.join(', ')})` : ''}
             </div>
-            <div className="workbench-meta" data-approval-state={item.approvalState ?? 'not-ready'}>
-              {item.approvalState === 'active' ? 'approved/active'
-                : item.approvalState === 'approved' ? 'approved, not active'
-                  : item.approvalState === 'approval-requested' || item.canRequestApproval ? 'ready for approval'
-                    : 'not ready for approval'}
+            <div className="workbench-meta" data-review-state={item.reviewState ?? 'not-reviewed'}>
+              reviewState {item.reviewState ?? 'not-reviewed'}
+            </div>
+            <div className="workbench-meta" data-governance-approval={item.governanceApproval ?? 'none'}>
+              governanceApproval {item.governanceApproval ?? 'none'}
+            </div>
+            <div className="workbench-meta" data-activation-state={item.activationState ?? 'inactive'}>
+              activationState {item.activationState ?? 'inactive'}
+              {item.activationFailureSummary ? ` · ${item.activationFailureSummary}` : ''}
+            </div>
+            <div className="workbench-meta" data-approval-state={item.approvalState ?? 'not-ready'} data-extension-lifecycle={item.extensionLifecycle ?? 'APPROVAL_REQUIRED'}>
+              {item.extensionLifecycle === 'ACTIVE' ? 'approved and active'
+                : item.extensionLifecycle === 'APPROVED_NOT_ACTIVE' ? 'approved, not active'
+                  : item.extensionLifecycle === 'ACTIVATING' ? 'activating'
+                    : item.extensionLifecycle === 'ACTIVATION_FAILED' ? 'activation failed'
+                      : item.extensionLifecycle === 'SUPERSEDED' ? 'superseded'
+                        : item.approvalState === 'approval-requested' || item.canRequestApproval ? 'ready for approval'
+                          : 'not ready for approval'}
             </div>
             <div className="workbench-diff">
-              capabilities {formatDiff(item.diff?.capabilities.added ?? [], item.diff?.capabilities.removed ?? [])}
+              capabilities {formatDiff(item.diff?.capabilities.added ?? [], item.diff?.capabilities.removed ?? [], item.diff?.capabilities.changed ?? [])}
             </div>
             <div className="workbench-diff">
-              permissions {formatDiff(item.diff?.permissions.added ?? [], item.diff?.permissions.removed ?? [])}
+              permissions {formatDiff(item.diff?.permissions.added ?? [], item.diff?.permissions.removed ?? [], item.diff?.permissions.changed ?? [])}
             </div>
             <div className="workbench-diff">
               effects {item.effectSummary?.length ? item.effectSummary.join('; ') : 'none'}
@@ -458,6 +544,10 @@ export function MissionControlScreen(props: {
   readonly onSend: () => void
   readonly onApprove: (card: ApprovalCard) => void
   readonly onReject: (card: ApprovalCard) => void
+  readonly onActivate?: (card: ActivationCard) => void
+  readonly onDeferActivation?: (card: ActivationCard) => void
+  readonly deferredActivations?: readonly string[]
+  readonly armedActivation?: string
   readonly onRecovery: (action: 'diagnostics' | 'rollback' | 'exit-safe-mode') => void
 }) {
   const { view } = props
@@ -494,6 +584,10 @@ export function MissionControlScreen(props: {
           onSend={props.onSend}
           onApprove={props.onApprove}
           onReject={props.onReject}
+          activations={(view.activations ?? []).filter((card) => !(props.deferredActivations ?? []).includes(card.id))}
+          armedActivation={props.armedActivation}
+          onActivate={props.onActivate ?? (() => {})}
+          onDefer={props.onDeferActivation ?? (() => {})}
         />
         <OperationsPanel view={view} />
       </div>
@@ -510,6 +604,8 @@ export function App() {
   const [draft, setDraft] = useState('')
   const [error, setError] = useState<string>()
   const [armedRecovery, setArmedRecovery] = useState<string>()
+  const [armedActivation, setArmedActivation] = useState<string>()
+  const [deferredActivations, setDeferredActivations] = useState<string[]>([])
 
   useEffect(() => {
     let closed = false
@@ -573,6 +669,19 @@ export function App() {
       onSend={() => { void onSend() }}
       onApprove={(card) => { void act(() => decideApproval(card, 'approve')) }}
       onReject={(card) => { void act(() => decideApproval(card, 'deny')) }}
+      deferredActivations={deferredActivations}
+      armedActivation={armedActivation}
+      onDeferActivation={(card) => {
+        setDeferredActivations((current) => current.includes(card.id) ? current : [...current, card.id])
+      }}
+      onActivate={(card) => {
+        if (armedActivation !== card.id) {
+          setArmedActivation(card.id)
+          return
+        }
+        setArmedActivation(undefined)
+        void act(() => activateCandidate(card, true))
+      }}
       onRecovery={(action) => {
         if (action !== 'diagnostics' && armedRecovery !== action) {
           setArmedRecovery(action)

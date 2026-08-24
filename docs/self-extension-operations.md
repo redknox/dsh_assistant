@@ -1,6 +1,6 @@
 # Self-Extension operator runbook (v0.2.0)
 
-Trusted control lives on `RecoveryRoot` / `npm run self-extension`. The model may inspect and request approval only.
+Trusted control lives on `RecoveryRoot` / `npm run self-extension`, and on the local Mission-Control Web UI for exact-diff **approve** plus a separate **activate** confirmation. The model may inspect and request approval only.
 
 Set `TARS_NG_HOME` (preferred) or `DSH_ASSISTANT_HOME`, or pass `bootAssistantControl({ home })`. Product CLI: `tars-ng self-extension <command>`.
 
@@ -14,7 +14,7 @@ Inspect registry, request a Capability Resolution Review, write/validate/seal a 
 
 ## What only a trusted operator can do
 
-Approve an exact fingerprint, activate, rollback, disable, enter/exit Safe Mode, backup/restore durable Self-Extension state, rewrite LKG indirectly via those actions.
+Approve an exact fingerprint, activate (CLI or WUI Activation Card with explicit confirm), rollback, disable, enter/exit Safe Mode, backup/restore durable Self-Extension state, rewrite LKG indirectly via those actions. Approval never auto-activates.
 
 ## Normal lifecycle
 

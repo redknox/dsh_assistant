@@ -26,10 +26,9 @@ import { CatalogDiscovery } from '../src/domain/discovery/index.js'
 import { InMemoryRegistryPersistence, RegistryService, bootstrapCoreInventory } from '../src/domain/registry/index.js'
 import { ResolutionService } from '../src/domain/resolution/index.js'
 import { PolicyReviewerProvider, ReviewService, finding, reviewPackageFromCandidate } from '../src/domain/review/index.js'
-import { projectMissionControl } from '../src/domain/workspace/index.js'
+import { gatherWorkspaceSnapshot, projectMissionControl } from '../src/domain/workspace/index.js'
 import { PRODUCT_TOOL_NAMES } from '../src/product/bundle.js'
 import { bootAssistantControl, bootSafeModeRuntime } from '../src/runtime/boot.js'
-import { gatherWorkspaceSnapshot } from '../src/domain/workspace/gather.js'
 
 const R0_SOURCE = `export const name = 'generated-r0-workbench'
 export function apply(ctx) {
@@ -288,6 +287,16 @@ describe('candidate workbench', () => {
         fingerprint: String(requested.fingerprint),
         decision: 'approved-for-exact-diff',
       })
+      const approvedView = projectMissionControl(gatherWorkspaceSnapshot({ ctx, sessionId: 'wb-e' }))
+      assert.equal(approvedView.approvals.some((item) => item.candidateId === id), false)
+      const activationCard = approvedView.activations.find((item) => item.candidateId === id)
+      assert.ok(activationCard)
+      assert.equal(activationCard.status, 'APPROVED_NOT_ACTIVE')
+      const inspected = ctx.candidateWorkbench.inspect(id)
+      assert.equal('approvalStatus' in (inspected.review ?? {}), false)
+      assert.equal(inspected.governanceApproval, 'approved-for-exact-diff')
+      assert.equal(inspected.activationState, 'inactive')
+      assert.doesNotMatch(JSON.stringify(inspected), /NOT APPROVED/)
       const activated = await recoveryRoot.activate(id, human)
       assert.equal(activated.state, 'active', activated.lastFailure?.diagnostics)
       const ping = await tool(ctx, 'r0_workbench_ping', { text: 'ok' })
@@ -295,6 +304,34 @@ describe('candidate workbench', () => {
       const rolled = await recoveryRoot.rollback(human)
       assert.equal(rolled.state, 'rolled-back')
       assert.equal(ctx.tools.get('r0_workbench_ping'), undefined)
+    } finally {
+      await ctx.fiber.dispose()
+    }
+  })
+
+  it('retires a stale Activation Card after the approved digest changes', async () => {
+    const { ctx, recoveryRoot } = await bootAssistantControl()
+    try {
+      const id = authorR0(ctx)
+      parse(await tool(ctx, 'validate_candidate', { candidateId: id }))
+      parse(await tool(ctx, 'seal_candidate', { candidateId: id }))
+      parse(await tool(ctx, 'review_candidate', { candidateId: id }))
+      const requested = parse(await tool(ctx, 'request_extension_approval', { candidateId: id }))
+      const human = recoveryRoot.issueAuthority({ kind: 'human-control', source: 'application-ui' })
+      recoveryRoot.recordApproval(human, {
+        candidateId: id,
+        fingerprint: String(requested.fingerprint),
+        decision: 'approved-for-exact-diff',
+      })
+      const approved = projectMissionControl(gatherWorkspaceSnapshot({ ctx, sessionId: 'wb-stale' }))
+      assert.equal(approved.activations.some((item) => item.candidateId === id && item.status === 'APPROVED_NOT_ACTIVE'), true)
+      writeFileSync(path.join(ctx.candidateWorkspace.get(id).workspaceRoot, 'src/plugin.js'), `${R0_SOURCE}\nexport const mutated = true\n`)
+      assert.ok(ctx.extensionGovernance.eligibility(id).denials.some((item) => item.reason === 'digest-mismatch'))
+      const stale = projectMissionControl(gatherWorkspaceSnapshot({ ctx, sessionId: 'wb-stale' }))
+      assert.equal(stale.activations.some((item) => item.candidateId === id), false)
+      assert.equal(stale.candidates?.find((item) => item.id === id)?.extensionLifecycle, 'SUPERSEDED')
+      assert.equal(ctx.candidateWorkbench.inspect(id).activationState, 'inactive')
+      assert.doesNotMatch(JSON.stringify(stale.activations), /APPROVED_NOT_ACTIVE/)
     } finally {
       await ctx.fiber.dispose()
     }
@@ -346,6 +383,134 @@ describe('candidate workbench', () => {
     const afterDisable = disabled.governance.requestEligibility(disabledCandidate.id)
     assert.equal(afterDisable.ok, false)
     assert.ok(afterDisable.denials.some((item) => item.reason === 'base-changed'))
+  })
+
+  it('retires an approved Activation Card when the base or Independent Review evidence is invalid', () => {
+    const upgraded = isolatedWorkbench()
+    const evolve = new ResolutionService(upgraded.registry).review({
+      capability: 'calendar.read',
+      need: 'richer attendee filtering',
+      behavior: 'attendee-filter',
+    })
+    const plan = upgraded.workbench.rememberPlan(evolve)
+    const created = upgraded.workbench.create({
+      planId: plan.planId,
+      manifest: { capabilities: ['calendar.read'], tools: ['calendar_list_events'] },
+    })
+    upgraded.workbench.writeFile(created.id, 'src/ok.ts', 'export const value: string = "ok"\n')
+    upgraded.workbench.validate(created.id)
+    upgraded.workbench.seal(created.id)
+    upgraded.workbench.review(created.id)
+    const fingerprint = upgraded.governance.requestApproval(created.id).fingerprint
+    const human = upgraded.root.issueAuthority({ kind: 'human-control', source: 'operator-cli' })
+    upgraded.root.recordApproval(human, { candidateId: created.id, fingerprint, decision: 'approved-for-exact-diff' })
+    const current = upgraded.registry.get('managed/integrations', '0.1.0')
+    assert.ok(current)
+    upgraded.registry.transitionStatus('managed/integrations', '0.1.0', 'disabled')
+    upgraded.registry.register({ ...current, version: '0.3.0', status: 'active' })
+    const afterUpgrade = upgraded.governance.eligibility(created.id)
+    assert.ok(afterUpgrade.denials.some((item) => item.reason === 'base-changed'))
+    const retired = projectMissionControl({
+      agentStatus: 'idle',
+      safeMode: false,
+      recoveryRequired: false,
+      pendingConfirmations: [],
+      jobs: [],
+      toolEvents: [],
+      conversation: [],
+      integrationStatus: [],
+      registry: upgraded.registry.list().map((record) => ({
+        owner: record.owner,
+        version: record.version,
+        provenance: record.provenance.kind,
+        status: record.status,
+        capabilities: record.capabilities.map((item) => item.id),
+      })),
+      extensionApprovals: [{
+        id: upgraded.governance.inspectApproval(created.id)?.id ?? 'apr',
+        candidateId: created.id,
+        fingerprint,
+        decision: 'approved-for-exact-diff',
+        owner: created.owner,
+        candidateVersion: created.version,
+        digest: upgraded.workspace.get(created.id).digest ?? '',
+        capabilitiesAdded: [],
+        capabilitiesRemoved: [],
+        permissionsAdded: [],
+        permissionsRemoved: [],
+        effects: [],
+        eligibilityOk: false,
+        eligibilityDenials: afterUpgrade.denials.map((item) => item.reason),
+      }],
+      memory: [],
+      knowledge: [],
+      personality: { humor: 40, directness: 70, initiative: 50, verbosity: 'normal', humorSuppressed: false },
+    })
+    assert.equal(retired.activations.length, 0)
+    assert.doesNotMatch(JSON.stringify(retired), /APPROVED_NOT_ACTIVE/)
+
+    let requireChanges = false
+    const reviewLost = isolatedWorkbench(new PolicyReviewerProvider((pkg) => (
+      requireChanges
+        ? [finding({
+          reviewedDigest: pkg.candidate.digest,
+          severity: 'BLOCKER',
+          category: 'acceptance-contract',
+          claim: 'needs-repair',
+          location: 'policy',
+          evidence: 'review reopened after approval',
+          whyItMatters: 'exact-diff evidence is gone',
+          requiredRemediation: 'repair',
+          status: 'open',
+        })]
+        : []
+    )))
+    const ping = authorIsolated(reviewLost)
+    reviewLost.workbench.review(ping)
+    const reviewFingerprint = reviewLost.governance.requestApproval(ping).fingerprint
+    const reviewHuman = reviewLost.root.issueAuthority({ kind: 'human-control', source: 'operator-cli' })
+    reviewLost.root.recordApproval(reviewHuman, {
+      candidateId: ping,
+      fingerprint: reviewFingerprint,
+      decision: 'approved-for-exact-diff',
+    })
+    requireChanges = true
+    const reopened = reviewLost.workbench.review(ping)
+    assert.equal(reopened.state, 'changes-required')
+    const afterReview = reviewLost.governance.eligibility(ping)
+    assert.ok(afterReview.denials.some((item) => item.reason === 'review-changes-required' || item.reason === 'review-stale'))
+    const lost = projectMissionControl({
+      agentStatus: 'idle',
+      safeMode: false,
+      recoveryRequired: false,
+      pendingConfirmations: [],
+      jobs: [],
+      toolEvents: [],
+      conversation: [],
+      integrationStatus: [],
+      registry: [],
+      extensionApprovals: [{
+        id: reviewLost.governance.inspectApproval(ping)?.id ?? 'apr-review',
+        candidateId: ping,
+        fingerprint: reviewFingerprint,
+        decision: 'approved-for-exact-diff',
+        owner: reviewLost.workspace.get(ping).owner,
+        candidateVersion: reviewLost.workspace.get(ping).version,
+        digest: reviewLost.workspace.get(ping).digest ?? '',
+        capabilitiesAdded: [],
+        capabilitiesRemoved: [],
+        permissionsAdded: [],
+        permissionsRemoved: [],
+        effects: [],
+        eligibilityOk: false,
+        eligibilityDenials: afterReview.denials.map((item) => item.reason),
+      }],
+      memory: [],
+      knowledge: [],
+      personality: { humor: 40, directness: 70, initiative: 50, verbosity: 'normal', humorSuppressed: false },
+    })
+    assert.equal(lost.activations.length, 0)
+    assert.doesNotMatch(JSON.stringify(lost), /APPROVED_NOT_ACTIVE/)
   })
 
   it('rejects tampered, symlink, and over-budget repair copies', () => {
@@ -1004,7 +1169,7 @@ function isolatedWorkbench(provider?: PolicyReviewerProvider, options: { persist
     root.service,
     { persist: options.persist, registry },
   )
-  return { workbench, workspace, review, governance: root.service, registry, independent }
+  return { workbench, workspace, review, governance: root.service, registry, independent, root }
 }
 
 function isolatedUnavailableDiscovery(status: 'unavailable' | 'incomplete' = 'unavailable') {
