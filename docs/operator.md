@@ -44,7 +44,7 @@ tars-ng stop
 
 `tars-ng start` prints a loopback URL (default `http://127.0.0.1:8787`). Open that address for daily conversation, Activity, approvals, capabilities, and Safe Mode/recovery. Override the port with `TARS_NG_UI_PORT`. The server binds loopback only; unsupported `Origin` headers are rejected; there is no wildcard CORS and no login in this release. Governance mutations require the per-launch `HttpOnly; SameSite=Strict` UI session cookie established when the page loads. Approval binds the current card id, candidate id (Self-Extension), and fingerprint. Rollback and Exit Safe Mode require an explicit confirmation. Exit Safe Mode is refused while recovery is still required; a verified rollback keeps historical `lastFailure` diagnostics but allows exit.
 
-`tars-ng status` reports whether the product is running and, when it is, the Web UI address. `tars-ng stop` terminates the runtime and the local Web server.
+`tars-ng status` reports whether the product is running and, when it is, the Web UI address. It does not print the runtime lease token. `tars-ng stop` authenticates against the live Home lease holder on loopback and does not signal an unverified PID. A PID is liveness metadata, not process identity. A TARS-NG Home has at most one verified writer.
 
 If the browser disconnects, reconnect; the UI reloads a fresh `MissionControlView`. Do not treat browser-local state as approval, activation, or recovery authority.
 
@@ -157,12 +157,12 @@ Tasks are stored as `tasks/*.md` inside the sandbox. `tasks_create` follows the 
 
 | Command | Behavior |
 | --- | --- |
-| `tars-ng start` | Ensures home, loads env, checks Node/DSH and default LLM, boots, starts the loopback Web UI, prints the URL, waits for SIGINT/SIGTERM. Fails without writing a pid when the default LLM is unusable or the Web UI cannot bind |
-| `tars-ng start --once` | Same checks and boot, then exits without serving the Web UI (packaging/smoke). Non-zero when the default LLM is unusable |
-| `tars-ng status` | Version, running pid, home, Web UI URL when running, DSH compatibility — no secret values |
-| `tars-ng doctor` | Version, Node, DSH packages, home, env-file safety, credential **names**, LLM provider/model/route, `ai-runtime`, integration mode, generated-runtime isolation, Safe Mode/recovery |
-| `tars-ng stop` | SIGTERM to the pid recorded by `start` (runtime and Web UI) |
-| `tars-ng self-extension …` | Existing Recovery Root operator commands (approve/activate/rollback/backup/…) |
+| `tars-ng start` | Acquires an exclusive Home lease, then loads env, checks Node/DSH and default LLM, boots, starts the loopback Web UI, prints the URL, waits for SIGINT/SIGTERM or authenticated stop. A second start on the same Home fails with `home-busy` before mutation. Fails without writing a pid when the default LLM is unusable or the Web UI cannot bind, and releases only the matching lease |
+| `tars-ng start --once` | Same lease + checks and boot, then exits without serving the Web UI (packaging/smoke). Non-zero when the default LLM is unusable |
+| `tars-ng status` | Version, verified running pid, home, Web UI URL when running, DSH compatibility — no secret values and no run token |
+| `tars-ng doctor` | Version, Node, DSH packages, home, env-file safety, credential **names**, LLM provider/model/route, `ai-runtime`, integration mode, generated-runtime isolation, Safe Mode/recovery. Stays read-only when a verified runtime already owns the Home |
+| `tars-ng stop` | Authenticated loopback stop of the exact lease holder. Does not signal a PID whose TARS-NG identity is unproven |
+| `tars-ng self-extension …` | Recovery Root operator commands. Mutating commands fail closed with `home-busy` while a verified runtime owns the Home |
 
 Doctor never prints Authorization headers, token values, credential-bearing URLs, or chain-of-thought.
 
@@ -172,7 +172,7 @@ Doctor never prints Authorization headers, token values, credential-bearing URLs
 $TARS_NG_HOME/          # TARS_NG_HOME, else DSH_ASSISTANT_HOME, else ~/.local/share/tars-ng
   config/               # product.json, optional env
   data/                 # personal memory JSON
-  state/                # pid, last-status (no secrets)
+  state/                # pid, last-status, exclusive runtime.lock identity (no secrets in operator output)
   logs/                 # tars-ng.log (rotated ~2 MiB)
   backups/              # operator-chosen backup destination may live here
   generated/            # reserved; not trusted core

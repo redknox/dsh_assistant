@@ -38,7 +38,7 @@ Recommended: **2–4 weeks of daily use** after `v0.3.0` is tagged. Adjust for u
 
 ## Observe
 
-Runtime: startup/restart, persistence, session continuity, candidate/review/approval lineage, Safe Mode, provider outages and Calendar token expiry, cancellation/timeout, long-running stability, CPU/memory/log growth, stop/restart, loopback Web UI reconnect.
+Runtime: startup/restart, persistence, session continuity, candidate/review/approval lineage, Safe Mode, provider outages and Calendar token expiry, cancellation/timeout, long-running stability, CPU/memory/log growth, exclusive Home lease, authenticated stop/restart, loopback Web UI reconnect. Confirm a second `tars-ng start` on the same Home fails with `home-busy` and that `tars-ng stop` does not signal an unrelated PID.
 
 LLM: `deepseek-official` / `deepseek-v4-flash` stability; response/tool-use quality; provider failures surfaced clearly; missing/invalid credential behavior remains understandable.
 

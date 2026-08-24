@@ -241,6 +241,7 @@ describe('TARS-NG product runtime', () => {
       assert.equal(once, 1)
       assert.equal(running, 1)
       assert.equal(existsSync(layout.pidFile), false)
+      assert.equal(existsSync(layout.runtimeIdentityFile), false)
       assert.match(text, /LLM not configured\/unavailable/)
       assert.match(text, /missing DEEPSEEK_API_KEY/)
       assert.doesNotMatch(text, /TARS-NG is running/)

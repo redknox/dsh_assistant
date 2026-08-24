@@ -77,7 +77,7 @@ Optional capability providers (replaceable, not required to boot):
 
 Product plugins register tools/services through Cordis effects. Disposing the product fiber (or the whole context) must drop `personalMemory`, `personalKnowledge`, `actionPolicy`, `assistantJobs`, and the product tools. Loading the bundle again on the same DSH stack must restore one copy of each name, not duplicates.
 
-`tars-ng start` writes `$TARS_NG_HOME/state/tars-ng.pid`, serves packed Web UI assets from `dist/web` on loopback, and records the URL in last-status. `tars-ng stop` sends SIGTERM. Uninstalling the npm package does not delete `$TARS_NG_HOME`. Production runtime does not depend on Vite or `tsx`.
+`tars-ng start` acquires `$TARS_NG_HOME/state/runtime.lock/`, writes `$TARS_NG_HOME/state/tars-ng.pid` as liveness metadata, serves packed Web UI assets from `dist/web` on loopback, and records the URL in last-status. `tars-ng stop` authenticates against that lease and does not signal an unverified PID. A TARS-NG Home has at most one verified writer. Uninstalling the npm package does not delete `$TARS_NG_HOME`. Production runtime does not depend on Vite or `tsx`.
 
 `npm test` covers unload + remount of the product fiber on `bootAssistantRuntime()`, and a separate official DSH profile/bundle smoke in the same file.
 
