@@ -5,7 +5,11 @@ import type { ExtensionRecord, WorkspaceSnapshotInput } from './types.js'
 export function projectExtensions(input: WorkspaceSnapshotInput): readonly ExtensionRecord[] {
   const rows = new Map<string, ExtensionRecord>()
   for (const candidate of input.candidates ?? []) {
-    if (!isolatedRuntimeOwner({ owner: candidate.owner })) continue
+    const record = input.registry.find((item) => item.owner === candidate.owner && item.version === candidate.version)
+    if (!isolatedRuntimeOwner({
+      owner: candidate.owner,
+      provenance: candidate.provenance ?? (record ? { kind: record.provenance } : undefined),
+    })) continue
     const key = `${candidate.owner}@${candidate.version}`
     rows.set(key, rowFromCandidate(input, candidate))
   }
@@ -41,7 +45,8 @@ function rowFromCandidate(
     version: candidate.version,
     candidateId: candidate.id,
     digest: candidate.digest,
-    provenance: record?.provenance ?? 'generated',
+    provenance: record?.provenance ?? candidate.provenance?.kind ?? 'generated',
+    ...(candidate.provenance?.origin ? { provenanceOrigin: candidate.provenance.origin } : {}),
     capabilities: [...(record?.capabilities ?? candidate.diff?.capabilities.added ?? [])],
     tools: [...(record?.tools ?? [])],
     lifecycle,

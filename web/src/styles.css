@@ -218,6 +218,7 @@ button { color: inherit; }
   letter-spacing: .1em;
 }
 .primary-nav { display: grid; }
+button.nav-item { cursor: pointer; font: inherit; }
 .nav-item {
   min-height: 62px;
   display: grid;

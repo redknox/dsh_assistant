@@ -112,6 +112,7 @@ export interface ExtensionRecord {
   readonly candidateId?: string
   readonly digest?: string
   readonly provenance: string
+  readonly provenanceOrigin?: string
   readonly capabilities: readonly string[]
   readonly tools: readonly string[]
   readonly lifecycle: ExtensionLifecycleState
@@ -243,6 +244,7 @@ export interface WorkbenchProjection {
   readonly version: string
   readonly digest?: string
   readonly baseVersion?: string
+  readonly provenance?: { readonly kind: string; readonly origin?: string }
   readonly lifecycle: string
   readonly resolutionKind?: string
   readonly resolutionCapability?: string

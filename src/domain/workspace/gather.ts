@@ -231,6 +231,7 @@ function workbenchCandidates(ctx: Context): WorkspaceSnapshotInput['candidates']
     version: string
     digest?: string
     baseVersion?: string
+    provenance?: { kind: string; origin?: string }
     lifecycle: string
     resolutionKind?: string
     resolutionCapability?: string
@@ -249,6 +250,7 @@ function workbenchCandidates(ctx: Context): WorkspaceSnapshotInput['candidates']
       owner: string
       version: string
       baseVersion?: string
+      provenance?: { kind: string; origin?: string }
       lifecycle: string
       sealed: boolean
       digest?: string
@@ -268,6 +270,7 @@ function workbenchCandidates(ctx: Context): WorkspaceSnapshotInput['candidates']
         version: view.version,
         digest: view.digest,
         baseVersion: view.baseVersion,
+        ...(view.provenance ? { provenance: view.provenance } : {}),
         lifecycle: view.lifecycle,
         resolutionKind: view.resolutionKind,
         resolutionCapability: view.resolutionCapability,
@@ -318,6 +321,7 @@ function workbenchCandidates(ctx: Context): WorkspaceSnapshotInput['candidates']
       version: record.version,
       digest: record.digest,
       baseVersion: record.baseVersion,
+      ...(record.provenance ? { provenance: record.provenance } : {}),
       lifecycle: record.lifecycle,
       resolutionKind: record.manifest?.resolutionKind,
       resolutionCapability: record.manifest?.resolutionCapability,
@@ -425,7 +429,7 @@ function projectedLifecycle(input: {
     eligibilityDenials: input.eligibilityDenials,
     newerAuthoritative: newerAuthoritative(input.registry, input.owner, input.version),
   })
-  let approvalState: import('./types.js').WorkbenchProjection['approvalState'] = approvalStateOf(lifecycle)
+  let approvalState: import('./types.js').WorkbenchProjection['approvalState'] = approvalStateOf(lifecycle, input.decision)
   if (lifecycle === 'APPROVAL_REQUIRED') {
     if (input.decision === 'approval-requested') approvalState = 'approval-requested'
     else if (input.canRequest) approvalState = 'ready-for-approval'

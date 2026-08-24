@@ -59,10 +59,10 @@ export function extensionLifecycleOf(input: {
   readonly eligibilityDenials?: readonly string[]
   readonly newerAuthoritative?: boolean
 }): ExtensionLifecycleState {
-  if (input.registryStatus === 'active') return 'ACTIVE'
   if (input.decision === 'superseded' || input.registryStatus === 'retired' || input.newerAuthoritative === true) {
     return 'SUPERSEDED'
   }
+  if (input.registryStatus === 'active') return 'ACTIVE'
   if (input.registryStatus === 'disabled') {
     const blocked = input.eligibilityDenials?.some((reason) => (BLOCKED_REACTIVATION_DENIALS as readonly string[]).includes(reason)) === true
     if (blocked || input.decision !== 'approved-for-exact-diff') return 'DISABLED_BLOCKED'
@@ -87,17 +87,27 @@ export function activationViewOf(lifecycle: ExtensionLifecycleState): Activation
   return 'inactive'
 }
 
-export function approvalStateOf(lifecycle: ExtensionLifecycleState): 'not-ready' | 'ready-for-approval' | 'approval-requested' | 'approved' | 'active' {
+export function approvalStateOf(
+  lifecycle: ExtensionLifecycleState,
+  decision?: string,
+): 'not-ready' | 'ready-for-approval' | 'approval-requested' | 'approved' | 'active' {
   if (lifecycle === 'ACTIVE') return 'active'
-  if (
-    lifecycle === 'APPROVED_NOT_ACTIVE'
-    || lifecycle === 'ACTIVATING'
-    || lifecycle === 'ACTIVATION_FAILED'
-    || lifecycle === 'DISABLED_REACTIVATABLE'
-    || lifecycle === 'DISABLED_BLOCKED'
-  ) {
-    return 'approved'
+  if (lifecycle === 'APPROVAL_REQUIRED') {
+    if (decision === 'approval-requested') return 'approval-requested'
+    return 'not-ready'
   }
-  if (lifecycle === 'APPROVAL_REQUIRED') return 'not-ready'
+  if (decision === 'approved-for-exact-diff') {
+    if (
+      lifecycle === 'APPROVED_NOT_ACTIVE'
+      || lifecycle === 'ACTIVATING'
+      || lifecycle === 'ACTIVATION_FAILED'
+      || lifecycle === 'DISABLED_REACTIVATABLE'
+      || lifecycle === 'DISABLED_BLOCKED'
+      || lifecycle === 'SUPERSEDED'
+    ) {
+      return 'approved'
+    }
+  }
+  if (decision === 'approval-requested') return 'approval-requested'
   return 'not-ready'
 }
