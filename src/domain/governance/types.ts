@@ -115,6 +115,7 @@ export interface ActivationStatus {
   readonly recoveryRequired: boolean
   /** Current evidence that restored LKG / Registry / artifacts were revalidated. */
   readonly integrityVerified: boolean
+  readonly lifecycleBusy?: 'activation' | 'uninstall' | 'recovery'
 }
 
 export interface TrustedApprovalInput {

@@ -105,6 +105,29 @@ export interface UserCapabilityView {
   }
 }
 
+export interface UserPluginView {
+  readonly id: string
+  readonly owner: string
+  readonly version: string
+  readonly provenance: string
+  readonly candidateId?: string
+  readonly digest?: string
+  readonly capabilities: readonly string[]
+  readonly tools: readonly string[]
+  readonly mounted: boolean
+  readonly registryGeneration: number
+  readonly dependency: {
+    readonly severity: 'none' | 'optional' | 'hard' | 'unresolved'
+    readonly dependents: readonly {
+      readonly owner: string
+      readonly version: string
+      readonly requiredCapability: string
+      readonly kind: 'hard' | 'optional' | 'historical'
+    }[]
+  }
+  readonly uninstallable: true
+}
+
 export interface RecoveryView {
   readonly why: string
   readonly disabled: readonly string[]
@@ -141,6 +164,7 @@ export interface MissionControlView {
   readonly activity: readonly ActivityItem[]
   readonly approvals: readonly ApprovalCard[]
   readonly activations: readonly ActivationCard[]
+  readonly plugins: readonly UserPluginView[]
   readonly capabilities: readonly UserCapabilityView[]
   readonly memory: readonly WorkspaceMemoryItem[]
   readonly knowledge: readonly WorkspaceKnowledgeItem[]
@@ -169,6 +193,7 @@ export interface WorkbenchProjection {
   readonly id: string
   readonly owner: string
   readonly version: string
+  readonly digest?: string
   readonly baseVersion?: string
   readonly lifecycle: string
   readonly resolutionKind?: string
@@ -227,6 +252,9 @@ export interface WorkspaceSnapshotInput {
     readonly permissions?: readonly string[]
     readonly provider?: string
     readonly providers?: readonly string[]
+    readonly tools?: readonly string[]
+    readonly runtimeSeams?: readonly string[]
+    readonly pluginDependencies?: readonly { readonly capability: string; readonly strength: 'hard' | 'optional' }[]
   }[]
   readonly extensionApprovals?: readonly {
     readonly id: string
@@ -252,6 +280,8 @@ export interface WorkspaceSnapshotInput {
   }[]
   readonly activation?: {
     readonly state: string
+    readonly generation?: number
+    readonly mounted?: readonly string[]
     readonly pendingCandidateId?: string
     readonly lastFailureCandidateId?: string
     readonly lastFailure?: {

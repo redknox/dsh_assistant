@@ -2,12 +2,12 @@ import { createReadStream, existsSync, statSync } from 'node:fs'
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { ActivationDeniedError } from '../domain/governance/errors.js'
+import { ActivationDeniedError, GovernanceContractError, UninstallDeniedError } from '../domain/governance/errors.js'
 import { SimulatedCrashError } from '../domain/governance/service.js'
 import type { RecoveryRoot } from '../domain/governance/root.js'
 import { boundActivationDiagnostics } from '../domain/workspace/failure.js'
 import { AssistantControlSurface } from '../ui/controller.js'
-import type { ActivationCard, ApprovalCard, MissionControlView } from '../domain/workspace/types.js'
+import type { ActivationCard, ApprovalCard, MissionControlView, UserPluginView } from '../domain/workspace/types.js'
 import { PRODUCT_UI_SESSION_ID } from './constants.js'
 import {
   assertSafePayload,
@@ -134,15 +134,39 @@ export function startWebUiServer(options: WebUiServerOptions): Promise<WebUiServ
         body: { action, diagnostics: options.diagnostics ?? { activation: options.recoveryRoot.inspect() } },
       }
     }
+    const busy = mutationInFlight()
+    if (busy !== undefined) {
+      return { status: 409 as const, body: { error: `${busy}-in-flight`, action } }
+    }
     const human = options.recoveryRoot.issueAuthority({ kind: 'human-control', source: 'application-ui' })
     if (action === 'rollback') {
-      return { status: 200 as const, body: { action, result: await options.recoveryRoot.rollback(human) } }
+      recoveryBusy = true
+      try {
+        return { status: 200 as const, body: { action, result: await options.recoveryRoot.rollback(human) } }
+      } catch (error) {
+        if (error instanceof GovernanceContractError && /in-flight$/.test(error.message)) {
+          return { status: 409 as const, body: { error: error.message, action } }
+        }
+        throw error
+      } finally {
+        recoveryBusy = false
+      }
     }
     const status = options.recoveryRoot.inspect()
     if (status.recoveryRequired) {
       return { status: 409 as const, body: { error: 'integrity-failure', action: 'exit-safe-mode' } }
     }
-    return { status: 200 as const, body: { action, result: options.recoveryRoot.exitSafeMode(human) } }
+    recoveryBusy = true
+    try {
+      return { status: 200 as const, body: { action, result: options.recoveryRoot.exitSafeMode(human) } }
+    } catch (error) {
+      if (error instanceof GovernanceContractError && /in-flight$/.test(error.message)) {
+        return { status: 409 as const, body: { error: error.message, action } }
+      }
+      throw error
+    } finally {
+      recoveryBusy = false
+    }
   }
 
   const bindCard = (body: { id?: unknown; candidateId?: unknown; fingerprint?: unknown }, cards: readonly ApprovalCard[]) => {
@@ -160,11 +184,18 @@ export function startWebUiServer(options: WebUiServerOptions): Promise<WebUiServ
   }
 
   let activationBusy = false
+  let uninstallBusy = false
+  let recoveryBusy = false
 
-  const activationInFlight = () => {
-    if (activationBusy) return true
-    const state = options.recoveryRoot.inspect().state
-    return state === 'activating' || state === 'activation-pending'
+  const mutationInFlight = (): 'activation' | 'uninstall' | 'recovery' | undefined => {
+    if (uninstallBusy) return 'uninstall'
+    if (activationBusy) return 'activation'
+    if (recoveryBusy) return 'recovery'
+    const inspected = options.recoveryRoot.inspect()
+    if (inspected.lifecycleBusy !== undefined) return inspected.lifecycleBusy
+    if (inspected.state === 'activating' || inspected.state === 'activation-pending') return 'activation'
+    if (inspected.state === 'rollback-pending') return 'recovery'
+    return undefined
   }
 
   const bindActivation = (body: {
@@ -183,6 +214,37 @@ export function startWebUiServer(options: WebUiServerOptions): Promise<WebUiServ
     if (card.digest !== body.digest) return { error: 'stale-digest' as const }
     if (card.fingerprint !== body.fingerprint) return { error: 'stale-fingerprint' as const }
     if (card.status !== 'APPROVED_NOT_ACTIVE') return { error: 'stale-activation' as const }
+    return { card }
+  }
+
+  const bindUninstall = (body: {
+    id?: unknown
+    owner?: unknown
+    version?: unknown
+    candidateId?: unknown
+    digest?: unknown
+    registryGeneration?: unknown
+  }, cards: readonly UserPluginView[]) => {
+    if (typeof body.id !== 'string' || body.id === '') return { error: 'malformed' as const }
+    if (typeof body.owner !== 'string' || body.owner === '') return { error: 'malformed' as const }
+    if (typeof body.version !== 'string' || body.version === '') return { error: 'malformed' as const }
+    if (typeof body.registryGeneration !== 'number' || !Number.isInteger(body.registryGeneration)) {
+      return { error: 'malformed' as const }
+    }
+    const card = cards.find((item) => item.id === body.id)
+    if (!card) return { error: 'unknown-plugin' as const }
+    if (card.owner !== body.owner || card.version !== body.version) return { error: 'stale-plugin' as const }
+    if (card.registryGeneration !== body.registryGeneration) return { error: 'stale-registry' as const }
+    if (card.candidateId !== undefined) {
+      if (typeof body.candidateId !== 'string' || body.candidateId !== card.candidateId) {
+        return { error: 'stale-candidate' as const }
+      }
+    }
+    if (card.digest !== undefined) {
+      if (typeof body.digest !== 'string' || body.digest !== card.digest) {
+        return { error: 'stale-digest' as const }
+      }
+    }
     return { card }
   }
 
@@ -300,8 +362,8 @@ export function startWebUiServer(options: WebUiServerOptions): Promise<WebUiServ
           sendJson(res, 409, { error: 'confirmation-required' })
           return
         }
-        if (activationInFlight()) {
-          sendJson(res, 409, { error: 'activation-in-flight', view: snapshot(), webUi: url })
+        if (mutationInFlight() !== undefined) {
+          sendJson(res, 409, { error: `${mutationInFlight()}-in-flight`, view: snapshot(), webUi: url })
           return
         }
         const bound = bindActivation(body, snapshot().activations)
@@ -358,6 +420,57 @@ export function startWebUiServer(options: WebUiServerOptions): Promise<WebUiServ
           broadcast()
         } finally {
           activationBusy = false
+        }
+        return
+      }
+      if (req.method === 'POST' && requestUrl.pathname === '/api/uninstall') {
+        const body = JSON.parse(await readBody(req)) as {
+          id?: unknown
+          owner?: unknown
+          version?: unknown
+          candidateId?: unknown
+          digest?: unknown
+          registryGeneration?: unknown
+          confirm?: unknown
+          acknowledgeDependents?: unknown
+        }
+        if (body.confirm !== true) {
+          sendJson(res, 409, { error: 'confirmation-required' })
+          return
+        }
+        if (mutationInFlight() !== undefined) {
+          sendJson(res, 409, { error: `${mutationInFlight()}-in-flight`, view: snapshot(), webUi: url })
+          return
+        }
+        const bound = bindUninstall(body, snapshot().plugins)
+        if ('error' in bound) {
+          sendJson(res, bound.error === 'malformed' ? 400 : 409, { error: bound.error })
+          return
+        }
+        const human = options.recoveryRoot.issueAuthority({ kind: 'human-control', source: 'application-ui' })
+        uninstallBusy = true
+        try {
+          await options.recoveryRoot.uninstall(human, bound.card.owner, bound.card.version, {
+            acknowledgeDependents: body.acknowledgeDependents === true,
+          })
+          sendJson(res, 200, envelope())
+          broadcast()
+        } catch (error) {
+          if (error instanceof UninstallDeniedError) {
+            sendJson(res, 409, { error: 'uninstall-denied', denials: error.denials, view: snapshot(), webUi: url })
+            broadcast()
+            return
+          }
+          const message = error instanceof Error ? error.message : 'uninstall failed'
+          sendJson(res, 409, {
+            error: 'uninstall-failed',
+            diagnostics: boundActivationDiagnostics(message),
+            view: snapshot(),
+            webUi: url,
+          })
+          broadcast()
+        } finally {
+          uninstallBusy = false
         }
         return
       }

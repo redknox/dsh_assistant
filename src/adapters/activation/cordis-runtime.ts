@@ -246,7 +246,16 @@ export class CordisActivationRuntime implements ActivationRuntime {
     this.currentMounted = snapshot.mounted.filter((id) => this.generated.has(id) || this.fibers.has(id))
   }
 
-  async unloadGenerated(): Promise<void> {
+  async unloadGenerated(candidateId?: string): Promise<void> {
+    if (candidateId !== undefined) {
+      const runner = this.generated.get(candidateId)
+      if (runner !== undefined) {
+        this.dropGenerated(candidateId, runner)
+        await runner.waitForExit()
+      }
+      await this.discardParked(candidateId)
+      return
+    }
     const runners = [...this.generated.entries()]
     for (const [id, runner] of runners) this.dropGenerated(id, runner)
     await Promise.all(runners.map(([, runner]) => runner.waitForExit()))

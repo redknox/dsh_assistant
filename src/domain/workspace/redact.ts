@@ -66,6 +66,10 @@ export function sanitizeMissionControlView(view: MissionControlView): MissionCon
       details: card.details.map((line) => redactText(line)),
       effects: card.effects.map((line) => redactText(line)),
     })),
+    plugins: view.plugins.map((plugin) => ({
+      ...plugin,
+      digest: plugin.digest === undefined ? undefined : redactText(plugin.digest),
+    })),
     memory: view.memory.map((item) => ({ ...item, statement: redactText(item.statement) })),
     knowledge: view.knowledge.map((item) => ({
       ...item,

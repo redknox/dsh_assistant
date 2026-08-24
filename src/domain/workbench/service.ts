@@ -380,6 +380,7 @@ export class WorkbenchService implements CandidateWorkbench {
           entryPoints: [...parent.manifest.entryPoints],
           riskModel: parent.manifest.riskModel,
           runtimeContractVersion: parent.manifest.runtimeContractVersion ?? '',
+          pluginDependencies: [...(parent.manifest.pluginDependencies ?? [])],
         },
       })
       createdId = created.id
@@ -578,6 +579,7 @@ function mergeManifestPatch(
     validationTasks: patch.validationTasks ?? current.validationTasks,
     riskModel: patch.riskModel ?? current.riskModel,
     runtimeContractVersion: hostContract ?? current.runtimeContractVersion ?? '',
+    pluginDependencies: patch.pluginDependencies ?? current.pluginDependencies,
   }
 }
 

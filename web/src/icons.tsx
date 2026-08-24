@@ -14,6 +14,7 @@ const strokes: Record<string, readonly string[]> = {
   terminal: ['M4 6h16v12H4z', 'M7 10l2.2 2L7 14', 'M11.5 14H16'],
   hex: ['M12 3l8 4.6v8.8L12 21l-8-4.6V7.6z'],
   warn: ['M12 4.2l8.4 15.1H3.6z', 'M12 10v4', 'M12 16.6h.01'],
+  trash: ['M5 7h14', 'M9 7V5h6v2', 'M7 7l1 13h8l1-13', 'M10 11v6', 'M14 11v6'],
   info: ['M12 4a8 8 0 1 1 0 16 8 8 0 0 1 0-16z', 'M12 11v5', 'M12 8h.01'],
 }
 

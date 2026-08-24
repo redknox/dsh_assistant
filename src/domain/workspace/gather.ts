@@ -33,6 +33,7 @@ export function gatherWorkspaceSnapshot(input: GatherWorkspaceInput): WorkspaceS
         rollbackSucceeded?: boolean
         safeModeRequired?: boolean
       }
+      current?: { generation: number; mounted: readonly string[] }
     }
   } | undefined
   const activation = recovery?.inspect()
@@ -60,7 +61,7 @@ export function gatherWorkspaceSnapshot(input: GatherWorkspaceInput): WorkspaceS
         available: availability.available,
         ...(availability.reason ? { reason: availability.reason } : {}),
       })),
-    registry: (ctx.get('capabilityRegistry') as { list(): { owner: string; version: string; provenance: { kind: string }; status: string; capabilities: { id: string }[]; permissions?: readonly string[]; provider?: string; providers?: readonly string[] }[] } | undefined)
+    registry: (ctx.get('capabilityRegistry') as { list(): { owner: string; version: string; provenance: { kind: string }; status: string; capabilities: { id: string }[]; permissions?: readonly string[]; provider?: string; providers?: readonly string[]; tools?: readonly string[]; runtimeSeams?: readonly string[]; pluginDependencies?: readonly { capability: string; strength: 'hard' | 'optional' }[] }[] } | undefined)
       ?.list().map((record) => ({
         owner: record.owner,
         version: record.version,
@@ -70,10 +71,15 @@ export function gatherWorkspaceSnapshot(input: GatherWorkspaceInput): WorkspaceS
         ...(record.permissions ? { permissions: [...record.permissions] } : {}),
         ...(record.provider ? { provider: record.provider } : {}),
         ...(record.providers ? { providers: [...record.providers] } : {}),
+        ...(record.tools ? { tools: [...record.tools] } : {}),
+        ...(record.runtimeSeams ? { runtimeSeams: [...record.runtimeSeams] } : {}),
+        ...(record.pluginDependencies ? { pluginDependencies: [...record.pluginDependencies] } : {}),
       })) ?? [],
     extensionApprovals: extensionApprovals(ctx),
     activation: {
       state: activation?.state ?? 'idle',
+      ...(activation?.current?.generation !== undefined ? { generation: activation.current.generation } : {}),
+      ...(activation?.current?.mounted ? { mounted: [...activation.current.mounted] } : {}),
       ...(activation?.pendingCandidateId ? { pendingCandidateId: activation.pendingCandidateId } : {}),
       ...(lastFailure?.candidateId ? { lastFailureCandidateId: lastFailure.candidateId } : {}),
       ...(lastFailure && boundedFailure
@@ -207,6 +213,7 @@ function workbenchCandidates(ctx: Context): WorkspaceSnapshotInput['candidates']
     id: string
     owner: string
     version: string
+    digest?: string
     baseVersion?: string
     lifecycle: string
     resolutionKind?: string
@@ -243,6 +250,7 @@ function workbenchCandidates(ctx: Context): WorkspaceSnapshotInput['candidates']
         id: view.id,
         owner: view.owner,
         version: view.version,
+        digest: view.digest,
         baseVersion: view.baseVersion,
         lifecycle: view.lifecycle,
         resolutionKind: view.resolutionKind,
@@ -292,6 +300,7 @@ function workbenchCandidates(ctx: Context): WorkspaceSnapshotInput['candidates']
       id: record.id,
       owner: record.owner,
       version: record.version,
+      digest: record.digest,
       baseVersion: record.baseVersion,
       lifecycle: record.lifecycle,
       resolutionKind: record.manifest?.resolutionKind,

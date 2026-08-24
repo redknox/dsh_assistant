@@ -29,7 +29,7 @@ export interface ActivationRuntime {
   commit(candidateId: string): Promise<void>
   restore(snapshot: ActivationSnapshot): Promise<void>
   mounted(): readonly string[]
-  unloadGenerated(): Promise<void>
+  unloadGenerated(candidateId?: string): Promise<void>
   bindIsolatedFailure(handler: (failure: IsolatedRuntimeFailure) => void | Promise<void>): void
 }
 
@@ -70,7 +70,13 @@ export class InMemoryActivationRuntime implements ActivationRuntime {
     return this.currentMounted
   }
 
-  async unloadGenerated(): Promise<void> {}
+  async unloadGenerated(candidateId?: string): Promise<void> {
+    if (candidateId === undefined) {
+      this.currentMounted = []
+      return
+    }
+    this.currentMounted = this.currentMounted.filter((id) => id !== candidateId)
+  }
 
   bindIsolatedFailure(_handler: (failure: IsolatedRuntimeFailure) => void | Promise<void>): void {}
 }

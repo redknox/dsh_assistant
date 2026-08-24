@@ -1,4 +1,4 @@
-import type { ActivationCard, ApprovalCard, MissionControlView, WorkObjectKind } from '../../src/domain/workspace/types'
+import type { ActivationCard, ApprovalCard, MissionControlView, UserPluginView, WorkObjectKind } from '../../src/domain/workspace/types'
 
 export interface UiEnvelope {
   readonly view: MissionControlView
@@ -55,6 +55,24 @@ export async function activateCandidate(card: ActivationCard, confirm: boolean):
       digest: card.digest,
       fingerprint: card.fingerprint,
       confirm,
+    }),
+  }))
+}
+
+export async function uninstallPlugin(plugin: UserPluginView, confirm: boolean): Promise<UiEnvelope> {
+  return parseEnvelope(await fetch('/api/uninstall', {
+    ...include,
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({
+      id: plugin.id,
+      owner: plugin.owner,
+      version: plugin.version,
+      registryGeneration: plugin.registryGeneration,
+      confirm,
+      acknowledgeDependents: true,
+      ...(plugin.candidateId ? { candidateId: plugin.candidateId } : {}),
+      ...(plugin.digest ? { digest: plugin.digest } : {}),
     }),
   }))
 }

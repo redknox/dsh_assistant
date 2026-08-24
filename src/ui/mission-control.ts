@@ -21,6 +21,7 @@ export function renderMissionControlAsText(view: MissionControlView): string {
     ...view.memory.slice(0, 5).map((item) => `- Memory  ${item.topicKey}: ${item.statement}`),
     ...view.knowledge.slice(0, 5).map((item) => `- Knowledge  ${item.sourceUri}`),
     ...view.capabilities.map((item) => `- ${item.area}  ${item.action}  ${item.status}`),
+    ...(view.plugins ?? []).map((item) => `- Plugin  ${item.owner}@${item.version}  uninstallable`),
     '',
     '# Conversation / work',
     ...view.conversation.map((item) => `[${item.kind}] ${item.text}`),
@@ -72,6 +73,7 @@ export function renderMissionControlAsHtml(view: MissionControlView): string {
     ...view.memory.map((item) => `<li data-memory-id="${escapeHtml(item.id)}">${escapeHtml(item.topicKey)}: ${escapeHtml(item.statement)}</li>`),
     ...view.knowledge.map((item) => `<li>${escapeHtml(item.sourceUri)}</li>`),
     ...view.capabilities.map((item) => `<li data-area="${escapeHtml(item.area)}" data-status="${escapeHtml(item.status)}">${escapeHtml(item.area)} — ${escapeHtml(item.action)} (${escapeHtml(item.status)})</li>`),
+    ...(view.plugins ?? []).map((item) => `<li data-plugin-id="${escapeHtml(item.id)}" data-uninstallable="yes">${escapeHtml(item.owner)}@${escapeHtml(item.version)}</li>`),
   ].join('')
   const conversation = view.conversation.map((item) => `<li data-kind="${escapeHtml(item.kind)}">${escapeHtml(item.text)}</li>`).join('')
   const approvals = view.approvals.map((card) => `<article data-approval-id="${escapeHtml(card.id)}" data-kind="${escapeHtml(card.kind)}" data-fingerprint="${escapeHtml(card.fingerprint)}">

@@ -293,6 +293,17 @@ function manifestParameters() {
       },
     },
     riskModel: riskModelToolSchema(),
+    pluginDependencies: {
+      type: 'array' as const,
+      items: {
+        type: 'object' as const,
+        additionalProperties: false,
+        properties: {
+          capability: { type: 'string' as const },
+          strength: { type: 'string' as const },
+        },
+      },
+    },
   }
 }
 
@@ -309,7 +320,19 @@ function manifestFromArgs(args: Record<string, unknown>): CandidateManifestInput
     effects: parseEffects(args.effects),
     entryPoints: asStringList(args.entryPoints),
     riskModel: parseRiskModel(args.riskModel),
+    pluginDependencies: parsePluginDependencies(args.pluginDependencies),
   }
+}
+
+function parsePluginDependencies(value: unknown): CandidateManifestInput['pluginDependencies'] {
+  if (!Array.isArray(value)) return undefined
+  return value.map((item) => {
+    const rec = item as { capability?: unknown; strength?: unknown }
+    return {
+      capability: typeof rec.capability === 'string' ? rec.capability : '',
+      strength: rec.strength as 'hard' | 'optional',
+    }
+  })
 }
 
 function parseEffects(value: unknown): Partial<OperationalEffects> | undefined {

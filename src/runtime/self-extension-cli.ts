@@ -113,7 +113,7 @@ export async function runSelfExtensionCli(argv: string[]): Promise<void> {
     }
     if (command === 'safe-mode') {
       const action = rest[0]
-      if (action === 'enter') console.log(JSON.stringify(recoveryRoot.enterSafeMode(human), null, 2))
+      if (action === 'enter') console.log(JSON.stringify(await recoveryRoot.enterSafeMode(human), null, 2))
       else if (action === 'exit') console.log(JSON.stringify(recoveryRoot.exitSafeMode(human), null, 2))
       else console.log(JSON.stringify({ safeMode: recoveryRoot.inspect().safeMode }, null, 2))
       return

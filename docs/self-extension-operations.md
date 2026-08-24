@@ -14,7 +14,7 @@ Inspect registry, request a Capability Resolution Review, write/validate/seal a 
 
 ## What only a trusted operator can do
 
-Approve an exact fingerprint, activate (CLI or WUI Activation Card with explicit confirm), rollback, disable, enter/exit Safe Mode, backup/restore durable Self-Extension state, rewrite LKG indirectly via those actions. Approval never auto-activates.
+Approve an exact fingerprint, activate (CLI or WUI Activation Card with explicit confirm), uninstall one active generated/user plugin from the READY-state WUI trash action, rollback, disable, enter/exit Safe Mode, backup/restore durable Self-Extension state, rewrite LKG indirectly via those actions. Approval never auto-activates. Uninstall is a targeted unmount of one plugin; it is not global LKG rollback and does not delete sealed artifacts.
 
 ## Normal lifecycle
 

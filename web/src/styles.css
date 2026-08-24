@@ -428,6 +428,21 @@ button { color: inherit; }
 [data-capability-state="active"] { color: var(--status-green); }
 [data-capability-state="governed"] { color: var(--signal-amber); }
 [data-capability-state="unavailable"] { color: var(--fault-red); }
+.plugin-row { align-items: flex-start; }
+.plugin-uninstall {
+  display: inline-grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border: 1px solid #7c7466;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+}
+.plugin-uninstall .glyph { width: 16px; height: 16px; }
+.uninstall-dialog { max-width: 22rem; color: var(--muted-inverse); font: 500 13px/1.4 var(--font-instrument); }
+.uninstall-dialog h3 { margin: 0 0 8px; font: 650 14px/1.3 var(--font-instrument); color: inherit; }
 
 .control-strip {
   flex: 0 0 auto;
