@@ -195,7 +195,7 @@ describe('TARS-NG Home runtime lease', () => {
       assert.equal(code, 1)
       assert.equal(existsSync(layout.pidFile), false)
       assert.equal(existsSync(layout.runtimeIdentityFile), false)
-      assert.doesNotMatch(lines.join('\n'), /[a-f0-9]{64}/)
+      assert.doesNotMatch(lines.join('\n').replace(/profile-identity: v\d+:[a-f0-9]+/g, ''), /[a-f0-9]{64}/)
     } finally {
       if (previous.deepseek === undefined) delete process.env.DEEPSEEK_API_KEY
       else process.env.DEEPSEEK_API_KEY = previous.deepseek

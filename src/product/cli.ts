@@ -29,7 +29,7 @@ import {
   type RuntimeIdentity,
 } from './runtime-lease.js'
 import { AssistantControlSurface } from '../ui/controller.js'
-import { assertAssistantAdapterContract, assertSelectedProfile } from './profile-composition.js'
+import { assertAssistantAdapterContract, assertRecoveryAdapterContract, assertSelectedProfile } from './profile-composition.js'
 import {
   claimSessionPartition,
   commitRuntimeContext,
@@ -230,6 +230,7 @@ async function defaultBootProduct(layout: ProductHomeLayout, allowFixtures: bool
     sessionRoot: persistSessions ? context?.sessionPersistenceDir : undefined,
     sessionId: context?.sessionId.value,
     workspace: context?.workspace.value,
+    safeMode: context?.safeMode,
   })
 }
 
@@ -371,6 +372,7 @@ export async function runProductCli(
       webUi ? `web-ui: ${webUi}` : 'web-ui: not-running',
       last === undefined ? 'last-start: none' : `last-start: recorded`,
       runtimeContext ? `profile: ${runtimeContext.profile.value} (${runtimeContext.profile.source})` : 'profile: unresolved',
+      runtimeContext ? `profile-identity: ${runtimeContext.profileIdentity}` : 'profile-identity: unresolved',
       runtimeContext ? `workspace: ${runtimeContext.workspaceLabel} (${runtimeContext.workspace.source})` : 'workspace: unresolved',
       runtimeContext ? `session: ${runtimeContext.sessionId.value} (${runtimeContext.sessionId.source})` : 'session: unresolved',
       inspected.state === 'ambiguous' ? `lease: ambiguous` : `lease: ${inspected.state}`,
@@ -400,6 +402,7 @@ export async function runProductCli(
     }
     const lease = await acquireRuntimeLease(layout, runtimeContext ? {
       profile: runtimeContext.profile.value,
+      profileIdentity: runtimeContext.profileIdentity,
       workspaceIdentity: runtimeContext.workspaceIdentity,
       sessionRootIdentity: runtimeContext.sessionRootIdentity,
       sessionId: runtimeContext.sessionId.value,
@@ -413,9 +416,24 @@ export async function runProductCli(
     if (parsed.command === 'start' && runtimeContext) {
       try {
         assertSelectedProfile(runtimeContext.profile.value)
-        assertAssistantAdapterContract()
+        if (runtimeContext.profileCompositionError !== undefined) {
+          assertRecoveryAdapterContract()
+        } else {
+          try {
+            assertAssistantAdapterContract()
+          } catch (error) {
+            runtimeContext = {
+              ...runtimeContext,
+              safeMode: true,
+              profileCompositionError: error instanceof Error ? error.message : 'normal Profile composition failed',
+            }
+            assertRecoveryAdapterContract()
+          }
+        }
         partition = claimSessionPartition(runtimeContext)
-        runtimeContext = commitRuntimeContext(layout, runtimeContext, { allowFixtures })
+        if (runtimeContext.profileCompositionError === undefined) {
+          runtimeContext = commitRuntimeContext(layout, runtimeContext, { allowFixtures })
+        }
       } catch (error) {
         if (partition?.createdOwner) rollbackSessionRootOwner(runtimeContext)
         partition?.release()

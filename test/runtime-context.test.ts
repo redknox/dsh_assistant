@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { spawnSync } from 'node:child_process'
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, realpathSync, readFileSync, statSync, writeFileSync } from 'node:fs'
+import { chmodSync, cpSync, existsSync, mkdirSync, mkdtempSync, realpathSync, readFileSync, statSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -19,7 +19,7 @@ import {
   expectedProductionAdapterIds,
   mountedAdapterPluginIds,
 } from '../src/product/profile-composition.js'
-import { activeComposedIds, loadGovernedAssistantComposition } from '../src/product/profile-load.js'
+import { activeComposedIds, loadGovernedAssistantComposition, productPackageRoot, profileIdentityOf } from '../src/product/profile-load.js'
 import { ensureProductHome } from '../src/product/home.js'
 import {
   claimSessionPartition,
@@ -368,7 +368,7 @@ describe('runtime context', () => {
     const booted = await bootAssistantControl()
     try {
       const mounted = mountedAdapterPluginIds(booted.ctx)
-      const composition = loadGovernedAssistantComposition({ safeMode: false })
+      const composition = loadGovernedAssistantComposition()
       const active = activeComposedIds(composition.entries)
       const expected = expectedProductionAdapterIds(active, { safeMode: false, sessionPersistence: false })
       assert.deepEqual(mounted, [...expected])
@@ -554,5 +554,163 @@ describe('runtime context', () => {
       sessionRoot: otherRoot,
     }, undefined)
     assert.equal(rebound.sessionRoot.value, retryB.sessionRoot.value)
+  })
+
+  it('starts the independent recovery Profile when the normal assistant patch is broken', async () => {
+    const profiles = mkdtempSync(path.join(tmpdir(), 'tars-profiles-'))
+    cpSync(path.join(productPackageRoot(), 'profiles'), profiles, { recursive: true })
+    const previous = process.env.TARS_NG_PROFILE_ROOT
+    process.env.TARS_NG_PROFILE_ROOT = profiles
+    try {
+      const layout = ensureProductHome(isolatedHome())
+      const context = resolveRuntimeContext(layout, {}, undefined, { allowFixtures: false })
+      const first = await bootAssistantControl({
+        home: layout.root,
+        sessionRoot: context.sessionPersistenceDir,
+        sessionId: context.sessionId.value,
+        workspace: context.workspace.value,
+      })
+      try {
+        const handle = await createAssistantAgent(first.ctx, context.sessionId.value, undefined, context.workspace.value)
+        handle.agent.session.append('user/message', createUserMessage({
+          content: [{ type: 'text', text: 'keep-me-in-recovery' }],
+          source: { kind: 'user' },
+        }), { surfaceOp: 'append' })
+        await first.ctx.sessions.flush(handle.agent.session)
+        await handle.dispose()
+      } finally {
+        await first.ctx.fiber.dispose()
+      }
+      writeFileSync(path.join(profiles, 'assistant', 'cordis.patch.yml'), 'not: yaml: [')
+      const recovered = inspectRuntimeContext(layout, {}, undefined)
+      assert.equal(recovered.safeMode, true)
+      assert.match(recovered.profileCompositionError ?? '', /failed to load|YAML|yaml|bad indentation|end of the stream|can not read/)
+      assert.equal(recovered.profileIdentity, context.profileIdentity)
+      assert.equal(recovered.sessionPersistenceDir, context.sessionPersistenceDir)
+      const recovery = loadGovernedAssistantComposition({ recovery: true })
+      assert.equal(activeComposedIds(recovery.entries).includes('skill'), false)
+      const booted = await bootSafeModeRuntime({
+        home: layout.root,
+        sessionRoot: recovered.sessionPersistenceDir,
+        sessionId: recovered.sessionId.value,
+        workspace: recovered.workspace.value,
+      })
+      try {
+        const resumed = await createAssistantAgent(booted.ctx, recovered.sessionId.value, undefined, recovered.workspace.value)
+        const texts = resumed.agent.session.events.map((event) => JSON.stringify(event.data))
+        assert.ok(texts.some((item) => item.includes('keep-me-in-recovery')))
+        const surface = new AssistantControlSurface(booted.ctx, recovered.sessionId.value, recovered)
+        assert.equal(surface.workspace().systemState, 'SAFE_MODE')
+        assert.equal(surface.workspace().runtimeContext?.safeMode, true)
+        await resumed.dispose()
+      } finally {
+        await booted.ctx.fiber.dispose()
+      }
+      const doctorLines: string[] = []
+      await runProductCli(['doctor', '--home', layout.root], {
+        log: (text) => doctorLines.push(text),
+        error: (text) => doctorLines.push(text),
+      })
+      assert.match(doctorLines.join('\n'), /profile-composition: recovery-required/)
+      const startLines: string[] = []
+      const previousPort = process.env.TARS_NG_UI_PORT
+      const previousKey = process.env.DEEPSEEK_API_KEY
+      process.env.TARS_NG_UI_PORT = '0'
+      process.env.DEEPSEEK_API_KEY = 'sk-offline-not-a-live-key'
+      try {
+        await runProductCli(['start', '--once', '--home', layout.root], {
+          log: (text) => startLines.push(text),
+          error: (text) => startLines.push(text),
+        })
+      } finally {
+        if (previousPort === undefined) delete process.env.TARS_NG_UI_PORT
+        else process.env.TARS_NG_UI_PORT = previousPort
+        if (previousKey === undefined) delete process.env.DEEPSEEK_API_KEY
+        else process.env.DEEPSEEK_API_KEY = previousKey
+      }
+      assert.match(startLines.join('\n'), /profile-composition: recovery-required|safe-mode: true/)
+      writeFileSync(
+        path.join(profiles, 'assistant', 'cordis.patch.yml'),
+        readFileSync(path.join(productPackageRoot(), 'profiles', 'assistant', 'cordis.patch.yml'), 'utf8'),
+      )
+      const healthy = inspectRuntimeContext(layout, {}, undefined)
+      assert.equal(healthy.profileCompositionError, undefined)
+      assert.equal(healthy.safeMode, false)
+      assert.equal(healthy.profileIdentity, context.profileIdentity)
+    } finally {
+      if (previous === undefined) delete process.env.TARS_NG_PROFILE_ROOT
+      else process.env.TARS_NG_PROFILE_ROOT = previous
+    }
+  })
+
+  it('rejects a same-named Profile whose resolved identity changed and does not read the old session', async () => {
+    const profiles = mkdtempSync(path.join(tmpdir(), 'tars-profiles-'))
+    cpSync(path.join(productPackageRoot(), 'profiles'), profiles, { recursive: true })
+    const previous = process.env.TARS_NG_PROFILE_ROOT
+    process.env.TARS_NG_PROFILE_ROOT = profiles
+    try {
+      const layout = ensureProductHome(isolatedHome())
+      const context = resolveRuntimeContext(layout, {}, undefined, { allowFixtures: false })
+      const originalIdentity = context.profileIdentity
+      assert.match(originalIdentity, /^v1:[0-9a-f]{64}$/)
+      const first = await bootAssistantControl({
+        home: layout.root,
+        sessionRoot: context.sessionPersistenceDir,
+        sessionId: context.sessionId.value,
+        workspace: context.workspace.value,
+      })
+      try {
+        const handle = await createAssistantAgent(first.ctx, context.sessionId.value, undefined, context.workspace.value)
+        handle.agent.session.append('user/message', createUserMessage({
+          content: [{ type: 'text', text: 'secret-under-original-profile' }],
+          source: { kind: 'user' },
+        }), { surfaceOp: 'append' })
+        await first.ctx.sessions.flush(handle.agent.session)
+        await handle.dispose()
+      } finally {
+        await first.ctx.fiber.dispose()
+      }
+      const patch = readFileSync(path.join(profiles, 'assistant', 'cordis.patch.yml'), 'utf8').replace(
+        '- id: skill\n  disabled: true\n',
+        '- id: skill\n  disabled: false\n',
+      )
+      writeFileSync(path.join(profiles, 'assistant', 'cordis.patch.yml'), patch)
+      const mutated = profileIdentityOf(loadGovernedAssistantComposition())
+      assert.notEqual(mutated, originalIdentity)
+      assert.throws(
+        () => inspectRuntimeContext(layout, {}, undefined),
+        /Profile migration required/,
+      )
+      const otherHome = ensureProductHome(isolatedHome())
+      const drifted = inspectRuntimeContext(otherHome, {
+        workspace: context.workspace.value,
+        sessionRoot: context.sessionRoot.value,
+      }, undefined)
+      assert.notEqual(drifted.profileIdentity, originalIdentity)
+      assert.notEqual(drifted.sessionPersistenceDir, context.sessionPersistenceDir)
+      writeFileSync(
+        path.join(profiles, 'assistant', 'cordis.patch.yml'),
+        readFileSync(path.join(productPackageRoot(), 'profiles', 'assistant', 'cordis.patch.yml'), 'utf8'),
+      )
+      const restored = inspectRuntimeContext(layout, {}, undefined)
+      assert.equal(restored.profileIdentity, originalIdentity)
+      const second = await bootAssistantControl({
+        home: layout.root,
+        sessionRoot: restored.sessionPersistenceDir,
+        sessionId: restored.sessionId.value,
+        workspace: restored.workspace.value,
+      })
+      try {
+        const resumed = await createAssistantAgent(second.ctx, restored.sessionId.value, undefined, restored.workspace.value)
+        const texts = resumed.agent.session.events.map((event) => JSON.stringify(event.data))
+        assert.ok(texts.some((item) => item.includes('secret-under-original-profile')))
+        await resumed.dispose()
+      } finally {
+        await second.ctx.fiber.dispose()
+      }
+    } finally {
+      if (previous === undefined) delete process.env.TARS_NG_PROFILE_ROOT
+      else process.env.TARS_NG_PROFILE_ROOT = previous
+    }
   })
 })

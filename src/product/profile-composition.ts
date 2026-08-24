@@ -227,7 +227,7 @@ export function assertOfficialEquivalentToAdapter(
   mountedIds: readonly string[],
   options: { readonly safeMode?: boolean; readonly sessionPersistence?: boolean } = {},
 ): void {
-  const composition = loadGovernedAssistantComposition({ safeMode: options.safeMode })
+  const composition = loadGovernedAssistantComposition({ recovery: options.safeMode === true })
   assertOfficialComposedIds(composedIds)
   assertActiveProfileMatchesAdapter(composition, mountedIds, options)
 }
@@ -251,7 +251,7 @@ export function assertMountedAdapterContract(
   ctx: Context,
   options: { readonly safeMode?: boolean; readonly sessionPersistence?: boolean } = {},
 ): void {
-  assertActiveProfileMatchesAdapter(loadGovernedAssistantComposition({ safeMode: options.safeMode }), mountedAdapterPluginIds(ctx), options)
+  assertActiveProfileMatchesAdapter(loadGovernedAssistantComposition({ recovery: options.safeMode === true }), mountedAdapterPluginIds(ctx), options)
 }
 
 export function assertProfilePatchSafe(patches: readonly ProfilePatchRow[]): void {
@@ -276,6 +276,13 @@ export function assertSelectedProfile(profile: string): void {
 
 export function assertAssistantAdapterContract(): void {
   const composition = loadGovernedAssistantComposition()
+  assertAssistantBundles(composition.bundles)
+  assertProfilePatchSafe(composition.patches)
+  assertGovernedActiveComposition(composition.entries)
+}
+
+export function assertRecoveryAdapterContract(): void {
+  const composition = loadGovernedAssistantComposition({ recovery: true })
   assertAssistantBundles(composition.bundles)
   assertProfilePatchSafe(composition.patches)
   assertGovernedActiveComposition(composition.entries)

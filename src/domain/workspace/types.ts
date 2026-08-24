@@ -249,11 +249,13 @@ export interface MissionControlView {
   }
   readonly runtimeContext?: {
     readonly profile: string
+    readonly profileIdentity?: string
     readonly workspaceLabel: string
     readonly workspaceIdentity: string
     readonly sessionId: string
     readonly sessionPersistence: 'persistent' | 'unavailable' | 'recovery-required'
     readonly safeMode: boolean
+    readonly profileCompositionError?: string
   }
 }
 

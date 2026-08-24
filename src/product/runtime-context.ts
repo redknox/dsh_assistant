@@ -4,6 +4,7 @@ import path from 'node:path'
 import { PRODUCT_CONFIG_SCHEMA_VERSION } from './constants.js'
 import { isSafeRuntimePid, processAlive, type ProductHomeLayout } from './home.js'
 import { runIdEquals } from './runtime-lease.js'
+import { profileIdentityOf, tryLoadGovernedAssistantComposition } from './profile-load.js'
 
 export const RUNTIME_CONTEXT_SCHEMA_VERSION = 1
 export const DEFAULT_PROFILE_NAME = 'assistant'
@@ -38,6 +39,7 @@ export interface RuntimeContext {
   readonly sessionPersistenceDir: string
   readonly safeMode: boolean
   readonly migrated: boolean
+  readonly profileCompositionError?: string
 }
 
 export interface RuntimeBinding {
@@ -565,16 +567,20 @@ function contextFromResolved(
   sessionId: RuntimeField<string>,
   resolvedWorkspace: string,
   resolvedSessionRoot: string,
-  options: { readonly safeMode?: boolean; readonly migrated: boolean },
+  options: {
+    readonly safeMode?: boolean
+    readonly migrated: boolean
+    readonly profileIdentity: string
+    readonly profileCompositionError?: string
+  },
 ): RuntimeContext {
-  const profileIdentity = profile.value
   const workspaceIdentity = stableIdentity(resolvedWorkspace)
   const sessionRootIdentity = stableIdentity(resolvedSessionRoot)
   const assembled = {
     schemaVersion: RUNTIME_CONTEXT_SCHEMA_VERSION,
     home: layout.root,
     profile,
-    profileIdentity,
+    profileIdentity: options.profileIdentity,
     workspace: { ...workspace, value: resolvedWorkspace },
     workspaceIdentity,
     workspaceLabel: workspaceLabelOf(resolvedWorkspace),
@@ -584,6 +590,7 @@ function contextFromResolved(
     sessionPersistenceDir: '',
     safeMode: options.safeMode === true,
     migrated: options.migrated,
+    ...(options.profileCompositionError === undefined ? {} : { profileCompositionError: options.profileCompositionError }),
   }
   return { ...assembled, sessionPersistenceDir: sessionPersistenceDirOf(assembled) }
 }
@@ -629,6 +636,26 @@ export function inspectRuntimeContext(
   }
 
   const existing = readRuntimeBinding(layout)
+  const loaded = tryLoadGovernedAssistantComposition()
+  let profileIdentity: string
+  let profileCompositionError: string | undefined
+  let safeMode = options.safeMode === true
+  if (loaded.ok) {
+    profileIdentity = profileIdentityOf(loaded.composition)
+  } else {
+    profileCompositionError = loaded.error
+    safeMode = true
+    if (existing) {
+      profileIdentity = existing.profileIdentity
+    } else {
+      const recovery = tryLoadGovernedAssistantComposition({ recovery: true })
+      if (!recovery.ok) {
+        throw new RuntimeContextError(`recovery Profile is unavailable: ${recovery.error}`)
+      }
+      profileIdentity = profileIdentityOf(recovery.composition)
+    }
+  }
+
   const inspected = contextFromResolved(
     layout,
     profile,
@@ -637,33 +664,127 @@ export function inspectRuntimeContext(
     sessionId,
     resolvedWorkspace,
     resolvedSessionRoot,
-    { safeMode: options.safeMode, migrated: false },
+    {
+      safeMode,
+      migrated: false,
+      profileIdentity,
+      ...(profileCompositionError === undefined ? {} : { profileCompositionError }),
+    },
   )
   if (existing) {
+    if (existing.home !== layout.root || existing.profile !== profile.value) {
+      throw new RuntimeContextError('runtime context mismatch: this Home is bound to a different Profile/Workspace/Session Root')
+    }
+    const legacyNameIdentity = existing.profileIdentity === existing.profile
     if (
-      existing.home !== layout.root
-      || existing.profile !== profile.value
-      || existing.profileIdentity !== inspected.profileIdentity
-      || existing.workspaceIdentity !== inspected.workspaceIdentity
+      !legacyNameIdentity
+      && existing.profileIdentity !== inspected.profileIdentity
+      && profileCompositionError === undefined
+    ) {
+      throw new RuntimeContextError('Profile migration required: this Home is bound to a different resolved Profile identity')
+    }
+    if (
+      existing.workspaceIdentity !== inspected.workspaceIdentity
       || existing.sessionRootIdentity !== inspected.sessionRootIdentity
     ) {
       throw new RuntimeContextError('runtime context mismatch: this Home is bound to a different Profile/Workspace/Session Root')
     }
-    assertSessionRootOwner(existing.sessionRoot, inspected)
-    return {
+    const bound = {
       ...inspected,
+      profileIdentity: existing.profileIdentity,
       workspace: { ...workspace, value: existing.workspace },
       sessionRoot: { ...sessionRoot, value: existing.sessionRoot },
+    }
+    assertSessionRootOwner(existing.sessionRoot, bound)
+    return {
+      ...bound,
       sessionPersistenceDir: sessionPersistenceDirOf({
-        home: inspected.home,
-        profileIdentity: inspected.profileIdentity,
-        workspaceIdentity: inspected.workspaceIdentity,
-        sessionRoot: { ...sessionRoot, value: existing.sessionRoot },
+        home: bound.home,
+        profileIdentity: bound.profileIdentity,
+        workspaceIdentity: bound.workspaceIdentity,
+        sessionRoot: bound.sessionRoot,
       }),
     }
   }
   assertSessionRootOwner(resolvedSessionRoot, inspected)
   return inspected
+}
+
+function upgradeLegacyProfileBinding(
+  layout: ProductHomeLayout,
+  existing: RuntimeBinding,
+  inspected: RuntimeContext,
+  options: { readonly allowFixtures: boolean },
+): RuntimeContext {
+  const loaded = tryLoadGovernedAssistantComposition()
+  if (!loaded.ok) {
+    return inspectRuntimeContext(layout, {
+      profile: inspected.profile.value,
+      workspace: inspected.workspace.value,
+      sessionRoot: inspected.sessionRoot.value,
+      sessionId: inspected.sessionId.value,
+    }, {
+      schemaVersion: RUNTIME_CONTEXT_SCHEMA_VERSION,
+      profile: existing.profile,
+      workspace: existing.workspace,
+      sessionRoot: existing.sessionRoot,
+      sessionId: inspected.sessionId.value,
+    }, { safeMode: true })
+  }
+  const nextIdentity = profileIdentityOf(loaded.composition)
+  if (nextIdentity === existing.profileIdentity) {
+    return inspected
+  }
+  const previous = {
+    home: existing.home,
+    profileIdentity: existing.profileIdentity,
+    workspaceIdentity: existing.workspaceIdentity,
+    sessionRoot: { value: existing.sessionRoot, source: inspected.sessionRoot.source },
+  }
+  const next = {
+    home: existing.home,
+    profileIdentity: nextIdentity,
+    workspaceIdentity: existing.workspaceIdentity,
+    sessionRoot: previous.sessionRoot,
+  }
+  const oldDir = sessionPersistenceDirOf(previous)
+  const newDir = sessionPersistenceDirOf(next)
+  if (existsSync(oldDir) && oldDir !== newDir && !existsSync(newDir)) {
+    mkdirSync(path.dirname(newDir), { recursive: true, mode: 0o700 })
+    renameSync(oldDir, newDir)
+  }
+  const owner = readSessionRootOwner(existing.sessionRoot)
+  if (owner && owner.profileIdentity === existing.profileIdentity) {
+    writeJsonAtomic(sessionRootOwnerFile(existing.sessionRoot), {
+      ...owner,
+      profileIdentity: nextIdentity,
+      partitionKey: partitionKeyOf(next),
+    })
+  }
+  const upgraded: RuntimeContext = {
+    ...inspected,
+    profileIdentity: nextIdentity,
+    sessionPersistenceDir: newDir,
+    migrated: true,
+  }
+  writeRuntimeBinding(layout, {
+    schemaVersion: RUNTIME_CONTEXT_SCHEMA_VERSION,
+    home: existing.home,
+    profile: existing.profile,
+    profileIdentity: nextIdentity,
+    workspace: existing.workspace,
+    workspaceIdentity: existing.workspaceIdentity,
+    sessionRoot: existing.sessionRoot,
+    sessionRootIdentity: existing.sessionRootIdentity,
+  })
+  writeProductRuntimeSection(layout, options.allowFixtures, {
+    schemaVersion: RUNTIME_CONTEXT_SCHEMA_VERSION,
+    profile: existing.profile,
+    workspace: existing.workspace,
+    sessionRoot: existing.sessionRoot,
+    sessionId: inspected.sessionId.value,
+  })
+  return upgraded
 }
 
 export function commitRuntimeContext(
@@ -673,6 +794,9 @@ export function commitRuntimeContext(
 ): RuntimeContext {
   const existing = readRuntimeBinding(layout)
   if (existing) {
+    if (existing.profileIdentity === existing.profile && inspected.profileCompositionError === undefined) {
+      return upgradeLegacyProfileBinding(layout, existing, inspected, options)
+    }
     return inspectRuntimeContext(layout, {
       profile: inspected.profile.value,
       workspace: inspected.workspace.value,
@@ -685,6 +809,10 @@ export function commitRuntimeContext(
       sessionRoot: existing.sessionRoot,
       sessionId: inspected.sessionId.value,
     }, { safeMode: inspected.safeMode })
+  }
+
+  if (inspected.profileCompositionError !== undefined) {
+    return inspected
   }
 
   const ownedWorkspace = inspected.workspace.source === 'default'
@@ -702,7 +830,7 @@ export function commitRuntimeContext(
     inspected.sessionId,
     ownedWorkspace,
     ownedSessionRoot,
-    { safeMode: inspected.safeMode, migrated: true },
+    { safeMode: inspected.safeMode, migrated: true, profileIdentity: inspected.profileIdentity, profileCompositionError: inspected.profileCompositionError },
   )
   backupBeforeMigration(layout)
   writeProductRuntimeSection(layout, options.allowFixtures, {
@@ -738,11 +866,13 @@ export function resolveRuntimeContext(
 
 export function publicRuntimeContextView(context: RuntimeContext): {
   readonly profile: string
+  readonly profileIdentity: string
   readonly workspaceLabel: string
   readonly workspaceIdentity: string
   readonly sessionId: string
   readonly sessionPersistence: 'persistent' | 'unavailable' | 'recovery-required'
   readonly safeMode: boolean
+  readonly profileCompositionError?: string
   readonly sources: {
     readonly profile: ConfigSource
     readonly workspace: ConfigSource
@@ -752,11 +882,13 @@ export function publicRuntimeContextView(context: RuntimeContext): {
 } {
   return {
     profile: context.profile.value,
+    profileIdentity: context.profileIdentity,
     workspaceLabel: context.workspaceLabel,
     workspaceIdentity: context.workspaceIdentity,
     sessionId: context.sessionId.value,
     sessionPersistence: context.safeMode ? 'recovery-required' : 'persistent',
     safeMode: context.safeMode,
+    ...(context.profileCompositionError === undefined ? {} : { profileCompositionError: context.profileCompositionError }),
     sources: {
       profile: context.profile.source,
       workspace: context.workspace.source,

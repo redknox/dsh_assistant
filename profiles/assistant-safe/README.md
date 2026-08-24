@@ -1,5 +1,5 @@
-# Safe Mode overlay
+# Independent recovery Profile
 
-Applied on top of `profiles/assistant` during recovery. Disables official `jobs` and sets `dsh-assistant.safeMode`. Ordinary Profile patches cannot disable `dsh-assistant` or remove governance/registry authority.
+Shipped recovery composition for Safe Mode. It is applied over `@deepseek-ai/dsh-base` and `dsh-assistant` only. It does **not** read `profiles/assistant`. Ordinary Profile patches cannot disable `dsh-assistant` or remove governance/registry authority.
 
-Shipped in the npm pack. See [docs/runtime-context.md](../../docs/runtime-context.md).
+See [docs/runtime-context.md](../../docs/runtime-context.md).

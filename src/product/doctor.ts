@@ -174,10 +174,13 @@ export function formatDoctorReport(report: DoctorReport): string {
     ...report.compatibility.problems.map((item) => `problem: ${item}`),
     `home: ${report.home}`,
     report.runtimeContext ? `profile: ${report.runtimeContext.profile.value} (${report.runtimeContext.profile.source})` : undefined,
+    report.runtimeContext ? `profile-identity: ${report.runtimeContext.profileIdentity}` : undefined,
     report.runtimeContext ? `workspace: ${report.runtimeContext.workspaceLabel} (${report.runtimeContext.workspace.source})` : undefined,
     report.runtimeContext ? `session-id: ${report.runtimeContext.sessionId.value} (${report.runtimeContext.sessionId.source})` : undefined,
     report.runtimeContext ? `session-persistence: ${report.runtimeContext.safeMode ? 'recovery-required' : 'persistent'}` : undefined,
-    report.runtimeContext ? `profile-composition: shipped ${report.runtimeContext.profile.value} Profile (official composeEntries; active composition)` : undefined,
+    report.runtimeContext?.profileCompositionError
+      ? `profile-composition: recovery-required (${report.runtimeContext.profileCompositionError})`
+      : report.runtimeContext ? `profile-composition: shipped ${report.runtimeContext.profile.value} Profile (official composeEntries; active composition)` : undefined,
     `log-file: ${report.logFile}`,
     ...envLines,
     ...credLines,
