@@ -49,7 +49,7 @@ export function gatherWorkspaceSnapshot(input: GatherWorkspaceInput): WorkspaceS
     }
   } | undefined
   const activation = recovery?.inspect()
-  const safeMode = Boolean(activation?.safeMode)
+  const safeMode = Boolean(activation?.safeMode) || Boolean(input.runtimeContext?.safeMode)
   const lastFailure = activation?.lastFailure
   const boundedFailure = lastFailure?.diagnostics ? boundActivationDiagnostics(lastFailure.diagnostics) : undefined
   const runtimeContext = input.runtimeContext

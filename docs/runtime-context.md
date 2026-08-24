@@ -47,7 +47,9 @@ CLI (--profile, --workspace, --session-root, --session-id)
 → defaults: assistant / $HOME/workspace / $HOME/sessions / main
 ```
 
-A Home is stamped on first successful resolve. Rebinding Profile, Workspace, or Session Root fails closed. Changing Session ID on the same binding is allowed (one selected session at runtime).
+A Home is stamped on first successful **start** after the Home lease is held. `doctor` and `status` inspect only. Rebinding Profile, Workspace, or Session Root fails closed. Changing Session ID on the same binding is allowed (one selected session at runtime).
+
+Session files are stored under `$SESSION_ROOT/.tars-ng-sessions/<home+profile+workspace identity>/`. The Session Root itself carries an exclusive owner stamp, so a different Home cannot mount or read it.
 
 ## Persistence
 

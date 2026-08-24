@@ -1,5 +1,5 @@
-import { createHash } from 'node:crypto'
-import { chmodSync, copyFileSync, existsSync, mkdirSync, readFileSync, realpathSync, statSync, writeFileSync } from 'node:fs'
+import { createHash, randomBytes } from 'node:crypto'
+import { chmodSync, closeSync, copyFileSync, existsSync, fsyncSync, mkdirSync, openSync, readFileSync, realpathSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import path from 'node:path'
 import { PRODUCT_CONFIG_SCHEMA_VERSION } from './constants.js'
 import type { ProductHomeLayout } from './home.js'
@@ -34,6 +34,7 @@ export interface RuntimeContext {
   readonly sessionRoot: RuntimeField<string>
   readonly sessionRootIdentity: string
   readonly sessionId: RuntimeField<string>
+  readonly sessionPersistenceDir: string
   readonly safeMode: boolean
   readonly migrated: boolean
 }
@@ -118,33 +119,54 @@ function envText(name: string): string | undefined {
   return typeof value === 'string' && value !== '' ? value : undefined
 }
 
-function secureDir(dir: string): string {
-  mkdirSync(dir, { recursive: true, mode: 0o700 })
-  try {
-    chmodSync(dir, 0o700)
-  } catch {
-    // chmod may fail on some filesystems
-  }
-  let resolved: string
-  try {
-    resolved = realpathSync(dir)
-  } catch {
-    throw new RuntimeContextError('workspace or session-root could not be resolved')
-  }
-  const stats = statSync(resolved)
-  if (!stats.isDirectory()) throw new RuntimeContextError('workspace or session-root must be a directory')
-  return resolved
-}
-
-function resolveExistingDir(value: string, kind: 'workspace' | 'session-root'): string {
+function assertSafePath(value: string, kind: 'workspace' | 'session-root'): string {
   const absolute = path.resolve(value)
   if (absolute.includes(`${path.sep}..${path.sep}`) || path.basename(value) === '..') {
     throw new RuntimeContextError(`${kind} path is invalid`)
   }
-  if (kind === 'workspace' && !existsSync(absolute)) {
-    throw new RuntimeContextError('workspace must be an existing directory')
+  return absolute
+}
+
+function inspectDir(value: string, kind: 'workspace' | 'session-root', required: boolean): string {
+  const absolute = assertSafePath(value, kind)
+  if (!existsSync(absolute)) {
+    if (required) throw new RuntimeContextError(`${kind} must be an existing directory`)
+    return absolute
   }
-  return secureDir(absolute)
+  let resolved: string
+  try {
+    resolved = realpathSync(absolute)
+  } catch {
+    throw new RuntimeContextError(`${kind} could not be resolved`)
+  }
+  if (!statSync(resolved).isDirectory()) throw new RuntimeContextError(`${kind} must be a directory`)
+  return resolved
+}
+
+function createOwnedDir(dir: string): string {
+  const existed = existsSync(dir)
+  mkdirSync(dir, { recursive: true, mode: 0o700 })
+  if (!existed) {
+    try {
+      chmodSync(dir, 0o700)
+    } catch {
+      // chmod may fail on some filesystems
+    }
+  }
+  return realpathSync(dir)
+}
+
+function writeJsonAtomic(file: string, body: unknown): void {
+  mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 })
+  const tmp = `${file}.${process.pid}.${randomBytes(8).toString('hex')}.tmp`
+  writeFileSync(tmp, `${JSON.stringify(body, null, 2)}\n`, { mode: 0o600 })
+  const fd = openSync(tmp, 'r+')
+  try {
+    fsyncSync(fd)
+  } finally {
+    closeSync(fd)
+  }
+  renameSync(tmp, file)
 }
 
 export function readProductRuntimeConfig(raw: unknown): ProductRuntimeConfig | undefined {
@@ -206,7 +228,7 @@ export function readRuntimeBinding(layout: ProductHomeLayout): RuntimeBinding | 
 }
 
 function writeRuntimeBinding(layout: ProductHomeLayout, binding: RuntimeBinding): void {
-  writeFileSync(runtimeContextBindingFile(layout), `${JSON.stringify(binding, null, 2)}\n`, { mode: 0o600 })
+  writeJsonAtomic(runtimeContextBindingFile(layout), binding)
 }
 
 function backupBeforeMigration(layout: ProductHomeLayout): void {
@@ -228,14 +250,175 @@ export function writeProductRuntimeSection(
     allowFixtures,
     runtime,
   }
-  writeFileSync(layout.productConfigFile, `${JSON.stringify(body, null, 2)}\n`, { mode: 0o600 })
+  writeJsonAtomic(layout.productConfigFile, body)
 }
 
-export function resolveRuntimeContext(
+export const SESSION_OWNER_SCHEMA_VERSION = 1
+
+export interface SessionRootOwner {
+  readonly schemaVersion: number
+  readonly home: string
+  readonly profileIdentity: string
+  readonly workspaceIdentity: string
+  readonly partitionKey: string
+}
+
+export interface SessionPartitionHold {
+  readonly root: string
+  release(): void
+}
+
+export function partitionKeyOf(input: {
+  readonly home: string
+  readonly profileIdentity: string
+  readonly workspaceIdentity: string
+}): string {
+  return stableIdentity(`${input.home}\n${input.profileIdentity}\n${input.workspaceIdentity}`)
+}
+
+export function sessionPersistenceDirOf(context: Pick<RuntimeContext, 'home' | 'profileIdentity' | 'workspaceIdentity' | 'sessionRoot'>): string {
+  return path.join(context.sessionRoot.value, '.tars-ng-sessions', partitionKeyOf(context))
+}
+
+export function sessionRootOwnerFile(sessionRoot: string): string {
+  return path.join(sessionRoot, '.tars-ng-session-owner.json')
+}
+
+export function readSessionRootOwner(sessionRoot: string): SessionRootOwner | undefined {
+  const file = sessionRootOwnerFile(sessionRoot)
+  if (!existsSync(file)) return undefined
+  const raw = JSON.parse(readFileSync(file, 'utf8')) as Partial<SessionRootOwner>
+  if (typeof raw.schemaVersion === 'number' && raw.schemaVersion > SESSION_OWNER_SCHEMA_VERSION) {
+    throw new RuntimeContextError(`unsupported session-root owner schema ${raw.schemaVersion}`)
+  }
+  if (
+    typeof raw.home !== 'string'
+    || typeof raw.profileIdentity !== 'string'
+    || typeof raw.workspaceIdentity !== 'string'
+    || typeof raw.partitionKey !== 'string'
+  ) {
+    throw new RuntimeContextError('session-root owner stamp is corrupt')
+  }
+  return {
+    schemaVersion: typeof raw.schemaVersion === 'number' ? raw.schemaVersion : SESSION_OWNER_SCHEMA_VERSION,
+    home: raw.home,
+    profileIdentity: raw.profileIdentity,
+    workspaceIdentity: raw.workspaceIdentity,
+    partitionKey: raw.partitionKey,
+  }
+}
+
+export function assertSessionRootOwner(
+  sessionRoot: string,
+  context: Pick<RuntimeContext, 'home' | 'profileIdentity' | 'workspaceIdentity'>,
+): void {
+  if (!existsSync(sessionRoot)) return
+  const owner = readSessionRootOwner(sessionRoot)
+  if (!owner) return
+  const expected = partitionKeyOf(context)
+  if (
+    owner.home !== context.home
+    || owner.profileIdentity !== context.profileIdentity
+    || owner.workspaceIdentity !== context.workspaceIdentity
+    || owner.partitionKey !== expected
+  ) {
+    throw new RuntimeContextError('session-root is bound to another Home/Profile/Workspace')
+  }
+}
+
+export function stampSessionRootOwner(context: RuntimeContext): void {
+  const sessionRoot = context.sessionRoot.value
+  assertSessionRootOwner(sessionRoot, context)
+  const existing = readSessionRootOwner(sessionRoot)
+  if (existing) return
+  const stamp: SessionRootOwner = {
+    schemaVersion: SESSION_OWNER_SCHEMA_VERSION,
+    home: context.home,
+    profileIdentity: context.profileIdentity,
+    workspaceIdentity: context.workspaceIdentity,
+    partitionKey: partitionKeyOf(context),
+  }
+  const file = sessionRootOwnerFile(sessionRoot)
+  mkdirSync(sessionRoot, { recursive: true, mode: 0o700 })
+  try {
+    const fd = openSync(file, 'wx', 0o600)
+    try {
+      writeFileSync(fd, `${JSON.stringify(stamp, null, 2)}\n`)
+      fsyncSync(fd)
+    } finally {
+      closeSync(fd)
+    }
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error
+  }
+  assertSessionRootOwner(sessionRoot, context)
+}
+
+export function claimSessionPartition(context: RuntimeContext): SessionPartitionHold {
+  stampSessionRootOwner(context)
+  const root = sessionPersistenceDirOf(context)
+  mkdirSync(root, { recursive: true, mode: 0o700 })
+  try {
+    chmodSync(root, 0o700)
+  } catch {
+    // chmod may fail on some filesystems
+  }
+  const lockDir = path.join(root, '.writer.lock')
+  try {
+    mkdirSync(lockDir, { recursive: false, mode: 0o700 })
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error
+    throw new RuntimeContextError('session partition is already held by another writer')
+  }
+  writeFileSync(path.join(lockDir, 'holder.json'), `${JSON.stringify({
+    home: context.home,
+    pid: process.pid,
+    partitionKey: partitionKeyOf(context),
+  }, null, 2)}\n`, { mode: 0o600 })
+  return {
+    root,
+    release() {
+      rmSync(lockDir, { recursive: true, force: true })
+    },
+  }
+}
+
+function contextFromResolved(
+  layout: ProductHomeLayout,
+  profile: RuntimeField<string>,
+  workspace: RuntimeField<string>,
+  sessionRoot: RuntimeField<string>,
+  sessionId: RuntimeField<string>,
+  resolvedWorkspace: string,
+  resolvedSessionRoot: string,
+  options: { readonly safeMode?: boolean; readonly migrated: boolean },
+): RuntimeContext {
+  const profileIdentity = profile.value
+  const workspaceIdentity = stableIdentity(resolvedWorkspace)
+  const sessionRootIdentity = stableIdentity(resolvedSessionRoot)
+  const assembled = {
+    schemaVersion: RUNTIME_CONTEXT_SCHEMA_VERSION,
+    home: layout.root,
+    profile,
+    profileIdentity,
+    workspace: { ...workspace, value: resolvedWorkspace },
+    workspaceIdentity,
+    workspaceLabel: workspaceLabelOf(resolvedWorkspace),
+    sessionRoot: { ...sessionRoot, value: resolvedSessionRoot },
+    sessionRootIdentity,
+    sessionId,
+    sessionPersistenceDir: '',
+    safeMode: options.safeMode === true,
+    migrated: options.migrated,
+  }
+  return { ...assembled, sessionPersistenceDir: sessionPersistenceDirOf(assembled) }
+}
+
+export function inspectRuntimeContext(
   layout: ProductHomeLayout,
   selection: RuntimeSelection,
   fileRuntime: ProductRuntimeConfig | undefined,
-  options: { readonly allowFixtures: boolean; readonly safeMode?: boolean } = { allowFixtures: false },
+  options: { readonly safeMode?: boolean } = {},
 ): RuntimeContext {
   const profile = pickField(
     selection.profile === undefined ? undefined : parseProfileName(selection.profile),
@@ -262,10 +445,8 @@ export function resolveRuntimeContext(
     DEFAULT_SESSION_ID,
   )
 
-  const resolvedWorkspace = workspace.source === 'default'
-    ? secureDir(path.resolve(workspace.value))
-    : resolveExistingDir(workspace.value, 'workspace')
-  const resolvedSessionRoot = secureDir(path.resolve(sessionRoot.value))
+  const resolvedWorkspace = inspectDir(workspace.value, 'workspace', workspace.source !== 'default')
+  const resolvedSessionRoot = inspectDir(sessionRoot.value, 'session-root', false)
   if (resolvedWorkspace === layout.root || resolvedSessionRoot === layout.root) {
     throw new RuntimeContextError('workspace and session-root must stay inside distinct product paths')
   }
@@ -273,69 +454,112 @@ export function resolveRuntimeContext(
     throw new RuntimeContextError('workspace and session-root must be different directories')
   }
 
-  const profileIdentity = profile.value
-  const workspaceIdentity = stableIdentity(resolvedWorkspace)
-  const sessionRootIdentity = stableIdentity(resolvedSessionRoot)
   const existing = readRuntimeBinding(layout)
+  const inspected = contextFromResolved(
+    layout,
+    profile,
+    workspace,
+    sessionRoot,
+    sessionId,
+    resolvedWorkspace,
+    resolvedSessionRoot,
+    { safeMode: options.safeMode, migrated: false },
+  )
   if (existing) {
     if (
       existing.home !== layout.root
       || existing.profile !== profile.value
-      || existing.profileIdentity !== profileIdentity
-      || existing.workspaceIdentity !== workspaceIdentity
-      || existing.sessionRootIdentity !== sessionRootIdentity
+      || existing.profileIdentity !== inspected.profileIdentity
+      || existing.workspaceIdentity !== inspected.workspaceIdentity
+      || existing.sessionRootIdentity !== inspected.sessionRootIdentity
     ) {
       throw new RuntimeContextError('runtime context mismatch: this Home is bound to a different Profile/Workspace/Session Root')
     }
+    assertSessionRootOwner(existing.sessionRoot, inspected)
     return {
-      schemaVersion: RUNTIME_CONTEXT_SCHEMA_VERSION,
-      home: layout.root,
-      profile,
-      profileIdentity,
+      ...inspected,
       workspace: { ...workspace, value: existing.workspace },
-      workspaceIdentity,
-      workspaceLabel: workspaceLabelOf(existing.workspace),
       sessionRoot: { ...sessionRoot, value: existing.sessionRoot },
-      sessionRootIdentity,
-      sessionId,
-      safeMode: options.safeMode === true,
-      migrated: false,
+      sessionPersistenceDir: sessionPersistenceDirOf({
+        home: inspected.home,
+        profileIdentity: inspected.profileIdentity,
+        workspaceIdentity: inspected.workspaceIdentity,
+        sessionRoot: { ...sessionRoot, value: existing.sessionRoot },
+      }),
     }
   }
+  assertSessionRootOwner(resolvedSessionRoot, inspected)
+  return inspected
+}
 
-  backupBeforeMigration(layout)
-  const binding: RuntimeBinding = {
-    schemaVersion: RUNTIME_CONTEXT_SCHEMA_VERSION,
-    home: layout.root,
-    profile: profile.value,
-    profileIdentity,
-    workspace: resolvedWorkspace,
-    workspaceIdentity,
-    sessionRoot: resolvedSessionRoot,
-    sessionRootIdentity,
+export function commitRuntimeContext(
+  layout: ProductHomeLayout,
+  inspected: RuntimeContext,
+  options: { readonly allowFixtures: boolean },
+): RuntimeContext {
+  const existing = readRuntimeBinding(layout)
+  if (existing) {
+    return inspectRuntimeContext(layout, {
+      profile: inspected.profile.value,
+      workspace: inspected.workspace.value,
+      sessionRoot: inspected.sessionRoot.value,
+      sessionId: inspected.sessionId.value,
+    }, {
+      schemaVersion: RUNTIME_CONTEXT_SCHEMA_VERSION,
+      profile: existing.profile,
+      workspace: existing.workspace,
+      sessionRoot: existing.sessionRoot,
+      sessionId: inspected.sessionId.value,
+    }, { safeMode: inspected.safeMode })
   }
-  writeRuntimeBinding(layout, binding)
+
+  const ownedWorkspace = inspected.workspace.source === 'default'
+    ? createOwnedDir(inspected.workspace.value)
+    : inspectDir(inspected.workspace.value, 'workspace', true)
+  const sessionRootPath = path.resolve(inspected.sessionRoot.value)
+  const ownedSessionRoot = existsSync(sessionRootPath)
+    ? inspectDir(sessionRootPath, 'session-root', true)
+    : createOwnedDir(sessionRootPath)
+  const committed = contextFromResolved(
+    layout,
+    inspected.profile,
+    { ...inspected.workspace, value: ownedWorkspace },
+    { ...inspected.sessionRoot, value: ownedSessionRoot },
+    inspected.sessionId,
+    ownedWorkspace,
+    ownedSessionRoot,
+    { safeMode: inspected.safeMode, migrated: true },
+  )
+  backupBeforeMigration(layout)
   writeProductRuntimeSection(layout, options.allowFixtures, {
     schemaVersion: RUNTIME_CONTEXT_SCHEMA_VERSION,
-    profile: profile.value,
-    workspace: resolvedWorkspace,
-    sessionRoot: resolvedSessionRoot,
-    sessionId: sessionId.value,
+    profile: committed.profile.value,
+    workspace: committed.workspace.value,
+    sessionRoot: committed.sessionRoot.value,
+    sessionId: committed.sessionId.value,
   })
-  return {
+  writeRuntimeBinding(layout, {
     schemaVersion: RUNTIME_CONTEXT_SCHEMA_VERSION,
-    home: layout.root,
-    profile,
-    profileIdentity,
-    workspace: { ...workspace, value: resolvedWorkspace },
-    workspaceIdentity,
-    workspaceLabel: workspaceLabelOf(resolvedWorkspace),
-    sessionRoot: { ...sessionRoot, value: resolvedSessionRoot },
-    sessionRootIdentity,
-    sessionId,
-    safeMode: options.safeMode === true,
-    migrated: true,
-  }
+    home: committed.home,
+    profile: committed.profile.value,
+    profileIdentity: committed.profileIdentity,
+    workspace: committed.workspace.value,
+    workspaceIdentity: committed.workspaceIdentity,
+    sessionRoot: committed.sessionRoot.value,
+    sessionRootIdentity: committed.sessionRootIdentity,
+  })
+  return committed
+}
+
+export function resolveRuntimeContext(
+  layout: ProductHomeLayout,
+  selection: RuntimeSelection,
+  fileRuntime: ProductRuntimeConfig | undefined,
+  options: { readonly allowFixtures: boolean; readonly safeMode?: boolean; readonly persist?: boolean } = { allowFixtures: false },
+): RuntimeContext {
+  const inspected = inspectRuntimeContext(layout, selection, fileRuntime, { safeMode: options.safeMode })
+  if (options.persist === false) return inspected
+  return commitRuntimeContext(layout, inspected, { allowFixtures: options.allowFixtures })
 }
 
 export function publicRuntimeContextView(context: RuntimeContext): {

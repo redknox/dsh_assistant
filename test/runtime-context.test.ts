@@ -1,19 +1,31 @@
 import assert from 'node:assert/strict'
-import { mkdtempSync, realpathSync, writeFileSync } from 'node:fs'
+import { chmodSync, existsSync, mkdtempSync, realpathSync, statSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { describe, it } from 'node:test'
+import { createUserMessage } from '@deepseek-ai/dsh-llm'
+import { withDshAssistantProfile } from './helpers/dsh-profile-loader.js'
 import { parseProductArgv, runProductCli } from '../src/product/cli.js'
+import {
+  ASSISTANT_PROFILE_BUNDLES,
+  assertAssistantBundles,
+  assertComposedProfile,
+  assertProfilePatchSafe,
+  packagedAssistantBundles,
+} from '../src/product/profile-composition.js'
 import { ensureProductHome } from '../src/product/home.js'
 import {
+  claimSessionPartition,
+  commitRuntimeContext,
   DEFAULT_PROFILE_NAME,
   DEFAULT_SESSION_ID,
+  inspectRuntimeContext,
   resolveRuntimeContext,
   runtimeContextBindingFile,
   RuntimeContextError,
 } from '../src/product/runtime-context.js'
-import { bootAssistantControl, createAssistantAgent } from '../src/runtime/boot.js'
-import { createUserMessage } from '@deepseek-ai/dsh-llm'
+import { bootAssistantControl, bootSafeModeRuntime, createAssistantAgent } from '../src/runtime/boot.js'
+import { AssistantControlSurface } from '../src/ui/controller.js'
 
 function isolatedHome(): string {
   return mkdtempSync(path.join(tmpdir(), 'tars-runtime-'))
@@ -117,6 +129,7 @@ describe('runtime context', () => {
       assert.match(text, /workspace: workspace \(default\)/)
       assert.match(text, /profile-composition: product-adapter/)
       assert.doesNotMatch(text, new RegExp(`workspace: ${process.cwd().replaceAll('\\', '\\\\')}`))
+      assert.equal(existsSync(runtimeContextBindingFile(ensureProductHome(home))), false)
     } finally {
       if (previousHome === undefined) delete process.env.TARS_NG_HOME
       else process.env.TARS_NG_HOME = previousHome
@@ -129,7 +142,7 @@ describe('runtime context', () => {
     const context = resolveRuntimeContext(layout, {}, undefined, { allowFixtures: false })
     const first = await bootAssistantControl({
       home,
-      sessionRoot: context.sessionRoot.value,
+      sessionRoot: context.sessionPersistenceDir,
       sessionId: context.sessionId.value,
       workspace: context.workspace.value,
     })
@@ -146,7 +159,7 @@ describe('runtime context', () => {
     }
     const second = await bootAssistantControl({
       home,
-      sessionRoot: context.sessionRoot.value,
+      sessionRoot: context.sessionPersistenceDir,
       sessionId: context.sessionId.value,
       workspace: context.workspace.value,
     })
@@ -165,7 +178,7 @@ describe('runtime context', () => {
     const context = resolveRuntimeContext(layout, {}, undefined, { allowFixtures: false })
     const first = await bootAssistantControl({
       home: layout.root,
-      sessionRoot: context.sessionRoot.value,
+      sessionRoot: context.sessionPersistenceDir,
       sessionId: context.sessionId.value,
       workspace: context.workspace.value,
     })
@@ -182,7 +195,7 @@ describe('runtime context', () => {
     }
     const other = await bootAssistantControl({
       home: layout.root,
-      sessionRoot: context.sessionRoot.value,
+      sessionRoot: context.sessionPersistenceDir,
       sessionId: 'topic-b',
       workspace: context.workspace.value,
     })
@@ -223,5 +236,157 @@ describe('runtime context', () => {
       sessionRootIdentity: 'will-mismatch',
     }, null, 2)}\n`)
     assert.throws(() => resolveRuntimeContext(rebound, {}, undefined, { allowFixtures: false }), /runtime context mismatch/)
+  })
+
+  it('does not let a second Home read or write another Home session root', async () => {
+    const shared = mkdtempSync(path.join(tmpdir(), 'tars-session-shared-'))
+    const homeA = ensureProductHome(isolatedHome())
+    const homeB = ensureProductHome(isolatedHome())
+    const workspaceA = mkdtempSync(path.join(tmpdir(), 'tars-ws-a-'))
+    const workspaceB = mkdtempSync(path.join(tmpdir(), 'tars-ws-b-'))
+    const contextA = resolveRuntimeContext(homeA, { workspace: workspaceA, sessionRoot: shared }, undefined, { allowFixtures: false })
+    const holdA = claimSessionPartition(contextA)
+    const first = await bootAssistantControl({
+      home: homeA.root,
+      sessionRoot: holdA.root,
+      sessionId: 'main',
+      workspace: contextA.workspace.value,
+    })
+    try {
+      const handle = await createAssistantAgent(first.ctx, 'main', undefined, contextA.workspace.value)
+      handle.agent.session.append('user/message', createUserMessage({
+        content: [{ type: 'text', text: 'SECRET-FROM-HOME-ONE' }],
+        source: { kind: 'user' },
+      }), { surfaceOp: 'append' })
+      await first.ctx.sessions.flush(handle.agent.session)
+      await handle.dispose()
+    } finally {
+      await first.ctx.fiber.dispose()
+      holdA.release()
+    }
+    assert.throws(
+      () => inspectRuntimeContext(homeB, { workspace: workspaceB, sessionRoot: shared }, undefined),
+      /session-root is bound to another Home/,
+    )
+    assert.throws(
+      () => resolveRuntimeContext(homeB, { workspace: workspaceB, sessionRoot: shared }, undefined, { allowFixtures: false }),
+      /session-root is bound to another Home/,
+    )
+    const again = claimSessionPartition(contextA)
+    assert.throws(() => claimSessionPartition(contextA), /already held by another writer/)
+    again.release()
+  })
+
+  it('leaves an external Workspace mode unchanged and does not write context from doctor/status', async () => {
+    const home = isolatedHome()
+    const workspace = mkdtempSync(path.join(tmpdir(), 'tars-ws-mode-'))
+    chmodSync(workspace, 0o755)
+    const previousHome = process.env.TARS_NG_HOME
+    try {
+      const doctor = await runProductCli(['doctor', '--home', home, '--workspace', workspace], {
+        log() {},
+        error() {},
+      })
+      const status = await runProductCli(['status', '--home', home, '--workspace', workspace], {
+        log() {},
+        error() {},
+      })
+      assert.equal(doctor, 0)
+      assert.equal(status, 0)
+      assert.equal(statSync(workspace).mode & 0o777, 0o755)
+      const layout = ensureProductHome(home)
+      assert.equal(existsSync(runtimeContextBindingFile(layout)), false)
+      assert.equal(existsSync(layout.productConfigFile), false)
+    } finally {
+      if (previousHome === undefined) delete process.env.TARS_NG_HOME
+      else process.env.TARS_NG_HOME = previousHome
+    }
+  })
+
+  it('treats an interrupted binding write as unbound until a complete commit', () => {
+    const layout = ensureProductHome(isolatedHome())
+    writeFileSync(`${runtimeContextBindingFile(layout)}.partial`, '{')
+    const inspected = inspectRuntimeContext(layout, {}, undefined)
+    assert.equal(inspected.migrated, false)
+    assert.equal(existsSync(runtimeContextBindingFile(layout)), false)
+    const committed = commitRuntimeContext(layout, inspected, { allowFixtures: false })
+    assert.equal(existsSync(runtimeContextBindingFile(layout)), true)
+    assert.equal(committed.profile.value, DEFAULT_PROFILE_NAME)
+  })
+
+  it('does not report a successful stop when session flush fails', async () => {
+    const home = isolatedHome()
+    const layout = ensureProductHome(home)
+    writeFileSync(layout.envFile, 'DEEPSEEK_API_KEY=sk-offline-not-a-live-key\n', { mode: 0o600 })
+    chmodSync(layout.envFile, 0o600)
+    const previous = {
+      key: process.env.DEEPSEEK_API_KEY,
+      port: process.env.TARS_NG_UI_PORT,
+      tars: process.env.TARS_NG_HOME,
+    }
+    delete process.env.DEEPSEEK_API_KEY
+    process.env.TARS_NG_UI_PORT = '0'
+    const lines: string[] = []
+    try {
+      const code = await runProductCli(['start', '--home', home], {
+        log: (text) => lines.push(text),
+        error: (text) => lines.push(text),
+      }, {
+        afterWebUiBound: () => {
+          throw new Error('injected stop after bind')
+        },
+        flushSession: async () => {
+          throw new Error('disk full')
+        },
+      })
+      assert.equal(code, 1)
+      assert.match(lines.join('\n'), /retaining Home lease/)
+      assert.doesNotMatch(lines.join('\n'), /lifecycle stop$/)
+      assert.equal(existsSync(layout.runtimeIdentityFile), true)
+    } finally {
+      if (previous.key === undefined) delete process.env.DEEPSEEK_API_KEY
+      else process.env.DEEPSEEK_API_KEY = previous.key
+      if (previous.port === undefined) delete process.env.TARS_NG_UI_PORT
+      else process.env.TARS_NG_UI_PORT = previous.port
+      if (previous.tars === undefined) delete process.env.TARS_NG_HOME
+      else process.env.TARS_NG_HOME = previous.tars
+    }
+  })
+
+  it('matches the official assistant Profile composition and rejects unsafe patches', async () => {
+    assert.deepEqual([...ASSISTANT_PROFILE_BUNDLES], ['@deepseek-ai/dsh-base', 'dsh-assistant'])
+    assertAssistantBundles(packagedAssistantBundles())
+    await withDshAssistantProfile(async ({ composedIds }) => {
+      assertComposedProfile(composedIds)
+      assert.equal(composedIds.filter((id) => id === 'dsh-assistant').length, 1)
+    })
+    assert.throws(() => assertComposedProfile(['dsh-assistant', 'dsh-assistant', 'agent', 'system-prompt']), /exactly one dsh-assistant/)
+    assert.throws(() => assertComposedProfile(['agent', 'system-prompt']), /exactly one dsh-assistant/)
+    assert.throws(() => assertProfilePatchSafe([{ id: 'dsh-assistant', disabled: true }]), /cannot disable protected plugin/)
+    assert.throws(() => assertProfilePatchSafe([{ id: 'dsh-assistant', config: { governance: null } }]), /cannot remove protected/)
+  })
+
+  it('keeps Safe Mode recovery identity aligned in doctor and Mission-Control', async () => {
+    const layout = ensureProductHome(isolatedHome())
+    const context = resolveRuntimeContext(layout, {}, undefined, { allowFixtures: false, safeMode: true })
+    const booted = await bootSafeModeRuntime({
+      home: layout.root,
+      sessionRoot: context.sessionPersistenceDir,
+      sessionId: context.sessionId.value,
+      workspace: context.workspace.value,
+    })
+    try {
+      const handle = await createAssistantAgent(booted.ctx, context.sessionId.value, undefined, context.workspace.value)
+      const surface = new AssistantControlSurface(booted.ctx, context.sessionId.value, context)
+      const view = surface.workspace()
+      assert.equal(view.systemState, 'SAFE_MODE')
+      assert.equal(view.runtimeContext?.safeMode, true)
+      assert.equal(view.runtimeContext?.sessionPersistence, 'recovery-required')
+      assert.equal(view.runtimeContext?.sessionId, 'main')
+      assert.equal(view.runtimeContext?.profile, 'assistant')
+      await handle.dispose()
+    } finally {
+      await booted.ctx.fiber.dispose()
+    }
   })
 })

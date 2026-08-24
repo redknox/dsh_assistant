@@ -29,7 +29,14 @@ import {
   type RuntimeIdentity,
 } from './runtime-lease.js'
 import { AssistantControlSurface } from '../ui/controller.js'
-import { resolveRuntimeContext, type RuntimeContext } from './runtime-context.js'
+import { assertSelectedProfile } from './profile-composition.js'
+import {
+  claimSessionPartition,
+  commitRuntimeContext,
+  inspectRuntimeContext,
+  type RuntimeContext,
+  type SessionPartitionHold,
+} from './runtime-context.js'
 import { attachWebUiBroadcast, startWebUiServer, type WebUiServer } from './web-ui-server.js'
 
 export interface ProductCliOptions {
@@ -65,6 +72,7 @@ export interface ProductCliHooks {
   readonly bootProduct?: (layout: ProductHomeLayout, allowFixtures: boolean) => Promise<AssistantControl>
   readonly stopConfirmTimeoutMs?: number
   readonly afterWebUiBound?: (web: WebUiServer) => void
+  readonly flushSession?: () => Promise<boolean>
 }
 
 function takeValue(argv: readonly string[], index: number, flag: string): { readonly value: string; readonly next: number } {
@@ -213,12 +221,12 @@ async function waitUntilStopConfirmed(layout: ProductHomeLayout, identity: Runti
   return current === undefined || !runIdEquals(current.runId, identity.runId) || !processAlive(current.pid)
 }
 
-async function defaultBootProduct(layout: ProductHomeLayout, allowFixtures: boolean, context?: RuntimeContext) {
+async function defaultBootProduct(layout: ProductHomeLayout, allowFixtures: boolean, context?: RuntimeContext, persistSessions = false) {
   return bootAssistantControl({
     home: layout.root,
     allowFixtures,
     memory: { persistence: 'json-file', jsonFilePath: layout.memoryFile },
-    sessionRoot: context?.sessionRoot.value,
+    sessionRoot: persistSessions ? context?.sessionPersistenceDir : undefined,
     sessionId: context?.sessionId.value,
     workspace: context?.workspace.value,
   })
@@ -300,12 +308,12 @@ export async function runProductCli(
   let runtimeContext: RuntimeContext | undefined
   if (parsed.command === 'start' || parsed.command === 'doctor' || parsed.command === 'status') {
     try {
-      runtimeContext = resolveRuntimeContext(layout, {
+      runtimeContext = inspectRuntimeContext(layout, {
         profile: parsed.profile,
         workspace: parsed.workspace,
         sessionRoot: parsed.sessionRoot,
         sessionId: parsed.sessionId,
-      }, userConfig.config.runtime, { allowFixtures })
+      }, userConfig.config.runtime)
     } catch (error) {
       io.error(error instanceof Error ? error.message : 'runtime context failed')
       return 1
@@ -400,7 +408,27 @@ export async function runProductCli(
       return 1
     }
     const hold = lease.hold
-    const boot = hooks.bootProduct ?? ((homeLayout, fixtures) => defaultBootProduct(homeLayout, fixtures, runtimeContext))
+    if (parsed.command === 'start' && runtimeContext) {
+      try {
+        assertSelectedProfile(runtimeContext.profile.value)
+        runtimeContext = commitRuntimeContext(layout, runtimeContext, { allowFixtures })
+      } catch (error) {
+        hold.release()
+        io.error(error instanceof Error ? error.message : 'runtime context commit failed')
+        return 1
+      }
+    }
+    let partition: SessionPartitionHold | undefined
+    if (parsed.command === 'start' && runtimeContext) {
+      try {
+        partition = claimSessionPartition(runtimeContext)
+      } catch (error) {
+        hold.release()
+        io.error(error instanceof Error ? error.message : 'session partition failed')
+        return 1
+      }
+    }
+    const boot = hooks.bootProduct ?? ((homeLayout, fixtures) => defaultBootProduct(homeLayout, fixtures, runtimeContext, parsed.command === 'start'))
     let booted: AssistantControl | undefined
     let handle: Awaited<ReturnType<typeof createAssistantAgent>> | undefined
     let web: WebUiServer | undefined
@@ -414,11 +442,14 @@ export async function runProductCli(
           await web.close()
           web = undefined
         }
+        let flushed = handle === undefined
         if (handle !== undefined) {
           try {
-            await booted?.ctx.sessions.flush(handle.agent.session)
+            if (hooks.flushSession) await hooks.flushSession()
+            else if (booted !== undefined) await booted.ctx.sessions.flush(handle.agent.session)
+            flushed = true
           } catch {
-            // flush failure still proceeds to dispose; lease is retained only if dispose fails
+            flushed = false
           }
           await handle.dispose()
           handle = undefined
@@ -427,6 +458,9 @@ export async function runProductCli(
           await booted.ctx.fiber.dispose()
           booted = undefined
         }
+        partition?.release()
+        partition = undefined
+        if (!flushed) return false
         writerStillActive = false
         return true
       } catch {
@@ -543,6 +577,7 @@ export async function runProductCli(
     } finally {
       if (!writerStillActive) {
         if (booted !== undefined) await booted.ctx.fiber.dispose()
+        partition?.release()
         removeOwnPidFile(layout)
         hold.release()
       }
