@@ -60,6 +60,7 @@ export function projectMissionControl(input: WorkspaceSnapshotInput): MissionCon
     developmentControlPlaneSeparated: true,
     ...(input.candidates ? { candidates: input.candidates } : {}),
     ...(activationFailure ? { activationFailure } : {}),
+    ...(input.runtimeContext ? { runtimeContext: input.runtimeContext } : {}),
   })
 }
 

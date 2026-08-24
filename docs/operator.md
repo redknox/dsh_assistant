@@ -37,6 +37,7 @@ Installing the package pulls Cordis/DSH runtime dependencies through npm. Do not
 ```sh
 tars-ng start --once    # first-run summary, then exit (no browser wait)
 tars-ng start           # boot runtime + local Web UI; stay until Ctrl-C
+tars-ng start --profile assistant --session-id main
 tars-ng status
 tars-ng doctor
 tars-ng stop
@@ -46,7 +47,7 @@ tars-ng stop
 
 `tars-ng status` reports whether the product is running and, when it is, the Web UI address. It does not print the runtime lease token. `tars-ng stop` authenticates the exact lease holder on loopback with a run-token challenge and does not signal a PID. If the owner does not release the lease, stop reports `stop requested but not confirmed`. A PID is liveness metadata, not process identity. A TARS-NG Home has at most one verified writer.
 
-If the browser disconnects, reconnect; the UI reloads a fresh `MissionControlView`. Do not treat browser-local state as approval, activation, or recovery authority.
+If the browser disconnects, reconnect; the UI reloads the authoritative `MissionControlView` for the bound Session ID. Conversation history is restored from DSH session persistence. Do not treat browser-local state as approval, activation, or recovery authority.
 
 CLI remains authoritative for installation, `doctor`, `status`, `stop`, and recovery when the Web UI itself is unavailable.
 
@@ -63,7 +64,7 @@ credential: DEEPSEEK_API_KEY
 ## Configuration precedence
 
 ```text
-CLI flag (--home, --allow-fixtures)
+CLI flag (--home, --allow-fixtures, --profile, --workspace, --session-root, --session-id)
 → process environment
 → $TARS_NG_HOME/config/env and ~/.config/tars-ng/env
 → $TARS_NG_HOME/config/product.json

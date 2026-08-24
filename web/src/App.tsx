@@ -76,7 +76,9 @@ function SystemHeader(props: {
   readonly systemState: MissionControlView['systemState']
   readonly objective?: string
   readonly connected: boolean
+  readonly runtimeContext?: MissionControlView['runtimeContext']
 }) {
+  const context = props.runtimeContext
   return (
     <header className="faceplate topbar" aria-label="System header">
       <PlateRivets />
@@ -92,6 +94,11 @@ function SystemHeader(props: {
           <span>{props.systemState}</span>
         </div>
       </div>
+      {context ? (
+        <p className="runtime-context" data-runtime-context="true">
+          Profile {context.profile} · Workspace {context.workspaceLabel} · Session {context.sessionId} · Persistence {context.sessionPersistence}
+        </p>
+      ) : null}
     </header>
   )
 }
@@ -908,6 +915,7 @@ export function MissionControlScreen(props: {
         systemState={view.systemState}
         objective={view.objective?.text}
         connected={props.connected}
+        runtimeContext={view.runtimeContext}
       />
       {!props.connected ? <p className="transport" role="status">Disconnected from local runtime</p> : null}
       {props.acknowledgement ? (

@@ -9,7 +9,7 @@ Personal-assistant product layer on DeepSeek Harness **0.1.0-rc.8**. Current pac
 | **v0.1.0** | Assistant Core MVP baseline |
 | **v0.2.0** | Governed Self-Extension baseline |
 | **v0.3.0** | Governance + Mission-Control product baseline (historical soak seal) |
-| **v0.4.0 target** | Self-Developing Product Baseline |
+| **v0.4.0 target** | Runtime Foundation + Governed Extension Baseline |
 
 The repository package version is `0.3.0`. The annotated `v0.3.0` git tag is created only on the exact `main` commit after this seal is merged. Do not move or recreate that tag; later soak fixes are `v0.3.1`, `v0.3.2`, etc.
 
@@ -42,7 +42,7 @@ credential: DEEPSEEK_API_KEY
 
 Daily soak surface: loopback Mission-Control Web UI from `tars-ng start` (`http://127.0.0.1:8787`).
 
-`v0.3.0` remains the immutable historical Governance + Mission-Control baseline. Do not retag it. Development toward **v0.4.0 — Self-Developing Product Baseline** starts with an enforceable generated-extension runtime. Self-development is allowed; self-authorization is not. The Candidate Workbench is not claimed complete by this issue.
+`v0.3.0` remains the immutable historical Governance + Mission-Control baseline. Do not retag it. Development toward **v0.4.0 — Runtime Foundation + Governed Extension Baseline** starts with a host-owned Profile / Workspace / Session Runtime Context, then the already-shipped generated-extension lifecycle. Self-development is allowed; self-authorization is not. Multi-session, third-party install, and Skill lifecycle are not claimed by this baseline.
 
 ## Direction after v0.4.0
 
@@ -52,7 +52,7 @@ The directional milestones are:
 
 | Milestone | Product question |
 | --- | --- |
-| **v0.4.0 — Self-Developing Product Baseline** | Can TARS-NG construct, validate, review, approve, activate, observe, and recover a generated capability without self-authorization? |
+| **v0.4.0 — Runtime Foundation + Governed Extension Baseline** | Can TARS-NG bind one Home to a Profile, Workspace, and durable current Session, then construct, validate, review, approve, activate, observe, and recover a generated capability without self-authorization? |
 | **Domain Construction Slice** | Can a professional who does not know TypeScript or DSH describe one bounded domain need and obtain an explicit, testable, governed capability? |
 | **Professional Application Composition** | Can several governed capabilities, domain adapters, policies, and UI components be composed into a coherent professional AI system? |
 

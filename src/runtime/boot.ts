@@ -7,6 +7,7 @@ import LocalJobRegistry from '@deepseek-ai/dsh-jobs-local'
 import LlmRuntime from '@deepseek-ai/dsh-llm'
 import * as DeepSeekLlm from '@deepseek-ai/dsh-llm-deepseek'
 import SessionStore, { SessionId } from '@deepseek-ai/dsh-session'
+import JsonlSessionPersistence from '@deepseek-ai/dsh-session-persistence-jsonl'
 import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
 import ToolRuntime from '@deepseek-ai/dsh-tools'
 import type { RecoveryRoot } from '../domain/governance/root.js'
@@ -24,6 +25,9 @@ import type { MemoryPluginConfig } from '../plugins/memory-plugin.js'
 /**
  * Minimal public DSH plugin stack for this product layer.
  * Depends only on public DSH package entrypoints, not package-internal implementation paths.
+ * This is the production-equivalent adapter for the packaged `assistant` Profile
+ * (`@deepseek-ai/dsh-base` then `dsh-assistant`). Official `dsh-app-boot` load/dump/boot
+ * remains the packaging smoke path; start does not silently init a third-party Profile tree.
  */
 export interface BootOptions {
   knowledgeFixturePaths?: string[]
@@ -33,6 +37,12 @@ export interface BootOptions {
   home?: string
   /** When false, fixture integrations stay unavailable instead of returning realistic fake data. */
   allowFixtures?: boolean
+  /** Durable DSH session-persistence root. Absent keeps an in-memory SessionStore. */
+  sessionRoot?: string
+  /** Current conversation/session identity. */
+  sessionId?: string
+  /** Operator workspace directory. Context only; not a filesystem grant. */
+  workspace?: string
 }
 
 export interface BootDiagnostics {
@@ -58,6 +68,14 @@ async function bootStack(options: BootOptions = {}): Promise<AssistantControl> {
   const ctx = new Context()
   await ctx.plugin(InvariantRegistry)
   await ctx.plugin(SessionStore)
+  if (options.sessionRoot) {
+    await ctx.plugin(JsonlSessionPersistence, {
+      root: options.sessionRoot,
+      compression: 'none',
+      packChunks: false,
+      writeBatchMaxDelayMs: 1,
+    })
+  }
   await ctx.plugin(AgentRegistry)
   await ctx.plugin(LlmRuntime)
   await ctx.plugin(DeepSeekLlm, { apiKeyEnv: DEFAULT_LLM_CREDENTIAL })
@@ -149,15 +167,28 @@ export async function bootSafeModeRuntime(options: Omit<BootOptions, 'safeMode'>
 
 export async function createAssistantAgent(
   ctx: Context,
-  sessionId = 'dsh-assistant',
+  sessionId = 'main',
   agentOptions?: AgentOptions,
+  workspace?: string,
 ) {
   const defaults = ctx.get('agentDefaultModel')?.currentSelection()
+  const options = {
+    ...(defaults ? { provider: defaults.provider, model: defaults.model } : {}),
+    ...agentOptions,
+  }
+  const persistence = ctx.get('sessionPersistence')
+  if (persistence) {
+    const stored = await persistence.list()
+    if (stored.some((header) => String(header.id) === sessionId)) {
+      return ctx.agents.resume({
+        resumeSessionId: SessionId(sessionId),
+        agentOptions: options,
+      })
+    }
+  }
   return ctx.agents.create({
     sessionId: SessionId(sessionId),
-    agentOptions: {
-      ...(defaults ? { provider: defaults.provider, model: defaults.model } : {}),
-      ...agentOptions,
-    },
+    ...(workspace === undefined ? {} : { meta: { cwd: workspace } }),
+    agentOptions: options,
   })
 }

@@ -115,7 +115,7 @@ See [ARCHITECTURE.md](./ARCHITECTURE.md) for layers. See [ENGINEERING.md](./ENGI
 | Self-Extension governance | no | **Verified** | Operator: `tars-ng self-extension` / [docs/self-extension-operations.md](./docs/self-extension-operations.md) |
 | Capability Registry / Resolution / Discovery | no | **Verified** | See docs/capability-*.md |
 | Candidate workspace + reliability + independent review | no | **Verified** | `review-complete` is not approval |
-| Candidate Workbench (plan/author/validate/review/request) | no | **Implemented** | Conversation-operable; not Verified until deterministic E2E and a real-model soak both pass. See [docs/m6c-conversation-soak.md](./docs/m6c-conversation-soak.md) |
+| Runtime Context (Profile / Workspace / Session) | yes (product start) | **Implemented** | One current session; [docs/runtime-context.md](./docs/runtime-context.md). Multi-session **Unsupported** |
 | Generated authoring contract `generated-extension-api/v1` | no | **Implemented** | Host-owned; [docs/generated-extension-api-v1.md](./docs/generated-extension-api-v1.md) |
 | TARS-NG personality + Mission-Control workspace | no | **Verified** | [docs/tars-ng-personality.md](./docs/tars-ng-personality.md) |
 | Production persistence, public npm publish | no | **Unsupported** | Package is `private` |
@@ -148,6 +148,7 @@ npm run pack:inspect
 | [ENGINEERING.md](./ENGINEERING.md) | Normative rules for humans and AI contributors |
 | [ARCHITECTURE.md](./ARCHITECTURE.md) | Layers, ownership, dependency direction |
 | [docs/packaging.md](./docs/packaging.md) | Bundle/profile plus product tarball |
+| [docs/runtime-context.md](./docs/runtime-context.md) | Profile / Workspace / Session identity and precedence |
 | [docs/self-extension.md](./docs/self-extension.md) | Self-Extension contract |
 | [docs/tars-ng-personality.md](./docs/tars-ng-personality.md) | Personality contract |
 | [docs/mission-control-workspace.md](./docs/mission-control-workspace.md) | Mission-Control IA |

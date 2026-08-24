@@ -18,6 +18,8 @@ Normative contributor rules: [ENGINEERING.md](./ENGINEERING.md). Product boundar
 
 A TARS-NG Home is a single-writer authority domain. A PID is liveness metadata, not process identity. Durable authority, LKG, Workbench, memory, and recovery state are never written by competing processes.
 
+Production boot resolves one host-owned **Runtime Context** before the lease: Home + Profile + Workspace + Session Root + current Session ID. Workspace is context, not filesystem authority. Session Root is DSH session persistence, not Candidate Workbench. See [docs/runtime-context.md](./docs/runtime-context.md).
+
 ## Layers and dependency direction
 
 Dependencies point **downward only**. Upper layers may call lower layers; lower layers must not depend on UI, channels, or a specific model.

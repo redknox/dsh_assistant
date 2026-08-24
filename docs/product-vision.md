@@ -41,6 +41,9 @@ Domain professional
 Domain construction experience
 intent / clarification / rules / examples / data mapping / UI preview
         ↓
+TARS-NG Runtime Context
+Home / Profile / Workspace / current Session
+        ↓
 TARS-NG capability construction
 resolve / plan / author / validate / review
         ↓
@@ -80,7 +83,7 @@ The design principle is:
 
 ## Current baseline
 
-Through v0.4.0, TARS-NG is validating the lower half of the stack: a usable reference assistant plus governed self-development. The central proof is that a missing capability can move through resolution, candidate authoring, validation, independent review, exact approval, isolated activation, discovery, use, restart, and recovery without self-authorization.
+Through v0.4.0, TARS-NG is validating the lower half of the stack: a usable reference assistant with one host-owned Runtime Context, plus governed self-development. The central proof is that a Home can bind Profile / Workspace / current Session, then move a missing capability through resolution, candidate authoring, validation, independent review, exact approval, isolated activation, discovery, use, restart, and recovery without self-authorization.
 
 This baseline is necessary but not sufficient for domain-professional vibe coding.
 

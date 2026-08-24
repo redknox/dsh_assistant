@@ -6,6 +6,7 @@ import { inspectCompatibility, type CompatibilityReport } from './compatibility.
 import { PRODUCT_NAME } from './constants.js'
 import { credentialInventory, missingCredentialNames, type CredentialPresence, type EnvFileLoad } from './env.js'
 import type { ProductHomeLayout } from './home.js'
+import type { RuntimeContext } from './runtime-context.js'
 import type { LlmDiagnosis } from './llm.js'
 
 export type IntegrationMode = 'live' | 'fake' | 'unavailable' | 'disabled'
@@ -36,6 +37,7 @@ export interface DoctorReport {
   readonly logFile: string
   readonly llm?: LlmDiagnosis
   readonly generatedRuntime?: GeneratedRuntimeDiagnosis
+  readonly runtimeContext?: RuntimeContext
 }
 
 export function calendarDiagnosis(allowFixtures: boolean): IntegrationDiagnosis {
@@ -112,6 +114,7 @@ export function collectStaticDoctor(input: {
   readonly envFiles: readonly EnvFileLoad[]
   readonly allowFixtures: boolean
   readonly lastStartup?: unknown
+  readonly runtimeContext?: RuntimeContext
 }): DoctorReport {
   const compatibility = inspectCompatibility()
   const credentials = credentialInventory()
@@ -129,6 +132,7 @@ export function collectStaticDoctor(input: {
     lastStartup: input.lastStartup,
     logFile: input.layout.logFile,
     generatedRuntime: generatedRuntimeDiagnosis(),
+    ...(input.runtimeContext ? { runtimeContext: input.runtimeContext } : {}),
   }
 }
 
@@ -169,6 +173,11 @@ export function formatDoctorReport(report: DoctorReport): string {
     ...dshLines,
     ...report.compatibility.problems.map((item) => `problem: ${item}`),
     `home: ${report.home}`,
+    report.runtimeContext ? `profile: ${report.runtimeContext.profile.value} (${report.runtimeContext.profile.source})` : undefined,
+    report.runtimeContext ? `workspace: ${report.runtimeContext.workspaceLabel} (${report.runtimeContext.workspace.source})` : undefined,
+    report.runtimeContext ? `session-id: ${report.runtimeContext.sessionId.value} (${report.runtimeContext.sessionId.source})` : undefined,
+    report.runtimeContext ? `session-persistence: ${report.runtimeContext.safeMode ? 'recovery-required' : 'persistent'}` : undefined,
+    report.runtimeContext ? `profile-composition: product-adapter (${report.runtimeContext.profile.value}; dsh-base + dsh-assistant)` : undefined,
     `log-file: ${report.logFile}`,
     ...envLines,
     ...credLines,

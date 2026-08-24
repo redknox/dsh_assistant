@@ -14,6 +14,17 @@ export interface RuntimeIdentity {
   readonly productVersion: string
   readonly normalizedHome: string
   readonly controlEndpoint?: string
+  readonly profile?: string
+  readonly workspaceIdentity?: string
+  readonly sessionRootIdentity?: string
+  readonly sessionId?: string
+}
+
+export interface RuntimeLeaseStamp {
+  readonly profile?: string
+  readonly workspaceIdentity?: string
+  readonly sessionRootIdentity?: string
+  readonly sessionId?: string
 }
 
 export type PublicRuntimeIdentity = Omit<RuntimeIdentity, 'runId'>
@@ -55,6 +66,10 @@ export function publicRuntimeIdentity(identity: RuntimeIdentity): PublicRuntimeI
     productVersion: identity.productVersion,
     normalizedHome: identity.normalizedHome,
     ...(identity.controlEndpoint ? { controlEndpoint: identity.controlEndpoint } : {}),
+    ...(identity.profile ? { profile: identity.profile } : {}),
+    ...(identity.workspaceIdentity ? { workspaceIdentity: identity.workspaceIdentity } : {}),
+    ...(identity.sessionRootIdentity ? { sessionRootIdentity: identity.sessionRootIdentity } : {}),
+    ...(identity.sessionId ? { sessionId: identity.sessionId } : {}),
   }
 }
 
@@ -74,7 +89,7 @@ export async function inspectRuntimeLease(layout: ProductHomeLayout): Promise<Ru
   return { state: 'ambiguous', identity: published, detail: `${HOME_AMBIGUOUS} ${HOME_AMBIGUOUS_RECOVERY}` }
 }
 
-export async function acquireRuntimeLease(layout: ProductHomeLayout): Promise<RuntimeLeaseAcquire> {
+export async function acquireRuntimeLease(layout: ProductHomeLayout, stamp?: RuntimeLeaseStamp): Promise<RuntimeLeaseAcquire> {
   for (let attempt = 0; attempt < 8; attempt += 1) {
     try {
       mkdirSync(layout.runtimeLockDir, { recursive: false, mode: 0o700 })
@@ -83,7 +98,7 @@ export async function acquireRuntimeLease(layout: ProductHomeLayout): Promise<Ru
       } catch {
         // chmod may fail on some filesystems
       }
-      const identity = writeNewRuntimeIdentity(layout)
+      const identity = writeNewRuntimeIdentity(layout, stamp)
       return { ok: true, hold: holdOf(layout, identity) }
     } catch (error) {
       if (!isAlreadyExists(error)) throw error
@@ -157,6 +172,10 @@ function parseRuntimeIdentityFile(layout: ProductHomeLayout): RuntimeIdentity | 
       productVersion: raw.productVersion,
       normalizedHome: raw.normalizedHome,
       ...(typeof raw.controlEndpoint === 'string' ? { controlEndpoint: raw.controlEndpoint } : {}),
+      ...(typeof raw.profile === 'string' ? { profile: raw.profile } : {}),
+      ...(typeof raw.workspaceIdentity === 'string' ? { workspaceIdentity: raw.workspaceIdentity } : {}),
+      ...(typeof raw.sessionRootIdentity === 'string' ? { sessionRootIdentity: raw.sessionRootIdentity } : {}),
+      ...(typeof raw.sessionId === 'string' ? { sessionId: raw.sessionId } : {}),
     }
   } catch {
     return undefined
@@ -229,7 +248,7 @@ async function classifyOwner(identity: RuntimeIdentity, layout: ProductHomeLayou
   return await challengeRuntimeIdentity(identity, layout.root) ? 'live' : 'ambiguous'
 }
 
-export function writeNewRuntimeIdentity(layout: ProductHomeLayout): RuntimeIdentity {
+export function writeNewRuntimeIdentity(layout: ProductHomeLayout, stamp?: RuntimeLeaseStamp): RuntimeIdentity {
   const identity: RuntimeIdentity = {
     schemaVersion: RUNTIME_LEASE_SCHEMA_VERSION,
     pid: process.pid,
@@ -237,6 +256,10 @@ export function writeNewRuntimeIdentity(layout: ProductHomeLayout): RuntimeIdent
     startedAt: new Date().toISOString(),
     productVersion: readProductVersion(),
     normalizedHome: layout.root,
+    ...(stamp?.profile ? { profile: stamp.profile } : {}),
+    ...(stamp?.workspaceIdentity ? { workspaceIdentity: stamp.workspaceIdentity } : {}),
+    ...(stamp?.sessionRootIdentity ? { sessionRootIdentity: stamp.sessionRootIdentity } : {}),
+    ...(stamp?.sessionId ? { sessionId: stamp.sessionId } : {}),
   }
   try {
     writeIdentity(layout, identity)

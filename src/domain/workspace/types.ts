@@ -247,6 +247,14 @@ export interface MissionControlView {
     readonly recoveryRequired: boolean
     readonly registryActive: boolean
   }
+  readonly runtimeContext?: {
+    readonly profile: string
+    readonly workspaceLabel: string
+    readonly workspaceIdentity: string
+    readonly sessionId: string
+    readonly sessionPersistence: 'persistent' | 'unavailable' | 'recovery-required'
+    readonly safeMode: boolean
+  }
 }
 
 export interface WorkbenchProjection {
@@ -371,6 +379,7 @@ export interface WorkspaceSnapshotInput {
   readonly objective?: ObjectiveView
   readonly personality: MissionControlView['personality']
   readonly blockedReason?: string
+  readonly runtimeContext?: MissionControlView['runtimeContext']
 }
 
 export interface ActivationSnapshotView {

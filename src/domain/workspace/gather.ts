@@ -13,6 +13,7 @@ export interface GatherWorkspaceInput {
   readonly ctx: Context
   readonly sessionId: string
   readonly objective?: ObjectiveView
+  readonly runtimeContext?: MissionControlView['runtimeContext']
 }
 
 /** Fold public runtime/session/governance/policy surfaces into a workspace snapshot. */
@@ -51,6 +52,15 @@ export function gatherWorkspaceSnapshot(input: GatherWorkspaceInput): WorkspaceS
   const safeMode = Boolean(activation?.safeMode)
   const lastFailure = activation?.lastFailure
   const boundedFailure = lastFailure?.diagnostics ? boundActivationDiagnostics(lastFailure.diagnostics) : undefined
+  const runtimeContext = input.runtimeContext
+    ? {
+      ...input.runtimeContext,
+      safeMode,
+      sessionPersistence: safeMode || Boolean(activation?.recoveryRequired)
+        ? 'recovery-required' as const
+        : input.runtimeContext.sessionPersistence,
+    }
+    : undefined
   return {
     agentStatus: agent?.status,
     safeMode,
@@ -132,6 +142,7 @@ export function gatherWorkspaceSnapshot(input: GatherWorkspaceInput): WorkspaceS
       verbosity: personality.verbosity,
       humorSuppressed: personality.humorSuppressed,
     },
+    ...(runtimeContext ? { runtimeContext } : {}),
   }
 }
 

@@ -12,6 +12,7 @@ Operator-facing install/start/secrets: [operator.md](./operator.md). Soak/freeze
 | Product bundle | `package.json` → `dsh.bundle.patch` = `cordis.patch.yml` | Inserts plugin id `dsh-assistant` |
 | Bundle entry | `src/product/bundle.ts` (`name`, `inject`, `apply`) | Loads registry, candidate, review, personality, governance, then optional memory/knowledge/integrations/policy/jobs |
 | Example profile | `profiles/assistant/` | `dsh.profile.bundles`: `@deepseek-ai/dsh-base` then `dsh-assistant` |
+| Runtime Context | `$TARS_NG_HOME/config/product.json` + `state/runtime-context.json` | Profile / Workspace / Session binding; [runtime-context.md](./runtime-context.md) |
 | Headless product start | `tars-ng start --once` | Compiled `dist/` entry; no `tsx` |
 
 The profile overlay `profiles/assistant/cordis.patch.yml` is empty so composition stays in bundle patches.

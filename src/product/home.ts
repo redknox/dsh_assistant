@@ -2,6 +2,7 @@ import { chmodSync, existsSync, mkdirSync, readFileSync, realpathSync, writeFile
 import os from 'node:os'
 import path from 'node:path'
 import { PRODUCT_CONFIG_SCHEMA_VERSION, PRODUCT_STATE_SCHEMA_VERSION } from './constants.js'
+import { readProductRuntimeConfig, type ProductRuntimeConfig } from './runtime-context.js'
 
 export interface ProductHomeLayout {
   readonly root: string
@@ -24,6 +25,7 @@ export interface ProductHomeLayout {
 export interface ProductUserConfig {
   readonly schemaVersion: number
   readonly allowFixtures: boolean
+  readonly runtime?: ProductRuntimeConfig
 }
 
 export function resolveProductHome(explicit?: string): string {
@@ -103,7 +105,7 @@ export function readProductUserConfig(layout: ProductHomeLayout): { config: Prod
   if (!existsSync(layout.productConfigFile)) {
     return { config: { schemaVersion: PRODUCT_CONFIG_SCHEMA_VERSION, allowFixtures: false } }
   }
-  const raw = JSON.parse(readFileSync(layout.productConfigFile, 'utf8')) as { schemaVersion?: unknown; allowFixtures?: unknown }
+  const raw = JSON.parse(readFileSync(layout.productConfigFile, 'utf8')) as { schemaVersion?: unknown; allowFixtures?: unknown; runtime?: unknown }
   const schemaVersion = typeof raw.schemaVersion === 'number' ? raw.schemaVersion : PRODUCT_CONFIG_SCHEMA_VERSION
   if (schemaVersion > PRODUCT_CONFIG_SCHEMA_VERSION) {
     throw new Error(`unsupported product config schema ${schemaVersion}; this TARS-NG build supports ${PRODUCT_CONFIG_SCHEMA_VERSION}`)
@@ -112,6 +114,7 @@ export function readProductUserConfig(layout: ProductHomeLayout): { config: Prod
     config: {
       schemaVersion,
       allowFixtures: raw.allowFixtures === true,
+      ...(readProductRuntimeConfig(raw) ? { runtime: readProductRuntimeConfig(raw) } : {}),
     },
   }
 }
