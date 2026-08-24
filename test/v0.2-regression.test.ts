@@ -220,7 +220,7 @@ describe('v0.2.x release-confidence suite', () => {
     const home = mkdtempSync(join(tmpdir(), 'dsh-v02-h-'))
     const { first, human } = await prepareCandidate(home, true)
     try {
-      first.recoveryRoot.enterSafeMode(human)
+      await first.recoveryRoot.enterSafeMode(human)
     } finally {
       await first.ctx.fiber.dispose()
     }

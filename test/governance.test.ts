@@ -274,7 +274,7 @@ describe('extension governance and recovery', () => {
     root.recordApproval(human, { candidateId: candidate.id, fingerprint, decision: 'approved-for-exact-diff' })
     await root.activate(candidate.id, human)
     assert.equal(registry.get('generated/matter-home', '0.1.0')?.status, 'active')
-    const safe = root.enterSafeMode(human)
+    const safe = await root.enterSafeMode(human)
     assert.equal(safe.safeMode, true)
     assert.equal(registry.get('generated/matter-home', '0.1.0')?.status, 'disabled')
     assert.equal(registry.get('managed/integrations', '0.1.0')?.status, 'active')
@@ -318,7 +318,7 @@ describe('extension governance and recovery', () => {
     root.independentReview.reviewCandidate(sealed.id)
     const upgradeFingerprint = governance.requestApproval(sealed.id).fingerprint
     root.recordApproval(human, { candidateId: sealed.id, fingerprint: upgradeFingerprint, decision: 'approved-for-exact-diff' })
-    root.enterSafeMode(human)
+    await root.enterSafeMode(human)
     assert.equal(registry.get('generated/matter-home', '0.1.0')?.status, 'disabled')
     const gate = governance.eligibility(sealed.id)
     assert.ok(gate.denials.some((item) => item.reason === 'safe-mode'))
@@ -477,11 +477,45 @@ describe('extension governance and recovery', () => {
     }
     assert.equal(root.inspect().lifecycleBusy, 'uninstall')
     await assert.rejects(() => root.rollback(human), /uninstall-in-flight/)
-    assert.throws(() => root.enterSafeMode(human), /uninstall-in-flight/)
+    await assert.rejects(() => root.enterSafeMode(human), /uninstall-in-flight/)
     assert.throws(() => root.disable(human, 'generated/text-slugify', '0.1.0'), /uninstall-in-flight/)
     release()
     await pending
     assert.equal(root.inspect().lifecycleBusy, undefined)
+  })
+
+  it('I3f. Safe Mode keeps the recovery lock until generated unload settles', async () => {
+    const { workspace, governance, root, human, runtime } = seeded()
+    const active = ready(workspace, { owner: 'generated/text-slugify', version: '0.1.0', capabilities: ['text.slugify'] })
+    const idle = ready(workspace, { owner: 'generated/other-idle', version: '0.1.0', capabilities: ['other.idle'] })
+    for (const item of [active, idle]) {
+      root.recordApproval(human, {
+        candidateId: item.id,
+        fingerprint: governance.requestApproval(item.id).fingerprint,
+        decision: 'approved-for-exact-diff',
+      })
+    }
+    await root.activate(active.id, human)
+    let release!: () => void
+    governance.holdSafeMode = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    const pending = root.enterSafeMode(human)
+    for (let i = 0; i < 50 && root.inspect().lifecycleBusy !== 'recovery'; i += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 10))
+    }
+    assert.equal(root.inspect().lifecycleBusy, 'recovery')
+    await assert.rejects(() => root.rollback(human), /recovery-in-flight/)
+    await assert.rejects(() => root.activate(idle.id, human), (error: unknown) => {
+      assert.ok(error instanceof ActivationDeniedError)
+      assert.ok(error.denials.some((item) => item.reason === 'recovery-in-flight'))
+      return true
+    })
+    release()
+    const safe = await pending
+    assert.equal(safe.safeMode, true)
+    assert.equal(root.inspect().lifecycleBusy, undefined)
+    assert.equal(runtime.mounted().includes(active.id), false)
   })
 
   it('J. rejects attempts to rewrite the recovery root', () => {
@@ -780,7 +814,7 @@ describe('safe mode bootstrap', () => {
       assert.equal(ctx.get('personalMemory'), undefined)
       assert.equal('issueAuthority' in ctx.extensionRecovery, false)
       const human = recoveryRoot.issueAuthority({ kind: 'human-control', source: 'recovery-root' })
-      const safe = recoveryRoot.enterSafeMode(human)
+      const safe = await recoveryRoot.enterSafeMode(human)
       assert.equal(safe.safeMode, true)
     } finally {
       await ctx.fiber.dispose()

@@ -71,7 +71,10 @@ export class InMemoryActivationRuntime implements ActivationRuntime {
   }
 
   async unloadGenerated(candidateId?: string): Promise<void> {
-    if (candidateId === undefined) return
+    if (candidateId === undefined) {
+      this.currentMounted = []
+      return
+    }
     this.currentMounted = this.currentMounted.filter((id) => id !== candidateId)
   }
 

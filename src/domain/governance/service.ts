@@ -82,6 +82,7 @@ export class GovernanceService implements ExtensionGovernance, ExtensionActivati
   failUninstallRestore = false
   holdActivation?: Promise<void>
   holdUninstall?: Promise<void>
+  holdSafeMode?: Promise<void>
   private mutation: 'idle' | LifecycleMutation = 'idle'
   private readonly persistHook?: () => void
   private readonly beginAuthorityCommit?: () => void
@@ -339,7 +340,7 @@ export class GovernanceService implements ExtensionGovernance, ExtensionActivati
     }
   }
 
-  enterSafeMode(credential: TrustedAuthorityCredential): ActivationStatus {
+  async enterSafeMode(credential: TrustedAuthorityCredential): Promise<ActivationStatus> {
     this.assertCredential(credential)
     this.assertMutationIdle('recovery')
     this.mutation = 'recovery'
@@ -352,7 +353,8 @@ export class GovernanceService implements ExtensionGovernance, ExtensionActivati
       this.safeMode = true
       this.state = 'safe-mode'
       this.current = this.captureSnapshot()
-      void this.runtime.unloadGenerated()
+      if (this.holdSafeMode) await this.holdSafeMode
+      await this.runtime.unloadGenerated()
       this.flush()
       return this.status()
     } finally {
@@ -651,7 +653,7 @@ export class GovernanceService implements ExtensionGovernance, ExtensionActivati
     this.state = 'safe-mode'
     this.integrityVerified = false
     this.current = this.captureSnapshot()
-    void this.runtime.unloadGenerated()
+    await this.runtime.unloadGenerated()
     this.lastFailure = {
       candidateId: this.pendingCandidateId ?? 'restart',
       version: '',

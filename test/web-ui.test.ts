@@ -300,7 +300,7 @@ describe('local Mission-Control Web UI', () => {
   it('cannot recover through unsupported browser-invented actions', async () => {
     const control = await bootSafeModeRuntime()
     const human = control.recoveryRoot.issueAuthority({ kind: 'human-control', source: 'application-ui' })
-    control.recoveryRoot.enterSafeMode(human)
+    await control.recoveryRoot.enterSafeMode(human)
     const surface = new AssistantControlSurface(control.ctx, 'web-ui-safe')
     const web = await startWebUiServer({
       surface,
@@ -952,7 +952,7 @@ export function apply(ctx) {
       assert.equal(recovery.status, 409)
       const recoveryBody = await recovery.json() as { error: string }
       assert.equal(recoveryBody.error, 'uninstall-in-flight')
-      assert.throws(() => recoveryRoot.enterSafeMode(recoveryRoot.issueAuthority({
+      await assert.rejects(() => recoveryRoot.enterSafeMode(recoveryRoot.issueAuthority({
         kind: 'human-control',
         source: 'application-ui',
       })), /uninstall-in-flight/)
@@ -1224,7 +1224,7 @@ export function apply(ctx) {
       const stale = authorGenerated(ctx, 'r0.wui.stale')
       const staleCard = await approveActivationCard(url, cookie, stale.id)
       const human = recoveryRoot.issueAuthority({ kind: 'human-control', source: 'application-ui' })
-      recoveryRoot.enterSafeMode(human)
+      await recoveryRoot.enterSafeMode(human)
       const afterSafe = await fetch(`${url}/api/view`).then((res) => res.json()) as { view: MissionControlView }
       const stillPending = afterSafe.view.activations.find((item) => item.candidateId === stale.id)
       assert.ok(stillPending)

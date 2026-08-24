@@ -299,7 +299,7 @@ describe('Self-Extension durable restart', () => {
     const { first, created, human } = await prepareCandidate(home)
     try {
       await first.recoveryRoot.activate(created.id, human)
-      first.recoveryRoot.enterSafeMode(human)
+      await first.recoveryRoot.enterSafeMode(human)
     } finally {
       await first.ctx.fiber.dispose()
     }

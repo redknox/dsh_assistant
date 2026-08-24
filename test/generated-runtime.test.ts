@@ -389,7 +389,7 @@ describe('isolated generated-extension runtime', () => {
     try {
       const { status, human } = await activateGenerated(first.ctx, first.recoveryRoot, { tool: 'r0_transform', source: R0 })
       assert.equal(status.state, 'active', status.lastFailure?.diagnostics)
-      first.recoveryRoot.enterSafeMode(human)
+      await first.recoveryRoot.enterSafeMode(human)
       assert.equal(first.ctx.tools.get('r0_transform'), undefined)
     } finally {
       await first.ctx.fiber.dispose()
@@ -602,7 +602,7 @@ describe('isolated generated-extension runtime', () => {
       assert.equal(result.isError, false, String(result.value))
       assert.equal(String(result.value), 'BOOT')
       const human = second.recoveryRoot.issueAuthority({ kind: 'human-control', source: 'application-ui' })
-      second.recoveryRoot.enterSafeMode(human)
+      await second.recoveryRoot.enterSafeMode(human)
       assert.equal(second.ctx.tools.get('r0_transform'), undefined)
     } finally {
       await second.ctx.fiber.dispose()
