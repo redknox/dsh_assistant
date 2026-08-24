@@ -274,6 +274,46 @@ describe('extension governance and recovery', () => {
     assert.ok(governance.eligibility(again.id).denials.some((item) => item.reason === 'safe-mode'))
   })
 
+  it('I2. Safe Mode does not treat a withheld generated base as a terminal base change', async () => {
+    const { registry, workspace, governance, root, human } = seeded()
+    const base = ready(workspace, {
+      owner: 'generated/matter-home',
+      version: '0.1.0',
+      capabilities: ['matter.light.set'],
+    })
+    const fingerprint = governance.requestApproval(base.id).fingerprint
+    root.recordApproval(human, { candidateId: base.id, fingerprint, decision: 'approved-for-exact-diff' })
+    await root.activate(base.id, human)
+    const upgrade = workspace.create({
+      review: review({
+        kind: 'evolve-owner',
+        capability: 'matter.light.set',
+        need: 'matter',
+        target: { owner: 'generated/matter-home', version: '0.1.0' },
+      }),
+      owner: 'generated/matter-home',
+      version: '0.1.1',
+      baseVersion: '0.1.0',
+      manifest: {
+        capabilities: ['matter.light.set'],
+        permissions: [],
+        runtimeSeams: [],
+        tools: [],
+      },
+    })
+    workspace.writeFile(upgrade.id, 'src/ok.ts', 'export const value: string = "ok"\n')
+    workspace.validate(upgrade.id)
+    const sealed = workspace.seal(upgrade.id)
+    root.independentReview.reviewCandidate(sealed.id)
+    const upgradeFingerprint = governance.requestApproval(sealed.id).fingerprint
+    root.recordApproval(human, { candidateId: sealed.id, fingerprint: upgradeFingerprint, decision: 'approved-for-exact-diff' })
+    root.enterSafeMode(human)
+    assert.equal(registry.get('generated/matter-home', '0.1.0')?.status, 'disabled')
+    const gate = governance.eligibility(sealed.id)
+    assert.ok(gate.denials.some((item) => item.reason === 'safe-mode'))
+    assert.equal(gate.denials.some((item) => item.reason === 'base-changed'), false)
+  })
+
   it('J. rejects attempts to rewrite the recovery root', () => {
     const { governance, root } = seeded()
     assert.throws(() => governance.rewriteRecoveryRoot(), GovernanceAuthorityError)

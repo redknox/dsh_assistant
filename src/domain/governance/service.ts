@@ -652,10 +652,17 @@ export class GovernanceService implements ExtensionGovernance, ExtensionActivati
     if (record.baseVersion !== undefined) {
       const active = this.registry.list({ owner: record.owner, status: 'active' })[0]
       if (active === undefined) {
-        denials.push({
-          reason: 'base-changed',
-          detail: `no active owner for ${record.owner}; proposal assumed ${record.baseVersion}`,
-        })
+        const withheldBySafeMode = this.safeMode && this.registry.list({ owner: record.owner }).some((item) => (
+          item.version === record.baseVersion
+          && item.status === 'disabled'
+          && isolatedRuntimeOwner(item)
+        ))
+        if (!withheldBySafeMode) {
+          denials.push({
+            reason: 'base-changed',
+            detail: `no active owner for ${record.owner}; proposal assumed ${record.baseVersion}`,
+          })
+        }
       } else if (active.version !== record.baseVersion) {
         denials.push({ reason: 'base-changed', detail: `active base is ${active.version}, proposal assumed ${record.baseVersion}` })
       }
