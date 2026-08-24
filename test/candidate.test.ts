@@ -114,6 +114,73 @@ describe('candidate workspace and validation', () => {
     assert.equal(workspace.get(candidate.id).manifest.provenance.kind, 'generated')
   })
 
+  it('keeps a new-plugin diff against no base after the owner is active', () => {
+    const { workspace, registry } = seeded()
+    const candidate = workspace.create({
+      review: review(),
+      owner: 'generated/candidate-probe',
+      version: '0.1.0',
+      manifest: {
+        capabilities: ['r0.candidate.probe'],
+        tools: ['candidate_probe'],
+      },
+    })
+    const before = workspace.diff(candidate.id)
+    assert.equal(candidate.baseVersion, undefined)
+    assert.equal(before.baseVersion, undefined)
+    assert.deepEqual(before.capabilities.added, ['r0.candidate.probe'])
+    assert.deepEqual(before.tools.added, ['candidate_probe'])
+    registry.register({
+      owner: 'generated/candidate-probe',
+      version: '0.1.0',
+      provenance: { kind: 'generated', origin: 'assistant' },
+      status: 'active',
+      evidence: 'Verified',
+      capabilities: [{ id: 'r0.candidate.probe', permissions: [] }],
+      tools: ['candidate_probe'],
+      runtimeSeams: [],
+    })
+    const after = workspace.diff(candidate.id)
+    assert.deepEqual(after, before)
+  })
+
+  it('keeps an evolve-owner diff bound to the planned baseVersion', () => {
+    const { workspace, registry } = seeded()
+    const candidate = workspace.create({
+      review: review({
+        kind: 'evolve-owner',
+        capability: 'calendar.read',
+        need: 'richer attendee filtering',
+        target: { owner: 'managed/integrations', version: '0.1.0' },
+      }),
+      owner: 'managed/integrations',
+      version: '0.2.0',
+      baseVersion: '0.1.0',
+      manifest: {
+        capabilities: ['calendar.read', 'calendar.freebusy'],
+        runtimeSeams: ['integrations.calendar'],
+      },
+    })
+    const before = workspace.diff(candidate.id)
+    assert.equal(before.baseVersion, '0.1.0')
+    assert.deepEqual(before.capabilities.added, ['calendar.freebusy'])
+    registry.transitionStatus('managed/integrations', '0.1.0', 'disabled')
+    registry.register({
+      owner: 'managed/integrations',
+      version: '0.2.0',
+      provenance: { kind: 'managed', origin: 'human' },
+      status: 'active',
+      evidence: 'Verified',
+      capabilities: [
+        { id: 'calendar.read', permissions: [] },
+        { id: 'calendar.freebusy', permissions: [] },
+      ],
+      runtimeSeams: ['integrations.calendar'],
+    })
+    const after = workspace.diff(candidate.id)
+    assert.deepEqual(after, before)
+  })
+
   it('D. rejects workspace escape attempts', () => {
     const { workspace, area } = seeded()
     const candidate = workspace.create({

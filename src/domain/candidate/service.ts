@@ -139,7 +139,7 @@ export class CandidateService implements CandidateWorkspace, CandidateValidation
     const record = this.require(id)
     const owned = this.registry.list({ owner: record.owner })
     const base = record.baseVersion === undefined
-      ? owned.find((item) => item.status === 'active')
+      ? undefined
       : owned.find((item) => item.version === record.baseVersion)
     return diffAgainstBase(record.manifest, base)
   }

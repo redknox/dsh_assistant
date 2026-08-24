@@ -422,6 +422,40 @@ describe('extension governance and recovery', () => {
     assert.ok(workspace.get(base.id).sealed)
   })
 
+  it('keeps the exact approval fingerprint across activate, uninstall, and reactivate', async () => {
+    const { registry, workspace, governance, root, human } = seeded()
+    const base = ready(workspace, {
+      owner: 'generated/text-slugify',
+      version: '0.1.0',
+      capabilities: ['text.slugify'],
+    })
+    const requested = governance.requestApproval(base.id)
+    root.recordApproval(human, {
+      candidateId: base.id,
+      fingerprint: requested.fingerprint,
+      decision: 'approved-for-exact-diff',
+    })
+    const before = governance.eligibility(base.id)
+    assert.equal(before.ok, true)
+    assert.equal(before.fingerprint, requested.fingerprint)
+    assert.equal(before.denials.some((item) => item.reason === 'approval-stale'), false)
+    await root.activate(base.id, human)
+    const active = governance.eligibility(base.id)
+    assert.equal(registry.get('generated/text-slugify', '0.1.0')?.status, 'active')
+    assert.equal(active.ok, true)
+    assert.equal(active.fingerprint, requested.fingerprint)
+    assert.equal(active.denials.some((item) => item.reason === 'approval-stale'), false)
+    await root.uninstall(human, 'generated/text-slugify', '0.1.0')
+    const disabled = governance.eligibility(base.id)
+    assert.equal(disabled.ok, true)
+    assert.equal(disabled.fingerprint, requested.fingerprint)
+    await root.activate(base.id, human)
+    const reactivated = governance.eligibility(base.id)
+    assert.equal(reactivated.ok, true)
+    assert.equal(reactivated.fingerprint, requested.fingerprint)
+    assert.equal(reactivated.denials.some((item) => item.reason === 'approval-stale'), false)
+  })
+
   it('I3b. uninstall uses declared pluginDependencies and a shared lifecycle mutex', async () => {
     const { registry, workspace, governance, root, human, runtime } = seeded()
     const provider = ready(workspace, {
