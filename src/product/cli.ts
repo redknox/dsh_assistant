@@ -29,11 +29,12 @@ import {
   type RuntimeIdentity,
 } from './runtime-lease.js'
 import { AssistantControlSurface } from '../ui/controller.js'
-import { assertSelectedProfile } from './profile-composition.js'
+import { assertAssistantAdapterContract, assertSelectedProfile } from './profile-composition.js'
 import {
   claimSessionPartition,
   commitRuntimeContext,
   inspectRuntimeContext,
+  rollbackSessionRootOwner,
   type RuntimeContext,
   type SessionPartitionHold,
 } from './runtime-context.js'
@@ -408,23 +409,18 @@ export async function runProductCli(
       return 1
     }
     const hold = lease.hold
-    if (parsed.command === 'start' && runtimeContext) {
-      try {
-        assertSelectedProfile(runtimeContext.profile.value)
-        runtimeContext = commitRuntimeContext(layout, runtimeContext, { allowFixtures })
-      } catch (error) {
-        hold.release()
-        io.error(error instanceof Error ? error.message : 'runtime context commit failed')
-        return 1
-      }
-    }
     let partition: SessionPartitionHold | undefined
     if (parsed.command === 'start' && runtimeContext) {
       try {
+        assertSelectedProfile(runtimeContext.profile.value)
+        assertAssistantAdapterContract()
         partition = claimSessionPartition(runtimeContext)
+        runtimeContext = commitRuntimeContext(layout, runtimeContext, { allowFixtures })
       } catch (error) {
+        if (partition?.createdOwner) rollbackSessionRootOwner(runtimeContext)
+        partition?.release()
         hold.release()
-        io.error(error instanceof Error ? error.message : 'session partition failed')
+        io.error(error instanceof Error ? error.message : 'runtime context commit failed')
         return 1
       }
     }

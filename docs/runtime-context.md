@@ -49,7 +49,7 @@ CLI (--profile, --workspace, --session-root, --session-id)
 
 A Home is stamped on first successful **start** after the Home lease is held. `doctor` and `status` inspect only. Rebinding Profile, Workspace, or Session Root fails closed. Changing Session ID on the same binding is allowed (one selected session at runtime).
 
-Session files are stored under `$SESSION_ROOT/.tars-ng-sessions/<home+profile+workspace identity>/`. The Session Root itself carries an exclusive owner stamp, so a different Home cannot mount or read it.
+Session files are stored under `$SESSION_ROOT/.tars-ng-sessions/<home+profile+workspace identity>/`. The Session Root itself carries an exclusive owner stamp, so a different Home cannot mount or read it. The partition writer lock uses a run token, classifies live/stale/ambiguous like the Home lease, and only a proven-stale lock can be reclaimed. `start` claims that Session Root before it permanently writes the Home binding.
 
 ## Persistence
 

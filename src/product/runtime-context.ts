@@ -1,8 +1,9 @@
 import { createHash, randomBytes } from 'node:crypto'
-import { chmodSync, closeSync, copyFileSync, existsSync, fsyncSync, mkdirSync, openSync, readFileSync, realpathSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs'
+import { chmodSync, closeSync, copyFileSync, existsSync, fsyncSync, mkdirSync, openSync, readFileSync, readdirSync, realpathSync, renameSync, rmSync, statSync, unlinkSync, writeFileSync } from 'node:fs'
 import path from 'node:path'
 import { PRODUCT_CONFIG_SCHEMA_VERSION } from './constants.js'
-import type { ProductHomeLayout } from './home.js'
+import { isSafeRuntimePid, processAlive, type ProductHomeLayout } from './home.js'
+import { runIdEquals } from './runtime-lease.js'
 
 export const RUNTIME_CONTEXT_SCHEMA_VERSION = 1
 export const DEFAULT_PROFILE_NAME = 'assistant'
@@ -263,10 +264,27 @@ export interface SessionRootOwner {
   readonly partitionKey: string
 }
 
+export interface SessionPartitionIdentity {
+  readonly schemaVersion: number
+  readonly pid: number
+  readonly runId: string
+  readonly startedAt: string
+  readonly home: string
+  readonly partitionKey: string
+}
+
 export interface SessionPartitionHold {
   readonly root: string
-  release(): void
+  readonly runId: string
+  readonly createdOwner: boolean
+  release(): boolean
 }
+
+export type SessionPartitionInspection =
+  | { readonly state: 'empty' }
+  | { readonly state: 'held'; readonly identity: SessionPartitionIdentity }
+  | { readonly state: 'stale'; readonly identity: SessionPartitionIdentity }
+  | { readonly state: 'ambiguous'; readonly detail: string }
 
 export function partitionKeyOf(input: {
   readonly home: string
@@ -326,11 +344,11 @@ export function assertSessionRootOwner(
   }
 }
 
-export function stampSessionRootOwner(context: RuntimeContext): void {
+export function stampSessionRootOwner(context: RuntimeContext): boolean {
   const sessionRoot = context.sessionRoot.value
   assertSessionRootOwner(sessionRoot, context)
   const existing = readSessionRootOwner(sessionRoot)
-  if (existing) return
+  if (existing) return false
   const stamp: SessionRootOwner = {
     schemaVersion: SESSION_OWNER_SCHEMA_VERSION,
     home: context.home,
@@ -340,11 +358,13 @@ export function stampSessionRootOwner(context: RuntimeContext): void {
   }
   const file = sessionRootOwnerFile(sessionRoot)
   mkdirSync(sessionRoot, { recursive: true, mode: 0o700 })
+  let created = false
   try {
     const fd = openSync(file, 'wx', 0o600)
     try {
       writeFileSync(fd, `${JSON.stringify(stamp, null, 2)}\n`)
       fsyncSync(fd)
+      created = true
     } finally {
       closeSync(fd)
     }
@@ -352,34 +372,147 @@ export function stampSessionRootOwner(context: RuntimeContext): void {
     if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error
   }
   assertSessionRootOwner(sessionRoot, context)
+  return created
 }
 
-export function claimSessionPartition(context: RuntimeContext): SessionPartitionHold {
-  stampSessionRootOwner(context)
-  const root = sessionPersistenceDirOf(context)
-  mkdirSync(root, { recursive: true, mode: 0o700 })
+export function rollbackSessionRootOwner(context: RuntimeContext): boolean {
+  const owner = readSessionRootOwner(context.sessionRoot.value)
+  if (!owner) return false
+  if (
+    owner.home !== context.home
+    || owner.profileIdentity !== context.profileIdentity
+    || owner.workspaceIdentity !== context.workspaceIdentity
+    || owner.partitionKey !== partitionKeyOf(context)
+  ) {
+    return false
+  }
+  const partition = sessionPersistenceDirOf(context)
+  if (existsSync(partition)) {
+    const leftover = readdirSync(partition).filter((name) => name !== '.writer.lock')
+    if (leftover.length > 0) return false
+  }
   try {
-    chmodSync(root, 0o700)
+    unlinkSync(sessionRootOwnerFile(context.sessionRoot.value))
   } catch {
-    // chmod may fail on some filesystems
+    return false
   }
-  const lockDir = path.join(root, '.writer.lock')
+  return true
+}
+
+export function sessionPartitionLockDir(root: string): string {
+  return path.join(root, '.writer.lock')
+}
+
+export function readSessionPartitionIdentity(root: string): SessionPartitionIdentity | undefined {
+  const file = path.join(sessionPartitionLockDir(root), 'identity.json')
+  if (!existsSync(file)) return undefined
   try {
-    mkdirSync(lockDir, { recursive: false, mode: 0o700 })
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error
-    throw new RuntimeContextError('session partition is already held by another writer')
+    const raw = JSON.parse(readFileSync(file, 'utf8')) as Partial<SessionPartitionIdentity>
+    if (raw.schemaVersion !== SESSION_OWNER_SCHEMA_VERSION) return undefined
+    if (!isSafeRuntimePid(raw.pid) || typeof raw.runId !== 'string' || raw.runId.length < 32) return undefined
+    if (typeof raw.startedAt !== 'string' || typeof raw.home !== 'string' || typeof raw.partitionKey !== 'string') {
+      return undefined
+    }
+    return {
+      schemaVersion: SESSION_OWNER_SCHEMA_VERSION,
+      pid: raw.pid,
+      runId: raw.runId,
+      startedAt: raw.startedAt,
+      home: raw.home,
+      partitionKey: raw.partitionKey,
+    }
+  } catch {
+    return undefined
   }
-  writeFileSync(path.join(lockDir, 'holder.json'), `${JSON.stringify({
-    home: context.home,
-    pid: process.pid,
-    partitionKey: partitionKeyOf(context),
-  }, null, 2)}\n`, { mode: 0o600 })
-  return {
-    root,
-    release() {
-      rmSync(lockDir, { recursive: true, force: true })
-    },
+}
+
+export function inspectSessionPartition(root: string): SessionPartitionInspection {
+  const lockDir = sessionPartitionLockDir(root)
+  if (!existsSync(lockDir)) return { state: 'empty' }
+  const identity = readSessionPartitionIdentity(root)
+  if (!identity) {
+    return { state: 'ambiguous', detail: 'session partition lock exists without a readable identity' }
+  }
+  if (!processAlive(identity.pid)) return { state: 'stale', identity }
+  if (localPartitionHolds.get(root) !== undefined && runIdEquals(localPartitionHolds.get(root)!, identity.runId)) {
+    return { state: 'held', identity }
+  }
+  return { state: 'ambiguous', detail: 'session partition lock belongs to a live unverified writer' }
+}
+
+export function removePartitionLockIfRunId(root: string, runId: string): boolean {
+  const current = readSessionPartitionIdentity(root)
+  if (!current || !runIdEquals(current.runId, runId)) return false
+  const lockDir = sessionPartitionLockDir(root)
+  const tomb = path.join(path.dirname(lockDir), `.writer.lock.${runId}.retired`)
+  try {
+    renameSync(lockDir, tomb)
+    rmSync(tomb, { recursive: true, force: true })
+  } catch {
+    return false
+  }
+  if (localPartitionHolds.get(root) !== undefined && runIdEquals(localPartitionHolds.get(root)!, runId)) {
+    localPartitionHolds.delete(root)
+  }
+  return true
+}
+
+const localPartitionHolds = new Map<string, string>()
+
+export function claimSessionPartition(context: RuntimeContext): SessionPartitionHold {
+  const existedOwner = readSessionRootOwner(context.sessionRoot.value) !== undefined
+  let createdOwner = false
+  try {
+    createdOwner = stampSessionRootOwner(context) && !existedOwner
+    const root = sessionPersistenceDirOf(context)
+    mkdirSync(root, { recursive: true, mode: 0o700 })
+    try {
+      chmodSync(root, 0o700)
+    } catch {
+      // chmod may fail on some filesystems
+    }
+    for (let attempt = 0; attempt < 8; attempt += 1) {
+      const inspected = inspectSessionPartition(root)
+      if (inspected.state === 'held') {
+        throw new RuntimeContextError('session partition is already held by another writer')
+      }
+      if (inspected.state === 'ambiguous') {
+        throw new RuntimeContextError(`session-partition-ambiguous: ${inspected.detail}`)
+      }
+      if (inspected.state === 'stale') {
+        removePartitionLockIfRunId(root, inspected.identity.runId)
+        continue
+      }
+      const lockDir = sessionPartitionLockDir(root)
+      try {
+        mkdirSync(lockDir, { recursive: false, mode: 0o700 })
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error
+        continue
+      }
+      const identity: SessionPartitionIdentity = {
+        schemaVersion: SESSION_OWNER_SCHEMA_VERSION,
+        pid: process.pid,
+        runId: randomBytes(32).toString('hex'),
+        startedAt: new Date().toISOString(),
+        home: context.home,
+        partitionKey: partitionKeyOf(context),
+      }
+      writeJsonAtomic(path.join(lockDir, 'identity.json'), identity)
+      localPartitionHolds.set(root, identity.runId)
+      return {
+        root,
+        runId: identity.runId,
+        createdOwner,
+        release() {
+          return removePartitionLockIfRunId(root, identity.runId)
+        },
+      }
+    }
+    throw new RuntimeContextError('session-partition-ambiguous: could not acquire a verified writer lock')
+  } catch (error) {
+    if (createdOwner) rollbackSessionRootOwner(context)
+    throw error
   }
 }
 

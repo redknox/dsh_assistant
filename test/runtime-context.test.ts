@@ -1,17 +1,21 @@
 import assert from 'node:assert/strict'
-import { chmodSync, existsSync, mkdtempSync, realpathSync, statSync, writeFileSync } from 'node:fs'
+import { spawnSync } from 'node:child_process'
+import { chmodSync, existsSync, mkdtempSync, realpathSync, readFileSync, statSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { describe, it } from 'node:test'
 import { createUserMessage } from '@deepseek-ai/dsh-llm'
 import { withDshAssistantProfile } from './helpers/dsh-profile-loader.js'
 import { parseProductArgv, runProductCli } from '../src/product/cli.js'
 import {
   ASSISTANT_PROFILE_BUNDLES,
-  assertAssistantBundles,
-  assertComposedProfile,
+  assertAssistantAdapterContract,
+  assertMountedAdapterContract,
+  assertOfficialComposedIds,
+  assertOfficialEquivalentToAdapter,
   assertProfilePatchSafe,
-  packagedAssistantBundles,
+  mountedAdapterPluginIds,
 } from '../src/product/profile-composition.js'
 import { ensureProductHome } from '../src/product/home.js'
 import {
@@ -355,13 +359,24 @@ describe('runtime context', () => {
 
   it('matches the official assistant Profile composition and rejects unsafe patches', async () => {
     assert.deepEqual([...ASSISTANT_PROFILE_BUNDLES], ['@deepseek-ai/dsh-base', 'dsh-assistant'])
-    assertAssistantBundles(packagedAssistantBundles())
-    await withDshAssistantProfile(async ({ composedIds }) => {
-      assertComposedProfile(composedIds)
-      assert.equal(composedIds.filter((id) => id === 'dsh-assistant').length, 1)
-    })
-    assert.throws(() => assertComposedProfile(['dsh-assistant', 'dsh-assistant', 'agent', 'system-prompt']), /exactly one dsh-assistant/)
-    assert.throws(() => assertComposedProfile(['agent', 'system-prompt']), /exactly one dsh-assistant/)
+    assertAssistantAdapterContract()
+    const booted = await bootAssistantControl()
+    try {
+      assertMountedAdapterContract(booted.ctx, { safeMode: false, sessionPersistence: false })
+      await withDshAssistantProfile(async ({ composedIds }) => {
+        assertOfficialComposedIds(composedIds)
+        assertOfficialEquivalentToAdapter(composedIds, mountedAdapterPluginIds(booted.ctx))
+        assert.equal(composedIds.filter((id) => id === 'dsh-assistant').length, 1)
+        assert.throws(
+          () => assertOfficialComposedIds(['dsh-assistant', 'agent', 'system-prompt', 'not-mounted-by-production']),
+          /does not match the shipped assistant contract/,
+        )
+      })
+    } finally {
+      await booted.ctx.fiber.dispose()
+    }
+    assert.throws(() => assertOfficialComposedIds(['dsh-assistant', 'dsh-assistant', 'agent', 'system-prompt']), /exactly one dsh-assistant/)
+    assert.throws(() => assertOfficialComposedIds(['agent', 'system-prompt']), /exactly one dsh-assistant/)
     assert.throws(() => assertProfilePatchSafe([{ id: 'dsh-assistant', disabled: true }]), /cannot disable protected plugin/)
     assert.throws(() => assertProfilePatchSafe([{ id: 'dsh-assistant', config: { governance: null } }]), /cannot remove protected/)
   })
@@ -388,5 +403,60 @@ describe('runtime context', () => {
     } finally {
       await booted.ctx.fiber.dispose()
     }
+  })
+
+  it('reclaims a stale session partition after a child process exits without release', () => {
+    const home = isolatedHome()
+    const ready = path.join(home, 'child-ready')
+    const helper = fileURLToPath(new URL('./helpers/claim-partition-and-exit.ts', import.meta.url))
+    const child = spawnSync(process.execPath, ['--import', 'tsx', helper], {
+      encoding: 'utf8',
+      env: { ...process.env, TARS_CHILD_HOME: home, TARS_CHILD_READY: ready },
+    })
+    assert.equal(child.status, 0, child.stderr)
+    assert.equal(existsSync(ready), true)
+    const layout = ensureProductHome(home)
+    const context = inspectRuntimeContext(layout, {}, undefined)
+    const recovered = claimSessionPartition(context)
+    assert.notEqual(recovered.runId, readFileSync(ready, 'utf8').trim())
+    recovered.release()
+  })
+
+  it('does not let a stale release drop the current partition holder', () => {
+    const context = resolveRuntimeContext(ensureProductHome(isolatedHome()), {}, undefined, { allowFixtures: false })
+    const oldHold = claimSessionPartition(context)
+    assert.equal(oldHold.release(), true)
+    const current = claimSessionPartition(context)
+    assert.equal(oldHold.release(), false)
+    assert.throws(() => claimSessionPartition(context), /already held|ambiguous/)
+    assert.equal(current.release(), true)
+    const third = claimSessionPartition(context)
+    third.release()
+  })
+
+  it('does not permanently bind the losing Home when two Homes race one Session Root', () => {
+    const shared = mkdtempSync(path.join(tmpdir(), 'tars-session-race-'))
+    const workspaceA = mkdtempSync(path.join(tmpdir(), 'tars-ws-race-a-'))
+    const workspaceB = mkdtempSync(path.join(tmpdir(), 'tars-ws-race-b-'))
+    const homeA = ensureProductHome(isolatedHome())
+    const homeB = ensureProductHome(isolatedHome())
+    const inspectA = inspectRuntimeContext(homeA, { workspace: workspaceA, sessionRoot: shared }, undefined)
+    const inspectB = inspectRuntimeContext(homeB, { workspace: workspaceB, sessionRoot: shared }, undefined)
+    const holdA = claimSessionPartition(inspectA)
+    assert.throws(() => claimSessionPartition(inspectB), /session-root is bound to another Home/)
+    assert.equal(existsSync(runtimeContextBindingFile(homeB)), false)
+    commitRuntimeContext(homeA, inspectA, { allowFixtures: false })
+    holdA.release()
+    const otherRoot = mkdtempSync(path.join(tmpdir(), 'tars-session-other-'))
+    const retryB = inspectRuntimeContext(homeB, { workspace: workspaceB, sessionRoot: otherRoot }, undefined)
+    const holdB = claimSessionPartition(retryB)
+    commitRuntimeContext(homeB, retryB, { allowFixtures: false })
+    holdB.release()
+    assert.equal(existsSync(runtimeContextBindingFile(homeB)), true)
+    const rebound = inspectRuntimeContext(homeB, {
+      workspace: workspaceB,
+      sessionRoot: otherRoot,
+    }, undefined)
+    assert.equal(rebound.sessionRoot.value, retryB.sessionRoot.value)
   })
 })
