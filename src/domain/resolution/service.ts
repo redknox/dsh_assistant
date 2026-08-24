@@ -1,7 +1,6 @@
 import { isEligible, type CapabilityDiscovery } from '../discovery/index.js'
 import type { DiscoveryFacts } from '../discovery/types.js'
 import {
-  hasTrustedFrontendExtensionSeam,
   isHostOwnedIrreplaceable,
   isHostProductCapability,
   isHostProductChangeNeed,
@@ -208,16 +207,16 @@ export class ResolutionService implements CapabilityResolution {
       }, `Produce a new candidate version of ${domainOwner.owner}.`, 'An existing owner already covers this domain. The smallest change is a new candidate version, not a helper/v2 plugin.', discoveryFacts)
     }
 
-    if (isHostProductCapability(capability) && !hasTrustedFrontendExtensionSeam(request.inventory?.seams)) {
+    if (isHostProductCapability(capability)) {
       steps.push(this.step(
         'adopt-existing',
         false,
-        'Catalog or inactive plugins cannot satisfy host WUI composition without a trusted frontend-extension seam.',
+        'Catalog or inactive plugins cannot satisfy host WUI composition.',
       ))
       steps.push(this.step(
         'implement-provider',
         false,
-        'A generic ui seam or catalog-declared provider is not a trusted frontend-extension seam.',
+        'A caller, catalog, or registry-declared ui seam is not a host frontend-extension runtime.',
       ))
       return this.finish(request, capability, 'host-product-change-required', {
         discoveryFacts,
@@ -227,11 +226,11 @@ export class ResolutionService implements CapabilityResolution {
           ? undefined
           : { owner: domainOwner.owner, version: domainOwner.version, seam: domainOwner.runtimeSeams[0] },
         recommendation: 'Make a trusted host product change; do not generate an isolated tool or evolve this owner.',
-        rationale: 'WUI/frontend composition requires a trusted product change. Catalog plugins and generic ui providers are not a frontend-extension seam.',
+        rationale: 'WUI/frontend composition requires a trusted product change. There is no host-owned frontend-extension execution contract yet.',
         implications: [
           ...this.discoveryImplications(discoveryFacts),
           'This is a proposal only. It does not approve, install, or mount anything.',
-          'Ship the change as reviewed product code, or through a later host-owned frontend-extension seam.',
+          'Ship the change as reviewed product code. Do not treat inventory, catalog, or plugin runtimeSeams as a frontend-extension seam.',
         ],
         assumptions: [],
         unresolved: [],

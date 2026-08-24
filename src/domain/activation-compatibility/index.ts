@@ -6,9 +6,6 @@ export type OwnerReplaceability = 'replaceable' | 'host-owned-irreplaceable'
 
 export const HOST_PRODUCT_DOMAINS = Object.freeze(['ui'] as const)
 
-/** Host-declared executable seam. Catalog `ui` or self-reported capabilities are not this. */
-export const TRUSTED_FRONTEND_EXTENSION_SEAM = 'ui.frontend-extension'
-
 export const HOST_OWNED_IRREPLACEABLE_OWNERS: ReadonlySet<string> = new Set(
   CORE_BOOTSTRAP_INVENTORY
     .filter((item) => (item.services?.length ?? 0) > 0 || (item.providers?.length ?? 0) > 0)
@@ -85,10 +82,6 @@ export function classifyOwnerExecution(facts: OwnerExecutionFacts): {
 export function isHostProductChangeNeed(capability: string, domainOwner?: OwnerExecutionFacts): boolean {
   if (isHostProductCapability(capability)) return true
   return domainOwner !== undefined && isHostOwnedIrreplaceable(domainOwner)
-}
-
-export function hasTrustedFrontendExtensionSeam(hostSeams?: readonly string[]): boolean {
-  return hostSeams?.includes(TRUSTED_FRONTEND_EXTENSION_SEAM) === true
 }
 
 export function evaluateActivationCompatibility(input: ActivationCompatibilityInput): ActivationCompatibilityResult {

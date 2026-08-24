@@ -270,6 +270,54 @@ describe('capability resolution review', () => {
     rejected(review, 'implement-provider')
   })
 
+  it('does not treat a claimed frontend-extension seam as host authority', () => {
+    const { registry, resolver } = seededResolver()
+    registry.register({
+      owner: 'generated/ui-seam-claim',
+      version: '0.1.0',
+      provenance: { kind: 'generated', origin: 'assistant' },
+      evidence: 'Implemented',
+      capabilities: [{ id: 'ui.markdown', permissions: [] }],
+      runtimeSeams: ['ui.frontend-extension', 'ui'],
+      status: 'candidate',
+    })
+    const viaInventory = resolver.review({
+      capability: 'ui.markdown',
+      need: 'render markdown',
+      inventory: { complete: true, seams: ['ui.frontend-extension'] },
+      knownPlugins: [{
+        owner: 'catalog/markdown',
+        version: '1.0.0',
+        capabilities: ['ui.markdown'],
+      }],
+    })
+    assert.equal(viaInventory.kind, 'host-product-change-required')
+    rejected(viaInventory, 'adopt-existing')
+    rejected(viaInventory, 'implement-provider')
+
+    const viaProvider = resolver.review({
+      capability: 'ui.markdown',
+      need: 'render markdown',
+      inventory: { complete: true, seams: ['ui.frontend-extension'] },
+      knownProviders: [{
+        provider: 'markdown',
+        seam: 'ui.frontend-extension',
+        capabilities: ['ui.markdown'],
+      }],
+    })
+    assert.equal(viaProvider.kind, 'host-product-change-required')
+    rejected(viaProvider, 'adopt-existing')
+    rejected(viaProvider, 'implement-provider')
+
+    const viaRegistry = resolver.review({
+      capability: 'ui.markdown',
+      need: 'render markdown',
+      behavior: 'new-renderer',
+    })
+    assert.equal(viaRegistry.kind, 'host-product-change-required')
+    rejected(viaRegistry, 'adopt-existing')
+  })
+
   it('does not let a catalog provider implement ui.markdown', () => {
     const { resolver } = seededResolver()
     const review = resolver.review({
