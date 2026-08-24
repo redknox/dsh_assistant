@@ -4,6 +4,7 @@ export type {
   ActivityKind,
   ApprovalCard,
   ControlStrip,
+  ExtensionRecord,
   MissionControlView,
   ObjectiveStatus,
   ObjectiveView,
@@ -28,6 +29,7 @@ export { deriveSystemState } from './state.js'
 export { projectActivity } from './activity.js'
 export { projectApprovalCards } from './approvals.js'
 export { projectUserCapabilities } from './capabilities.js'
+export { projectExtensions } from './extensions.js'
 export { projectUserPlugins } from './plugins.js'
 export { projectRollbackCard } from './rollback.js'
 export { flattenEffects, secretAccessLabel, summarizeCandidateEffects } from './effects.js'

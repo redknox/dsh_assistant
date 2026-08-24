@@ -368,6 +368,107 @@ describe('TARS-NG mission-control workspace', () => {
     assert.match(renderMissionControlAsHtml(plugins), /data-plugin-id="uninst-generated\/text-slugify@0.1.0"/)
   })
 
+  it('G7. disabled exact revision stays discoverable and reactivatable', () => {
+    const view = projectMissionControl(snapshot({
+      candidates: [{
+        id: 'generated--text-slugify@0.1.0',
+        owner: 'generated/text-slugify',
+        version: '0.1.0',
+        digest: 'abc123',
+        lifecycle: 'sealed',
+        sealed: true,
+        canRequestApproval: false,
+        governanceApproval: 'approved-for-exact-diff',
+        extensionLifecycle: 'DISABLED_REACTIVATABLE',
+      }],
+      extensionApprovals: [{
+        id: 'apr-disabled',
+        candidateId: 'generated--text-slugify@0.1.0',
+        fingerprint: 'fp-disabled',
+        decision: 'approved-for-exact-diff',
+        owner: 'generated/text-slugify',
+        candidateVersion: '0.1.0',
+        digest: 'abc123',
+        capabilitiesAdded: ['text.slugify'],
+        capabilitiesRemoved: [],
+        permissionsAdded: [],
+        permissionsRemoved: [],
+        effects: [],
+        eligibilityOk: true,
+        eligibilityDenials: [],
+      }],
+      registry: [
+        {
+          owner: 'managed/integrations',
+          version: '0.1.0',
+          provenance: 'managed',
+          status: 'active',
+          capabilities: ['calendar.read'],
+        },
+        {
+          owner: 'generated/text-slugify',
+          version: '0.1.0',
+          provenance: 'generated',
+          status: 'disabled',
+          capabilities: ['text.slugify'],
+          tools: ['text_slugify'],
+        },
+      ],
+    }))
+    assert.equal(view.plugins.length, 0)
+    assert.equal(view.extensions.length, 1)
+    assert.equal(view.extensions[0]?.lifecycle, 'DISABLED_REACTIVATABLE')
+    assert.equal(view.activations[0]?.status, 'DISABLED_REACTIVATABLE')
+    assert.equal(view.activations[0]?.title, 'Reactivate extension')
+    assert.match(renderMissionControlAsHtml(view), /data-extension-lifecycle="DISABLED_REACTIVATABLE"/)
+    const superseded = projectMissionControl(snapshot({
+      candidates: [{
+        id: 'generated--text-slugify@0.1.0',
+        owner: 'generated/text-slugify',
+        version: '0.1.0',
+        digest: 'abc123',
+        lifecycle: 'sealed',
+        sealed: true,
+        canRequestApproval: false,
+        governanceApproval: 'approved-for-exact-diff',
+      }],
+      extensionApprovals: [{
+        id: 'apr-old',
+        candidateId: 'generated--text-slugify@0.1.0',
+        fingerprint: 'fp-old',
+        decision: 'approved-for-exact-diff',
+        owner: 'generated/text-slugify',
+        candidateVersion: '0.1.0',
+        digest: 'abc123',
+        capabilitiesAdded: [],
+        capabilitiesRemoved: [],
+        permissionsAdded: [],
+        permissionsRemoved: [],
+        effects: [],
+        eligibilityOk: true,
+        eligibilityDenials: [],
+      }],
+      registry: [
+        {
+          owner: 'generated/text-slugify',
+          version: '0.1.0',
+          provenance: 'generated',
+          status: 'disabled',
+          capabilities: ['text.slugify'],
+        },
+        {
+          owner: 'generated/text-slugify',
+          version: '0.2.0',
+          provenance: 'generated',
+          status: 'active',
+          capabilities: ['text.slugify'],
+        },
+      ],
+    }))
+    assert.equal(superseded.extensions[0]?.lifecycle, 'SUPERSEDED')
+    assert.equal(superseded.activations.length, 0)
+  })
+
   it('G6. READY-state projects a system rollback card only when LKG differs', () => {
     const none = projectMissionControl(snapshot())
     assert.equal(none.rollback, undefined)

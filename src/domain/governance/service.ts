@@ -1050,6 +1050,9 @@ export class GovernanceService implements ExtensionGovernance, ExtensionActivati
     if (conflicts.length > 0) {
       denials.push({ reason: 'ownership-conflict', detail: conflicts.map((item) => item.capability).join(', ') })
     }
+    if (this.isRecoveryRequired()) {
+      denials.push({ reason: 'recovery-required', detail: 'reactivation is blocked while recovery is required' })
+    }
     if (this.safeMode && requiresIsolatedGeneratedRuntime({
       owner: record.owner,
       provenanceKind: record.provenance.kind,

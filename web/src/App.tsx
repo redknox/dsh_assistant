@@ -114,6 +114,9 @@ function WorkspaceNavigation(props: { readonly view: MissionControlView }) {
         <a className="nav-item" href="#memory">
           <Glyph name="memory" /><span>MEMORY</span>
         </a>
+        <a className="nav-item" href="#extensions">
+          <Glyph name="capabilities" /><span>EXTENSIONS</span>
+        </a>
         <a className="nav-item" href="#capabilities">
           <Glyph name="capabilities" /><span>CAPABILITIES</span>
         </a>
@@ -203,7 +206,7 @@ function ActivationCardView(props: {
   readonly onDefer: (card: ActivationCard) => void
 }) {
   const { card } = props
-  const actionable = card.status === 'APPROVED_NOT_ACTIVE' && card.eligibilityOk
+  const actionable = (card.status === 'APPROVED_NOT_ACTIVE' || card.status === 'DISABLED_REACTIVATABLE') && card.eligibilityOk
   return (
     <article
       className="approval-card"
@@ -244,7 +247,9 @@ function ActivationCardView(props: {
             disabled={props.locked}
             onClick={() => props.onActivate(card)}
           >
-            {props.armed ? 'CONFIRM ACTIVATE' : 'ACTIVATE'}
+            {props.armed
+              ? (card.status === 'DISABLED_REACTIVATABLE' ? 'CONFIRM REACTIVATE' : 'CONFIRM ACTIVATE')
+              : (card.status === 'DISABLED_REACTIVATABLE' ? 'REACTIVATE' : 'ACTIVATE')}
           </button>
         </div>
       ) : <p className="approval-status">Status {card.status}</p>}
@@ -525,9 +530,11 @@ function OperationsPanel(props: {
   readonly view: MissionControlView
   readonly locked?: boolean
   readonly confirmingPlugin?: string
+  readonly armedActivation?: string
   readonly onAskUninstall?: (plugin: UserPluginView) => void
   readonly onCancelUninstall?: () => void
   readonly onConfirmUninstall?: (plugin: UserPluginView) => void
+  readonly onActivate?: (card: ActivationCard) => void
 }) {
   return (
     <aside className="ops-panel instrument-panel" id="activity" aria-label="Operational state">
@@ -545,6 +552,52 @@ function OperationsPanel(props: {
         </ol>
       </section>
       <WorkbenchPanel candidates={props.view.candidates ?? []} />
+      <section className="capability-section" id="extensions" aria-labelledby="extensions-title">
+        <h2 id="extensions-title">EXTENSIONS</h2>
+        <ul className="workbench-list" data-extensions="true">
+          {(props.view.extensions ?? []).length === 0 ? (
+            <li className="workbench-item">No generated or user extensions in this home.</li>
+          ) : (props.view.extensions ?? []).map((item) => {
+            const card = props.view.activations.find((activation) => activation.candidateId === item.candidateId)
+            const canAct = item.lifecycle === 'DISABLED_REACTIVATABLE' || item.lifecycle === 'APPROVED_NOT_ACTIVE'
+            return (
+              <li
+                key={item.id}
+                className="workbench-item"
+                data-extension-id={item.id}
+                data-extension-lifecycle={item.lifecycle}
+                data-registry-status={item.registryStatus}
+              >
+                <div className="workbench-identity">{item.owner}@{item.version}</div>
+                <div className="workbench-meta">lifecycle {item.lifecycle.replaceAll('_', ' ')}</div>
+                <div className="workbench-meta">registry {item.registryStatus} · {item.mounted ? 'mounted' : 'unmounted'}</div>
+                <div className="workbench-meta">capabilities {item.capabilities.join(', ') || 'none'}</div>
+                {item.candidateId ? <div className="workbench-meta">candidate {item.candidateId}</div> : null}
+                {item.digest ? <div className="workbench-meta">digest {item.digest}</div> : null}
+                <div className="workbench-meta">
+                  {item.eligibilityOk ? 'eligible' : `not eligible${item.eligibilityDenials.length ? `: ${item.eligibilityDenials.join(', ')}` : ''}`}
+                </div>
+                {item.newerAuthoritative ? <div className="workbench-meta">newer authoritative revision exists</div> : null}
+                {canAct && card && item.eligibilityOk ? (
+                  <div className="approval-actions">
+                    <button
+                      type="button"
+                      className="button button--approval"
+                      data-extension-action={item.lifecycle === 'DISABLED_REACTIVATABLE' ? 'reactivate' : 'activate'}
+                      disabled={props.locked === true}
+                      onClick={() => props.onActivate?.(card)}
+                    >
+                      {props.armedActivation === card.id
+                        ? (item.lifecycle === 'DISABLED_REACTIVATABLE' ? 'CONFIRM REACTIVATE' : 'CONFIRM ACTIVATE')
+                        : (item.lifecycle === 'DISABLED_REACTIVATABLE' ? 'REACTIVATE' : 'ACTIVATE')}
+                    </button>
+                  </div>
+                ) : null}
+              </li>
+            )
+          })}
+        </ul>
+      </section>
       <section className="capability-section" id="capabilities" aria-labelledby="capability-title">
         <h2 id="capability-title">CAPABILITY STATUS</h2>
         <dl className="capability-list">
@@ -629,9 +682,11 @@ function WorkbenchPanel(props: { readonly candidates: readonly WorkbenchProjecti
                 : item.extensionLifecycle === 'APPROVED_NOT_ACTIVE' ? 'approved, not active'
                   : item.extensionLifecycle === 'ACTIVATING' ? 'activating'
                     : item.extensionLifecycle === 'ACTIVATION_FAILED' ? 'activation failed'
-                      : item.extensionLifecycle === 'SUPERSEDED' ? 'superseded'
-                        : item.approvalState === 'approval-requested' || item.canRequestApproval ? 'ready for approval'
-                          : 'not ready for approval'}
+                      : item.extensionLifecycle === 'DISABLED_REACTIVATABLE' ? 'disabled, reactivatable'
+                        : item.extensionLifecycle === 'DISABLED_BLOCKED' ? 'disabled, blocked'
+                          : item.extensionLifecycle === 'SUPERSEDED' ? 'superseded'
+                            : item.approvalState === 'approval-requested' || item.canRequestApproval ? 'ready for approval'
+                              : 'not ready for approval'}
             </div>
             <div className="workbench-diff">
               capabilities {formatDiff(item.diff?.capabilities.added ?? [], item.diff?.capabilities.removed ?? [], item.diff?.capabilities.changed ?? [])}
@@ -767,9 +822,11 @@ export function MissionControlScreen(props: {
           view={view}
           locked={locked}
           confirmingPlugin={props.confirmingPlugin}
+          armedActivation={props.armedActivation}
           onAskUninstall={props.onAskUninstall}
           onCancelUninstall={props.onCancelUninstall}
           onConfirmUninstall={props.onConfirmUninstall}
+          onActivate={props.onActivate}
         />
       </div>
       <ControlStripView view={view} connected={props.connected} />

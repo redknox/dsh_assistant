@@ -3,6 +3,7 @@ import { projectActivity } from './activity.js'
 import { projectActivationCards } from './activations.js'
 import { projectApprovalCards } from './approvals.js'
 import { projectUserCapabilities } from './capabilities.js'
+import { projectExtensions } from './extensions.js'
 import { projectUserPlugins } from './plugins.js'
 import { projectRollbackCard } from './rollback.js'
 import { sanitizeMissionControlView } from './redact.js'
@@ -29,6 +30,7 @@ export function projectMissionControl(input: WorkspaceSnapshotInput): MissionCon
     approvals,
     activations,
     plugins: projectUserPlugins(input),
+    extensions: projectExtensions(input),
     ...(rollback ? { rollback } : {}),
     capabilities: projectUserCapabilities(input),
     memory: input.memory,

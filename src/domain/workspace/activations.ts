@@ -1,5 +1,5 @@
 import type { ActivationCard, WorkspaceSnapshotInput } from './types.js'
-import { extensionLifecycleOf } from './lifecycle.js'
+import { compareOwnerVersion, extensionLifecycleOf } from './lifecycle.js'
 
 export function formatExactDiff(
   added: readonly string[],
@@ -27,8 +27,13 @@ export function projectActivationCards(input: WorkspaceSnapshotInput): readonly 
       candidateId: approval.candidateId,
       lastFailureCandidateId: input.activation?.lastFailureCandidateId,
       eligibilityDenials: approval.eligibilityDenials,
+      newerAuthoritative: input.registry.some((item) => (
+        item.owner === approval.owner
+        && item.status === 'active'
+        && compareOwnerVersion(item.version, approval.candidateVersion) > 0
+      )),
     })
-    if (lifecycle !== 'APPROVED_NOT_ACTIVE' && lifecycle !== 'ACTIVATING') continue
+    if (lifecycle !== 'APPROVED_NOT_ACTIVE' && lifecycle !== 'ACTIVATING' && lifecycle !== 'DISABLED_REACTIVATABLE') continue
     cards.push(selfExtensionActivationCard(approval, lifecycle))
   }
   return cards
@@ -46,7 +51,7 @@ function selfExtensionActivationCard(
   return {
     id: approval.id,
     kind: 'self-extension-activate',
-    title: 'SELF-EXTENSION ACTIVATION',
+    title: status === 'DISABLED_REACTIVATABLE' ? 'Reactivate extension' : 'SELF-EXTENSION ACTIVATION',
     owner: approval.owner,
     version: approval.candidateVersion,
     candidateId: approval.candidateId,
@@ -79,7 +84,9 @@ function selfExtensionActivationCard(
       `Contract    ${approval.runtimeContractVersion || 'unspecified'}`,
       'Generated code runs only in the isolated runner after this trusted activation.',
       eligibilityOk ? 'Eligible for trusted activation.' : `Not eligible: ${denials.join(', ') || 'denied'}`,
-      'Approval did not activate this candidate. Conversation yes cannot activate it.',
+      status === 'DISABLED_REACTIVATABLE'
+        ? 'This reactivates the exact disabled revision. It is not uninstall rollback and does not create a new version.'
+        : 'Approval did not activate this candidate. Conversation yes cannot activate it.',
     ],
   }
 }

@@ -105,6 +105,26 @@ export interface UserCapabilityView {
   }
 }
 
+export interface ExtensionRecord {
+  readonly id: string
+  readonly owner: string
+  readonly version: string
+  readonly candidateId?: string
+  readonly digest?: string
+  readonly provenance: string
+  readonly capabilities: readonly string[]
+  readonly tools: readonly string[]
+  readonly lifecycle: ExtensionLifecycleState
+  readonly registryStatus: string
+  readonly mounted: boolean
+  readonly eligibilityOk: boolean
+  readonly eligibilityDenials: readonly string[]
+  readonly newerAuthoritative: boolean
+  readonly reviewState?: string
+  readonly validationPassed?: boolean
+  readonly approvalDecision?: string
+}
+
 export interface UserPluginView {
   readonly id: string
   readonly owner: string
@@ -191,6 +211,7 @@ export interface MissionControlView {
   readonly approvals: readonly ApprovalCard[]
   readonly activations: readonly ActivationCard[]
   readonly plugins: readonly UserPluginView[]
+  readonly extensions: readonly ExtensionRecord[]
   readonly rollback?: RollbackCard
   readonly capabilities: readonly UserCapabilityView[]
   readonly memory: readonly WorkspaceMemoryItem[]

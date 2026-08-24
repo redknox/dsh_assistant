@@ -111,7 +111,10 @@ export interface WorkbenchServiceOptions {
   readonly restore?: WorkbenchPersistState
   readonly persist?: (state: WorkbenchPersistState) => void
   readonly inventory?: { snapshot(): import('../resolution/types.js').ArchitectureInventory }
-  readonly registry?: { get(owner: string, version: string): { status: string } | undefined }
+  readonly registry?: {
+    get(owner: string, version: string): { status: string } | undefined
+    list(query?: { owner?: string; status?: string }): readonly { owner: string; version: string; status: string }[]
+  }
   readonly activation?: {
     inspect(): {
       state?: string

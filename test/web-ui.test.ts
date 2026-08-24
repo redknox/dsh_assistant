@@ -35,6 +35,7 @@ function fixtureView(overrides: Partial<MissionControlView> = {}): MissionContro
     approvals: [],
     activations: [],
     plugins: [],
+    extensions: [],
     capabilities: [{ area: 'Memory', action: 'remember', status: 'active' }],
     memory: [],
     knowledge: [],
@@ -1368,6 +1369,107 @@ export function apply(ctx) {
         assert.ok(leftover)
         assert.equal(leftover.sealed, true)
         assert.ok(second.ctx.extensionGovernance.inspectApproval(leftover.id))
+      } finally {
+        await second.ctx.fiber.dispose()
+      }
+    } finally {
+      rmSync(home, { recursive: true, force: true })
+    }
+  })
+
+  it('reactivates an exact disabled generated plugin from the Extensions Center', async () => {
+    const home = mkdtempSync(join(tmpdir(), 'tars-reactivate-boot-'))
+    try {
+      await withServer(() => bootAssistantControl({ home }), 'web-ui-reactivate', async (url, _surface, _agent, ctx, recoveryRoot) => {
+        const cookie = await cookieHeader(url)
+        const base = authorGenerated(ctx, 'text.slugify')
+        const card = await approveActivationCard(url, cookie, base.id)
+        assert.equal((await fetch(`${url}/api/activate`, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json', ...authHeaders(cookie) },
+          body: JSON.stringify({
+            id: card.id,
+            candidateId: card.candidateId,
+            digest: card.digest,
+            fingerprint: card.fingerprint,
+            confirm: true,
+          }),
+        })).status, 200)
+        const ready = await fetch(`${url}/api/view`).then((res) => res.json()) as { view: MissionControlView }
+        const plugin = ready.view.plugins.find((item) => item.owner === 'generated/text-slugify')
+        assert.ok(plugin)
+        assert.equal((await fetch(`${url}/api/uninstall`, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json', ...authHeaders(cookie) },
+          body: JSON.stringify({ ...uninstallBody(plugin), confirm: true }),
+        })).status, 200)
+        assert.equal(ctx.tools.get('text_slugify'), undefined)
+        const disabled = await fetch(`${url}/api/view`).then((res) => res.json()) as { view: MissionControlView }
+        assert.equal(disabled.view.plugins.some((item) => item.owner === 'generated/text-slugify'), false)
+        const row = disabled.view.extensions.find((item) => item.owner === 'generated/text-slugify')
+        assert.ok(row)
+        assert.equal(row.lifecycle, 'DISABLED_REACTIVATABLE')
+        const reactivate = disabled.view.activations.find((item) => item.candidateId === row.candidateId)
+        assert.ok(reactivate)
+        assert.equal(reactivate.title, 'Reactivate extension')
+        const markup = renderToStaticMarkup(createElement(MissionControlScreen, {
+          view: disabled.view,
+          connected: true,
+          sending: false,
+          draft: '',
+          onDraft() {},
+          onSend() {},
+          onApprove() {},
+          onReject() {},
+          onRecovery() {},
+        }))
+        assert.match(markup, /data-extension-lifecycle="DISABLED_REACTIVATABLE"/)
+        assert.match(markup, /data-extension-action="reactivate"/)
+        assert.equal(ctx.tools.get('activate_extension'), undefined)
+        const noConfirm = await fetch(`${url}/api/activate`, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json', ...authHeaders(cookie) },
+          body: JSON.stringify({
+            id: reactivate.id,
+            candidateId: reactivate.candidateId,
+            digest: reactivate.digest,
+            fingerprint: reactivate.fingerprint,
+          }),
+        })
+        assert.equal(noConfirm.status, 409)
+        assert.equal((await fetch(`${url}/api/activate`, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json', ...authHeaders(cookie) },
+          body: JSON.stringify({
+            id: reactivate.id,
+            candidateId: reactivate.candidateId,
+            digest: reactivate.digest,
+            fingerprint: reactivate.fingerprint,
+            confirm: true,
+          }),
+        })).status, 200)
+        assert.ok(ctx.tools.get('text_slugify'))
+        assert.equal(ctx.capabilityRegistry.get('generated/text-slugify', '0.1.0')?.status, 'active')
+        const after = await fetch(`${url}/api/view`).then((res) => res.json()) as { view: MissionControlView }
+        assert.ok(after.view.rollback)
+        assert.ok(after.view.rollback.ownerChanges.some((item) => item.owner === 'generated/text-slugify' && item.change === 'disable'))
+        const replay = await fetch(`${url}/api/activate`, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json', ...authHeaders(cookie) },
+          body: JSON.stringify({
+            id: reactivate.id,
+            candidateId: reactivate.candidateId,
+            digest: reactivate.digest,
+            fingerprint: reactivate.fingerprint,
+            confirm: true,
+          }),
+        })
+        assert.equal(replay.status, 409)
+      })
+      const second = await bootAssistantControl({ home })
+      try {
+        assert.equal(second.ctx.capabilityRegistry.get('generated/text-slugify', '0.1.0')?.status, 'active')
+        assert.ok(second.ctx.tools.get('text_slugify'))
       } finally {
         await second.ctx.fiber.dispose()
       }

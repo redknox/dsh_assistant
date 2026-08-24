@@ -221,7 +221,9 @@ export function startWebUiServer(options: WebUiServerOptions): Promise<WebUiServ
     if (card.candidateId !== body.candidateId) return { error: 'stale-candidate' as const }
     if (card.digest !== body.digest) return { error: 'stale-digest' as const }
     if (card.fingerprint !== body.fingerprint) return { error: 'stale-fingerprint' as const }
-    if (card.status !== 'APPROVED_NOT_ACTIVE') return { error: 'stale-activation' as const }
+    if (card.status !== 'APPROVED_NOT_ACTIVE' && card.status !== 'DISABLED_REACTIVATABLE') {
+      return { error: 'stale-activation' as const }
+    }
     return { card }
   }
 
