@@ -1,6 +1,6 @@
 # Runtime Context
 
-Status: **Implemented**. This is the v0.4.0 host-owned Profile / Workspace / Session contract. Multi-session topic chat, third-party install, and Skill lifecycle are **not** Implemented here.
+Status: **Implemented**. This is the v0.4.0 host-owned Profile / Workspace / Session contract. Multi-session topic lifecycle is **Implemented** in [session-catalog.md](./session-catalog.md). Third-party install and Skill lifecycle are **not** Implemented here.
 
 ```text
 Install Harness
@@ -47,7 +47,7 @@ CLI (--profile, --workspace, --session-root, --session-id)
 → defaults: assistant / $HOME/workspace / $HOME/sessions / main
 ```
 
-A Home is stamped on first successful **start** after the Home lease is held. `doctor` and `status` inspect only. Rebinding Profile, Workspace, or Session Root fails closed. Changing Session ID on the same binding is allowed (one selected session at runtime).
+A Home is stamped on first successful **start** after the Home lease is held. `doctor` and `status` inspect only. Rebinding Profile, Workspace, or Session Root fails closed. Changing Session ID on the same binding is allowed. The host Session Catalog records every topic; restart restores the last successfully selected active session. See [session-catalog.md](./session-catalog.md).
 
 Session files are stored under `$SESSION_ROOT/.tars-ng-sessions/<home+profile+workspace identity>/`. The Session Root itself carries an exclusive owner stamp, so a different Home cannot mount or read it. The owner stamp is written only when a Home **binding** can be committed. Unbound recovery (fresh Home + unreadable Profile) uses an ephemeral partition under `$HOME/state/recovery-sessions` and does not stamp the operator Session Root. Stopping recovery deletes that ephemeral partition. `$SESSION_ROOT/.tars-ng-sessions` is a product-owned, owner-only directory: it must be a real directory (not a symlink), its canonical path must stay inside the Session Root, and partitions are checked the same way before mkdir, copy, or delete. A leftover Session Root owner with no Home binding is recovered only when Home, Profile identity, Workspace identity, and partition key all match the current request. Any mismatch fails closed; the owner stamp and existing partitions are left unchanged. v0.3 Homes with neither binding nor owner still take the first-start path. The partition writer lock is published atomically: identity is written and fsynced in a token-named staging directory, then renamed to `.writer.lock`. A visible official lock always has a complete identity. Automatic sweep only removes unpublished `.writer.lock.<token>.staging` leftovers. A published lock with missing, malformed, or unverifiable identity is `ambiguous` and is never deleted by claim. The lock uses a run token, classifies live/stale/ambiguous like the Home lease, and only a proven-stale lock can be reclaimed. `start` claims that Session Root before it permanently writes the Home binding.
 

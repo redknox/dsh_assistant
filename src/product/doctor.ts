@@ -6,7 +6,8 @@ import { inspectCompatibility, type CompatibilityReport } from './compatibility.
 import { PRODUCT_NAME } from './constants.js'
 import { credentialInventory, missingCredentialNames, type CredentialPresence, type EnvFileLoad } from './env.js'
 import type { ProductHomeLayout } from './home.js'
-import { publicRuntimeContextView, type RuntimeContext } from './runtime-context.js'
+import { publicRuntimeContextView, sessionPersistenceDirOf, type RuntimeContext } from './runtime-context.js'
+import { catalogBindingOf, inspectSessionCatalog, inspectSessionJournal, SessionCatalogError } from './session-catalog.js'
 import type { LlmDiagnosis } from './llm.js'
 
 export type IntegrationMode = 'live' | 'fake' | 'unavailable' | 'disabled'
@@ -177,6 +178,7 @@ export function formatDoctorReport(report: DoctorReport): string {
     report.runtimeContext ? `profile-identity: ${report.runtimeContext.profileIdentity}` : undefined,
     report.runtimeContext ? `workspace: ${report.runtimeContext.workspaceLabel} (${report.runtimeContext.workspace.source})` : undefined,
     report.runtimeContext ? `session-id: ${report.runtimeContext.sessionId.value} (${report.runtimeContext.sessionId.source})` : undefined,
+    sessionCatalogLine(report.runtimeContext),
     report.runtimeContext ? `session-persistence: ${publicRuntimeContextView(report.runtimeContext).sessionPersistence}` : undefined,
     report.runtimeContext?.profileCompositionError
       ? `profile-composition: recovery-required (${report.runtimeContext.profileCompositionError})`
@@ -203,4 +205,22 @@ export function formatDoctorReport(report: DoctorReport): string {
     report.operator ? `active: ${report.operator.active.join(', ') || '(none)'}` : undefined,
     report.operator?.lastFailure ? `last-failure: ${report.operator.lastFailure}` : undefined,
   ].filter((item): item is string => item !== undefined).join('\n')
+}
+
+function sessionCatalogLine(runtimeContext: RuntimeContext | undefined): string | undefined {
+  if (!runtimeContext) return undefined
+  try {
+    const binding = catalogBindingOf(runtimeContext)
+    const dir = sessionPersistenceDirOf(runtimeContext)
+    const catalog = inspectSessionCatalog(dir, binding)
+    const journal = inspectSessionJournal(dir, binding)
+    const catalogLine = catalog.health === 'absent'
+      ? 'session-catalog: absent'
+      : `session-catalog: ${catalog.health} (${catalog.activeCount} active, ${catalog.archivedCount} archived, current ${catalog.currentSessionId})`
+    if (!journal) return catalogLine
+    return `${catalogLine}\nsession-journal: ${journal.phase} ${journal.op}`
+  } catch (error) {
+    if (error instanceof SessionCatalogError) return `session-catalog: recovery-required (${error.code})`
+    return 'session-catalog: recovery-required'
+  }
 }

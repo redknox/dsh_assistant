@@ -50,6 +50,7 @@ export interface ActivityItem {
   readonly kind: ActivityKind
   readonly summary: string
   readonly source: string
+  readonly sessionId?: string
 }
 
 export interface ApprovalResolution {
@@ -74,6 +75,7 @@ export interface ApprovalCard {
   readonly status: string
   readonly candidateId?: string
   readonly digest?: string
+  readonly sessionId?: string
 }
 
 export interface ActivationCard {
@@ -257,6 +259,28 @@ export interface MissionControlView {
     readonly safeMode: boolean
     readonly profileCompositionError?: string
   }
+  readonly sessions?: SessionCatalogView
+}
+
+export interface SessionTopicView {
+  readonly id: string
+  readonly title: string
+  readonly lifecycle: 'active' | 'archived'
+  readonly createdAt: string
+  readonly lastActivityAt: string
+  readonly preview?: string
+  readonly persistence: 'persistent' | 'unavailable' | 'recovery-required'
+  readonly current: boolean
+}
+
+export interface SessionCatalogView {
+  readonly schemaVersion: number
+  readonly revision: number
+  readonly currentSessionId: string
+  readonly health: 'ok' | 'absent' | 'recovery-required'
+  readonly activeCount: number
+  readonly archivedCount: number
+  readonly sessions: readonly SessionTopicView[]
 }
 
 export interface WorkbenchProjection {
@@ -382,6 +406,8 @@ export interface WorkspaceSnapshotInput {
   readonly personality: MissionControlView['personality']
   readonly blockedReason?: string
   readonly runtimeContext?: MissionControlView['runtimeContext']
+  readonly sessions?: SessionCatalogView
+  readonly approvalOrigins?: Readonly<Record<string, string>>
 }
 
 export interface ActivationSnapshotView {

@@ -42,7 +42,7 @@ credential: DEEPSEEK_API_KEY
 
 Daily soak surface: loopback Mission-Control Web UI from `tars-ng start` (`http://127.0.0.1:8787`).
 
-`v0.3.0` remains the immutable historical Governance + Mission-Control baseline. Do not retag it. Development toward **v0.4.0 — Runtime Foundation + Governed Extension Baseline** starts with a host-owned Profile / Workspace / Session Runtime Context, then the already-shipped generated-extension lifecycle. Self-development is allowed; self-authorization is not. Multi-session, third-party install, and Skill lifecycle are not claimed by this baseline.
+`v0.3.0` remains the immutable historical Governance + Mission-Control baseline. Do not retag it. Development toward **v0.4.0 — Runtime Foundation + Governed Extension Baseline** starts with a host-owned Profile / Workspace / Session Runtime Context, then topic conversations in one bound context (Session Catalog), then the already-shipped generated-extension lifecycle. Self-development is allowed; self-authorization is not. Third-party install and Skill lifecycle are not claimed by this baseline.
 
 ## Direction after v0.4.0
 

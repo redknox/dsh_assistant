@@ -23,6 +23,7 @@ export function projectActivity(input: WorkspaceSnapshotInput): readonly Activit
         kind: 'RUNNING',
         summary: label,
         source: 'session.tool',
+        ...(input.runtimeContext?.sessionId ? { sessionId: input.runtimeContext.sessionId } : {}),
       })
       continue
     }
@@ -31,6 +32,7 @@ export function projectActivity(input: WorkspaceSnapshotInput): readonly Activit
       kind: event.isError ? 'FAILED' : 'COMPLETED',
       summary: event.isError ? `${label} failed` : completedLabel(event.name, event.text, label),
       source: 'session.tool',
+      ...(input.runtimeContext?.sessionId ? { sessionId: input.runtimeContext.sessionId } : {}),
     })
   }
   for (const ticket of input.pendingConfirmations.filter((item) => item.status === 'pending')) {
@@ -39,6 +41,7 @@ export function projectActivity(input: WorkspaceSnapshotInput): readonly Activit
       kind: 'APPROVAL_REQUIRED',
       summary: `${ticket.capability}.${ticket.operation} waiting for approval`,
       source: 'actionPolicy',
+      ...(input.approvalOrigins?.[ticket.id] ? { sessionId: input.approvalOrigins[ticket.id] } : {}),
     })
   }
   for (const resolution of projectApprovalResolutions(input)) {
@@ -50,6 +53,9 @@ export function projectActivity(input: WorkspaceSnapshotInput): readonly Activit
       kind: resolution.outcome === 'failed' ? 'FAILED' : 'COMPLETED',
       summary: `${target} ${resolution.outcome}`,
       source: 'approval/resolved',
+      ...(input.approvalOrigins?.[resolution.confirmationId]
+        ? { sessionId: input.approvalOrigins[resolution.confirmationId] }
+        : {}),
     })
   }
   if (input.blockedReason) {

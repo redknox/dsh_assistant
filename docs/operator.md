@@ -47,7 +47,7 @@ tars-ng stop
 
 `tars-ng status` reports whether the product is running and, when it is, the Web UI address. It does not print the runtime lease token. `tars-ng stop` authenticates the exact lease holder on loopback with a run-token challenge and does not signal a PID. If the owner does not release the lease, stop reports `stop requested but not confirmed`. A PID is liveness metadata, not process identity. A TARS-NG Home has at most one verified writer.
 
-If the browser disconnects, reconnect; the UI reloads the authoritative `MissionControlView` for the bound Session ID. Conversation history is restored from DSH session persistence. Do not treat browser-local state as approval, activation, or recovery authority.
+If the browser disconnects, reconnect; the UI reloads the authoritative `MissionControlView` for the bound Session ID. Conversation history is restored from DSH session persistence. The Conversations sidebar lists host-owned topics from the Session Catalog; create/switch/rename/archive/restore/delete go through `POST /api/conversations`. Do not treat browser-local state as approval, activation, or recovery authority.
 
 CLI remains authoritative for installation, `doctor`, `status`, `stop`, and recovery when the Web UI itself is unavailable.
 

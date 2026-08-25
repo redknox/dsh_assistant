@@ -38,9 +38,14 @@ import {
   inspectRuntimeContext,
   recoverySessionsDir,
   rollbackSessionRootOwner,
+  RUNTIME_CONTEXT_SCHEMA_VERSION,
+  sessionPersistenceDirOf,
+  writeProductRuntimeSection,
   type RuntimeContext,
   type SessionPartitionHold,
 } from './runtime-context.js'
+import { catalogBindingOf, inspectSessionCatalog, inspectSessionJournal, SessionCatalog, SessionCatalogError, type CatalogJournal } from './session-catalog.js'
+import { LiveSessionHost } from './session-lifecycle.js'
 import { attachWebUiBroadcast, startWebUiServer, type WebUiServer } from './web-ui-server.js'
 
 export interface ProductCliOptions {
@@ -378,6 +383,7 @@ export async function runProductCli(
       runtimeContext ? `profile-identity: ${runtimeContext.profileIdentity}` : 'profile-identity: unresolved',
       runtimeContext ? `workspace: ${runtimeContext.workspaceLabel} (${runtimeContext.workspace.source})` : 'workspace: unresolved',
       runtimeContext ? `session: ${runtimeContext.sessionId.value} (${runtimeContext.sessionId.source})` : 'session: unresolved',
+      catalogStatusLine(runtimeContext),
       inspected.state === 'ambiguous' ? `lease: ambiguous` : `lease: ${inspected.state}`,
     ].join('\n'))
     return 0
@@ -468,6 +474,7 @@ export async function runProductCli(
     const boot = hooks.bootProduct ?? ((homeLayout, fixtures) => defaultBootProduct(homeLayout, fixtures, runtimeContext, parsed.command === 'start'))
     let booted: AssistantControl | undefined
     let handle: Awaited<ReturnType<typeof createAssistantAgent>> | undefined
+    let sessionHost: LiveSessionHost | undefined
     let web: WebUiServer | undefined
     let detach = () => {}
     let writerStillActive = false
@@ -479,17 +486,19 @@ export async function runProductCli(
           await web.close()
           web = undefined
         }
-        let flushed = handle === undefined
-        if (handle !== undefined) {
+        const live = sessionHost?.currentHandle() ?? handle
+        let flushed = live === undefined
+        if (live !== undefined) {
           try {
             if (hooks.flushSession) await hooks.flushSession()
-            else if (booted !== undefined) await booted.ctx.sessions.flush(handle.agent.session)
+            else if (booted !== undefined) await booted.ctx.sessions.flush(live.agent.session as never)
             flushed = true
           } catch {
             flushed = false
           }
-          await handle.dispose()
+          await live.dispose()
           handle = undefined
+          sessionHost = undefined
         }
         if (booted !== undefined) {
           await booted.ctx.fiber.dispose()
@@ -547,9 +556,40 @@ export async function runProductCli(
       if (parsed.once) {
         return compatibility.ok ? 0 : 1
       }
-      const sessionId = runtimeContext?.sessionId.value ?? 'main'
+      let sessionId = runtimeContext?.sessionId.value ?? 'main'
+      let catalog: SessionCatalog | undefined
+      let recoveredJournal: CatalogJournal | undefined
+      if (runtimeContext) {
+        catalog = new SessionCatalog(sessionPersistenceDirOf(runtimeContext), catalogBindingOf(runtimeContext))
+        if (!runtimeContext.ephemeralRecovery) {
+          const started = catalog.resolveStartSession(sessionId)
+          sessionId = started.sessionId
+          recoveredJournal = started.journal
+        }
+      }
       handle = await createAssistantAgent(booted.ctx, sessionId, undefined, runtimeContext?.workspace.value)
-      const surface = new AssistantControlSurface(booted.ctx, sessionId, runtimeContext)
+      const surface = new AssistantControlSurface(booted.ctx, sessionId, runtimeContext, catalog)
+      if (catalog && runtimeContext && handle && !runtimeContext.ephemeralRecovery) {
+        const boundContext = runtimeContext
+        const persistCurrent = (nextId: string) => writeProductRuntimeSection(layout, allowFixtures, {
+          schemaVersion: RUNTIME_CONTEXT_SCHEMA_VERSION,
+          profile: boundContext.profile.value,
+          workspace: boundContext.workspace.value,
+          sessionRoot: boundContext.sessionRoot.value,
+          sessionId: nextId,
+        })
+        if (recoveredJournal) persistCurrent(sessionId)
+        sessionHost = new LiveSessionHost(
+          booted.ctx,
+          surface,
+          catalog,
+          boundContext.workspace.value,
+          persistCurrent,
+          handle,
+          boundContext.safeMode,
+        )
+        if (recoveredJournal) await sessionHost.finishCommittedJournal(recoveredJournal)
+      }
       let requestStop = () => {}
       const stopped = new Promise<void>((resolve) => {
         requestStop = resolve
@@ -560,6 +600,7 @@ export async function runProductCli(
         web = await startWebUiServer({
           surface,
           recoveryRoot: booted.recoveryRoot,
+          ...(sessionHost ? { sessionHost } : {}),
           diagnostics: { persistence: booted.diagnostics.persistence, reasons: booted.diagnostics.reasons },
           runtimeControl: {
             pid: hold.identity.pid,
@@ -625,4 +666,22 @@ export async function runProductCli(
 
   io.error(usage())
   return 1
+}
+
+function catalogStatusLine(runtimeContext: RuntimeContext | undefined): string {
+  if (!runtimeContext) return 'session-catalog: unavailable'
+  try {
+    const binding = catalogBindingOf(runtimeContext)
+    const dir = sessionPersistenceDirOf(runtimeContext)
+    const catalog = inspectSessionCatalog(dir, binding)
+    const journal = inspectSessionJournal(dir, binding)
+    const catalogLine = catalog.health === 'absent'
+      ? 'session-catalog: absent'
+      : `session-catalog: ${catalog.health} (${catalog.activeCount} active, ${catalog.archivedCount} archived)`
+    if (!journal) return catalogLine
+    return `${catalogLine}\nsession-journal: ${journal.phase} ${journal.op}`
+  } catch (error) {
+    if (error instanceof SessionCatalogError) return `session-catalog: recovery-required (${error.code})`
+    return 'session-catalog: recovery-required'
+  }
 }
