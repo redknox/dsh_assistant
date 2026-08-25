@@ -39,6 +39,7 @@ export class AssistantControlSurface {
     private readonly sessionCatalog?: {
       inspect(): MissionControlView['sessions']
       approvalOrigins(): Readonly<Record<string, string>>
+      noteApprovalOrigin?(confirmationId: string, sessionId: string): void
     },
   ) {
     this.currentSessionId = sessionId
@@ -170,12 +171,16 @@ export class AssistantControlSurface {
   }
 
   requestExecute(capability: string, operation: string, payload: Record<string, unknown>) {
-    return this.ctx.actionPolicy.policy.decide({
+    const outcome = this.ctx.actionPolicy.policy.decide({
       capability,
       operation,
       intent: 'execute',
       payload,
     })
+    if (outcome.kind === 'pending_confirmation') {
+      this.sessionCatalog?.noteApprovalOrigin?.(outcome.confirmationId, this.sessionId)
+    }
+    return outcome
   }
 
   private requireAgent() {

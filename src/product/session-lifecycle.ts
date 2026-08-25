@@ -16,6 +16,7 @@ export type SessionLifecycleFault =
   | 'after-prepare-next'
   | 'after-catalog-commit'
   | 'after-persist'
+  | 'after-dispose'
   | 'before-unlink'
 
 export interface SessionHandle {
@@ -24,6 +25,8 @@ export interface SessionHandle {
 }
 
 export class LiveSessionHost {
+  private routeTail: Promise<unknown> = Promise.resolve()
+
   constructor(
     private readonly ctx: Context,
     private readonly surface: AssistantControlSurface,
@@ -32,7 +35,10 @@ export class LiveSessionHost {
     private readonly persistCurrent: (sessionId: string) => void,
     private handle: SessionHandle,
     private readonly safeMode: boolean,
-    private readonly faults: { failAt?: SessionLifecycleFault } = {},
+    private readonly faults: {
+      failAt?: SessionLifecycleFault
+      on?: Partial<Record<SessionLifecycleFault, () => void>>
+    } = {},
   ) {}
 
   currentHandle(): SessionHandle {
@@ -43,106 +49,101 @@ export class LiveSessionHost {
     return this.catalog.inspect()
   }
 
-  async recover(): Promise<PublicSessionCatalog> {
-    const journal = this.catalog.readJournal()
-    if (!journal) return this.catalog.inspect()
-    const stored = this.catalog.load()
-    if (sameSnapshot(stored, journal.previous) && journal.phase === 'prepared') {
-      this.catalog.clearJournal()
-      return this.catalog.inspect()
+  async finishCommittedJournal(journal: CatalogJournal): Promise<void> {
+    if (journal.phase !== 'committed') return
+    if (this.surface.sessionId !== journal.toSessionId) {
+      await this.finishAdopt(journal.toSessionId)
     }
-    if (journal.phase === 'committed' || stored.currentSessionId === journal.toSessionId) {
-      if (this.surface.sessionId !== journal.toSessionId) {
-        await this.finishAdopt(journal.toSessionId)
-      }
-      for (const id of journal.unlink ?? []) this.catalog.discardDeletedPersistence(id)
-      this.catalog.clearJournal()
-      return this.catalog.inspect()
-    }
-      this.catalog.restoreSnapshot(journal.previous)
+    for (const id of journal.unlink ?? []) this.catalog.discardDeletedPersistence(id)
     this.catalog.clearJournal()
-    return this.catalog.inspect()
   }
 
   async create(title: string | undefined, expected: { readonly sessionId: string; readonly revision: number }): Promise<PublicSessionCatalog> {
-    this.assertMutable()
-    this.assertExpected(expected)
-    this.assertIdle()
-    const previous = this.catalog.load()
-    const created = this.catalog.create(title, expected)
-    try {
-      return await this.commitRoute({
+    return this.serialize(async () => {
+      this.assertMutable()
+      this.assertExpected(expected)
+      this.assertIdle()
+      this.capturePendingOrigins()
+      const created = this.catalog.create(title, expected)
+      return this.commitRoute({
         op: 'create',
         toSessionId: created.id,
         expected: { sessionId: expected.sessionId, revision: this.catalog.inspect().revision },
         apply: (nextExpected) => this.catalog.switchTo(created.id, nextExpected),
       })
-    } catch (error) {
-      this.catalog.restoreSnapshot(previous)
-      throw error
-    }
+    })
   }
 
   async switchTo(id: string, expected: { readonly sessionId: string; readonly revision: number }): Promise<PublicSessionCatalog> {
-    this.assertExpected(expected)
-    if (id === this.surface.sessionId) return this.catalog.inspect()
-    this.assertIdle()
-    return this.commitRoute({
-      op: 'switch',
-      toSessionId: id,
-      expected,
-      apply: (nextExpected) => this.catalog.switchTo(id, nextExpected),
+    return this.serialize(async () => {
+      this.assertExpected(expected)
+      if (id === this.surface.sessionId) return this.catalog.inspect()
+      this.assertIdle()
+      return this.commitRoute({
+        op: 'switch',
+        toSessionId: id,
+        expected,
+        apply: (nextExpected) => this.catalog.switchTo(id, nextExpected),
+      })
     })
   }
 
   async rename(id: string, title: string, expected: { readonly sessionId: string; readonly revision: number }): Promise<PublicSessionCatalog> {
-    this.assertMutable()
-    this.assertExpected(expected)
-    return this.catalog.rename(id, title, expected)
+    return this.serialize(async () => {
+      this.assertMutable()
+      this.assertExpected(expected)
+      return this.catalog.rename(id, title, expected)
+    })
   }
 
   async archive(id: string, expected: { readonly sessionId: string; readonly revision: number }): Promise<PublicSessionCatalog> {
-    this.assertMutable()
-    this.assertExpected(expected)
-    const before = this.catalog.inspect()
-    const nextCurrent = before.currentSessionId === id
-      ? before.sessions.find((item) => item.lifecycle === 'active' && item.id !== id)?.id
-      : before.currentSessionId
-    if (nextCurrent === undefined) {
-      throw new SessionCatalogError('last-active', 'the last active conversation cannot be archived')
-    }
-    if (before.currentSessionId === id) this.assertIdle()
-    return this.commitRoute({
-      op: 'archive',
-      toSessionId: nextCurrent,
-      expected,
-      apply: (nextExpected) => this.catalog.archive(id, nextExpected),
+    return this.serialize(async () => {
+      this.assertMutable()
+      this.assertExpected(expected)
+      const before = this.catalog.inspect()
+      const nextCurrent = before.currentSessionId === id
+        ? before.sessions.find((item) => item.lifecycle === 'active' && item.id !== id)?.id
+        : before.currentSessionId
+      if (nextCurrent === undefined) {
+        throw new SessionCatalogError('last-active', 'the last active conversation cannot be archived')
+      }
+      if (before.currentSessionId === id) this.assertIdle()
+      return this.commitRoute({
+        op: 'archive',
+        toSessionId: nextCurrent,
+        expected,
+        apply: (nextExpected) => this.catalog.archive(id, nextExpected),
+      })
     })
   }
 
   async restore(id: string, expected: { readonly sessionId: string; readonly revision: number }): Promise<PublicSessionCatalog> {
-    this.assertMutable()
-    this.assertExpected(expected)
-    return this.catalog.restore(id, expected)
+    return this.serialize(async () => {
+      this.assertMutable()
+      this.assertExpected(expected)
+      return this.catalog.restore(id, expected)
+    })
   }
 
   async delete(id: string, expected: { readonly sessionId: string; readonly revision: number; readonly confirm: boolean }): Promise<PublicSessionCatalog> {
-    this.assertMutable()
-    this.assertExpected(expected)
-    const before = this.catalog.inspect()
-    const nextCurrent = before.currentSessionId === id
-      ? before.sessions.find((item) => item.lifecycle === 'active' && item.id !== id)?.id
-      : before.currentSessionId
-    if (nextCurrent === undefined) {
-      throw new SessionCatalogError('last-active', 'the last active conversation cannot be deleted')
-    }
-    if (before.currentSessionId === id) this.assertIdle()
-    return this.commitRoute({
-      op: 'delete',
-      toSessionId: nextCurrent,
-      expected,
-      unlink: [id],
-      apply: (nextExpected) => this.catalog.delete(id, { ...nextExpected, confirm: expected.confirm }),
+    return this.serialize(async () => {
+      this.assertMutable()
+      this.assertExpected(expected)
+      const before = this.catalog.inspect()
+      const nextCurrent = before.currentSessionId === id
+        ? before.sessions.find((item) => item.lifecycle === 'active' && item.id !== id)?.id
+        : before.currentSessionId
+      if (nextCurrent === undefined) {
+        throw new SessionCatalogError('last-active', 'the last active conversation cannot be deleted')
+      }
+      if (before.currentSessionId === id) this.assertIdle()
+      return this.commitRoute({
+        op: 'delete',
+        toSessionId: nextCurrent,
+        expected,
+        unlink: [id],
+        apply: (nextExpected) => this.catalog.delete(id, { ...nextExpected, confirm: expected.confirm }),
+      })
     })
   }
 
@@ -162,32 +163,41 @@ export class LiveSessionHost {
     readonly unlink?: readonly string[]
   }): Promise<PublicSessionCatalog> {
     const from = this.surface.sessionId
-    const previous = this.catalog.load()
+    this.capturePendingOrigins()
     if (from !== input.toSessionId) await this.flushCurrent()
     this.trip('after-flush')
     const next = from === input.toSessionId ? undefined : await createAssistantAgent(this.ctx, input.toSessionId, undefined, this.workspace)
-    const journal: CatalogJournal = {
-      schemaVersion: 1,
-      op: input.op,
-      fromSessionId: from,
-      toSessionId: input.toSessionId,
-      previous,
-      phase: 'prepared',
-      ...(input.unlink ? { unlink: input.unlink } : {}),
-    }
+    this.trip('after-prepare-next')
+    const previous = this.catalog.load()
+    let adopted = false
+    let applied: SessionCatalogFile | undefined
     try {
-      this.trip('after-prepare-next')
+      const journal: CatalogJournal = {
+        schemaVersion: 1,
+        op: input.op,
+        fromSessionId: from,
+        toSessionId: input.toSessionId,
+        previous,
+        phase: 'prepared',
+        ...(input.unlink ? { unlink: input.unlink } : {}),
+      }
       this.catalog.writeJournal(journal)
       const view = input.apply(input.expected)
-      this.catalog.writeJournal({ ...journal, phase: 'committed' })
+      applied = this.catalog.load()
+      this.catalog.writeJournal({ ...journal, phase: 'committed', intended: applied })
       this.trip('after-catalog-commit')
       if (from !== input.toSessionId) {
-        this.surface.setSessionId(input.toSessionId)
         this.persistCurrent(input.toSessionId)
         this.trip('after-persist')
+        this.surface.setSessionId(input.toSessionId)
         const outgoing = this.handle
         this.handle = next!
-        await outgoing.dispose()
+        try {
+          await outgoing.dispose()
+        } finally {
+          adopted = true
+        }
+        this.trip('after-dispose')
       } else {
         await next?.dispose()
       }
@@ -198,29 +208,46 @@ export class LiveSessionHost {
       this.catalog.clearJournal()
       return view
     } catch (error) {
+      if (adopted) throw error
       if (next && next !== this.handle) await next.dispose().catch(() => undefined)
       const live = this.catalog.load()
-      if (!sameSnapshot(live, previous)) this.catalog.restoreSnapshot(previous)
-      if (this.surface.sessionId !== from) {
-        this.surface.setSessionId(from)
-        this.persistCurrent(from)
+      if (applied && sameSnapshot(live, applied)) {
+        try {
+          this.catalog.restoreSnapshot(previous)
+          this.persistCurrent(from)
+          this.surface.setSessionId(from)
+          this.catalog.clearJournal()
+        } catch {
+          this.catalog.restoreSnapshot(applied)
+        }
       }
-      this.catalog.clearJournal()
       throw error
     }
+  }
+
+  private capturePendingOrigins(): void {
+    const policy = this.ctx.get('actionPolicy') as { policy?: { confirmations(): readonly { readonly id: string; readonly status: string }[] } } | undefined
+    const pending = policy?.policy?.confirmations().filter((item) => item.status === 'pending').map((item) => item.id) ?? []
+    this.noteApprovals(pending)
   }
 
   private async finishAdopt(id: string): Promise<void> {
     const next = await createAssistantAgent(this.ctx, id, undefined, this.workspace)
     const outgoing = this.handle
-    this.surface.setSessionId(id)
     this.persistCurrent(id)
+    this.surface.setSessionId(id)
     this.handle = next
     await outgoing.dispose()
   }
 
   private async flushCurrent(): Promise<void> {
     await this.ctx.sessions.flush(this.handle.agent.session as never)
+  }
+
+  private serialize<T>(work: () => Promise<T>): Promise<T> {
+    const next = this.routeTail.then(work, work)
+    this.routeTail = next.then(() => undefined, () => undefined)
+    return next
   }
 
   private assertExpected(expected: { readonly sessionId: string; readonly revision: number }): void {
@@ -246,6 +273,7 @@ export class LiveSessionHost {
   }
 
   private trip(point: SessionLifecycleFault): void {
+    this.faults.on?.[point]?.()
     if (this.faults.failAt === point) {
       this.faults.failAt = undefined
       throw new SessionCatalogError('injected-fault', point)

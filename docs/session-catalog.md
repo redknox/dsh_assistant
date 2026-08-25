@@ -28,13 +28,15 @@ The browser renders catalog DTOs. It does not invent IDs, storage paths, or cont
 
 Trusted `POST /api/conversations` actions: `create`, `switch`, `rename`, `archive`, `restore`, `delete`.
 
-- Switch/archive/delete journal the previous catalog, then commit the route. A failed step restores the previous catalog and live session. History is unlinked only after the replacement route is live.
+- Switch/archive/delete journal the previous catalog, then commit an intended snapshot. Restart recovers the journal **before** `ensureMigrated` / `resolveBootSession`. A prepared journal rolls back; a committed journal restores the intended current Session and then finishes persist/unlink.
+- After the outgoing Agent is disposed, late failures keep the new route and retry from the committed journal instead of rolling memory back to the old handle.
+- Catalog lifecycle mutations are serialized. Rollback only restores the snapshot this transaction wrote; concurrent preview/origin writes are not overwritten.
 - Conversation posts require the expected Session ID. Catalog mutations require Session ID and revision; omitted tokens are rejected. Create consumes the current revision, so a replay is stale.
 - A running Agent turn returns `busy`; the originating session stays current until it is idle.
-- Approval origins are written once and kept as tombstones after delete. Projection never falls back to the current Session ID.
+- Approval origins are bound when a confirmation is created or before leaving the originating Session. They are written once and kept as tombstones after delete. Projection never falls back to the current Session ID.
 - Delete requires `confirm: true`. The last active conversation cannot be archived or deleted.
 - Safe Mode can inspect and switch; create/rename/archive/restore/delete are frozen. Recovery still inspects the official bound catalog, not the ephemeral recovery session store.
 - A #88 Home with only `main` is migrated to one catalog entry titled `Conversation` without rewriting the Session ID.
 - `currentSessionId` must exist and be active. Missing timestamps, non-integer revisions, or a missing current session fail closed.
 
-`tars-ng status` / `doctor` report catalog health and counts. They do not dump transcripts.
+`tars-ng status` / `doctor` report catalog health, counts, and any incomplete session journal. They do not dump transcripts. Future or malformed journals fail closed.

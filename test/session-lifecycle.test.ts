@@ -35,7 +35,10 @@ async function waitUntil(predicate: () => boolean, timeoutMs = 2000): Promise<vo
   }
 }
 
-async function liveHost(input: { readonly failAt?: import('../src/product/session-lifecycle.js').SessionLifecycleFault } = {}) {
+async function liveHost(input: {
+  readonly failAt?: import('../src/product/session-lifecycle.js').SessionLifecycleFault
+  readonly on?: Partial<Record<import('../src/product/session-lifecycle.js').SessionLifecycleFault, () => void>>
+} = {}) {
   const home = mkdtempSync(path.join(tmpdir(), 'tars-session-host-'))
   const layout = ensureProductHome(home)
   const context = inspectRuntimeContext(layout, {}, undefined)
@@ -158,7 +161,6 @@ describe('Session lifecycle transactions', () => {
       })
       assert.equal(pending.kind, 'pending_confirmation')
       if (pending.kind !== 'pending_confirmation') return
-      host.noteApprovals([pending.confirmationId])
       await host.switchTo(extra.id, { sessionId: 'main', revision: catalog.inspect().revision })
       await surface.deny(pending.confirmationId)
       const view = surface.workspace()
@@ -167,6 +169,82 @@ describe('Session lifecycle transactions', () => {
       await host.delete('main', { sessionId: extra.id, revision: catalog.inspect().revision, confirm: true })
       assert.equal(catalog.approvalOrigin(pending.confirmationId), 'main')
       assert.equal(surface.workspace().approvals.find((item) => item.id === pending.confirmationId)?.sessionId, 'main')
+    } finally {
+      await host.currentHandle().dispose()
+      await control.ctx.fiber.dispose()
+    }
+  })
+
+  it('keeps the new live handle when unlink fails after adopt', async () => {
+    const { catalog, extra, host, surface, control } = await liveHost({ failAt: 'before-unlink' })
+    try {
+      await assert.rejects(
+        () => host.delete(surface.sessionId, { sessionId: 'main', revision: catalog.inspect().revision, confirm: true }),
+        (error: SessionCatalogError) => error.code === 'injected-fault',
+      )
+      assert.equal(surface.sessionId, extra.id)
+      assert.equal(catalog.inspect().currentSessionId, extra.id)
+      assert.equal(host.currentHandle().agent.session && catalog.inspect().currentSessionId, extra.id)
+      assert.equal(catalog.readJournal()?.phase, 'committed')
+      await host.finishCommittedJournal(catalog.readJournal()!)
+      assert.equal(catalog.readJournal(), undefined)
+    } finally {
+      await host.currentHandle().dispose()
+      await control.ctx.fiber.dispose()
+    }
+  })
+
+  it('rolls persist back before the outgoing handle is disposed', async () => {
+    const { catalog, extra, host, surface, control, persisted } = await liveHost({ failAt: 'after-persist' })
+    try {
+      await assert.rejects(
+        () => host.switchTo(extra.id, { sessionId: 'main', revision: catalog.inspect().revision }),
+        (error: SessionCatalogError) => error.code === 'injected-fault',
+      )
+      assert.equal(surface.sessionId, 'main')
+      assert.equal(catalog.inspect().currentSessionId, 'main')
+      assert.equal(persisted.at(-1), 'main')
+    } finally {
+      await host.currentHandle().dispose()
+      await control.ctx.fiber.dispose()
+    }
+  })
+
+  it('does not roll memory back after outgoing dispose fails', async () => {
+    const { catalog, extra, host, surface, control } = await liveHost({ failAt: 'after-dispose' })
+    try {
+      await assert.rejects(
+        () => host.switchTo(extra.id, { sessionId: 'main', revision: catalog.inspect().revision }),
+        (error: SessionCatalogError) => error.code === 'injected-fault',
+      )
+      assert.equal(surface.sessionId, extra.id)
+      assert.equal(catalog.inspect().currentSessionId, extra.id)
+      assert.equal(catalog.readJournal()?.phase, 'committed')
+    } finally {
+      await host.currentHandle().dispose()
+      await control.ctx.fiber.dispose()
+    }
+  })
+
+  it('does not overwrite a concurrent origin write when switch fails stale', async () => {
+    const { catalog, extra, host, surface, control } = await liveHost({
+      failAt: 'after-prepare-next',
+      on: {
+        'after-flush': () => {
+          catalog.noteApprovalOrigin('ticket-during-switch', 'main')
+          catalog.touch('main', 'preview during switch')
+        },
+      },
+    })
+    try {
+      const revision = catalog.inspect().revision
+      await assert.rejects(
+        () => host.switchTo(extra.id, { sessionId: 'main', revision }),
+        (error: SessionCatalogError) => error.code === 'injected-fault',
+      )
+      assert.equal(catalog.approvalOrigin('ticket-during-switch'), 'main')
+      assert.equal(catalog.inspect().sessions.find((item) => item.id === 'main')?.preview, 'preview during switch')
+      assert.equal(surface.sessionId, 'main')
     } finally {
       await host.currentHandle().dispose()
       await control.ctx.fiber.dispose()

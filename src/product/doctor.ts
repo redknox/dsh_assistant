@@ -7,7 +7,7 @@ import { PRODUCT_NAME } from './constants.js'
 import { credentialInventory, missingCredentialNames, type CredentialPresence, type EnvFileLoad } from './env.js'
 import type { ProductHomeLayout } from './home.js'
 import { publicRuntimeContextView, sessionPersistenceDirOf, type RuntimeContext } from './runtime-context.js'
-import { catalogBindingOf, inspectSessionCatalog, SessionCatalogError } from './session-catalog.js'
+import { catalogBindingOf, inspectSessionCatalog, inspectSessionJournal, SessionCatalogError } from './session-catalog.js'
 import type { LlmDiagnosis } from './llm.js'
 
 export type IntegrationMode = 'live' | 'fake' | 'unavailable' | 'disabled'
@@ -210,9 +210,15 @@ export function formatDoctorReport(report: DoctorReport): string {
 function sessionCatalogLine(runtimeContext: RuntimeContext | undefined): string | undefined {
   if (!runtimeContext) return undefined
   try {
-    const catalog = inspectSessionCatalog(sessionPersistenceDirOf(runtimeContext), catalogBindingOf(runtimeContext))
-    if (catalog.health === 'absent') return 'session-catalog: absent'
-    return `session-catalog: ${catalog.health} (${catalog.activeCount} active, ${catalog.archivedCount} archived, current ${catalog.currentSessionId})`
+    const binding = catalogBindingOf(runtimeContext)
+    const dir = sessionPersistenceDirOf(runtimeContext)
+    const catalog = inspectSessionCatalog(dir, binding)
+    const journal = inspectSessionJournal(dir, binding)
+    const catalogLine = catalog.health === 'absent'
+      ? 'session-catalog: absent'
+      : `session-catalog: ${catalog.health} (${catalog.activeCount} active, ${catalog.archivedCount} archived, current ${catalog.currentSessionId})`
+    if (!journal) return catalogLine
+    return `${catalogLine}\nsession-journal: ${journal.phase} ${journal.op}`
   } catch (error) {
     if (error instanceof SessionCatalogError) return `session-catalog: recovery-required (${error.code})`
     return 'session-catalog: recovery-required'

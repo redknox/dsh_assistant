@@ -77,6 +77,7 @@ export interface CatalogJournal {
   readonly toSessionId: string
   readonly previous: SessionCatalogFile
   readonly phase: 'prepared' | 'committed'
+  readonly intended?: SessionCatalogFile
   readonly unlink?: readonly string[]
 }
 
@@ -139,6 +140,65 @@ function generateSessionId(): string {
   return parseSessionId(`t${randomBytes(8).toString('hex')}`)
 }
 
+export function inspectSessionJournal(
+  sessionPersistenceDir: string,
+  binding: SessionCatalogBinding,
+): CatalogJournal | undefined {
+  return readCatalogJournal(sessionCatalogJournalFile(sessionPersistenceDir), binding)
+}
+
+function readCatalogJournal(file: string, binding: SessionCatalogBinding): CatalogJournal | undefined {
+  if (!existsSync(file)) return undefined
+  let raw: unknown
+  try {
+    raw = JSON.parse(readFileSync(file, 'utf8'))
+  } catch {
+    throw new SessionCatalogError('corrupt', 'session catalog journal is corrupt')
+  }
+  if (raw === null || typeof raw !== 'object') {
+    throw new SessionCatalogError('corrupt', 'session catalog journal is corrupt')
+  }
+  const record = raw as Partial<CatalogJournal>
+  if (typeof record.schemaVersion === 'number' && record.schemaVersion > SESSION_CATALOG_JOURNAL_SCHEMA_VERSION) {
+    throw new SessionCatalogError('unsupported-schema', `unsupported session catalog journal schema ${record.schemaVersion}`)
+  }
+  if (record.schemaVersion !== SESSION_CATALOG_JOURNAL_SCHEMA_VERSION
+    || (record.op !== 'create' && record.op !== 'switch' && record.op !== 'archive' && record.op !== 'delete')
+    || (record.phase !== 'prepared' && record.phase !== 'committed')
+    || typeof record.fromSessionId !== 'string'
+    || typeof record.toSessionId !== 'string'
+  ) {
+    throw new SessionCatalogError('corrupt', 'session catalog journal is corrupt')
+  }
+  const fromSessionId = parseSessionId(record.fromSessionId)
+  const toSessionId = parseSessionId(record.toSessionId)
+  const previous = parseCatalogRecord(record.previous, binding)
+  const intended = record.intended === undefined ? undefined : parseCatalogRecord(record.intended, binding)
+  if (record.phase === 'committed' && intended === undefined) {
+    throw new SessionCatalogError('corrupt', 'session catalog journal is missing the committed snapshot')
+  }
+  const unlink = Array.isArray(record.unlink)
+    ? record.unlink.map((item) => parseSessionId(String(item)))
+    : undefined
+  if (unlink) {
+    for (const id of unlink) {
+      if (!previous.sessions.some((item) => item.id === id)) {
+        throw new SessionCatalogError('corrupt', 'session catalog journal unlink is outside the previous snapshot')
+      }
+    }
+  }
+  return {
+    schemaVersion: SESSION_CATALOG_JOURNAL_SCHEMA_VERSION,
+    op: record.op,
+    fromSessionId,
+    toSessionId,
+    previous,
+    phase: record.phase,
+    ...(intended ? { intended } : {}),
+    ...(unlink ? { unlink } : {}),
+  }
+}
+
 export function inspectSessionCatalog(
   sessionPersistenceDir: string,
   binding: SessionCatalogBinding,
@@ -182,6 +242,10 @@ function readCatalogFile(file: string, binding: SessionCatalogBinding): SessionC
   } catch {
     throw new SessionCatalogError('corrupt', 'session catalog is corrupt')
   }
+  return parseCatalogRecord(raw, binding)
+}
+
+function parseCatalogRecord(raw: unknown, binding: SessionCatalogBinding): SessionCatalogFile {
   if (raw === null || typeof raw !== 'object') {
     throw new SessionCatalogError('corrupt', 'session catalog is corrupt')
   }
@@ -488,27 +552,7 @@ export class SessionCatalog {
   }
 
   readJournal(): CatalogJournal | undefined {
-    const file = this.journalFile()
-    if (!existsSync(file)) return undefined
-    try {
-      const raw = JSON.parse(readFileSync(file, 'utf8')) as Partial<CatalogJournal>
-      if (raw.schemaVersion !== SESSION_CATALOG_JOURNAL_SCHEMA_VERSION) return undefined
-      if (raw.op !== 'create' && raw.op !== 'switch' && raw.op !== 'archive' && raw.op !== 'delete') return undefined
-      if (typeof raw.fromSessionId !== 'string' || typeof raw.toSessionId !== 'string') return undefined
-      if (raw.phase !== 'prepared' && raw.phase !== 'committed') return undefined
-      if (raw.previous === null || typeof raw.previous !== 'object') return undefined
-      return {
-        schemaVersion: SESSION_CATALOG_JOURNAL_SCHEMA_VERSION,
-        op: raw.op,
-        fromSessionId: raw.fromSessionId,
-        toSessionId: raw.toSessionId,
-        previous: raw.previous,
-        phase: raw.phase,
-        ...(Array.isArray(raw.unlink) ? { unlink: raw.unlink.filter((item): item is string => typeof item === 'string') } : {}),
-      }
-    } catch {
-      throw new SessionCatalogError('corrupt', 'session catalog journal is corrupt')
-    }
+    return readCatalogJournal(this.journalFile(), this.binding)
   }
 
   writeJournal(journal: CatalogJournal): void {
@@ -522,6 +566,22 @@ export class SessionCatalog {
 
   restoreSnapshot(previous: SessionCatalogFile): void {
     this.write(previous)
+  }
+
+  resolveStartSession(requested: string): { readonly sessionId: string; readonly journal?: CatalogJournal } {
+    const journal = this.readJournal()
+    if (journal?.phase === 'prepared') {
+      this.restoreSnapshot(journal.previous)
+      this.clearJournal()
+      return { sessionId: journal.previous.currentSessionId }
+    }
+    if (journal?.phase === 'committed') {
+      if (journal.intended) this.restoreSnapshot(journal.intended)
+      return { sessionId: journal.intended?.currentSessionId ?? journal.toSessionId, journal }
+    }
+    const id = parseSessionId(requested)
+    this.ensureMigrated(id)
+    return { sessionId: this.resolveBootSession(id) }
   }
 
   private assertExpected(expected?: { readonly sessionId?: string; readonly revision?: number }): SessionCatalogFile {

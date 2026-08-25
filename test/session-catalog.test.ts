@@ -10,6 +10,7 @@ import { ensureProductHome } from '../src/product/home.js'
 import {
   catalogBindingOf,
   inspectSessionCatalog,
+  inspectSessionJournal,
   SessionCatalog,
   SessionCatalogError,
   sessionCatalogFile,
@@ -136,6 +137,81 @@ describe('Session Catalog', () => {
       approvalOrigins: {},
     }, null, 2)}\n`)
     assert.throws(() => inspectSessionCatalog(second.context.sessionPersistenceDir, catalogBindingOf(second.context)), (error: SessionCatalogError) => error.code === 'context-mismatch')
+  })
+
+  it('recovers a committed journal before boot would rewrite current from product.json', () => {
+    const { catalog, context } = catalogFor()
+    catalog.ensureMigrated('main')
+    const extra = catalog.create('Scratch')
+    const previous = catalog.load()
+    catalog.switchTo(extra.id)
+    catalog.writeJournal({
+      schemaVersion: 1,
+      op: 'switch',
+      fromSessionId: 'main',
+      toSessionId: extra.id,
+      previous,
+      intended: catalog.load(),
+      phase: 'committed',
+    })
+    const started = catalog.resolveStartSession('main')
+    assert.equal(started.sessionId, extra.id)
+    assert.equal(catalog.inspect().currentSessionId, extra.id)
+    assert.equal(started.journal?.phase, 'committed')
+  })
+
+  it('recovers a committed delete without resurrecting the deleted session', () => {
+    const { catalog, context } = catalogFor()
+    catalog.ensureMigrated('main')
+    const extra = catalog.create('Scratch')
+    const previous = catalog.load()
+    const deleted = catalog.delete('main', { confirm: true })
+    catalog.writeJournal({
+      schemaVersion: 1,
+      op: 'delete',
+      fromSessionId: 'main',
+      toSessionId: extra.id,
+      previous,
+      intended: catalog.load(),
+      phase: 'committed',
+      unlink: ['main'],
+    })
+    const started = catalog.resolveStartSession('main')
+    assert.equal(started.sessionId, extra.id)
+    assert.equal(catalog.inspect().sessions.some((item) => item.id === 'main'), false)
+    assert.equal(deleted.currentSessionId, extra.id)
+    assert.equal(inspectSessionJournal(context.sessionPersistenceDir, catalogBindingOf(context))?.phase, 'committed')
+  })
+
+  it('rolls a prepared journal back on restart', () => {
+    const { catalog, context } = catalogFor()
+    catalog.ensureMigrated('main')
+    const extra = catalog.create('Scratch')
+    const previous = catalog.load()
+    catalog.switchTo(extra.id)
+    catalog.writeJournal({
+      schemaVersion: 1,
+      op: 'switch',
+      fromSessionId: 'main',
+      toSessionId: extra.id,
+      previous,
+      phase: 'prepared',
+    })
+    const started = catalog.resolveStartSession('main')
+    assert.equal(started.sessionId, 'main')
+    assert.equal(catalog.inspect().currentSessionId, 'main')
+    assert.equal(started.journal, undefined)
+    assert.equal(inspectSessionJournal(context.sessionPersistenceDir, catalogBindingOf(context)), undefined)
+  })
+
+  it('fails closed on a future or malformed journal', () => {
+    const { catalog, context } = catalogFor()
+    catalog.ensureMigrated('main')
+    const file = catalog.journalFile()
+    writeFileSync(file, `${JSON.stringify({ schemaVersion: 99, op: 'switch', fromSessionId: 'main', toSessionId: 'main', previous: catalog.load(), phase: 'committed' }, null, 2)}\n`)
+    assert.throws(() => catalog.readJournal(), (error: SessionCatalogError) => error.code === 'unsupported-schema')
+    writeFileSync(file, `${JSON.stringify({ schemaVersion: 1, op: 'nope', fromSessionId: 'main', toSessionId: 'main', phase: 'prepared' }, null, 2)}\n`)
+    assert.throws(() => catalog.readJournal(), (error: SessionCatalogError) => error.code === 'corrupt')
   })
 
   it('keeps three topic histories isolated across switch', async () => {
