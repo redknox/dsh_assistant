@@ -278,14 +278,22 @@ function assertJournalTransition(journal: CatalogJournal): void {
     }
   } else if (op === 'delete') {
     const removed = previous.sessions.filter((item) => sessionOf(intended, item.id) === undefined).map((item) => item.id)
+    const added = intended.sessions.filter((item) => sessionOf(previous, item.id) === undefined)
     const removedId = removed[0]
-    if (removed.length !== 1 || removedId === undefined || removedId !== unlink?.[0]) {
+    if (removed.length !== 1 || removedId === undefined || removedId !== unlink?.[0] || added.length !== 0) {
       throw new SessionCatalogError('corrupt', 'delete journal must remove exactly the unlinked session')
+    }
+    if (previous.sessions.some((item) => item.id !== removedId && sessionOf(intended, item.id)?.lifecycle !== item.lifecycle)) {
+      throw new SessionCatalogError('corrupt', 'delete journal cannot change remaining session lifecycle')
     }
   } else if (op === 'create') {
     const added = intended.sessions.filter((item) => sessionOf(previous, item.id) === undefined)
-    if (added.length !== 1 || added[0]?.id !== toSessionId) {
+    const removed = previous.sessions.filter((item) => sessionOf(intended, item.id) === undefined)
+    if (added.length !== 1 || added[0]?.id !== toSessionId || removed.length !== 0) {
       throw new SessionCatalogError('corrupt', 'create journal must add exactly the target session')
+    }
+    if (previous.sessions.some((item) => sessionOf(intended, item.id)?.lifecycle !== item.lifecycle)) {
+      throw new SessionCatalogError('corrupt', 'create journal cannot change existing session lifecycle')
     }
   }
 }

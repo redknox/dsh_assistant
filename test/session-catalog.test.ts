@@ -223,6 +223,59 @@ describe('Session Catalog', () => {
     assert.equal(catalog.inspect().currentSessionId, extra.id)
   })
 
+  it('rejects a create journal that also drops an existing session', () => {
+    const { catalog } = catalogFor()
+    catalog.ensureMigrated('main')
+    const extra = catalog.create('Scratch')
+    const previous = catalog.load()
+    const created = catalog.createAndSwitch('t1111111111111111', 'New')
+    const intended = {
+      ...catalog.load(),
+      sessions: catalog.load().sessions.filter((item) => item.id !== extra.id),
+    }
+    assert.throws(() => catalog.writeJournal({
+      schemaVersion: 1,
+      op: 'create',
+      fromSessionId: 'main',
+      toSessionId: created.currentSessionId,
+      previous,
+      intended,
+      phase: 'committed',
+    }), (error: SessionCatalogError) => error.code === 'corrupt')
+  })
+
+  it('rejects a delete journal that also injects a new session', () => {
+    const { catalog } = catalogFor()
+    catalog.ensureMigrated('main')
+    const extra = catalog.create('Scratch')
+    const previous = catalog.load()
+    catalog.delete('main', { confirm: true })
+    const live = catalog.load()
+    const at = extra.createdAt
+    const intended = {
+      ...live,
+      revision: live.revision + 1,
+      sessions: [...live.sessions, {
+        id: 't2222222222222222',
+        title: 'Injected',
+        lifecycle: 'active' as const,
+        createdAt: at,
+        lastActivityAt: at,
+        persistence: 'persistent' as const,
+      }],
+    }
+    assert.throws(() => catalog.writeJournal({
+      schemaVersion: 1,
+      op: 'delete',
+      fromSessionId: 'main',
+      toSessionId: extra.id,
+      previous,
+      intended,
+      phase: 'committed',
+      unlink: ['main'],
+    }), (error: SessionCatalogError) => error.code === 'corrupt')
+  })
+
   it('keeps a newer successor catalog instead of restoring a stale intended snapshot', () => {
     const { catalog } = catalogFor()
     catalog.ensureMigrated('main')

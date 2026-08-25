@@ -175,12 +175,12 @@ export class LiveSessionHost {
   }): Promise<PublicSessionCatalog> {
     const from = this.surface.sessionId
     this.routing = true
-    this.capturePendingOrigins()
     let next: SessionHandle | undefined
     let adopted = false
     let applied: SessionCatalogFile | undefined
     let previous: SessionCatalogFile | undefined
     try {
+      this.capturePendingOrigins()
       if (from !== input.toSessionId) await this.flushCurrent()
       await this.trip('after-flush')
       next = from === input.toSessionId ? undefined : await createAssistantAgent(this.ctx, input.toSessionId, undefined, this.workspace)

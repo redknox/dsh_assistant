@@ -269,6 +269,34 @@ describe('Session lifecycle transactions', () => {
     }
   })
 
+  it('clears the routing gate when origin capture fails', async () => {
+    const { catalog, extra, host, surface, control } = await liveHost()
+    try {
+      const pending = surface.requestExecute('calendar', 'create_event', {
+        calendarId: 'primary',
+        title: 'Hold',
+        start: '2026-08-21T09:00:00.000Z',
+        end: '2026-08-21T10:00:00.000Z',
+      })
+      assert.equal(pending.kind, 'pending_confirmation')
+      const original = catalog.noteApprovalOrigin.bind(catalog)
+      catalog.noteApprovalOrigin = () => {
+        throw new SessionCatalogError('corrupt', 'origin write failed')
+      }
+      await assert.rejects(
+        () => host.switchTo(extra.id, { sessionId: 'main', revision: catalog.inspect().revision }),
+        (error: SessionCatalogError) => error.code === 'corrupt',
+      )
+      catalog.noteApprovalOrigin = original
+      host.assertAcceptingMessages()
+      await host.switchTo(extra.id, { sessionId: 'main', revision: catalog.inspect().revision })
+      assert.equal(surface.sessionId, extra.id)
+    } finally {
+      await host.currentHandle().dispose()
+      await control.ctx.fiber.dispose()
+    }
+  })
+
   it('does not overwrite a concurrent origin write when switch fails stale', async () => {
     const { catalog, extra, host, surface, control } = await liveHost({
       failAt: 'after-prepare-next',
