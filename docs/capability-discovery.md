@@ -101,3 +101,5 @@ Checked:
 Recommendation: ADOPT EXISTING community/weather-kit
 Not done: install, import, approve, or mount.
 ```
+
+Discovery != Import != Validation != Approval != Activation. An eligible catalog record remains a recommendation until a trusted operator imports an exact local bundle. Import does not approve or activate. Marketplace search and remote catalog sync are out of scope.

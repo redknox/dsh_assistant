@@ -25,3 +25,13 @@ export class ValidationPolicyError extends CandidateContractError {
     this.name = 'ValidationPolicyError'
   }
 }
+
+export class ImportLocalError extends CandidateContractError {
+  readonly code: string
+
+  constructor(code: string, message: string) {
+    super(message)
+    this.name = 'ImportLocalError'
+    this.code = code
+  }
+}

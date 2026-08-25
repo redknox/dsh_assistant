@@ -42,7 +42,7 @@ credential: DEEPSEEK_API_KEY
 
 Daily soak surface: loopback Mission-Control Web UI from `tars-ng start` (`http://127.0.0.1:8787`).
 
-`v0.3.0` remains the immutable historical Governance + Mission-Control baseline. Do not retag it. Development toward **v0.4.0 — Runtime Foundation + Governed Extension Baseline** starts with a host-owned Profile / Workspace / Session Runtime Context, then topic conversations in one bound context (Session Catalog), then the already-shipped generated-extension lifecycle. Self-development is allowed; self-authorization is not. Third-party install and Skill lifecycle are not claimed by this baseline.
+`v0.3.0` remains the immutable historical Governance + Mission-Control baseline. Do not retag it. Development toward **v0.4.0 — Runtime Foundation + Governed Extension Baseline** starts with a host-owned Profile / Workspace / Session Runtime Context, then topic conversations in one bound context (Session Catalog), then the generated-extension lifecycle, then **governed local third-party import**. Self-development is allowed; self-authorization is not. Marketplace discovery remains future. Skill lifecycle is the next Issue and is not claimed here.
 
 ## Direction after v0.4.0
 
@@ -52,7 +52,7 @@ The directional milestones are:
 
 | Milestone | Product question |
 | --- | --- |
-| **v0.4.0 — Runtime Foundation + Governed Extension Baseline** | Can TARS-NG bind one Home to a Profile, Workspace, and durable current Session, then construct, validate, review, approve, activate, observe, and recover a generated capability without self-authorization? |
+| **v0.4.0 — Runtime Foundation + Governed Extension Baseline** | Can TARS-NG bind one Home to a Profile, Workspace, and durable current Session, then construct or locally import, validate, review, approve, activate, observe, and recover a generated or third-party capability without self-authorization? |
 | **Typed Capability Broker** | Can a generated capability safely compose narrowly scoped host operations without receiving arbitrary runtime, filesystem, network, process, or secret access? |
 | **Domain Construction Slice** | Can a professional who does not know TypeScript or DSH describe one bounded domain need and obtain an explicit, testable, governed capability? |
 | **Host-Rendered Domain UI** | Can that governed capability produce a useful professional work surface without creating frontend-owned authority or state? |

@@ -15,7 +15,7 @@ export type LifecycleStatus = (typeof LIFECYCLE_STATUSES)[number]
 export const APPROVAL_STATES = ['unreviewed', 'rejected', 'approved-for-this-diff'] as const
 export type ApprovalState = (typeof APPROVAL_STATES)[number]
 
-export const PROVENANCE_KINDS = ['managed', 'generated'] as const
+export const PROVENANCE_KINDS = ['managed', 'generated', 'third-party'] as const
 export type ProvenanceKind = (typeof PROVENANCE_KINDS)[number]
 
 export const PROVENANCE_ORIGINS = ['human', 'assistant', 'import'] as const

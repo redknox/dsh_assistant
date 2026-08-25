@@ -37,6 +37,9 @@ export function assertChangeReview(review: ResolutionReview): void {
 }
 
 export function defaultProvenance(review: ResolutionReview, owner: string): ExtensionProvenance {
+  if (owner.startsWith('third-party/')) {
+    return { kind: 'third-party', origin: 'import' }
+  }
   if (review.kind === 'new-plugin' || owner.startsWith('generated/')) {
     return { kind: 'generated', origin: 'assistant' }
   }
@@ -102,7 +105,9 @@ function normalizePluginDependencies(input?: readonly PluginCapabilityDependency
 function resolveRuntimeContractVersion(provenanceKind: string, requested?: string): string | undefined {
   if (requested === '') return undefined
   if (requested !== undefined) return requested
-  return provenanceKind === 'generated' ? 'generated-extension-api/v1' : undefined
+  return provenanceKind === 'generated' || provenanceKind === 'third-party'
+    ? 'generated-extension-api/v1'
+    : undefined
 }
 
 export function emptyOperationalEffects(): OperationalEffects {

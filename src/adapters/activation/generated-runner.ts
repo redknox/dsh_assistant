@@ -71,7 +71,10 @@ export class IsolatedGeneratedRunner {
       return { ok: false, diagnostics }
     }
     try {
-      if (this.input.owner.startsWith('generated/') && this.input.runtimeContractVersion !== GENERATED_EXTENSION_API_V1) {
+      if (
+        (this.input.owner.startsWith('generated/') || this.input.owner.startsWith('third-party/'))
+        && this.input.runtimeContractVersion !== GENERATED_EXTENSION_API_V1
+      ) {
         const diagnostics = this.input.runtimeContractVersion === undefined
           ? 'generated activation refused: missing host-owned authoring contract'
           : `generated activation refused: unsupported authoring contract ${this.input.runtimeContractVersion}`

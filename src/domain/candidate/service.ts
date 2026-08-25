@@ -1,6 +1,7 @@
 import path from 'node:path'
 import type { RegistryReadModel } from '../resolution/types.js'
 import { diffAgainstBase } from './diff.js'
+import { isImportedThirdParty } from '../generated-runtime/trust.js'
 import { CandidateContractError, SealedCandidateError, WorkspaceEscapeError } from './errors.js'
 import { ensureDir, listSourceFiles, readSourceFile, removeTree, writeSourceFile } from './files.js'
 import { assertChangeReview, defaultProvenance, normalizeManifest } from './manifest.js'
@@ -62,13 +63,16 @@ export class CandidateService implements CandidateWorkspace, CandidateValidation
     const workspaceRoot = path.join(this.areaRoot, id)
     ensureDir(workspaceRoot)
     writeSourceFile(workspaceRoot, 'candidate.manifest.json', `${JSON.stringify(manifest, null, 2)}\n`)
+    for (const [relativePath, content] of Object.entries(input.files ?? {})) {
+      writeSourceFile(workspaceRoot, relativePath, content)
+    }
     const record: MutableCandidate = {
       id,
       owner: manifest.owner,
       version: manifest.version,
       baseVersion: manifest.baseVersion,
       provenance,
-      lifecycle: 'planned',
+      lifecycle: input.files !== undefined && Object.keys(input.files).length > 0 ? 'developing' : 'planned',
       workspaceRoot,
       manifest,
       sealed: false,
@@ -88,6 +92,7 @@ export class CandidateService implements CandidateWorkspace, CandidateValidation
 
   writeFile(id: string, relativePath: string, content: string): CandidateRecord {
     const record = this.require(id)
+    this.assertImportedReadOnly(record)
     this.assertMutable(record)
     writeSourceFile(record.workspaceRoot, relativePath, content)
     const next = this.snapshot(this.markDeveloping(record))
@@ -109,6 +114,7 @@ export class CandidateService implements CandidateWorkspace, CandidateValidation
 
   setManifest(id: string, manifest: CandidateManifestInput): CandidateRecord {
     const record = this.require(id)
+    this.assertImportedReadOnly(record)
     this.assertMutable(record)
     record.manifest = normalizeManifest(
       {
@@ -189,6 +195,16 @@ export class CandidateService implements CandidateWorkspace, CandidateValidation
     const record = this.records.get(id)
     if (record === undefined) throw new CandidateContractError(`unknown candidate: ${id}`)
     return record
+  }
+
+  private assertImportedReadOnly(record: MutableCandidate): void {
+    if (isImportedThirdParty({
+      owner: record.owner,
+      provenanceKind: record.provenance.kind,
+      origin: record.provenance.origin,
+    })) {
+      throw new CandidateContractError('imported third-party candidate is read-only; import a new version')
+    }
   }
 
   private assertMutable(record: MutableCandidate): void {

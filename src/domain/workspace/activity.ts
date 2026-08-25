@@ -92,6 +92,15 @@ export function projectActivity(input: WorkspaceSnapshotInput): readonly Activit
       source: 'extensionActivation',
     })
   }
+  for (const candidate of input.candidates ?? []) {
+    if (candidate.provenance?.kind !== 'third-party' && candidate.provenance?.origin !== 'import') continue
+    items.push({
+      id: `import-${candidate.id}`,
+      kind: 'COMPLETED',
+      summary: `Third-party candidate imported ${candidate.owner}@${candidate.version}`,
+      source: 'candidate.import',
+    })
+  }
   return items
 }
 

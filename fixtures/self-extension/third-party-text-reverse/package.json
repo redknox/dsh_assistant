@@ -1,0 +1,10 @@
+{
+  "name": "text-reverse",
+  "version": "1.0.0",
+  "type": "module",
+  "main": "src/plugin.js",
+  "tarsNg": {
+    "capability": "text.reverse",
+    "tools": ["text_reverse"]
+  }
+}

@@ -1245,7 +1245,10 @@ export class GovernanceService implements ExtensionGovernance, ExtensionActivati
 }
 
 function missingHostAuthoringContract(record: CandidateRecord): boolean {
-  const generated = record.provenance.kind === 'generated' || record.owner.startsWith('generated/')
+  const generated = record.provenance.kind === 'generated'
+    || record.provenance.kind === 'third-party'
+    || record.owner.startsWith('generated/')
+    || record.owner.startsWith('third-party/')
   return generated && record.manifest.runtimeContractVersion !== GENERATED_EXTENSION_API_V1
 }
 

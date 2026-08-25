@@ -390,5 +390,35 @@ describe('product package and profile', () => {
       })
     }
     assert.equal(existsSync(pidFile), false)
+
+    const outside = mkdtempSync(join(tmpdir(), 'tars-ng-third-party-'))
+    mkdirSync(join(outside, 'src'), { recursive: true })
+    writeFileSync(join(outside, 'package.json'), `${JSON.stringify({
+      name: 'text-reverse',
+      version: '1.0.0',
+      type: 'module',
+      main: 'src/plugin.js',
+      tarsNg: { capability: 'text.reverse', tools: ['text_reverse'] },
+    }, null, 2)}\n`)
+    writeFileSync(join(outside, 'src', 'plugin.js'), `export function apply(ctx) {
+  const dispose = ctx.tools.register({
+    name: 'text_reverse',
+    description: 'Reverse text',
+    parameters: { text: { type: 'string', required: true } },
+    output: { schema: { type: 'string' }, render(_a, v) { return [{ type: 'text', text: String(v) }] } },
+    async execute(args) { return String(args.text ?? '').split('').reverse().join('') },
+  })
+  ctx.effect(() => dispose)
+}
+`)
+    assert.equal(outside.startsWith(pkgRoot), false)
+    const imported = execFileSync(bin, ['self-extension', 'import-local', outside], { encoding: 'utf8', env })
+    assert.match(imported, /"status": "imported"/)
+    assert.match(imported, /"owner": "third-party\/text-reverse"/)
+    assert.match(imported, /"origin": "import"/)
+    assert.doesNotMatch(imported, /src\/product|tsx/)
+    const doctorAfter = execFileSync(bin, ['doctor', '--home', productHome], { encoding: 'utf8', env })
+    assert.match(doctorAfter, /third-party-imported: 1/)
+    assert.match(doctorAfter, /third-party-active: 0/)
   })
 })

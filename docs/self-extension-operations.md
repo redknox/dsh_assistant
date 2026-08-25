@@ -32,6 +32,7 @@ self-extension status
 self-extension rollback
 self-extension disable <owner> <version>
 self-extension migrate-authoring-contract <id>
+self-extension import-local <directory>
 self-extension safe-mode enter|status|exit
 self-extension diagnostics
 self-extension lkg

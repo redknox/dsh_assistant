@@ -15,6 +15,8 @@ describe('self-extension contract', () => {
     assert.match(text, /May I change it\?/)
     assert.match(text, /managed\/\*/)
     assert.match(text, /generated\/\*/)
+    assert.match(text, /third-party\/\*/)
+    assert.match(text, /import-local/)
     assert.match(text, /Capability Resolution Review/)
     assert.match(text, /Capability \+ Permission Diff/)
     assert.match(text, /User Approval/)

@@ -38,7 +38,13 @@ function inspectPackage(root: string, generatedV1: boolean): ValidationStageResu
     return stage('package.inspect', 'not-applicable', 'No package.json in the candidate workspace.')
   }
   const raw = readFileSync(pkgPath, 'utf8')
-  let parsed: { scripts?: Record<string, string>; dependencies?: Record<string, string>; devDependencies?: Record<string, string> }
+  let parsed: {
+    scripts?: Record<string, string>
+    dependencies?: Record<string, string>
+    devDependencies?: Record<string, string>
+    optionalDependencies?: Record<string, string>
+    peerDependencies?: Record<string, string>
+  }
   try {
     parsed = JSON.parse(raw) as typeof parsed
   } catch {
@@ -46,7 +52,12 @@ function inspectPackage(root: string, generatedV1: boolean): ValidationStageResu
   }
   const scripts = parsed.scripts ?? {}
   const lifecycle = Object.keys(scripts).filter((name) => LIFECYCLE_SCRIPTS.includes(name))
-  const deps = { ...parsed.dependencies, ...parsed.devDependencies }
+  const deps = {
+    ...parsed.dependencies,
+    ...parsed.devDependencies,
+    ...parsed.optionalDependencies,
+    ...parsed.peerDependencies,
+  }
   const diagnostics = JSON.stringify({
     dependencies: Object.keys(deps),
     lifecycleScripts: lifecycle.map((name) => ({ name, command: scripts[name], executed: false, risk: 'blocked' })),
@@ -103,7 +114,10 @@ function inspectActivationCompatibility(
 }
 
 function inspectRuntimeContract(record: CandidateRecord): ValidationStageResult {
-  const generated = record.provenance.kind === 'generated' || record.owner.startsWith('generated/')
+  const generated = record.provenance.kind === 'generated'
+    || record.provenance.kind === 'third-party'
+    || record.owner.startsWith('generated/')
+    || record.owner.startsWith('third-party/')
   const version = record.manifest.runtimeContractVersion
   if (generated) {
     if (version !== 'generated-extension-api/v1') {

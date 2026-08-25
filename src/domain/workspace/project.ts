@@ -94,6 +94,6 @@ function workKind(kind: 'user' | 'assistant' | 'tool_call' | 'tool_result'): Wor
 
 function generatedDisabled(input: WorkspaceSnapshotInput): readonly string[] {
   return input.registry
-    .filter((record) => record.provenance === 'generated')
+    .filter((record) => record.provenance === 'generated' || record.provenance === 'third-party')
     .map((record) => `${record.owner}@${record.version}`)
 }

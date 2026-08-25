@@ -118,6 +118,7 @@ See [ARCHITECTURE.md](./ARCHITECTURE.md) for layers. See [ENGINEERING.md](./ENGI
 | Runtime Context (Profile / Workspace / Session) | yes (product start) | **Implemented** | [docs/runtime-context.md](./docs/runtime-context.md) |
 | Topic conversations / Session Catalog | yes (product start) | **Implemented** | [docs/session-catalog.md](./docs/session-catalog.md) |
 | Generated authoring contract `generated-extension-api/v1` | no | **Implemented** | Host-owned; [docs/generated-extension-api-v1.md](./docs/generated-extension-api-v1.md) |
+| Local third-party import (`import-local`) | no | **Implemented** | CLI-only quarantine into an inactive `third-party/import` candidate. Marketplace and Skills are out of scope. |
 | TARS-NG personality + Mission-Control workspace | no | **Verified** | [docs/tars-ng-personality.md](./docs/tars-ng-personality.md) |
 | Production persistence, public npm publish | no | **Unsupported** | Package is `private` |
 
