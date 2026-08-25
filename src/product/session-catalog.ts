@@ -136,7 +136,7 @@ function parseStoredTitle(value: unknown): string {
   }
 }
 
-function generateSessionId(): string {
+export function generateSessionId(): string {
   return parseSessionId(`t${randomBytes(8).toString('hex')}`)
 }
 
@@ -180,14 +180,7 @@ function readCatalogJournal(file: string, binding: SessionCatalogBinding): Catal
   const unlink = Array.isArray(record.unlink)
     ? record.unlink.map((item) => parseSessionId(String(item)))
     : undefined
-  if (unlink) {
-    for (const id of unlink) {
-      if (!previous.sessions.some((item) => item.id === id)) {
-        throw new SessionCatalogError('corrupt', 'session catalog journal unlink is outside the previous snapshot')
-      }
-    }
-  }
-  return {
+  const journal: CatalogJournal = {
     schemaVersion: SESSION_CATALOG_JOURNAL_SCHEMA_VERSION,
     op: record.op,
     fromSessionId,
@@ -196,6 +189,104 @@ function readCatalogJournal(file: string, binding: SessionCatalogBinding): Catal
     phase: record.phase,
     ...(intended ? { intended } : {}),
     ...(unlink ? { unlink } : {}),
+  }
+  assertJournalTransition(journal)
+  return journal
+}
+
+function idsOf(file: SessionCatalogFile): readonly string[] {
+  return file.sessions.map((item) => item.id)
+}
+
+function originSuperset(next: SessionCatalogFile, previous: SessionCatalogFile): boolean {
+  return Object.entries(previous.approvalOrigins).every(([key, value]) => next.approvalOrigins[key] === value)
+}
+
+function sameIdentitySet(left: SessionCatalogFile, right: SessionCatalogFile): boolean {
+  const leftIds = idsOf(left)
+  const rightIds = idsOf(right)
+  return leftIds.length === rightIds.length && leftIds.every((id) => rightIds.includes(id))
+}
+
+function sessionOf(file: SessionCatalogFile, id: string): SessionRecord | undefined {
+  return file.sessions.find((item) => item.id === id)
+}
+
+export function isCommittedSuccessor(live: SessionCatalogFile, intended: SessionCatalogFile): boolean {
+  if (live.currentSessionId !== intended.currentSessionId) return false
+  if (live.revision < intended.revision) return false
+  if (!sameIdentitySet(live, intended)) return false
+  if (!live.sessions.every((item) => sessionOf(intended, item.id)?.lifecycle === item.lifecycle)) return false
+  return originSuperset(live, intended)
+}
+
+function assertJournalTransition(journal: CatalogJournal): void {
+  const { op, fromSessionId, toSessionId, previous, intended, unlink, phase } = journal
+  if (previous.currentSessionId !== fromSessionId) {
+    throw new SessionCatalogError('corrupt', 'session catalog journal from-session does not match previous current')
+  }
+  if (op === 'switch' && unlink && unlink.length > 0) {
+    throw new SessionCatalogError('corrupt', 'switch journal cannot unlink history')
+  }
+  if (op !== 'delete' && unlink && unlink.length > 0) {
+    throw new SessionCatalogError('corrupt', 'only delete journals may unlink history')
+  }
+  if (op === 'delete') {
+    if (unlink?.length !== 1 || unlink[0] === toSessionId) {
+      throw new SessionCatalogError('corrupt', 'delete journal unlink must be the unique removed session')
+    }
+    if (!previous.sessions.some((item) => item.id === unlink[0])) {
+      throw new SessionCatalogError('corrupt', 'delete journal unlink is outside the previous snapshot')
+    }
+  }
+  if (op === 'create' && previous.sessions.some((item) => item.id === toSessionId)) {
+    throw new SessionCatalogError('corrupt', 'create journal target already exists')
+  }
+  if (op === 'switch' && sessionOf(previous, toSessionId)?.lifecycle !== 'active') {
+    throw new SessionCatalogError('corrupt', 'journal target is not an active session')
+  }
+  if ((op === 'archive' || op === 'delete') && sessionOf(previous, toSessionId)?.lifecycle !== 'active') {
+    throw new SessionCatalogError('corrupt', 'journal replacement session is not active')
+  }
+  if (phase === 'prepared') return
+  if (intended === undefined) {
+    throw new SessionCatalogError('corrupt', 'session catalog journal is missing the committed snapshot')
+  }
+  if (intended.currentSessionId !== toSessionId || sessionOf(intended, toSessionId)?.lifecycle !== 'active') {
+    throw new SessionCatalogError('corrupt', 'committed journal current session is not the active target')
+  }
+  if (intended.revision <= previous.revision) {
+    throw new SessionCatalogError('corrupt', 'committed journal revision is not monotonic')
+  }
+  if (!originSuperset(intended, previous)) {
+    throw new SessionCatalogError('corrupt', 'committed journal dropped approval origin tombstones')
+  }
+  if (op === 'switch') {
+    if (!sameIdentitySet(previous, intended)) {
+      throw new SessionCatalogError('corrupt', 'switch journal cannot add or remove sessions')
+    }
+    if (previous.sessions.some((item) => sessionOf(intended, item.id)?.lifecycle !== item.lifecycle)) {
+      throw new SessionCatalogError('corrupt', 'switch journal cannot change lifecycle')
+    }
+  } else if (op === 'archive') {
+    if (!sameIdentitySet(previous, intended)) {
+      throw new SessionCatalogError('corrupt', 'archive journal cannot add or remove sessions')
+    }
+    const changed = previous.sessions.filter((item) => sessionOf(intended, item.id)?.lifecycle !== item.lifecycle)
+    if (changed.length !== 1 || sessionOf(intended, changed[0]!.id)?.lifecycle !== 'archived') {
+      throw new SessionCatalogError('corrupt', 'archive journal must archive exactly one session')
+    }
+  } else if (op === 'delete') {
+    const removed = previous.sessions.filter((item) => sessionOf(intended, item.id) === undefined).map((item) => item.id)
+    const removedId = removed[0]
+    if (removed.length !== 1 || removedId === undefined || removedId !== unlink?.[0]) {
+      throw new SessionCatalogError('corrupt', 'delete journal must remove exactly the unlinked session')
+    }
+  } else if (op === 'create') {
+    const added = intended.sessions.filter((item) => sessionOf(previous, item.id) === undefined)
+    if (added.length !== 1 || added[0]?.id !== toSessionId) {
+      throw new SessionCatalogError('corrupt', 'create journal must add exactly the target session')
+    }
   }
 }
 
@@ -413,6 +504,30 @@ export class SessionCatalog {
     return { ...record, current: false }
   }
 
+  createAndSwitch(id: string, title: string | undefined, expected?: { readonly sessionId?: string; readonly revision?: number }): PublicSessionCatalog {
+    const stored = this.assertExpected(expected)
+    const target = parseSessionId(id)
+    if (stored.sessions.some((item) => item.id === target)) {
+      throw new SessionCatalogError('conflict', `session ${target} already exists`)
+    }
+    const at = nowIso()
+    const record: SessionRecord = {
+      id: target,
+      title: parseTitle(title),
+      lifecycle: 'active',
+      createdAt: at,
+      lastActivityAt: at,
+      persistence: 'persistent',
+    }
+    this.write({
+      ...stored,
+      currentSessionId: target,
+      revision: stored.revision + 1,
+      sessions: [...stored.sessions, record],
+    })
+    return this.inspect()
+  }
+
   switchTo(id: string, expected?: { readonly sessionId?: string; readonly revision?: number }): PublicSessionCatalog {
     const stored = this.assertExpected(expected)
     const target = parseSessionId(id)
@@ -556,6 +671,7 @@ export class SessionCatalog {
   }
 
   writeJournal(journal: CatalogJournal): void {
+    assertJournalTransition(journal)
     writeJsonAtomic(this.journalFile(), journal)
   }
 
@@ -575,9 +691,13 @@ export class SessionCatalog {
       this.clearJournal()
       return { sessionId: journal.previous.currentSessionId }
     }
-    if (journal?.phase === 'committed') {
-      if (journal.intended) this.restoreSnapshot(journal.intended)
-      return { sessionId: journal.intended?.currentSessionId ?? journal.toSessionId, journal }
+    if (journal?.phase === 'committed' && journal.intended) {
+      const live = this.load()
+      if (isCommittedSuccessor(live, journal.intended)) {
+        return { sessionId: live.currentSessionId, journal }
+      }
+      this.restoreSnapshot(journal.intended)
+      return { sessionId: journal.intended.currentSessionId, journal }
     }
     const id = parseSessionId(requested)
     this.ensureMigrated(id)

@@ -37,7 +37,7 @@ async function waitUntil(predicate: () => boolean, timeoutMs = 2000): Promise<vo
 
 async function liveHost(input: {
   readonly failAt?: import('../src/product/session-lifecycle.js').SessionLifecycleFault
-  readonly on?: Partial<Record<import('../src/product/session-lifecycle.js').SessionLifecycleFault, () => void>>
+  readonly on?: Partial<Record<import('../src/product/session-lifecycle.js').SessionLifecycleFault, () => void | Promise<void>>>
 } = {}) {
   const home = mkdtempSync(path.join(tmpdir(), 'tars-session-host-'))
   const layout = ensureProductHome(home)
@@ -221,6 +221,49 @@ describe('Session lifecycle transactions', () => {
       assert.equal(catalog.inspect().currentSessionId, extra.id)
       assert.equal(catalog.readJournal()?.phase, 'committed')
     } finally {
+      await host.currentHandle().dispose()
+      await control.ctx.fiber.dispose()
+    }
+  })
+
+  it('keeps create inside one journaled transaction', async () => {
+    const { catalog, host, surface, control } = await liveHost({ failAt: 'after-prepare-next' })
+    const before = catalog.inspect()
+    try {
+      await assert.rejects(
+        () => host.create('Unconfirmed', { sessionId: 'main', revision: before.revision }),
+        (error: SessionCatalogError) => error.code === 'injected-fault',
+      )
+      assert.equal(catalog.inspect().sessions.length, before.sessions.length)
+      assert.equal(surface.sessionId, 'main')
+      assert.equal(catalog.readJournal(), undefined)
+    } finally {
+      await host.currentHandle().dispose()
+      await control.ctx.fiber.dispose()
+    }
+  })
+
+  it('rejects messages while a route change is in progress', async () => {
+    let releaseFlush!: () => void
+    const held = new Promise<void>((resolve) => { releaseFlush = resolve })
+    let inFlush = false
+    const { extra, host, control } = await liveHost({
+      on: {
+        'after-flush': async () => {
+          inFlush = true
+          await held
+        },
+      },
+    })
+    try {
+      const switching = host.switchTo(extra.id, { sessionId: 'main', revision: host.inspect().revision })
+      await waitUntil(() => inFlush)
+      assert.throws(() => host.assertAcceptingMessages(), (error: SessionCatalogError) => error.code === 'busy')
+      releaseFlush()
+      await switching
+      host.assertAcceptingMessages()
+    } finally {
+      releaseFlush()
       await host.currentHandle().dispose()
       await control.ctx.fiber.dispose()
     }

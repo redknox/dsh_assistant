@@ -467,6 +467,15 @@ export function startWebUiServer(options: WebUiServerOptions): Promise<WebUiServ
           sendJson(res, 409, { error: 'stale-session', detail: 'request targeted a different current session', view: snapshot(), webUi: url })
           return
         }
+        try {
+          options.sessionHost?.assertAcceptingMessages()
+        } catch (error) {
+          if (error instanceof SessionCatalogError) {
+            sendJson(res, 409, { error: error.code, detail: error.message, view: snapshot(), webUi: url })
+            return
+          }
+          throw error
+        }
         options.surface.sendMessage(body.text.trim())
         options.sessionHost?.touchPreview(body.text.trim())
         sendJson(res, 202, envelope())

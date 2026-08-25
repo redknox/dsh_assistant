@@ -3,6 +3,7 @@ import { SessionId } from '@deepseek-ai/dsh-session'
 import { createAssistantAgent } from '../runtime/boot.js'
 import { AssistantControlSurface } from '../ui/controller.js'
 import {
+  generateSessionId,
   SessionCatalog,
   SessionCatalogError,
   type CatalogJournal,
@@ -26,6 +27,7 @@ export interface SessionHandle {
 
 export class LiveSessionHost {
   private routeTail: Promise<unknown> = Promise.resolve()
+  private routing = false
 
   constructor(
     private readonly ctx: Context,
@@ -37,7 +39,7 @@ export class LiveSessionHost {
     private readonly safeMode: boolean,
     private readonly faults: {
       failAt?: SessionLifecycleFault
-      on?: Partial<Record<SessionLifecycleFault, () => void>>
+      on?: Partial<Record<SessionLifecycleFault, () => void | Promise<void>>>
     } = {},
   ) {}
 
@@ -47,6 +49,16 @@ export class LiveSessionHost {
 
   inspect(): PublicSessionCatalog {
     return this.catalog.inspect()
+  }
+
+  isRouting(): boolean {
+    return this.routing
+  }
+
+  assertAcceptingMessages(): void {
+    if (this.routing) {
+      throw new SessionCatalogError('busy', 'session route change is in progress')
+    }
   }
 
   async finishCommittedJournal(journal: CatalogJournal): Promise<void> {
@@ -63,13 +75,12 @@ export class LiveSessionHost {
       this.assertMutable()
       this.assertExpected(expected)
       this.assertIdle()
-      this.capturePendingOrigins()
-      const created = this.catalog.create(title, expected)
+      const createdId = generateSessionId()
       return this.commitRoute({
         op: 'create',
-        toSessionId: created.id,
-        expected: { sessionId: expected.sessionId, revision: this.catalog.inspect().revision },
-        apply: (nextExpected) => this.catalog.switchTo(created.id, nextExpected),
+        toSessionId: createdId,
+        expected,
+        apply: (nextExpected) => this.catalog.createAndSwitch(createdId, title, nextExpected),
       })
     })
   }
@@ -163,15 +174,18 @@ export class LiveSessionHost {
     readonly unlink?: readonly string[]
   }): Promise<PublicSessionCatalog> {
     const from = this.surface.sessionId
+    this.routing = true
     this.capturePendingOrigins()
-    if (from !== input.toSessionId) await this.flushCurrent()
-    this.trip('after-flush')
-    const next = from === input.toSessionId ? undefined : await createAssistantAgent(this.ctx, input.toSessionId, undefined, this.workspace)
-    this.trip('after-prepare-next')
-    const previous = this.catalog.load()
+    let next: SessionHandle | undefined
     let adopted = false
     let applied: SessionCatalogFile | undefined
+    let previous: SessionCatalogFile | undefined
     try {
+      if (from !== input.toSessionId) await this.flushCurrent()
+      await this.trip('after-flush')
+      next = from === input.toSessionId ? undefined : await createAssistantAgent(this.ctx, input.toSessionId, undefined, this.workspace)
+      await this.trip('after-prepare-next')
+      previous = this.catalog.load()
       const journal: CatalogJournal = {
         schemaVersion: 1,
         op: input.op,
@@ -185,10 +199,10 @@ export class LiveSessionHost {
       const view = input.apply(input.expected)
       applied = this.catalog.load()
       this.catalog.writeJournal({ ...journal, phase: 'committed', intended: applied })
-      this.trip('after-catalog-commit')
+      await this.trip('after-catalog-commit')
       if (from !== input.toSessionId) {
         this.persistCurrent(input.toSessionId)
-        this.trip('after-persist')
+        await this.trip('after-persist')
         this.surface.setSessionId(input.toSessionId)
         const outgoing = this.handle
         this.handle = next!
@@ -197,31 +211,36 @@ export class LiveSessionHost {
         } finally {
           adopted = true
         }
-        this.trip('after-dispose')
+        await this.trip('after-dispose')
       } else {
         await next?.dispose()
       }
       if (input.unlink) {
-        this.trip('before-unlink')
+        await this.trip('before-unlink')
         for (const id of input.unlink) this.catalog.discardDeletedPersistence(id)
       }
       this.catalog.clearJournal()
       return view
     } catch (error) {
-      if (adopted) throw error
-      if (next && next !== this.handle) await next.dispose().catch(() => undefined)
-      const live = this.catalog.load()
-      if (applied && sameSnapshot(live, applied)) {
-        try {
-          this.catalog.restoreSnapshot(previous)
-          this.persistCurrent(from)
-          this.surface.setSessionId(from)
+      if (!adopted && next && next !== this.handle) await next.dispose().catch(() => undefined)
+      if (!adopted) {
+        const live = this.catalog.load()
+        if (applied && previous && sameSnapshot(live, applied)) {
+          try {
+            this.catalog.restoreSnapshot(previous)
+            this.persistCurrent(from)
+            this.surface.setSessionId(from)
+            this.catalog.clearJournal()
+          } catch {
+            this.catalog.restoreSnapshot(applied)
+          }
+        } else if (!applied) {
           this.catalog.clearJournal()
-        } catch {
-          this.catalog.restoreSnapshot(applied)
         }
       }
       throw error
+    } finally {
+      this.routing = false
     }
   }
 
@@ -272,8 +291,8 @@ export class LiveSessionHost {
     }
   }
 
-  private trip(point: SessionLifecycleFault): void {
-    this.faults.on?.[point]?.()
+  private async trip(point: SessionLifecycleFault): Promise<void> {
+    await this.faults.on?.[point]?.()
     if (this.faults.failAt === point) {
       this.faults.failAt = undefined
       throw new SessionCatalogError('injected-fault', point)

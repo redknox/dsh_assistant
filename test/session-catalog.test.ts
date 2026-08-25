@@ -204,6 +204,50 @@ describe('Session Catalog', () => {
     assert.equal(inspectSessionJournal(context.sessionPersistenceDir, catalogBindingOf(context)), undefined)
   })
 
+  it('rejects a structurally valid switch journal that would unlink the wrong history', () => {
+    const { catalog } = catalogFor()
+    catalog.ensureMigrated('main')
+    const extra = catalog.create('Scratch')
+    const previous = catalog.load()
+    catalog.switchTo(extra.id)
+    assert.throws(() => catalog.writeJournal({
+      schemaVersion: 1,
+      op: 'switch',
+      fromSessionId: 'main',
+      toSessionId: 'main',
+      previous,
+      intended: previous,
+      phase: 'committed',
+      unlink: ['main'],
+    }), (error: SessionCatalogError) => error.code === 'corrupt')
+    assert.equal(catalog.inspect().currentSessionId, extra.id)
+  })
+
+  it('keeps a newer successor catalog instead of restoring a stale intended snapshot', () => {
+    const { catalog } = catalogFor()
+    catalog.ensureMigrated('main')
+    const extra = catalog.create('Scratch')
+    const previous = catalog.load()
+    catalog.switchTo(extra.id)
+    const intended = catalog.load()
+    catalog.writeJournal({
+      schemaVersion: 1,
+      op: 'switch',
+      fromSessionId: 'main',
+      toSessionId: extra.id,
+      previous,
+      intended,
+      phase: 'committed',
+    })
+    catalog.noteApprovalOrigin('ticket-after-adopt', extra.id)
+    catalog.touch(extra.id, 'after-adopt preview')
+    const started = catalog.resolveStartSession('main')
+    assert.equal(started.sessionId, extra.id)
+    assert.equal(catalog.inspect().sessions.find((item) => item.id === extra.id)?.preview, 'after-adopt preview')
+    assert.equal(catalog.approvalOrigin('ticket-after-adopt'), extra.id)
+    assert.ok(catalog.inspect().revision > intended.revision)
+  })
+
   it('fails closed on a future or malformed journal', () => {
     const { catalog, context } = catalogFor()
     catalog.ensureMigrated('main')

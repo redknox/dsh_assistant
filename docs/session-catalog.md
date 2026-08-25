@@ -30,6 +30,8 @@ Trusted `POST /api/conversations` actions: `create`, `switch`, `rename`, `archiv
 
 - Switch/archive/delete journal the previous catalog, then commit an intended snapshot. Restart recovers the journal **before** `ensureMigrated` / `resolveBootSession`. A prepared journal rolls back; a committed journal restores the intended current Session and then finishes persist/unlink.
 - After the outgoing Agent is disposed, late failures keep the new route and retry from the committed journal instead of rolling memory back to the old handle.
+- Create is one journaled transaction: the new topic is not visible until the switch commits. Messages during an in-progress route change return `busy`.
+- A committed journal restores the intended snapshot only when live state is not already a legal successor (same current Session, same identities, newer metadata).
 - Catalog lifecycle mutations are serialized. Rollback only restores the snapshot this transaction wrote; concurrent preview/origin writes are not overwritten.
 - Conversation posts require the expected Session ID. Catalog mutations require Session ID and revision; omitted tokens are rejected. Create consumes the current revision, so a replay is stale.
 - A running Agent turn returns `busy`; the originating session stays current until it is idle.
