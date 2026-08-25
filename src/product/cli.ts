@@ -39,6 +39,7 @@ import {
   recoverySessionsDir,
   rollbackSessionRootOwner,
   RUNTIME_CONTEXT_SCHEMA_VERSION,
+  sessionPersistenceDirOf,
   writeProductRuntimeSection,
   type RuntimeContext,
   type SessionPartitionHold,
@@ -557,14 +558,16 @@ export async function runProductCli(
       }
       let sessionId = runtimeContext?.sessionId.value ?? 'main'
       let catalog: SessionCatalog | undefined
-      if (runtimeContext && !runtimeContext.ephemeralRecovery) {
-        catalog = new SessionCatalog(runtimeContext.sessionPersistenceDir, catalogBindingOf(runtimeContext))
-        catalog.ensureMigrated(sessionId)
-        sessionId = catalog.resolveBootSession(sessionId)
+      if (runtimeContext) {
+        catalog = new SessionCatalog(sessionPersistenceDirOf(runtimeContext), catalogBindingOf(runtimeContext))
+        if (!runtimeContext.ephemeralRecovery) {
+          catalog.ensureMigrated(sessionId)
+          sessionId = catalog.resolveBootSession(sessionId)
+        }
       }
       handle = await createAssistantAgent(booted.ctx, sessionId, undefined, runtimeContext?.workspace.value)
       const surface = new AssistantControlSurface(booted.ctx, sessionId, runtimeContext, catalog)
-      if (catalog && runtimeContext && handle) {
+      if (catalog && runtimeContext && handle && !runtimeContext.ephemeralRecovery) {
         const boundContext = runtimeContext
         sessionHost = new LiveSessionHost(
           booted.ctx,
@@ -581,6 +584,7 @@ export async function runProductCli(
           handle,
           boundContext.safeMode,
         )
+        await sessionHost.recover()
       }
       let requestStop = () => {}
       const stopped = new Promise<void>((resolve) => {
@@ -661,9 +665,9 @@ export async function runProductCli(
 }
 
 function catalogStatusLine(runtimeContext: RuntimeContext | undefined): string {
-  if (!runtimeContext || runtimeContext.ephemeralRecovery) return 'session-catalog: unavailable'
+  if (!runtimeContext) return 'session-catalog: unavailable'
   try {
-    const catalog = inspectSessionCatalog(runtimeContext.sessionPersistenceDir, catalogBindingOf(runtimeContext))
+    const catalog = inspectSessionCatalog(sessionPersistenceDirOf(runtimeContext), catalogBindingOf(runtimeContext))
     if (catalog.health === 'absent') return 'session-catalog: absent'
     return `session-catalog: ${catalog.health} (${catalog.activeCount} active, ${catalog.archivedCount} archived)`
   } catch (error) {

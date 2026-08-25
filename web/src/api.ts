@@ -36,12 +36,12 @@ export async function fetchView(): Promise<UiEnvelope> {
   return parseEnvelope(await fetch('/api/view', include))
 }
 
-export async function sendMessage(text: string, sessionId?: string): Promise<UiEnvelope> {
+export async function sendMessage(text: string, sessionId: string): Promise<UiEnvelope> {
   return parseEnvelope(await fetch('/api/message', {
     ...include,
     method: 'POST',
     headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ text, ...(sessionId ? { sessionId } : {}) }),
+    body: JSON.stringify({ text, sessionId }),
   }))
 }
 

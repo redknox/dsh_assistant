@@ -459,11 +459,11 @@ export function startWebUiServer(options: WebUiServerOptions): Promise<WebUiServ
       }
       if (req.method === 'POST' && requestUrl.pathname === '/api/message') {
         const body = JSON.parse(await readBody(req)) as { text?: unknown; sessionId?: unknown }
-        if (typeof body.text !== 'string' || body.text.trim() === '') {
+        if (typeof body.text !== 'string' || body.text.trim() === '' || typeof body.sessionId !== 'string') {
           sendJson(res, 400, { error: 'malformed' })
           return
         }
-        if (typeof body.sessionId === 'string' && body.sessionId !== options.surface.sessionId) {
+        if (body.sessionId !== options.surface.sessionId) {
           sendJson(res, 409, { error: 'stale-session', detail: 'request targeted a different current session', view: snapshot(), webUi: url })
           return
         }
@@ -487,18 +487,15 @@ export function startWebUiServer(options: WebUiServerOptions): Promise<WebUiServ
           revision?: unknown
           confirm?: unknown
         }
-        if (typeof body.action !== 'string') {
+        if (typeof body.action !== 'string' || typeof body.sessionId !== 'string' || typeof body.revision !== 'number') {
           sendJson(res, 400, { error: 'malformed' })
           return
         }
         try {
-          const expected = {
-            sessionId: typeof body.sessionId === 'string' ? body.sessionId : options.surface.sessionId,
-            revision: typeof body.revision === 'number' ? body.revision : host.inspect().revision,
-          }
+          const expected = { sessionId: body.sessionId, revision: body.revision }
           let acknowledgement: { text: string } | undefined
           if (body.action === 'create') {
-            await host.create(typeof body.title === 'string' ? body.title : undefined)
+            await host.create(typeof body.title === 'string' ? body.title : undefined, expected)
             acknowledgement = { text: 'Created a new conversation.' }
           } else if (body.action === 'switch' && typeof body.id === 'string') {
             await host.switchTo(body.id, expected)

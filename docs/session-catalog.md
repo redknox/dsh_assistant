@@ -28,11 +28,13 @@ The browser renders catalog DTOs. It does not invent IDs, storage paths, or cont
 
 Trusted `POST /api/conversations` actions: `create`, `switch`, `rename`, `archive`, `restore`, `delete`.
 
-- Switch flushes the outgoing DSH session before changing the route. A failed switch leaves the previous current session.
-- Conversation posts carry the expected Session ID; a stale tab cannot append to a newly selected topic.
-- Catalog mutations carry an expected revision.
+- Switch/archive/delete journal the previous catalog, then commit the route. A failed step restores the previous catalog and live session. History is unlinked only after the replacement route is live.
+- Conversation posts require the expected Session ID. Catalog mutations require Session ID and revision; omitted tokens are rejected. Create consumes the current revision, so a replay is stale.
+- A running Agent turn returns `busy`; the originating session stays current until it is idle.
+- Approval origins are written once and kept as tombstones after delete. Projection never falls back to the current Session ID.
 - Delete requires `confirm: true`. The last active conversation cannot be archived or deleted.
-- Safe Mode can inspect and switch; create/rename/archive/restore/delete are frozen.
+- Safe Mode can inspect and switch; create/rename/archive/restore/delete are frozen. Recovery still inspects the official bound catalog, not the ephemeral recovery session store.
 - A #88 Home with only `main` is migrated to one catalog entry titled `Conversation` without rewriting the Session ID.
+- `currentSessionId` must exist and be active. Missing timestamps, non-integer revisions, or a missing current session fail closed.
 
 `tars-ng status` / `doctor` report catalog health and counts. They do not dump transcripts.

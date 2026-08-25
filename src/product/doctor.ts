@@ -6,7 +6,7 @@ import { inspectCompatibility, type CompatibilityReport } from './compatibility.
 import { PRODUCT_NAME } from './constants.js'
 import { credentialInventory, missingCredentialNames, type CredentialPresence, type EnvFileLoad } from './env.js'
 import type { ProductHomeLayout } from './home.js'
-import { publicRuntimeContextView, type RuntimeContext } from './runtime-context.js'
+import { publicRuntimeContextView, sessionPersistenceDirOf, type RuntimeContext } from './runtime-context.js'
 import { catalogBindingOf, inspectSessionCatalog, SessionCatalogError } from './session-catalog.js'
 import type { LlmDiagnosis } from './llm.js'
 
@@ -208,9 +208,9 @@ export function formatDoctorReport(report: DoctorReport): string {
 }
 
 function sessionCatalogLine(runtimeContext: RuntimeContext | undefined): string | undefined {
-  if (!runtimeContext || runtimeContext.ephemeralRecovery) return undefined
+  if (!runtimeContext) return undefined
   try {
-    const catalog = inspectSessionCatalog(runtimeContext.sessionPersistenceDir, catalogBindingOf(runtimeContext))
+    const catalog = inspectSessionCatalog(sessionPersistenceDirOf(runtimeContext), catalogBindingOf(runtimeContext))
     if (catalog.health === 'absent') return 'session-catalog: absent'
     return `session-catalog: ${catalog.health} (${catalog.activeCount} active, ${catalog.archivedCount} archived, current ${catalog.currentSessionId})`
   } catch (error) {

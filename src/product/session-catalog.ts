@@ -6,6 +6,7 @@ import { redactText } from '../domain/workspace/redact.js'
 import { DEFAULT_SESSION_ID, parseSessionId, type RuntimeContext } from './runtime-context.js'
 
 export const SESSION_CATALOG_SCHEMA_VERSION = 1
+export const SESSION_CATALOG_JOURNAL_SCHEMA_VERSION = 1
 export const DEFAULT_CONVERSATION_TITLE = 'New conversation'
 export const MIGRATED_MAIN_TITLE = 'Conversation'
 
@@ -67,8 +68,24 @@ export interface PublicSessionCatalog {
   readonly sessions: readonly PublicSessionView[]
 }
 
+export type CatalogTransactionOp = 'create' | 'switch' | 'archive' | 'delete'
+
+export interface CatalogJournal {
+  readonly schemaVersion: number
+  readonly op: CatalogTransactionOp
+  readonly fromSessionId: string
+  readonly toSessionId: string
+  readonly previous: SessionCatalogFile
+  readonly phase: 'prepared' | 'committed'
+  readonly unlink?: readonly string[]
+}
+
 export function sessionCatalogFile(sessionPersistenceDir: string): string {
   return path.join(sessionPersistenceDir, '.tars-ng-catalog.json')
+}
+
+export function sessionCatalogJournalFile(sessionPersistenceDir: string): string {
+  return path.join(sessionPersistenceDir, '.tars-ng-catalog.journal.json')
 }
 
 export function catalogBindingOf(context: Pick<RuntimeContext, 'home' | 'profileIdentity' | 'workspaceIdentity' | 'sessionRootIdentity'>): SessionCatalogBinding {
@@ -98,6 +115,24 @@ function parseTitle(value: string | undefined): string {
 
 function nowIso(): string {
   return new Date().toISOString()
+}
+
+function parseIsoTimestamp(value: unknown, label: string): string {
+  if (typeof value !== 'string' || Number.isNaN(Date.parse(value))) {
+    throw new SessionCatalogError('corrupt', `session catalog ${label} is not a valid timestamp`)
+  }
+  return value
+}
+
+function parseStoredTitle(value: unknown): string {
+  if (typeof value !== 'string' || value.trim() === '') {
+    throw new SessionCatalogError('corrupt', 'session catalog title is missing')
+  }
+  try {
+    return parseTitle(value)
+  } catch {
+    throw new SessionCatalogError('corrupt', 'session catalog title is invalid')
+  }
 }
 
 function generateSessionId(): string {
@@ -158,6 +193,8 @@ function readCatalogFile(file: string, binding: SessionCatalogBinding): SessionC
     || record.binding === undefined
     || typeof record.currentSessionId !== 'string'
     || typeof record.revision !== 'number'
+    || !Number.isInteger(record.revision)
+    || record.revision < 1
     || !Array.isArray(record.sessions)
   ) {
     throw new SessionCatalogError('corrupt', 'session catalog is corrupt')
@@ -180,19 +217,26 @@ function readCatalogFile(file: string, binding: SessionCatalogBinding): SessionC
     }
     sessions.push({
       id,
-      title: parseTitle(typeof row.title === 'string' ? row.title : DEFAULT_CONVERSATION_TITLE),
+      title: parseStoredTitle(row.title),
       lifecycle: row.lifecycle,
-      createdAt: typeof row.createdAt === 'string' ? row.createdAt : nowIso(),
-      lastActivityAt: typeof row.lastActivityAt === 'string' ? row.lastActivityAt : nowIso(),
+      createdAt: parseIsoTimestamp(row.createdAt, 'createdAt'),
+      lastActivityAt: parseIsoTimestamp(row.lastActivityAt, 'lastActivityAt'),
       persistence: row.persistence === 'unavailable' || row.persistence === 'recovery-required' ? row.persistence : 'persistent',
       ...(typeof row.preview === 'string' && row.preview.trim() !== '' ? { preview: redactText(row.preview).slice(0, 72) } : {}),
     })
   }
   const currentSessionId = parseSessionId(record.currentSessionId)
+  const current = sessions.find((item) => item.id === currentSessionId)
+  if (!current || current.lifecycle !== 'active') {
+    throw new SessionCatalogError('corrupt', 'session catalog current session is missing or not active')
+  }
   const origins: Record<string, string> = {}
   if (record.approvalOrigins && typeof record.approvalOrigins === 'object') {
     for (const [key, value] of Object.entries(record.approvalOrigins)) {
-      if (typeof value === 'string' && value !== '') origins[key] = parseSessionId(value)
+      if (typeof key !== 'string' || key.trim() === '' || typeof value !== 'string' || value === '') {
+        throw new SessionCatalogError('corrupt', 'session catalog approval origin is invalid')
+      }
+      origins[key] = parseSessionId(value)
     }
   }
   return {
@@ -285,8 +329,8 @@ export class SessionCatalog {
     return id
   }
 
-  create(title?: string): PublicSessionView {
-    const stored = this.readOrThrow()
+  create(title?: string, expected?: { readonly sessionId?: string; readonly revision?: number }): PublicSessionView {
+    const stored = this.assertExpected(expected)
     const id = generateSessionId()
     const at = nowIso()
     const record: SessionRecord = {
@@ -399,7 +443,6 @@ export class SessionCatalog {
       currentSessionId: nextCurrent,
       revision: stored.revision + 1,
       sessions: stored.sessions.filter((item) => item.id !== target),
-      approvalOrigins: Object.fromEntries(Object.entries(stored.approvalOrigins).filter(([, sessionId]) => sessionId !== target)),
     })
     return this.inspect()
   }
@@ -420,7 +463,7 @@ export class SessionCatalog {
 
   noteApprovalOrigin(confirmationId: string, sessionId: string): void {
     const stored = this.readOrThrow()
-    if (stored.approvalOrigins[confirmationId] === sessionId) return
+    if (stored.approvalOrigins[confirmationId] !== undefined) return
     this.write({
       ...stored,
       approvalOrigins: { ...stored.approvalOrigins, [confirmationId]: parseSessionId(sessionId) },
@@ -438,6 +481,47 @@ export class SessionCatalog {
       const file = path.join(this.sessionPersistenceDir, name)
       if (existsSync(file)) unlinkSync(file)
     }
+  }
+
+  journalFile(): string {
+    return sessionCatalogJournalFile(this.sessionPersistenceDir)
+  }
+
+  readJournal(): CatalogJournal | undefined {
+    const file = this.journalFile()
+    if (!existsSync(file)) return undefined
+    try {
+      const raw = JSON.parse(readFileSync(file, 'utf8')) as Partial<CatalogJournal>
+      if (raw.schemaVersion !== SESSION_CATALOG_JOURNAL_SCHEMA_VERSION) return undefined
+      if (raw.op !== 'create' && raw.op !== 'switch' && raw.op !== 'archive' && raw.op !== 'delete') return undefined
+      if (typeof raw.fromSessionId !== 'string' || typeof raw.toSessionId !== 'string') return undefined
+      if (raw.phase !== 'prepared' && raw.phase !== 'committed') return undefined
+      if (raw.previous === null || typeof raw.previous !== 'object') return undefined
+      return {
+        schemaVersion: SESSION_CATALOG_JOURNAL_SCHEMA_VERSION,
+        op: raw.op,
+        fromSessionId: raw.fromSessionId,
+        toSessionId: raw.toSessionId,
+        previous: raw.previous,
+        phase: raw.phase,
+        ...(Array.isArray(raw.unlink) ? { unlink: raw.unlink.filter((item): item is string => typeof item === 'string') } : {}),
+      }
+    } catch {
+      throw new SessionCatalogError('corrupt', 'session catalog journal is corrupt')
+    }
+  }
+
+  writeJournal(journal: CatalogJournal): void {
+    writeJsonAtomic(this.journalFile(), journal)
+  }
+
+  clearJournal(): void {
+    const file = this.journalFile()
+    if (existsSync(file)) unlinkSync(file)
+  }
+
+  restoreSnapshot(previous: SessionCatalogFile): void {
+    this.write(previous)
   }
 
   private assertExpected(expected?: { readonly sessionId?: string; readonly revision?: number }): SessionCatalogFile {

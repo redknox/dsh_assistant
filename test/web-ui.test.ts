@@ -216,7 +216,7 @@ describe('local Mission-Control Web UI', () => {
       const sent = await fetch(`${url}/api/message`, {
         method: 'POST',
         headers: { 'content-type': 'application/json', ...authHeaders(await cookieHeader(url)) },
-        body: JSON.stringify({ text: 'Hello from the Web UI' }),
+        body: JSON.stringify({ text: 'Hello from the Web UI', sessionId: 'web-ui-ready' }),
       })
       assert.equal(sent.status, 202)
       await agent.agent.whenIdle()
@@ -563,6 +563,24 @@ describe('local Mission-Control Web UI', () => {
         body: JSON.stringify({ text: 'should-not-land', sessionId: 'main' }),
       })
       assert.equal(stale.status, 409)
+      const omitted = await fetch(`${web.url}/api/message`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', ...authHeaders(cookie) },
+        body: JSON.stringify({ text: 'no-token' }),
+      })
+      assert.equal(omitted.status, 400)
+      const omittedMutation = await fetch(`${web.url}/api/conversations`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', ...authHeaders(cookie) },
+        body: JSON.stringify({ action: 'create', title: 'Replay' }),
+      })
+      assert.equal(omittedMutation.status, 400)
+      const replay = await fetch(`${web.url}/api/conversations`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', ...authHeaders(cookie) },
+        body: JSON.stringify({ action: 'create', title: 'Replay', sessionId: 'main', revision: catalog.inspect().revision - 2 }),
+      })
+      assert.equal(replay.status, 409)
     } finally {
       await web.close()
       await host.currentHandle().dispose()

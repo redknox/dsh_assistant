@@ -1132,7 +1132,9 @@ export function App() {
     setSending(true)
     setError(undefined)
     try {
-      setEnvelope(await sendMessage(draft.trim(), view?.runtimeContext?.sessionId))
+      const sessionId = view?.runtimeContext?.sessionId ?? view?.sessions?.currentSessionId
+      if (!sessionId) throw new Error('current session is unknown')
+      setEnvelope(await sendMessage(draft.trim(), sessionId))
       setDraft('')
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : 'send failed')

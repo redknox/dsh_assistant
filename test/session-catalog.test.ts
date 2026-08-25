@@ -74,6 +74,51 @@ describe('Session Catalog', () => {
     assert.throws(() => catalog.create('ok/nope'), SessionCatalogError)
   })
 
+  it('fails closed when current session or timestamps are invalid', () => {
+    const { context, catalog } = catalogFor()
+    catalog.ensureMigrated('main')
+    const file = sessionCatalogFile(context.sessionPersistenceDir)
+    const binding = catalogBindingOf(context)
+    writeFileSync(file, `${JSON.stringify({
+      schemaVersion: 1,
+      binding,
+      currentSessionId: 'ghost',
+      revision: 1,
+      sessions: [{ id: 'main', title: 'Conversation', lifecycle: 'active', createdAt: '2026-01-01T00:00:00.000Z', lastActivityAt: '2026-01-01T00:00:00.000Z', persistence: 'persistent' }],
+      approvalOrigins: {},
+    }, null, 2)}\n`)
+    assert.throws(() => catalog.inspect(), (error: SessionCatalogError) => error.code === 'corrupt')
+    writeFileSync(file, `${JSON.stringify({
+      schemaVersion: 1,
+      binding,
+      currentSessionId: 'main',
+      revision: 1,
+      sessions: [{ id: 'main', title: 'Conversation', lifecycle: 'archived', createdAt: '2026-01-01T00:00:00.000Z', lastActivityAt: '2026-01-01T00:00:00.000Z', persistence: 'persistent' }],
+      approvalOrigins: {},
+    }, null, 2)}\n`)
+    assert.throws(() => catalog.inspect(), (error: SessionCatalogError) => error.code === 'corrupt')
+    writeFileSync(file, `${JSON.stringify({
+      schemaVersion: 1,
+      binding,
+      currentSessionId: 'main',
+      revision: 1.5,
+      sessions: [{ id: 'main', title: 'Conversation', lifecycle: 'active', createdAt: '2026-01-01T00:00:00.000Z', lastActivityAt: '2026-01-01T00:00:00.000Z', persistence: 'persistent' }],
+      approvalOrigins: {},
+    }, null, 2)}\n`)
+    assert.throws(() => catalog.inspect(), (error: SessionCatalogError) => error.code === 'corrupt')
+  })
+
+  it('keeps approval origin tombstones after delete', () => {
+    const { catalog } = catalogFor()
+    catalog.ensureMigrated('main')
+    const extra = catalog.create('Scratch')
+    catalog.noteApprovalOrigin('ticket-a', extra.id)
+    catalog.delete(extra.id, { confirm: true })
+    assert.equal(catalog.approvalOrigin('ticket-a'), extra.id)
+    catalog.noteApprovalOrigin('ticket-a', 'main')
+    assert.equal(catalog.approvalOrigin('ticket-a'), extra.id)
+  })
+
   it('fails closed on future or foreign catalog files', () => {
     const first = catalogFor()
     first.catalog.ensureMigrated('main')

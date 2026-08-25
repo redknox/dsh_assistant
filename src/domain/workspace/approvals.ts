@@ -9,18 +9,14 @@ export function projectApprovalCards(input: WorkspaceSnapshotInput): readonly Ap
   for (const ticket of input.pendingConfirmations.filter((item) => item.status === 'pending' || RESOLVED_TICKET.has(item.status))) {
     cards.push({
       ...sideEffectCard(ticket),
-      ...(input.approvalOrigins?.[ticket.id] || input.runtimeContext?.sessionId
-        ? { sessionId: input.approvalOrigins?.[ticket.id] ?? input.runtimeContext?.sessionId }
-        : {}),
+      ...(input.approvalOrigins?.[ticket.id] ? { sessionId: input.approvalOrigins[ticket.id] } : {}),
     })
   }
   for (const approval of input.extensionApprovals ?? []) {
     if (!HISTORY_EXTENSION.has(approval.decision)) continue
     cards.push({
       ...selfExtensionCard(approval),
-      ...(input.approvalOrigins?.[approval.id] || input.runtimeContext?.sessionId
-        ? { sessionId: input.approvalOrigins?.[approval.id] ?? input.runtimeContext?.sessionId }
-        : {}),
+      ...(input.approvalOrigins?.[approval.id] ? { sessionId: input.approvalOrigins[approval.id] } : {}),
     })
   }
   return cards

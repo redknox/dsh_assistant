@@ -41,9 +41,7 @@ export function projectActivity(input: WorkspaceSnapshotInput): readonly Activit
       kind: 'APPROVAL_REQUIRED',
       summary: `${ticket.capability}.${ticket.operation} waiting for approval`,
       source: 'actionPolicy',
-      ...(input.approvalOrigins?.[ticket.id] || input.runtimeContext?.sessionId
-        ? { sessionId: input.approvalOrigins?.[ticket.id] ?? input.runtimeContext?.sessionId }
-        : {}),
+      ...(input.approvalOrigins?.[ticket.id] ? { sessionId: input.approvalOrigins[ticket.id] } : {}),
     })
   }
   for (const resolution of projectApprovalResolutions(input)) {
@@ -55,6 +53,9 @@ export function projectActivity(input: WorkspaceSnapshotInput): readonly Activit
       kind: resolution.outcome === 'failed' ? 'FAILED' : 'COMPLETED',
       summary: `${target} ${resolution.outcome}`,
       source: 'approval/resolved',
+      ...(input.approvalOrigins?.[resolution.confirmationId]
+        ? { sessionId: input.approvalOrigins[resolution.confirmationId] }
+        : {}),
     })
   }
   if (input.blockedReason) {
