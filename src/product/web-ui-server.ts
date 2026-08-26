@@ -397,6 +397,13 @@ export function startWebUiServer(options: WebUiServerOptions): Promise<WebUiServ
     return { skill }
   }
 
+  const withheldSkillCatalogMutation = (action: string, view: MissionControlView): string | undefined => {
+    if (action !== 'activate' && action !== 'reactivate') return undefined
+    if (view.skillCatalog?.state === 'withheld') return 'catalog-withheld'
+    if (view.systemState === 'SAFE_MODE' || view.runtimeContext?.safeMode === true) return 'safe-mode'
+    return undefined
+  }
+
   const sameStringSet = (left: readonly string[], right: readonly string[]) => (
     left.length === right.length && left.every((item) => right.includes(item))
   )
@@ -727,6 +734,11 @@ export function startWebUiServer(options: WebUiServerOptions): Promise<WebUiServ
         }
         const action = String(body.action ?? '')
         const view = snapshot()
+        const withheld = withheldSkillCatalogMutation(action, view)
+        if (withheld !== undefined) {
+          sendJson(res, 409, { error: withheld, view, webUi: url })
+          return
+        }
         const bound = bindSkillAction(body, view)
         if ('error' in bound) {
           sendJson(res, bound.error === 'malformed' ? 400 : 409, { error: bound.error })

@@ -26,6 +26,12 @@ function isUserMessage(kind: WorkObjectKind): boolean {
   return kind === 'user-message'
 }
 
+function skillInvocationSurfaceOpen(view: MissionControlView): boolean {
+  if (view.systemState === 'SAFE_MODE' || view.runtimeContext?.safeMode === true) return false
+  const state = view.skillCatalog?.state
+  return state === undefined || state === 'ok' || state === 'empty'
+}
+
 function lampModifier(state: MissionControlView['systemState'], connected: boolean): string {
   if (!connected) return 'offline'
   if (state === 'READY') return 'ready'
@@ -508,7 +514,7 @@ function ConversationWorkspace(props: {
         ) : null}
       </div>
       <div>
-        {(props.view.skills ?? []).some((skill) => skill.userInvocable && skill.lifecycle === 'active') ? (
+        {skillInvocationSurfaceOpen(props.view) && (props.view.skills ?? []).some((skill) => skill.userInvocable && skill.lifecycle === 'active') ? (
           <div className="composer-chips" data-skill-chips="true">
             {(props.view.skills ?? []).filter((skill) => skill.userInvocable && skill.lifecycle === 'active').map((skill) => (
               <button
@@ -773,6 +779,7 @@ function SkillsCenter(props: {
   readonly onSkillAction: (action: 'approve' | 'reject' | 'activate' | 'disable' | 'reactivate' | 'uninstall' | 'rollback', skill?: SkillProjection) => void
 }) {
   const skills = props.view.skills ?? []
+  const catalogOpen = skillInvocationSurfaceOpen(props.view)
   return (
     <section className="capability-section" aria-labelledby="skills-title">
       <h2 id="skills-title">SKILLS</h2>
@@ -844,12 +851,12 @@ function SkillsCenter(props: {
                   </button>
                 </>
               ) : null}
-              {skill.lifecycle === 'approved' ? (
+              {catalogOpen && skill.lifecycle === 'approved' ? (
                 <button type="button" className="button button--approval" data-skill-action="activate" disabled={props.locked} onClick={() => props.onSkillAction('activate', skill)}>
                   {props.armedSkill === `activate:${skill.id}` ? 'CONFIRM ACTIVATE' : 'ACTIVATE'}
                 </button>
               ) : null}
-              {skill.lifecycle === 'disabled' ? (
+              {catalogOpen && skill.lifecycle === 'disabled' ? (
                 <button type="button" className="button button--approval" data-skill-action="reactivate" disabled={props.locked} onClick={() => props.onSkillAction('reactivate', skill)}>
                   {props.armedSkill === `reactivate:${skill.id}` ? 'CONFIRM REACTIVATE' : 'REACTIVATE'}
                 </button>
