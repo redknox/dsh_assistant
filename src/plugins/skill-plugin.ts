@@ -4,7 +4,7 @@ import { registerSkillTools } from './skill-tools.js'
 
 declare module '@deepseek-ai/cordis' {
   interface Context {
-    skillLifecycle: SkillService
+    skillLifecycle: Omit<SkillService, 'importLocal'>
   }
 }
 
@@ -29,7 +29,6 @@ class SkillLifecycleService extends Service {
   listFiles(id: string) { return this.store.listFiles(id) }
   readFile(id: string, relativePath: string) { return this.store.readFile(id, relativePath) }
   create(input: Parameters<SkillService['create']>[0]) { return this.store.create(input) }
-  importLocal(sourceDir: string) { return this.store.importLocal(sourceDir) }
   writeFile(id: string, relativePath: string, content: string) { return this.store.writeFile(id, relativePath, content) }
   validate(id: string) { return this.store.validate(id) }
   seal(id: string) { return this.store.seal(id) }
@@ -38,6 +37,7 @@ class SkillLifecycleService extends Service {
   declareDependencies(id: string, dependsOn: Parameters<SkillService['declareDependencies']>[1]) {
     return this.store.declareDependencies(id, dependsOn)
   }
+  diff(id: string) { return this.store.diff(id) }
   activeRoot() { return this.store.activeRoot() }
   catalogNames() { return this.store.catalogNames() }
   health() { return this.store.health() }

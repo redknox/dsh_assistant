@@ -34,7 +34,7 @@ export function ensureSkillStore(layout: SkillStoreLayout): SkillIndex {
   mkdirSync(layout.active, { recursive: true })
   mkdirSync(layout.history, { recursive: true })
   if (!existsSync(layout.indexPath)) {
-    const empty: SkillIndex = { schemaVersion: SKILL_SCHEMA_VERSION, profile: layout.profile, records: [], active: {} }
+    const empty: SkillIndex = { schemaVersion: SKILL_SCHEMA_VERSION, profile: layout.profile, records: [], active: {}, generation: 0 }
     writeJsonAtomic(layout.indexPath, empty)
     return empty
   }
@@ -49,14 +49,14 @@ export function readSkillIndex(layout: SkillStoreLayout): SkillIndex {
   if (raw.profile !== layout.profile) {
     throw new SkillContractError('skill-profile', 'skill index profile does not match the selected Profile')
   }
-  return raw
+  return { ...raw, generation: typeof raw.generation === 'number' ? raw.generation : 0 }
 }
 
 export function writeSkillIndex(layout: SkillStoreLayout, index: SkillIndex): void {
   if (index.profile !== layout.profile) {
     throw new SkillContractError('skill-profile', 'refusing to write another Profile skill index')
   }
-  writeJsonAtomic(layout.indexPath, index)
+  writeJsonAtomic(layout.indexPath, { ...index, generation: (index.generation ?? 0) + 1 })
 }
 
 export function candidateDir(layout: SkillStoreLayout, id: string): string {

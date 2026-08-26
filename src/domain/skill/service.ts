@@ -366,6 +366,22 @@ export class SkillService {
     return next
   }
 
+  reject(id: string, fingerprint: string, credential: TrustedAuthorityCredential): SkillRecord {
+    this.assertTrusted(credential)
+    const record = this.get(id)
+    if (record.lifecycle !== 'approval-requested') {
+      throw new SkillContractError('not-requested', 'skill is not awaiting exact approval')
+    }
+    if (fingerprint !== fingerprintOf(record)) {
+      throw new SkillContractError('digest-mismatch', 'approval fingerprint does not match the exact skill revision')
+    }
+    return this.update(id, (item) => ({
+      ...item,
+      lifecycle: 'review-complete',
+      approvalDecision: 'rejected',
+    }))
+  }
+
   activate(id: string, credential: TrustedAuthorityCredential): SkillRecord {
     this.assertTrusted(credential)
     const record = this.get(id)
@@ -440,24 +456,23 @@ export class SkillService {
     this.retireActive(name, version, 'disabled')
   }
 
-  uninstall(name: string, credential: TrustedAuthorityCredential, acknowledgedDependents: readonly string[] = []): void {
+  uninstall(id: string, credential: TrustedAuthorityCredential, acknowledgedDependents: readonly string[] = []): void {
     this.assertTrusted(credential)
-    const index = readSkillIndex(this.layout)
-    const version = index.active[name] ?? index.records.find((item) => item.name === name)?.version
-    if (version === undefined) throw new SkillContractError('unknown-skill', `unknown skill: ${name}`)
-    const record = this.get(skillId(name, version))
+    const record = this.get(id)
     if (record.provenance.kind === 'system') throw new SkillAuthorityError('system skills cannot be disabled or uninstalled')
-    const dependents = this.dependentsOf(name, version)
+    const dependents = this.dependentsOf(record.name, record.version)
     if (dependents.length > 0 && !sameSet(dependents, acknowledgedDependents)) {
       throw new SkillContractError('dependents', `hard dependents must be acknowledged: ${dependents.join(', ')}`)
     }
-    if (index.active[name] !== undefined) this.retireActive(name, version, 'uninstalled')
-    else {
-      writeSkillIndex(this.layout, {
-        ...index,
-        records: index.records.map((item) => item.name === name ? { ...item, lifecycle: 'uninstalled' } : item),
-      })
+    const index = readSkillIndex(this.layout)
+    if (index.active[record.name] === record.version) {
+      this.retireActive(record.name, record.version, 'uninstalled')
+      return
     }
+    writeSkillIndex(this.layout, {
+      ...index,
+      records: index.records.map((item) => item.id === id ? { ...item, lifecycle: 'uninstalled' as SkillLifecycle } : item),
+    })
   }
 
   reactivate(name: string, version: string, credential: TrustedAuthorityCredential): SkillRecord {
@@ -495,11 +510,15 @@ export class SkillService {
     readonly disabled: readonly string[]
     readonly failed: readonly string[]
     readonly catalog: 'ok' | 'empty'
-    readonly rollbackTarget?: { readonly name: string; readonly version: string }
+    readonly generation: number
+    readonly rollbackTarget?: { readonly name: string; readonly version: string; readonly digest: string }
   } {
     const index = readSkillIndex(this.layout)
     const records = index.records
     const active = records.filter((item) => item.lifecycle === 'active').map((item) => item.id)
+    const rollback = index.lastActive === undefined
+      ? undefined
+      : records.find((item) => item.id === skillId(index.lastActive!.name, index.lastActive!.version))
     return {
       profile: this.layout.profile,
       candidates: records.filter((item) => item.lifecycle !== 'active' && item.lifecycle !== 'uninstalled').length,
@@ -507,7 +526,8 @@ export class SkillService {
       disabled: records.filter((item) => item.lifecycle === 'disabled').map((item) => item.id),
       failed: [],
       catalog: active.length === 0 ? 'empty' : 'ok',
-      ...(index.lastActive ? { rollbackTarget: index.lastActive } : {}),
+      generation: index.generation,
+      ...(rollback ? { rollbackTarget: { name: rollback.name, version: rollback.version, digest: rollback.digest } } : {}),
     }
   }
 
@@ -796,4 +816,3 @@ export async function loadThroughDshProvider(skillDir: string, name: string): Pr
   if (loaded.name !== name) throw new SkillContractError('skill-name', 'DSH parser name does not match host identity')
   return loaded
 }
-

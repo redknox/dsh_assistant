@@ -939,6 +939,7 @@ describe('TARS-NG mission-control workspace', () => {
         dependsOn: [],
         dependents: [],
         system: false,
+        generation: 0,
       }],
     }))
     assert.ok(view.activity.some((item) => item.summary === 'Skill weekly-review@1.0.0 active' && item.source === 'skill.lifecycle'))

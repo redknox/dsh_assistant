@@ -37,7 +37,7 @@ export async function runSkillCli(argv: readonly string[], home?: string): Promi
   const [action, ...rest] = argv
   if (action === 'import-local') return importLocalSkill(String(rest[0] ?? ''), home)
   if (action === undefined || action === 'help' || action === '-h') {
-    console.log('skill import-local <directory> | approve <id> <fingerprint> | activate <id> | disable <name> | uninstall <name> | rollback')
+    console.log('skill import-local <directory> | approve <id> <fingerprint> | activate <id> | disable <name> | uninstall <id> | rollback')
     return 0
   }
   const layout = ensureProductHome(resolveProductHome(home))
@@ -82,7 +82,7 @@ export async function runSkillCli(argv: readonly string[], home?: string): Promi
         console.log(JSON.stringify(control.recoveryRoot.rollbackSkill(human), null, 2))
         return 0
       }
-      console.error('skill import-local <directory> | approve <id> <fingerprint> | activate <id> | disable <name> | uninstall <name> | rollback')
+      console.error('skill import-local <directory> | approve <id> <fingerprint> | activate <id> | disable <name> | uninstall <id> | rollback')
       return 1
     } finally {
       await control.ctx.fiber.dispose()

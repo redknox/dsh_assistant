@@ -244,13 +244,16 @@ function toolEventsFromSession(events: readonly SessionEvent[]): WorkspaceSnapsh
 
 function skillRollbackOf(ctx: Context): WorkspaceSnapshotInput['skillRollback'] {
   const skills = ctx.get('skillLifecycle') as {
-    health(): { rollbackTarget?: { name: string; version: string } }
+    health(): { generation: number; rollbackTarget?: { name: string; version: string; digest: string } }
   } | undefined
-  return skills?.health().rollbackTarget
+  const health = skills?.health()
+  return health?.rollbackTarget === undefined ? undefined : { ...health.rollbackTarget, generation: health.generation }
 }
 
 function skillProjections(ctx: Context): WorkspaceSnapshotInput['skills'] {
   const skills = ctx.get('skillLifecycle') as {
+    health(): { generation: number }
+    diff(id: string): NonNullable<WorkspaceSnapshotInput['skills']>[number]['revisionDiff']
     list(): readonly {
       id: string
       name: string
@@ -276,6 +279,7 @@ function skillProjections(ctx: Context): WorkspaceSnapshotInput['skills'] {
     inspect(id: string): { dependents: readonly string[] }
   } | undefined
   if (skills === undefined) return []
+  const generation = skills.health().generation
   return skills.list().map((item) => ({
     id: item.id,
     name: item.name,
@@ -299,7 +303,9 @@ function skillProjections(ctx: Context): WorkspaceSnapshotInput['skills'] {
     dependsOn: (item.dependsOn ?? []).map((dep) => `${dep.name}@${dep.version}`),
     dependents: [...(skills.inspect(item.id).dependents ?? item.dependents ?? [])],
     system: item.provenance.kind === 'system',
+    generation,
     ...(item.resolutionHandoff ? { resolutionHandoff: item.resolutionHandoff } : {}),
+    revisionDiff: skills.diff(item.id),
   }))
 }
 

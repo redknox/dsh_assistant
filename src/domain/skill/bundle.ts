@@ -5,6 +5,8 @@ import { isSkillName } from '@deepseek-ai/dsh-skill'
 import { SkillContractError } from './errors.js'
 import type { SkillDependency, SkillInvocationPolicy } from './types.js'
 
+export const HOST_SKILL_DESCRIPTOR_SCHEMA_VERSION = 1
+const HOST_SKILL_DESCRIPTOR_KEYS = new Set(['schemaVersion', 'version', 'dependsOn'])
 export const STRICT_SEMVER = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/
 const SECRET_KEY = /(secret|password|passwd|api[_-]?key|token|credential|private[_-]?key|authorization)/i
 const FORBIDDEN_BASENAMES = new Set([
@@ -71,9 +73,24 @@ export function readHostSkillDescriptor(sourceDir: string): {
   if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) {
     throw new SkillContractError('skill-descriptor', 'tars-ng.skill.json must be a host object')
   }
-  const data = raw as { version?: unknown; dependsOn?: unknown }
-  const version = typeof data.version === 'string' && STRICT_SEMVER.test(data.version) ? data.version : undefined
-  return { version, dependsOn: parseDependsOn(data.dependsOn) }
+  const data = raw as Record<string, unknown>
+  for (const key of Object.keys(data)) {
+    if (!HOST_SKILL_DESCRIPTOR_KEYS.has(key)) {
+      throw new SkillContractError('skill-descriptor', `unknown host descriptor field: ${key}`)
+    }
+  }
+  if (data.schemaVersion !== HOST_SKILL_DESCRIPTOR_SCHEMA_VERSION) {
+    throw new SkillContractError('skill-descriptor', 'unsupported or missing tars-ng.skill.json schemaVersion')
+  }
+  if (data.version !== undefined) {
+    if (typeof data.version !== 'string' || !STRICT_SEMVER.test(data.version)) {
+      throw new SkillContractError('skill-version', `invalid skill version: ${String(data.version)}`)
+    }
+  }
+  return {
+    ...(typeof data.version === 'string' ? { version: data.version } : {}),
+    dependsOn: parseDependsOn(data.dependsOn),
+  }
 }
 
 export function parseDependsOn(value: unknown): readonly SkillDependency[] {

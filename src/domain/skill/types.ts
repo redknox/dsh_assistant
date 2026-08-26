@@ -90,6 +90,7 @@ export interface SkillIndex {
   readonly profile: string
   readonly records: readonly SkillRecord[]
   readonly active: Record<string, string>
+  readonly generation: number
   readonly lastActive?: { readonly name: string; readonly version: string }
   readonly approvals?: readonly SkillApprovalRecord[]
   readonly reviews?: readonly SkillReviewRecord[]

@@ -69,9 +69,14 @@ export class RecoveryRoot {
     return this.requireSkills().disable(name, credential)
   }
 
-  uninstallSkill(name: string, credential: TrustedAuthorityCredential, acknowledgedDependents: readonly string[] = []) {
+  uninstallSkill(id: string, credential: TrustedAuthorityCredential, acknowledgedDependents: readonly string[] = []) {
     this.assertCredential(credential)
-    return this.requireSkills().uninstall(name, credential, acknowledgedDependents)
+    return this.requireSkills().uninstall(id, credential, acknowledgedDependents)
+  }
+
+  rejectSkill(id: string, fingerprint: string, credential: TrustedAuthorityCredential) {
+    this.assertCredential(credential)
+    return this.requireSkills().reject(id, fingerprint, credential)
   }
 
   reactivateSkill(name: string, version: string, credential: TrustedAuthorityCredential) {

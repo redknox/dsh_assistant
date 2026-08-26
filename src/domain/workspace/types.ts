@@ -1,4 +1,5 @@
 import type { CandidateDiff } from '../candidate/types.js'
+import type { SkillRevisionDiff } from '../skill/diff.js'
 import type { SystemState } from '../personality/types.js'
 import type { ActivationViewState, ExtensionLifecycleState } from './lifecycle.js'
 
@@ -223,7 +224,7 @@ export interface MissionControlView {
   readonly activity: readonly ActivityItem[]
   readonly approvals: readonly ApprovalCard[]
   readonly skills?: readonly SkillProjection[]
-  readonly skillRollback?: { readonly name: string; readonly version: string }
+  readonly skillRollback?: { readonly name: string; readonly version: string; readonly digest: string; readonly generation: number }
   readonly approvalResolutions: readonly ApprovalResolution[]
   readonly activations: readonly ActivationCard[]
   readonly plugins: readonly UserPluginView[]
@@ -308,6 +309,8 @@ export interface SkillProjection {
   readonly dependsOn: readonly string[]
   readonly dependents: readonly string[]
   readonly system: boolean
+  readonly generation: number
+  readonly revisionDiff?: SkillRevisionDiff
   readonly resolutionHandoff?: {
     readonly missingTools: readonly string[]
     readonly nextAction: 'capability-resolution'
@@ -440,7 +443,7 @@ export interface WorkspaceSnapshotInput {
   readonly sessions?: SessionCatalogView
   readonly approvalOrigins?: Readonly<Record<string, string>>
   readonly skills?: readonly SkillProjection[]
-  readonly skillRollback?: { readonly name: string; readonly version: string }
+  readonly skillRollback?: { readonly name: string; readonly version: string; readonly digest: string; readonly generation: number }
 }
 
 export interface ActivationSnapshotView {

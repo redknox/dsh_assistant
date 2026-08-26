@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { cpSync, mkdirSync, mkdtempSync, readFileSync, symlinkSync, writeFileSync } from 'node:fs'
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { describe, it } from 'node:test'
@@ -71,7 +71,7 @@ describe('skill lifecycle', () => {
     const service = new SkillService(home(), 'assistant')
     const source = mkdtempSync(path.join(tmpdir(), 'skill-src-'))
     writeFileSync(path.join(source, 'SKILL.md'), '---\nname: weekly-review\ndescription: Guide a weekly review.\n---\nUse recall_memory only.\n')
-    writeFileSync(path.join(source, 'tars-ng.skill.json'), '{"version":"1.0.0"}\n')
+    writeFileSync(path.join(source, 'tars-ng.skill.json'), '{"schemaVersion":1,"version":"1.0.0"}\n')
     const imported = await service.importLocal(source)
     writeFileSync(path.join(source, 'SKILL.md'), '---\nname: weekly-review\ndescription: mutated\n---\nmutated body here\n')
     assert.equal(service.inspect(imported.candidateId).description, 'Guide a weekly review.')
@@ -144,7 +144,7 @@ describe('skill lifecycle', () => {
     const { ctx, recoveryRoot } = await bootAssistantControl({ home: isolated })
     try {
       assert.deepEqual(await ctx.skills.list({ cwd: isolated }), [])
-      const imported = await ctx.skillLifecycle.importLocal(FIXTURE)
+      const imported = await new SkillService(isolated, 'assistant').importLocal(FIXTURE)
       await ctx.skillLifecycle.validate(imported.candidateId)
       ctx.skillLifecycle.seal(imported.candidateId)
       ctx.skillLifecycle.requestReview(imported.candidateId)
@@ -343,7 +343,7 @@ describe('skill lifecycle', () => {
       body: 'This text mentions weekly-review but does not depend on it.',
     })
     assert.equal(prose.dependsOn.length, 0)
-    service.uninstall('weekly-review', human)
+    service.uninstall(imported.candidateId, human)
     assert.equal(service.get(imported.candidateId).lifecycle, 'uninstalled')
 
     const again = new SkillService(home(), 'assistant')
@@ -356,9 +356,9 @@ describe('skill lifecycle', () => {
       body: 'This skill needs the exact weekly-review revision.',
       dependsOn: [{ name: 'weekly-review', version: '1.0.0' }],
     })
-    assert.throws(() => again.uninstall('weekly-review', human), /hard dependents/)
-    assert.throws(() => again.uninstall('weekly-review', human, [prose.id]), /hard dependents/)
-    again.uninstall('weekly-review', human, [dependent.id])
+    assert.throws(() => again.uninstall(second.imported.candidateId, human), /hard dependents/)
+    assert.throws(() => again.uninstall(second.imported.candidateId, human, [prose.id]), /hard dependents/)
+    again.uninstall(second.imported.candidateId, human, [dependent.id])
     assert.equal(again.get(second.imported.candidateId).lifecycle, 'uninstalled')
   })
 
@@ -393,7 +393,7 @@ describe('skill lifecycle', () => {
     service.approve(drafted.id, requested.fingerprint, human)
     service.activate(drafted.id, human)
     assert.throws(() => service.disable('system-brief', human), /cannot be disabled or uninstalled/)
-    assert.throws(() => service.uninstall('system-brief', human), /cannot be disabled or uninstalled/)
+    assert.throws(() => service.uninstall(drafted.id, human), /cannot be disabled or uninstalled/)
     assert.equal(service.get(drafted.id).lifecycle, 'active')
   })
 
@@ -452,17 +452,27 @@ describe('skill lifecycle', () => {
     const ready = await bootAssistantControl({ home: isolated })
     try {
       const service = ready.ctx.skillLifecycle
-      const imported = await service.importLocal(FIXTURE)
-      await service.validate(imported.candidateId)
-      service.seal(imported.candidateId)
-      service.requestReview(imported.candidateId)
-      const requested = service.requestApproval(imported.candidateId)
+      const imported = await new SkillService(isolated, 'assistant').importLocal(FIXTURE)
+      await ready.ctx.skillLifecycle.validate(imported.candidateId)
+      ready.ctx.skillLifecycle.seal(imported.candidateId)
+      ready.ctx.skillLifecycle.requestReview(imported.candidateId)
+      const requested = ready.ctx.skillLifecycle.requestApproval(imported.candidateId)
       const human = ready.recoveryRoot.issueAuthority({ kind: 'human-control', source: 'operator-cli' })
       ready.recoveryRoot.approveSkill(imported.candidateId, requested.fingerprint, human)
       ready.recoveryRoot.activateSkill(imported.candidateId, human)
       const dest = mkdtempSync(path.join(tmpdir(), 'skill-bak-'))
       const tampered = mkdtempSync(path.join(tmpdir(), 'skill-bak-bad-'))
       backupSelfExtension(isolated, dest)
+      assert.equal(existsSync(path.join(dest, 'skills', 'assistant', 'staging')), false)
+      const draft = new SkillService(isolated, 'assistant').create({
+        name: 'draft-only',
+        description: 'An unsealed draft that must not enter backup.',
+        body: 'Keep this draft instruction body long enough.',
+      })
+      const destAfterDraft = mkdtempSync(path.join(tmpdir(), 'skill-bak-draft-'))
+      backupSelfExtension(isolated, destAfterDraft)
+      const backed = JSON.parse(readFileSync(path.join(destAfterDraft, 'skills', 'assistant', 'index.json'), 'utf8')) as { records: { id: string }[] }
+      assert.equal(backed.records.some((item) => item.id === draft.id), false)
       assert.ok(service.health().active.includes(imported.candidateId))
       const status = formatOperatorStatus(operatorStatus({
         activation: ready.recoveryRoot.inspect(),
@@ -489,5 +499,50 @@ describe('skill lifecycle', () => {
     } finally {
       await ready.ctx.fiber.dispose()
     }
+  })
+
+  it('does not expose path import on the shared Context skill surface', async () => {
+    const isolated = home()
+    const { ctx } = await bootAssistantControl({ home: isolated })
+    try {
+      assert.equal((ctx.skillLifecycle as unknown as { importLocal?: unknown }).importLocal, undefined)
+    } finally {
+      await ctx.fiber.dispose()
+    }
+  })
+
+  it('uninstalls only the selected revision when v1 is active and v2 is a candidate', async () => {
+    const isolated = home()
+    const service = new SkillService(isolated, 'assistant')
+    const rootId = Symbol('recovery-root')
+    service.bindRoot(rootId)
+    const human = humanCred(rootId)
+    const { imported, requested } = await authorApproved(service)
+    service.approve(imported.candidateId, requested.fingerprint, human)
+    service.activate(imported.candidateId, human)
+    const v2 = service.create({
+      name: 'weekly-review',
+      description: 'Guide a weekly review using existing memory and knowledge tools.',
+      body: 'This is an inactive v2 candidate that must not uninstall v1.',
+    })
+    service.uninstall(v2.id, human)
+    assert.equal(service.get(v2.id).lifecycle, 'uninstalled')
+    assert.equal(service.get(imported.candidateId).lifecycle, 'active')
+  })
+
+  it('rejects malformed and future host skill descriptors', async () => {
+    const service = new SkillService(home(), 'assistant')
+    const badVersion = mkdtempSync(path.join(tmpdir(), 'skill-ver-'))
+    writeFileSync(path.join(badVersion, 'SKILL.md'), '---\nname: weekly-review\ndescription: Guide a weekly review.\n---\nUse existing tools.\n')
+    writeFileSync(path.join(badVersion, 'tars-ng.skill.json'), '{"schemaVersion":1,"version":"01.0.0"}\n')
+    await assert.rejects(() => service.importLocal(badVersion), /invalid skill version/)
+    const future = mkdtempSync(path.join(tmpdir(), 'skill-future-'))
+    writeFileSync(path.join(future, 'SKILL.md'), '---\nname: weekly-review\ndescription: Guide a weekly review.\n---\nUse existing tools.\n')
+    writeFileSync(path.join(future, 'tars-ng.skill.json'), '{"schemaVersion":2,"version":"1.0.0"}\n')
+    await assert.rejects(() => service.importLocal(future), /schemaVersion/)
+    const extra = mkdtempSync(path.join(tmpdir(), 'skill-extra-'))
+    writeFileSync(path.join(extra, 'SKILL.md'), '---\nname: weekly-review\ndescription: Guide a weekly review.\n---\nUse existing tools.\n')
+    writeFileSync(path.join(extra, 'tars-ng.skill.json'), '{"schemaVersion":1,"version":"1.0.0","marketplace":true}\n')
+    await assert.rejects(() => service.importLocal(extra), /unknown host descriptor field/)
   })
 })

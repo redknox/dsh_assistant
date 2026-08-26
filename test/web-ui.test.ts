@@ -12,6 +12,7 @@ import type { ResolutionReview } from '../src/domain/resolution/index.js'
 import { GENERATED_EXTENSION_API_V1 } from '../src/domain/workbench/index.js'
 import { projectMissionControl } from '../src/domain/workspace/index.js'
 import { SimulatedCrashError } from '../src/domain/governance/index.js'
+import { SkillService } from '../src/domain/skill/index.js'
 import { bootAssistantControl, bootSafeModeRuntime, createAssistantAgent } from '../src/runtime/boot.js'
 import { AssistantControlSurface } from '../src/ui/controller.js'
 import {
@@ -2536,6 +2537,7 @@ export function apply(ctx) {
           dependsOn: [],
           dependents: [],
           system: false,
+          generation: 0,
         }, {
           id: 'host-brief@1.0.0',
           name: 'host-brief',
@@ -2555,6 +2557,7 @@ export function apply(ctx) {
           dependsOn: [],
           dependents: [],
           system: true,
+          generation: 0,
         }],
       }),
       pane: 'extensions',
@@ -2569,6 +2572,7 @@ export function apply(ctx) {
     }))
     assert.match(skillsPane, /data-skills="true"/)
     assert.match(skillsPane, /data-skill-action="activate"/)
+    assert.match(skillsPane, /profile assistant/)
     assert.doesNotMatch(skillsPane, /data-skill-id="host-brief@1.0.0"[^]*data-skill-action="uninstall"/)
 
     const chips = renderToStaticMarkup(createElement(MissionControlScreen, {
@@ -2592,6 +2596,7 @@ export function apply(ctx) {
           dependsOn: [],
           dependents: [],
           system: false,
+          generation: 0,
         }],
       }),
       connected: true,
@@ -2817,35 +2822,110 @@ export function apply(ctx) {
   it('approves and activates Skills only through /api/skill', async () => {
     const isolated = mkdtempSync(join(tmpdir(), 'tars-ng-web-skill-'))
     await withServer(() => bootAssistantControl({ home: isolated }), 'web-ui-skill', async (url, _surface, _agent, ctx) => {
-      const imported = await ctx.skillLifecycle.importLocal(join(import.meta.dirname, '../fixtures/skills/weekly-review'))
+      const imported = await new SkillService(isolated, 'assistant').importLocal(join(import.meta.dirname, '../fixtures/skills/weekly-review'))
       await ctx.skillLifecycle.validate(imported.candidateId)
       ctx.skillLifecycle.seal(imported.candidateId)
       ctx.skillLifecycle.requestReview(imported.candidateId)
       ctx.skillLifecycle.requestApproval(imported.candidateId)
+      assert.equal((ctx.skillLifecycle as unknown as { importLocal?: unknown }).importLocal, undefined)
       const cookie = await cookieHeader(url)
       const before = await fetch(`${url}/api/view`).then((res) => res.json()) as { view: MissionControlView }
       const skill = before.view.skills?.find((item) => item.id === imported.candidateId)
       assert.equal(skill?.lifecycle, 'approval-requested')
       assert.ok(skill?.approvalFingerprint)
-      const activateEarly = await fetch(`${url}/api/skill`, {
+      assert.ok(skill?.revisionDiff)
+      const headers = { 'content-type': 'application/json', ...authHeaders(cookie) }
+      const bound = {
+        action: 'approve',
+        id: skill.id,
+        name: skill.name,
+        version: skill.version,
+        digest: skill.digest,
+        fingerprint: skill.approvalFingerprint,
+        generation: skill.generation,
+      }
+      assert.equal((await fetch(`${url}/api/skill`, {
         method: 'POST',
-        headers: { 'content-type': 'application/json', ...authHeaders(cookie) },
-        body: JSON.stringify({ action: 'activate', id: skill.id }),
-      })
-      assert.equal(activateEarly.status, 409)
+        headers,
+        body: JSON.stringify(bound),
+      })).status, 409)
+      assert.equal((await fetch(`${url}/api/skill`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({ ...bound, confirm: true, digest: 'stale' }),
+      })).status, 409)
       const approved = await fetch(`${url}/api/skill`, {
         method: 'POST',
-        headers: { 'content-type': 'application/json', ...authHeaders(cookie) },
-        body: JSON.stringify({ action: 'approve', id: skill.id, fingerprint: skill.approvalFingerprint }),
+        headers,
+        body: JSON.stringify({ ...bound, confirm: true }),
       })
       assert.equal(approved.status, 200)
+      const replay = await fetch(`${url}/api/skill`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({ ...bound, confirm: true }),
+      })
+      assert.equal(replay.status, 409)
+      const afterApprove = await fetch(`${url}/api/view`).then((res) => res.json()) as { view: MissionControlView }
+      const ready = afterApprove.view.skills?.find((item) => item.id === imported.candidateId)
+      assert.equal(ready?.lifecycle, 'approved')
       const activated = await fetch(`${url}/api/skill`, {
         method: 'POST',
-        headers: { 'content-type': 'application/json', ...authHeaders(cookie) },
-        body: JSON.stringify({ action: 'activate', id: skill.id }),
+        headers,
+        body: JSON.stringify({
+          action: 'activate',
+          confirm: true,
+          id: ready?.id,
+          name: ready?.name,
+          version: ready?.version,
+          digest: ready?.digest,
+          generation: ready?.generation,
+        }),
       })
       assert.equal(activated.status, 200)
       assert.equal(ctx.skillLifecycle.get(imported.candidateId).lifecycle, 'active')
+      const dependent = ctx.skillLifecycle.create({
+        name: 'needs-weekly',
+        description: 'Host-declared hard dependent of weekly-review.',
+        body: 'This skill needs the exact weekly-review revision.',
+        dependsOn: [{ name: 'weekly-review', version: '1.0.0' }],
+      })
+      const listed = await fetch(`${url}/api/view`).then((res) => res.json()) as { view: MissionControlView }
+      const active = listed.view.skills?.find((item) => item.id === imported.candidateId)
+      const blocked = await fetch(`${url}/api/skill`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({
+          action: 'uninstall',
+          confirm: true,
+          id: active?.id,
+          name: active?.name,
+          version: active?.version,
+          digest: active?.digest,
+          generation: active?.generation,
+        }),
+      })
+      assert.equal(blocked.status, 409)
+      const blockedBody = await blocked.json() as { error?: string; dependents?: string[] }
+      assert.equal(blockedBody.error, 'dependents-required')
+      assert.deepEqual(blockedBody.dependents, [dependent.id])
+      const acked = await fetch(`${url}/api/skill`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({
+          action: 'uninstall',
+          confirm: true,
+          id: active?.id,
+          name: active?.name,
+          version: active?.version,
+          digest: active?.digest,
+          generation: active?.generation,
+          acknowledgeDependents: true,
+          dependents: blockedBody.dependents,
+        }),
+      })
+      assert.equal(acked.status, 200)
+      assert.equal(ctx.skillLifecycle.get(imported.candidateId).lifecycle, 'uninstalled')
     })
   })
 

@@ -9,8 +9,16 @@ export interface UiEnvelope {
 const include: RequestInit = { credentials: 'include', cache: 'no-store' }
 
 async function parseEnvelope(response: Response): Promise<UiEnvelope> {
-  const body = await response.json() as UiEnvelope & { error?: string; detail?: string }
-  if (!response.ok) throw new Error(body.detail ?? recoveryFailureText(body.error) ?? `request failed (${response.status})`)
+  const body = await response.json() as UiEnvelope & { error?: string; detail?: string; dependents?: readonly string[] }
+  if (!response.ok) {
+    const error = new Error(body.detail ?? recoveryFailureText(body.error) ?? `request failed (${response.status})`) as Error & {
+      code?: string
+      dependents?: readonly string[]
+    }
+    error.code = body.error
+    if (body.dependents) error.dependents = body.dependents
+    throw error
+  }
   return body
 }
 
@@ -72,21 +80,29 @@ export async function decideApproval(card: ApprovalCard, decision: 'approve' | '
 }
 
 export async function runSkillAction(input: {
-  readonly action: 'approve' | 'activate' | 'disable' | 'reactivate' | 'uninstall' | 'rollback'
+  readonly action: 'approve' | 'reject' | 'activate' | 'disable' | 'reactivate' | 'uninstall' | 'rollback'
   readonly skill?: SkillProjection
+  readonly rollback?: MissionControlView['skillRollback']
+  readonly confirm: boolean
   readonly dependents?: readonly string[]
+  readonly acknowledgeDependents?: boolean
 }): Promise<UiEnvelope> {
+  const target = input.action === 'rollback' ? input.rollback : input.skill
   return parseEnvelope(await fetch('/api/skill', {
     ...include,
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({
       action: input.action,
+      confirm: input.confirm,
       id: input.skill?.id,
-      name: input.skill?.name,
-      version: input.skill?.version,
+      name: target?.name,
+      version: target?.version,
+      digest: target?.digest,
       fingerprint: input.skill?.approvalFingerprint,
-      dependents: input.dependents ?? input.skill?.dependents ?? [],
+      generation: input.action === 'rollback' ? input.rollback?.generation : input.skill?.generation,
+      dependents: input.dependents ?? [],
+      acknowledgeDependents: input.acknowledgeDependents === true,
     }),
   }))
 }

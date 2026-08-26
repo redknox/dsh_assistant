@@ -43,7 +43,9 @@ Backtick tool mentions are compared to the bound runtime tool inventory. Missing
 
 `tars-ng` status, `self-extension status`, and `tars-ng doctor` report the Profile Skill catalog. Home backup/restore copies `$TARS_NG_HOME/self-extension/skills/<profile>` and fail closed on a tampered active digest. Restore replaces the Self-Extension tree, so a backup without Skills would wipe them.
 
-The Web UI Skills Center (Extensions pane) shows catalog metadata only. React does not parse `SKILL.md`. Trusted actions use `POST /api/skill` through Recovery Root. Approve is not Activate. System Skills hide uninstall/disable. User-invocable active Skills appear as composer chips. Session history may still show earlier instruction text; disable does not rewrite candidate bytes.
+The Web UI Skills Center (Extensions pane) shows catalog metadata, resources, validation/review state, and a bounded revision diff. React does not parse `SKILL.md`. Trusted actions use `POST /api/skill` through Recovery Root and require `confirm: true` plus exact id/name/version/digest/generation binding. Approve is not Activate. Reject is available on the exact approval card. System Skills hide uninstall/disable. Uninstall binds one revision; hard dependents return `dependents-required` until the same set is acknowledged. User-invocable active Skills appear as composer chips. Session history may still show earlier instruction text; disable does not rewrite candidate bytes.
+
+Local import remains operator-only (`tars-ng skill import-local`) and is not on `ctx.skillLifecycle`. Home backup copies only sealed/approved/active/disabled Skill authority, not drafts or staging.
 
 ## Scope
 
