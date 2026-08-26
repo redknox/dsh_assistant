@@ -273,6 +273,21 @@ describe('local third-party import', () => {
     }
   })
 
+  it('inspects an unsealed imported candidate without a fingerprint', () => {
+    const setup = isolatedImport()
+    const imported = importLocalExtension(importArgs(setup, FIXTURE))
+    const summary = setup.root.service.inspectSummary(imported.candidateId)
+    assert.equal(summary.owner, 'third-party/text-reverse')
+    assert.equal(summary.candidateVersion, '1.0.0')
+    assert.equal(summary.digest, '')
+    assert.equal(summary.validationPassed, false)
+    assert.equal('fingerprint' in summary, false)
+    assert.ok(summary.tools.added.includes('text_reverse'))
+    assert.equal(setup.root.service.inspectApproval(imported.candidateId), undefined)
+    assert.throws(() => setup.root.service.requestApproval(imported.candidateId), /not-sealed|not-validated|review-required/)
+    assert.equal(setup.root.service.inspectApproval(imported.candidateId), undefined)
+  })
+
   it('validates, reviews, approves, and activates only in the isolated runner', async () => {
     const { ctx, recoveryRoot } = await bootAssistantControl({ home: mkdtempSync(path.join(tmpdir(), 'tars-ng-import-life-')) })
     try {
@@ -416,6 +431,88 @@ describe('local third-party import', () => {
       capabilities: [{ id: 'text.reverse', permissions: [] }],
       runtimeSeams: [],
     }), RegistryContractError)
+  })
+})
+
+describe('import-local CLI inspect', () => {
+  it('inspects imported and generated developing candidates then refuses request-approval', async () => {
+    const previous = process.env.TARS_NG_HOME
+    const home = mkdtempSync(path.join(tmpdir(), 'tars-ng-import-inspect-'))
+    process.env.TARS_NG_HOME = home
+    const logs: string[] = []
+    const errors: string[] = []
+    const originalLog = console.log
+    const originalError = console.error
+    console.log = (text) => {
+      logs.push(String(text))
+    }
+    console.error = (text) => {
+      errors.push(String(text))
+    }
+    try {
+      const importedCode = await runSelfExtensionCli(['import-local', FIXTURE])
+      assert.equal(importedCode, 0)
+      logs.length = 0
+      const inspectImported = await runSelfExtensionCli(['inspect', 'third-party--text-reverse@1.0.0'])
+      assert.equal(inspectImported, 0, errors.join('\n'))
+      const importedSummary = JSON.parse(logs.join('\n')) as { digest?: string; validationPassed?: boolean; fingerprint?: string }
+      assert.equal(importedSummary.digest, '')
+      assert.equal(importedSummary.validationPassed, false)
+      assert.equal(importedSummary.fingerprint, undefined)
+      assert.doesNotMatch(logs.join('\n'), /fingerprint/)
+      logs.length = 0
+      errors.length = 0
+      const requestImported = await runSelfExtensionCli(['request-approval', 'third-party--text-reverse@1.0.0'])
+      assert.equal(requestImported, 1)
+      assert.match(errors.join('\n'), /not-sealed|not-validated|review-required/)
+      assert.doesNotMatch(errors.join('\n'), /at |Error: candidate digest|\/Users\/|src\/plugin/)
+
+      const generatedId = 'generated--inspect-pending@0.1.0'
+      logs.length = 0
+      errors.length = 0
+      const inspectGenerated = await runSelfExtensionCli(['inspect', generatedId], {
+        boot: async () => {
+          const control = await bootAssistantControl({ home })
+          control.ctx.candidateWorkspace.create({
+            review: {
+              kind: 'new-plugin',
+              capability: 'text.inspect',
+              need: 'inspect',
+              recommendation: 'create',
+              rationale: 'test',
+              implications: [],
+              assumptions: [],
+              unresolved: [],
+              steps: [],
+              registryFacts: { exact: { kind: 'unknown', capability: 'text.inspect' }, domainOwners: [], conflicts: [] },
+            },
+            owner: 'generated/inspect-pending',
+            version: '0.1.0',
+            manifest: { capabilities: ['text.inspect'], permissions: [], runtimeSeams: [], tools: [] },
+          })
+          return control
+        },
+      })
+      assert.equal(inspectGenerated, 0, errors.join('\n'))
+      const generatedSummary = JSON.parse(logs.join('\n')) as { owner?: string; digest?: string; validationPassed?: boolean; fingerprint?: string }
+      assert.equal(generatedSummary.owner, 'generated/inspect-pending')
+      assert.equal(generatedSummary.digest, '')
+      assert.equal(generatedSummary.validationPassed, false)
+      assert.equal(generatedSummary.fingerprint, undefined)
+      logs.length = 0
+      errors.length = 0
+      const requestGenerated = await runSelfExtensionCli(['request-approval', generatedId], {
+        boot: async () => bootAssistantControl({ home }),
+      })
+      assert.equal(requestGenerated, 1)
+      assert.match(errors.join('\n'), /not-sealed|not-validated|review-required|unknown-candidate/)
+      assert.doesNotMatch(errors.join('\n'), /at |candidate digest is required/)
+    } finally {
+      console.log = originalLog
+      console.error = originalError
+      if (previous === undefined) delete process.env.TARS_NG_HOME
+      else process.env.TARS_NG_HOME = previous
+    }
   })
 })
 

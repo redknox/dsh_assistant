@@ -178,7 +178,7 @@ export class GovernanceService implements ExtensionGovernance, ExtensionActivati
   }
 
   inspectSummary(candidateId: string): ApprovalSummary {
-    const { record, diff } = this.facts(candidateId)
+    const { record, diff } = this.candidateView(candidateId)
     return approvalSummary(record, diff)
   }
 
@@ -988,11 +988,15 @@ export class GovernanceService implements ExtensionGovernance, ExtensionActivati
     }
   }
 
-  private facts(candidateId: string) {
+  private candidateView(candidateId: string) {
     const record = this.workspace.get(candidateId)
     const diff = this.workspace.diff(candidateId)
-    const fingerprint = fingerprintFromCandidate(record, diff)
-    return { record, diff, fingerprint }
+    return { record, diff }
+  }
+
+  private facts(candidateId: string) {
+    const { record, diff } = this.candidateView(candidateId)
+    return { record, diff, fingerprint: fingerprintFromCandidate(record, diff) }
   }
 
   private approvalRequestDenials(candidateId: string): EligibilityDenial[] {

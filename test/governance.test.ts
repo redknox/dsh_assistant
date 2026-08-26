@@ -113,6 +113,27 @@ function ready(
 }
 
 describe('extension governance and recovery', () => {
+  it('inspects a developing generated candidate without inventing a fingerprint', () => {
+    const { workspace, governance } = seeded()
+    const candidate = workspace.create({
+      review: review({ kind: 'new-plugin', capability: 'matter.light.set', need: 'matter', target: undefined }),
+      owner: 'generated/matter-home',
+      version: '0.1.0',
+      manifest: { capabilities: ['matter.light.set'], permissions: [], runtimeSeams: [], tools: [] },
+    })
+    assert.equal(candidate.digest, undefined)
+    assert.equal(candidate.sealed, false)
+    const summary = governance.inspectSummary(candidate.id)
+    assert.equal(summary.owner, 'generated/matter-home')
+    assert.equal(summary.candidateVersion, '0.1.0')
+    assert.equal(summary.digest, '')
+    assert.equal(summary.validationPassed, false)
+    assert.equal('fingerprint' in summary, false)
+    assert.equal(governance.inspectApproval(candidate.id), undefined)
+    assert.throws(() => governance.requestApproval(candidate.id), GovernanceContractError)
+    assert.equal(governance.inspectApproval(candidate.id), undefined)
+  })
+
   it('A. denies activation without approval', async () => {
     const { registry, workspace, governance, root, human } = seeded()
     const candidate = ready(workspace)

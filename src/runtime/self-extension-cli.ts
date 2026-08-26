@@ -169,6 +169,10 @@ export async function runSelfExtensionCli(argv: string[], hooks: SelfExtensionCl
       }
       console.error(usage())
       return 1
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      console.error(error instanceof ImportLocalError ? `${error.code}: ${message}` : message.split(/\r?\n/, 1)[0] ?? message)
+      return 1
     } finally {
       await ctx.fiber.dispose()
     }
