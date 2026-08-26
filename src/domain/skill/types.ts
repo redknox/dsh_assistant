@@ -65,6 +65,10 @@ export interface SkillRecord extends SkillIdentity {
   readonly whenToUse?: string
   readonly dependsOn: readonly SkillDependency[]
   readonly dependents: readonly string[]
+  readonly lastFailure?: {
+    readonly phase: 'validate' | 'review' | 'activate'
+    readonly detail: string
+  }
   readonly resolutionHandoff?: {
     readonly missingTools: readonly string[]
     readonly nextAction: 'capability-resolution'
@@ -97,6 +101,7 @@ export const SKILL_LIFECYCLE_EVENT_KINDS = [
   'activate',
   'disable',
   'uninstall',
+  'update',
   'rollback',
   'recovery',
   'catalog-degraded',
@@ -151,6 +156,10 @@ export interface SkillInspectSummary {
   readonly baseVersion?: string
   readonly dependsOn: readonly SkillDependency[]
   readonly dependents: readonly string[]
+  readonly lastFailure?: {
+    readonly phase: 'validate' | 'review' | 'activate'
+    readonly detail: string
+  }
   readonly resolutionHandoff?: {
     readonly missingTools: readonly string[]
     readonly nextAction: 'capability-resolution'

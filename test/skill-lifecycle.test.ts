@@ -647,6 +647,7 @@ describe('skill lifecycle', () => {
     assert.equal(service.get(imported.candidateId).lifecycle, 'approved')
     assert.deepEqual(service.catalogNames(), [])
     assert.equal(service.health().catalog, 'empty')
+    assert.ok(service.health().failed.includes(imported.candidateId))
     assert.equal(existsSync(path.join(isolated, 'self-extension', 'skills', 'assistant', 'active', 'weekly-review')), false)
     const again = new SkillService(isolated, 'assistant')
     again.bindRoot(rootId)
@@ -662,7 +663,7 @@ describe('skill lifecycle', () => {
     assert.deepEqual(again.catalogNames(), [])
     assert.equal(again.health().catalog, 'degraded')
     assert.equal(again.health().recoveryRequired, true)
-    assert.ok(again.health().failed.includes('weekly-review'))
+    assert.ok(again.health().failed.includes(imported.candidateId))
     assert.throws(() => again.activate(imported.candidateId, human), /recovery is required/)
     const restarted = new SkillService(isolated, 'assistant')
     restarted.bindRoot(rootId)
@@ -671,6 +672,7 @@ describe('skill lifecycle', () => {
     assert.equal(restarted.health().catalog, 'empty')
     const activated = restarted.activate(imported.candidateId, human)
     assert.equal(activated.lifecycle, 'active')
+    assert.equal(restarted.health().failed.length, 0)
     restarted.attachInvalidation(() => {
       throw new Error('invalidate failed')
     })
@@ -685,5 +687,98 @@ describe('skill lifecycle', () => {
     assert.ok(kinds.includes('approved'))
     assert.ok(kinds.includes('activate'))
     assert.doesNotMatch(JSON.stringify(restarted.events()), /Use existing tools only/)
+  })
+
+  it('rolls back index-write failure and does not fail a committed cleanup leftover', async () => {
+    const isolated = home()
+    const service = new SkillService(isolated, 'assistant')
+    const rootId = Symbol('recovery-root')
+    service.bindRoot(rootId)
+    const human = humanCred(rootId)
+    const { imported, requested } = await authorApproved(service)
+    service.approve(imported.candidateId, requested.fingerprint, human)
+    service.interruptAfter = 'index-write'
+    assert.throws(() => service.activate(imported.candidateId, human), /index-write/)
+    assert.equal(service.get(imported.candidateId).lifecycle, 'approved')
+    assert.deepEqual(service.catalogNames(), [])
+    assert.equal(existsSync(path.join(isolated, 'self-extension', 'skills', 'assistant', 'active', 'weekly-review')), false)
+    const restarted = new SkillService(isolated, 'assistant')
+    restarted.bindRoot(rootId)
+    assert.equal(restarted.get(imported.candidateId).lifecycle, 'approved')
+    assert.deepEqual(restarted.catalogNames(), [])
+    restarted.interruptAfter = undefined
+    restarted.activate(imported.candidateId, human)
+    restarted.interruptAfter = 'outgoing-cleanup'
+    restarted.disable('weekly-review', human)
+    assert.equal(restarted.get(imported.candidateId).lifecycle, 'disabled')
+    const outgoing = path.join(isolated, 'self-extension', 'skills', 'assistant', 'history', 'outgoing-weekly-review')
+    assert.equal(existsSync(outgoing), true)
+    const recovered = new SkillService(isolated, 'assistant')
+    recovered.bindRoot(rootId)
+    assert.equal(recovered.get(imported.candidateId).lifecycle, 'disabled')
+    assert.equal(existsSync(outgoing), false)
+  })
+
+  it('records update and rollback events and persists failed candidate diagnostics', async () => {
+    const isolated = home()
+    const service = new SkillService(isolated, 'assistant')
+    const rootId = Symbol('recovery-root')
+    service.bindRoot(rootId)
+    const human = humanCred(rootId)
+    const drafted = service.create({
+      name: 'notes',
+      description: 'A drafted skill used to record update and validation failure.',
+      body: 'Keep this instruction body long enough.',
+    })
+    service.writeFile(drafted.id, 'SKILL.md', [
+      '---',
+      'name: notes',
+      'description: A drafted skill used to record update and validation failure.',
+      '---',
+      'Updated drafted instruction body here.',
+      '',
+    ].join('\n'))
+    assert.ok(service.events().some((item) => item.kind === 'update' && item.skillId === drafted.id))
+    writeFileSync(path.join(service.layout.candidates, drafted.id.replace('@', '--'), 'SKILL.md'), '---\nname: notes\ndescription: A drafted skill used to record update and validation failure.\n---\nshort\n')
+    await assert.rejects(() => service.validate(drafted.id), /empty or unbounded/)
+    assert.ok(service.health().failed.includes(drafted.id))
+    assert.equal(service.get(drafted.id).lastFailure?.phase, 'validate')
+    service.writeFile(drafted.id, 'SKILL.md', [
+      '---',
+      'name: notes',
+      'description: A drafted skill used to record update and validation failure.',
+      '---',
+      'Restored drafted instruction body here.',
+      '',
+    ].join('\n'))
+    await service.validate(drafted.id)
+    assert.equal(service.health().failed.includes(drafted.id), false)
+
+    const { imported, requested } = await authorApproved(service)
+    service.approve(imported.candidateId, requested.fingerprint, human)
+    service.activate(imported.candidateId, human)
+    const forked = service.writeFile(imported.candidateId, 'SKILL.md', [
+      '---',
+      'name: weekly-review',
+      'description: Guide a weekly review using existing memory and knowledge tools.',
+      '---',
+      'Use existing tools only. This is a v2 instruction body.',
+      '',
+    ].join('\n'))
+    assert.ok(service.events().some((item) => item.kind === 'update' && item.skillId === forked.id && item.detail === 'from 1.0.0'))
+    await trustActivate(service, forked.id, human)
+    service.rollback(human)
+    assert.equal(service.get(imported.candidateId).lifecycle, 'active')
+    assert.ok(service.events().some((item) => item.kind === 'rollback' && item.skillId === imported.candidateId))
+    service.interruptAfter = 'index-write'
+    assert.throws(() => service.rollback(human), /index-write/)
+    assert.equal(service.get(imported.candidateId).lifecycle, 'active')
+    assert.equal(service.events().filter((item) => item.kind === 'rollback').length, 1)
+    const restarted = new SkillService(isolated, 'assistant')
+    const kinds = restarted.events().map((item) => item.kind)
+    assert.ok(kinds.includes('activate'))
+    assert.ok(kinds.includes('update'))
+    assert.ok(kinds.includes('rollback'))
+    assert.doesNotMatch(JSON.stringify(restarted.events()), /v2 instruction body/)
   })
 })

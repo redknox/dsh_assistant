@@ -807,6 +807,9 @@ function SkillsCenter(props: {
             </div>
             {skill.dependsOn.length > 0 ? <div className="workbench-meta">depends on {skill.dependsOn.join(', ')}</div> : null}
             {skill.dependents.length > 0 ? <div className="workbench-meta" data-skill-dependents="true">dependents {skill.dependents.join(', ')}</div> : null}
+            {skill.lastFailure ? (
+              <div className="workbench-meta" data-skill-failed="true">failed {skill.lastFailure.phase} · {skill.lastFailure.detail}</div>
+            ) : null}
             {skill.revisionDiff ? (
               <div className="workbench-meta" data-skill-diff="true">
                 instruction {skill.revisionDiff.instructionChanged ? 'changed' : 'unchanged'}

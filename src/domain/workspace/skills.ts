@@ -11,7 +11,8 @@ export function skillActivity(input: WorkspaceSnapshotInput) {
       : event.kind === 'recovery' ? 'RECOVERED' as const
         : event.kind === 'approval-requested' || event.kind === 'review' ? 'APPROVAL_REQUIRED' as const
           : event.kind === 'disable' || event.kind === 'uninstall' ? 'RECOVERED' as const
-            : event.kind === 'activate' || event.kind === 'approved' ? 'COMPLETED' as const
+            : event.kind === 'activate' || event.kind === 'approved' || event.kind === 'rollback' ? 'COMPLETED' as const
+              : event.kind === 'update' ? 'OBSERVED' as const
               : 'OBSERVED' as const,
     summary: [
       event.name && event.version ? `Skill ${event.name}@${event.version}` : 'Skill',

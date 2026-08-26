@@ -65,7 +65,7 @@ type EventInput = {
   readonly detail?: string
 }
 
-export type SkillInterrupt = 'after-outgoing' | 'after-incoming' | 'after-index'
+export type SkillInterrupt = 'after-outgoing' | 'after-incoming' | 'after-index' | 'index-write' | 'outgoing-cleanup'
 
 export class SkillService {
   readonly layout: SkillStoreLayout
@@ -132,6 +132,7 @@ export class SkillService {
       baseVersion: record.baseVersion,
       dependsOn: record.dependsOn ?? [],
       dependents: this.dependentsOf(record.name, record.version),
+      lastFailure: record.lastFailure,
       resolutionHandoff: record.resolutionHandoff,
     }
   }
@@ -242,35 +243,45 @@ export class SkillService {
         whenToUse: record.whenToUse,
         baseVersion: record.version,
         dependsOn: record.dependsOn ?? [],
-        eventKind: 'draft',
+        eventKind: 'update',
+        eventDetail: `from ${record.version}`,
       })
     }
     publishSkillFiles(candidateDir(this.layout, id), current)
+    const digest = digestSkillFiles(current)
     return this.update(id, (item) => ({
       ...item,
-      digest: digestSkillFiles(current),
+      digest,
       resources: Object.keys(current).filter((name) => name !== 'SKILL.md').sort(),
-    }))
+    }), { kind: 'update', skillId: record.id, name: record.name, version: record.version, digest, detail: relativePath })
   }
 
   async validate(id: string): Promise<SkillRecord> {
     const record = this.get(id)
-    const loaded = await loadThroughDshCatalog(candidateDir(this.layout, id))
-    if (loaded.name !== record.name) throw new SkillContractError('skill-name', 'DSH parser name does not match host identity')
-    applyHostSkillLimits(loaded)
-    const inventory = this.knownTools?.()
-    const handoff = inventory === undefined
-      ? undefined
-      : skillResolutionHandoff(instructionBody(loaded.content), inventory)
-    return this.update(id, (item) => ({
-      ...item,
-      lifecycle: 'validated',
-      validationPassed: true,
-      description: loaded.description,
-      whenToUse: loaded.whenToUse,
-      invocation: loaded.invocation,
-      resolutionHandoff: handoff,
-    }), { kind: 'validate', skillId: record.id, name: record.name, version: record.version, digest: record.digest })
+    try {
+      const loaded = await loadThroughDshCatalog(candidateDir(this.layout, id))
+      if (loaded.name !== record.name) throw new SkillContractError('skill-name', 'DSH parser name does not match host identity')
+      applyHostSkillLimits(loaded)
+      const inventory = this.knownTools?.()
+      const handoff = inventory === undefined
+        ? undefined
+        : skillResolutionHandoff(instructionBody(loaded.content), inventory)
+      return this.update(id, (item) => {
+        const { lastFailure: _cleared, ...rest } = item
+        return {
+          ...rest,
+          lifecycle: 'validated',
+          validationPassed: true,
+          description: loaded.description,
+          whenToUse: loaded.whenToUse,
+          invocation: loaded.invocation,
+          resolutionHandoff: handoff,
+        }
+      }, { kind: 'validate', skillId: record.id, name: record.name, version: record.version, digest: record.digest })
+    } catch (error) {
+      this.recordFailure(id, 'validate', error)
+      throw error
+    }
   }
 
   diff(id: string): SkillRevisionDiff {
@@ -324,11 +335,18 @@ export class SkillService {
       state: complete ? 'review-complete' : 'changes-required',
       createdAt: new Date().toISOString(),
     }
-    const updated = this.update(id, (item) => ({
-      ...item,
-      lifecycle: complete ? 'review-complete' : item.lifecycle,
-      reviewComplete: complete,
-    }), { kind: 'review', skillId: record.id, name: record.name, version: record.version, digest: record.digest, detail: stored.state })
+    const updated = this.update(id, (item) => {
+      const next = {
+        ...item,
+        lifecycle: complete ? 'review-complete' as const : item.lifecycle,
+        reviewComplete: complete,
+      }
+      if (complete) {
+        const { lastFailure: _cleared, ...rest } = next
+        return rest
+      }
+      return { ...next, lastFailure: { phase: 'review' as const, detail: boundSkillDetail(stored.state) } }
+    }, { kind: 'review', skillId: record.id, name: record.name, version: record.version, digest: record.digest, detail: stored.state })
     const index = readSkillIndex(this.layout)
     writeSkillIndex(this.layout, {
       ...index,
@@ -402,7 +420,7 @@ export class SkillService {
     }), { kind: 'rejected', skillId: record.id, name: record.name, version: record.version, digest: record.digest })
   }
 
-  activate(id: string, credential: TrustedAuthorityCredential): SkillRecord {
+  activate(id: string, credential: TrustedAuthorityCredential, event?: EventInput): SkillRecord {
     this.assertTrusted(credential)
     this.assertCatalogWritable()
     const record = this.get(id)
@@ -438,11 +456,13 @@ export class SkillService {
       throw error
     }
     const next = { ...record, lifecycle: 'active' as SkillLifecycle }
+    const { lastFailure: _cleared, ...cleared } = next
+    const committedRecord = cleared
     const committed = {
       ...previous,
       records: previous.records.map((item) => (
-        item.id === next.id
-          ? next
+        item.id === committedRecord.id
+          ? committedRecord
           : item.name === record.name && item.lifecycle === 'active'
             ? { ...item, lifecycle: 'disabled' as SkillLifecycle }
             : item
@@ -452,7 +472,7 @@ export class SkillService {
         ? { name: record.name, version: previous.active[record.name]! }
         : previous.lastActive,
     }
-    if (!committed.records.some((item) => item.id === next.id)) committed.records = [...committed.records, next]
+    if (!committed.records.some((item) => item.id === committedRecord.id)) committed.records = [...committed.records, committedRecord]
     if (this.interruptAfter === 'after-index') {
       rollbackActiveDirectory(dest, outgoing)
       throw new SkillContractError('skill-interrupt', 'after-index')
@@ -463,7 +483,8 @@ export class SkillService {
       dest,
       outgoing,
       name: record.name,
-      event: { kind: 'activate', skillId: record.id, name: record.name, version: record.version, digest: record.digest },
+      skillId: record.id,
+      event: event ?? { kind: 'activate', skillId: record.id, name: record.name, version: record.version, digest: record.digest },
     })
     return this.get(id)
   }
@@ -508,7 +529,14 @@ export class SkillService {
     if (record.approvalDecision !== 'approved-for-exact-diff') {
       throw new SkillContractError('approval-required', 'rollback target is not an approved skill revision')
     }
-    return this.activate(record.id, credential)
+    return this.activate(record.id, credential, {
+      kind: 'rollback',
+      skillId: record.id,
+      name: record.name,
+      version: record.version,
+      digest: record.digest,
+      detail: `from ${index.active[record.name] ?? 'none'}`,
+    })
   }
 
   events(): readonly SkillLifecycleEvent[] {
@@ -551,7 +579,7 @@ export class SkillService {
       candidates: records.filter((item) => item.lifecycle !== 'active' && item.lifecycle !== 'uninstalled').length,
       active,
       disabled: records.filter((item) => item.lifecycle === 'disabled').map((item) => item.id),
-      failed: [...(index.catalog?.failed ?? [])],
+      failed: records.filter((item) => item.lastFailure !== undefined).map((item) => item.id),
       catalog: degraded ? 'degraded' : active.length === 0 ? 'empty' : 'ok',
       generation: index.generation,
       recoveryRequired: degraded,
@@ -592,6 +620,7 @@ export class SkillService {
       dest,
       outgoing,
       name,
+      skillId: skillId(name, version),
       event: {
         kind: lifecycle === 'disabled' ? 'disable' : 'uninstall',
         skillId: skillId(name, version),
@@ -663,10 +692,18 @@ export class SkillService {
         whenToUse: record.whenToUse,
         baseVersion: record.version,
         dependsOn: parsed,
-        eventKind: 'draft',
+        eventKind: 'update',
+        eventDetail: `from ${record.version}`,
       })
     }
-    return this.update(id, (item) => ({ ...item, dependsOn: parsed }))
+    return this.update(id, (item) => ({ ...item, dependsOn: parsed }), {
+      kind: 'update',
+      skillId: record.id,
+      name: record.name,
+      version: record.version,
+      digest: record.digest,
+      detail: 'dependsOn',
+    })
   }
 
   private assertAcknowledgedDependents(record: SkillRecord, acknowledgedDependents: readonly string[]): void {
@@ -701,7 +738,8 @@ export class SkillService {
     readonly whenToUse?: string
     readonly baseVersion?: string
     readonly dependsOn?: readonly SkillDependency[]
-    readonly eventKind: 'draft' | 'import'
+    readonly eventKind: 'draft' | 'import' | 'update'
+    readonly eventDetail?: string
   }): SkillRecord {
     const id = skillId(input.name, input.version)
     const index = readSkillIndex(this.layout)
@@ -737,6 +775,7 @@ export class SkillService {
         name: record.name,
         version: record.version,
         digest: record.digest,
+        ...(input.eventDetail ? { detail: input.eventDetail } : {}),
       }))
     } catch (error) {
       discardDir(staging)
@@ -761,19 +800,61 @@ export class SkillService {
     readonly dest: string
     readonly outgoing: string
     readonly name: string
+    readonly skillId?: string
     readonly event: EventInput
   }): void {
-    writeSkillIndex(this.layout, this.withEvent(input.committed, input.event))
+    try {
+      if (this.interruptAfter === 'index-write') {
+        throw new SkillContractError('skill-interrupt', 'index-write')
+      }
+      writeSkillIndex(this.layout, this.withEvent(input.committed, input.event))
+    } catch (error) {
+      try {
+        rollbackActiveDirectory(input.dest, input.outgoing)
+      } catch {
+        this.markCatalogDegraded(input.name, 'index-write failed; catalog rollback failed')
+        throw new SkillContractError('catalog-degraded', 'catalog sync failed; recovery required')
+      }
+      throw error
+    }
     try {
       this.syncCatalog()
     } catch {
       const restored = this.rollbackCatalogMutation(input)
+      if (input.skillId !== undefined) this.recordFailure(input.skillId, 'activate', 'catalog invalidation failed')
       if (restored === 'restored') {
         throw new SkillContractError('catalog-sync-failed', 'catalog invalidation failed; previous catalog restored')
       }
       throw new SkillContractError('catalog-degraded', 'catalog sync failed; recovery required')
     }
-    discardDir(input.outgoing)
+    try {
+      if (this.interruptAfter === 'outgoing-cleanup') {
+        throw new SkillContractError('skill-interrupt', 'outgoing-cleanup')
+      }
+      discardDir(input.outgoing)
+    } catch {
+      writeSkillIndex(this.layout, this.withEvent(readSkillIndex(this.layout), {
+        kind: 'recovery',
+        name: input.name,
+        skillId: input.skillId,
+        detail: 'outgoing-cleanup-pending',
+      }))
+    }
+  }
+
+  private recordFailure(id: string, phase: 'validate' | 'review' | 'activate', error: unknown): void {
+    const detail = boundSkillDetail(typeof error === 'string' ? error : error instanceof Error ? error.message : String(error))
+    try {
+      this.update(id, (item) => ({ ...item, lastFailure: { phase, detail } }), {
+        kind: 'recovery',
+        skillId: id,
+        name: this.get(id).name,
+        version: this.get(id).version,
+        detail: `${phase}-failed`,
+      })
+    } catch {
+      return
+    }
   }
 
   private rollbackCatalogMutation(input: {

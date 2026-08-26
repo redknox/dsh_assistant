@@ -314,6 +314,7 @@ function skillProjections(ctx: Context): WorkspaceSnapshotInput['skills'] {
       baseVersion?: string
       dependsOn?: readonly { name: string; version: string }[]
       dependents?: readonly string[]
+      lastFailure?: { phase: string; detail: string }
       resolutionHandoff?: { missingTools: readonly string[]; nextAction: 'capability-resolution' }
     }[]
     inspect(id: string): { dependents: readonly string[] }
@@ -344,6 +345,7 @@ function skillProjections(ctx: Context): WorkspaceSnapshotInput['skills'] {
     dependents: [...(skills.inspect(item.id).dependents ?? item.dependents ?? [])],
     system: item.provenance.kind === 'system',
     generation,
+    ...(item.lastFailure ? { lastFailure: item.lastFailure } : {}),
     ...(item.resolutionHandoff ? { resolutionHandoff: item.resolutionHandoff } : {}),
     revisionDiff: skills.diff(item.id),
   }))

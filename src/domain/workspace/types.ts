@@ -314,6 +314,10 @@ export interface SkillProjection {
   readonly baseVersion?: string
   readonly dependsOn: readonly string[]
   readonly dependents: readonly string[]
+  readonly lastFailure?: {
+    readonly phase: string
+    readonly detail: string
+  }
   readonly system: boolean
   readonly generation: number
   readonly revisionDiff?: SkillRevisionDiff

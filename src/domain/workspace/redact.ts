@@ -80,6 +80,7 @@ export function sanitizeMissionControlView(view: MissionControlView): MissionCon
       digest: redactText(item.digest),
       description: redactText(item.description),
       ...(item.whenToUse ? { whenToUse: redactText(item.whenToUse) } : {}),
+      ...(item.lastFailure ? { lastFailure: { ...item.lastFailure, detail: redactText(item.lastFailure.detail) } } : {}),
     })),
     ...(view.skillCatalog?.detail
       ? { skillCatalog: { ...view.skillCatalog, detail: redactText(view.skillCatalog.detail) } }
