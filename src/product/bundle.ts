@@ -23,6 +23,8 @@ import * as governancePlugin from '../plugins/governance-plugin.js'
 import type { GovernancePluginConfig } from '../plugins/governance-plugin.js'
 import * as workbenchPlugin from '../plugins/workbench-plugin.js'
 import type { WorkbenchPluginConfig } from '../plugins/workbench-plugin.js'
+import * as skillPlugin from '../plugins/skill-plugin.js'
+import type { SkillPluginConfig } from '../plugins/skill-plugin.js'
 
 export const name = 'dsh-assistant'
 export const inject = ['systemPrompt', 'agents']
@@ -42,6 +44,7 @@ export interface AssistantBundleConfig {
   readonly safeMode?: boolean
   readonly governance?: GovernancePluginConfig
   readonly workbench?: WorkbenchPluginConfig
+  readonly skills?: SkillPluginConfig
 }
 
 /** Bundle entry: compose product plugins through public Cordis lifecycle. */
@@ -59,6 +62,7 @@ export async function apply(ctx: Context, config: AssistantBundleConfig = {}) {
     ...config.workbench,
     inspectOnly: config.safeMode === true,
   })
+  await ctx.plugin(skillPlugin, config.skills)
   if (config.safeMode) return
   await ctx.plugin(memoryPlugin, config.memory)
   await ctx.plugin(knowledgePlugin, config.knowledge)

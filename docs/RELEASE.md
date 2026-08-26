@@ -9,7 +9,7 @@ Personal-assistant product layer on DeepSeek Harness **0.1.0-rc.8**. Current pac
 | **v0.1.0** | Assistant Core MVP baseline |
 | **v0.2.0** | Governed Self-Extension baseline |
 | **v0.3.0** | Governance + Mission-Control product baseline (historical soak seal) |
-| **v0.4.0 target** | Runtime Foundation + Governed Extension Baseline |
+| **v0.4.0 target** | Runtime Foundation + Governed Extension Baseline + DSH-native Skill lifecycle |
 
 The repository package version is `0.3.0`. The annotated `v0.3.0` git tag is created only on the exact `main` commit after this seal is merged. Do not move or recreate that tag; later soak fixes are `v0.3.1`, `v0.3.2`, etc.
 

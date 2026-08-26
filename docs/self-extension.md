@@ -16,7 +16,7 @@ Self-Extension is extension through **public DSH** plugin, service, provider, to
 
 Assistant-generated and imported third-party code has **no privileged runtime path**. Human-maintained `managed/*` product plugins may use the in-process Cordis lifecycle. `generated/*` and `third-party/*` candidates are not imported into the TARS-NG process and do not receive the live Cordis context; they run in a fail-closed isolated runner with a host-owned proxy and capability broker.
 
-A trusted operator may import one local directory with `tars-ng self-extension import-local <directory>`. Import publishes an inactive Workbench candidate only. Discovery != Import != Validation != Approval != Activation. Marketplace discovery and Skill lifecycle are not part of this command.
+A trusted operator may import one local directory with `tars-ng self-extension import-local <directory>`. Import publishes an inactive Workbench plugin candidate only. Discovery != Import != Validation != Approval != Activation. Marketplace discovery is not part of this command. Skill lifecycle is a separate product path (`tars-ng skill import-local`); see [docs/skills.md](./skills.md).
 
 ```text
 v0.3.0 = Governance + Mission-Control product baseline

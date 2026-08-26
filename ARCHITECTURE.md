@@ -9,7 +9,7 @@ Normative contributor rules: [ENGINEERING.md](./ENGINEERING.md). Product boundar
 | Owner | Owns | Does not own |
 | --- | --- | --- |
 | **DSH** | Generic Harness/runtime: agent loop, sessions, tool execution, events, LLM/provider seams, jobs, lifecycle, plugin composition | Personal persona, user memory, personal knowledge product, trust policy for this assistant, personal integrations, product UI |
-| **This repository** | Reference assistant plus governed capability construction/control: persona, memory, knowledge, tools, trust/policy, integrations, Candidate Workbench, approval, activation/recovery, UI/product experience | Replacing DSH Agent Loop, forking DSH internals, becoming a generic multi-agent framework |
+| **This repository** | Reference assistant plus governed capability construction/control: persona, memory, knowledge, tools, trust/policy, integrations, Candidate Workbench, Skill lifecycle, approval, activation/recovery, UI/product experience | Replacing DSH Agent Loop, forking DSH internals, becoming a generic multi-agent framework |
 | **Future domain kits / products** | Finance, HR, Legal, or Operations vocabulary, schemas, rules, templates, tests, adapters, and UI components | Modifying DSH core; bypassing TARS-NG governance; granting generated code authority over approval or recovery |
 
 **DSH is the Harness runtime, not the business/domain layer.** Domain rules belong in this repository's personal services (or in adapters that this repository owns), not in DSH core.

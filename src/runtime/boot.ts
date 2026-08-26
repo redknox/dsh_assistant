@@ -9,8 +9,12 @@ import * as DeepSeekLlm from '@deepseek-ai/dsh-llm-deepseek'
 import SessionStore, { SessionId } from '@deepseek-ai/dsh-session'
 import JsonlSessionPersistence from '@deepseek-ai/dsh-session-persistence-jsonl'
 import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
+import SkillRegistry from '@deepseek-ai/dsh-skill'
+import * as skillFilesystem from '@deepseek-ai/dsh-skill-filesystem'
+import * as toolSkill from '@deepseek-ai/dsh-tool-skill'
 import ToolRuntime from '@deepseek-ai/dsh-tools'
 import type { RecoveryRoot } from '../domain/governance/root.js'
+import { SkillService } from '../domain/skill/index.js'
 import { persistCandidates, persistGovernance, openDurableSelfExtension, hydrateFromAuthority } from '../domain/self-extension/durable.js'
 import { resolveAssistantHome } from '../domain/self-extension/home.js'
 import { reconstructCommittedExtensions } from '../domain/self-extension/reconstruct.js'
@@ -83,9 +87,11 @@ async function bootStack(options: BootOptions = {}): Promise<AssistantControl> {
   await ctx.plugin(AgentDefaultModel, { provider: DEFAULT_LLM_PROVIDER, model: DEFAULT_LLM_MODEL })
   await ctx.plugin(SystemPrompt, {})
   await ctx.plugin(ToolRuntime)
+  await ctx.plugin(SkillRegistry)
   if (!safeMode) await ctx.plugin(LocalJobRegistry)
   await ctx.plugin(AgentLoop, { agents: [] })
   let recoveryRoot: RecoveryRoot | undefined
+  const skillHome = resolveAssistantHome(options.home)
   await ctx.plugin(assistantProduct, {
     memory: options.memory,
     knowledge: { fixturePaths: options.knowledgeFixturePaths },
@@ -128,7 +134,21 @@ async function bootStack(options: BootOptions = {}): Promise<AssistantControl> {
         recoveryRoot = root
       },
     },
+    skills: {
+      home: skillHome,
+      profile: 'assistant',
+    },
   })
+  if (!safeMode) {
+    const activeSkills = skillHome === undefined ? [] : [new SkillService(skillHome, 'assistant').activeRoot()]
+    await ctx.plugin(skillFilesystem, {
+      includeDefaultRoots: false,
+      watch: false,
+      watchFollowSymlinks: false,
+      customSkillDirs: activeSkills,
+    })
+    await ctx.plugin(toolSkill)
+  }
   if (recoveryRoot === undefined) {
     throw new Error('bootstrap did not attach the recovery root')
   }

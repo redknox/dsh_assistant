@@ -163,7 +163,8 @@ Tasks are stored as `tasks/*.md` inside the sandbox. `tasks_create` follows the 
 | `tars-ng status` | Version, verified running pid, home, Web UI URL when running, DSH compatibility — no secret values and no run token |
 | `tars-ng doctor` | Version, Node, DSH packages, home, env-file safety, credential **names**, LLM provider/model/route, `ai-runtime`, integration mode, generated-runtime isolation, Safe Mode/recovery. Stays read-only when a verified runtime already owns the Home |
 | `tars-ng stop` | Authenticated loopback stop of the exact lease holder. Does not signal a PID and does not delete another run's pid file. Unconfirmed shutdown is fail-closed. A damaged or foreign identity is `home-ambiguous`; do not delete `state/runtime.lock` while identity is unverified |
-| `tars-ng self-extension …` | Recovery Root operator commands, including `import-local <directory>` for a bounded local third-party bundle. Any command that boots a runtime fails closed with `home-busy` while a verified runtime owns the Home |
+| `tars-ng self-extension …` | Recovery Root operator commands, including `import-local <directory>` for a bounded local third-party plugin bundle. Any command that boots a runtime fails closed with `home-busy` while a verified runtime owns the Home |
+| `tars-ng skill import-local <directory>` | Trusted local Skill import. Publishes an inactive `third-party/import` Skill candidate. Does not approve or activate. See [docs/skills.md](./skills.md) |
 
 Doctor never prints Authorization headers, token values, credential-bearing URLs, or chain-of-thought.
 

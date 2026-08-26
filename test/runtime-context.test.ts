@@ -383,7 +383,7 @@ describe('runtime context', () => {
       assert.deepEqual(mounted, [...expected])
       assertMountedAdapterContract(booted.ctx, { safeMode: false, sessionPersistence: false })
       assert.ok(active.includes('dsh-assistant'))
-      assert.equal(active.includes('skill'), false)
+      assert.equal(active.includes('skill'), true)
       assert.throws(
         () => assertOfficialEquivalentToAdapter(ASSISTANT_OFFICIAL_COMPOSED_IDS, ['dsh-assistant']),
         /not equivalent to the production adapter/,
@@ -597,7 +597,7 @@ describe('runtime context', () => {
       assert.equal(recovered.profileIdentity, context.profileIdentity)
       assert.equal(recovered.sessionPersistenceDir, context.sessionPersistenceDir)
       const recovery = loadGovernedAssistantComposition({ recovery: true })
-      assert.equal(activeComposedIds(recovery.entries).includes('skill'), false)
+      assert.equal(activeComposedIds(recovery.entries).includes('skill'), true)
       const booted = await bootSafeModeRuntime({
         home: layout.root,
         sessionRoot: recovered.sessionPersistenceDir,
@@ -680,8 +680,8 @@ describe('runtime context', () => {
         await first.ctx.fiber.dispose()
       }
       const patch = readFileSync(path.join(profiles, 'assistant', 'cordis.patch.yml'), 'utf8').replace(
-        '- id: skill\n  disabled: true\n',
-        '- id: skill\n  disabled: false\n',
+        'includeDefaultRoots: false',
+        'includeDefaultRoots: true',
       )
       writeFileSync(path.join(profiles, 'assistant', 'cordis.patch.yml'), patch)
       const mutated = profileIdentityOf(loadGovernedAssistantComposition())

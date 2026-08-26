@@ -69,6 +69,8 @@ function usage(): string {
   stop [--home <dir>]
   self-extension <subcommand>
     import-local <directory>   trusted operator only; no model or browser path
+  skill <subcommand>
+    import-local <directory>   trusted operator only; inactive third-party Skill candidate
 
 TARS-NG home defaults to $TARS_NG_HOME, then $DSH_ASSISTANT_HOME, then ~/.local/share/tars-ng.
 Runtime context precedence: CLI → environment → $TARS_NG_HOME/config/product.json → defaults (profile=assistant, workspace=$HOME/workspace, sessions=$HOME/sessions, session-id=main).
@@ -152,7 +154,7 @@ export function parseProductArgv(argv: readonly string[]): ProductCliOptions {
       i = taken.next
       continue
     }
-    if (arg.startsWith('--') && command !== 'self-extension') {
+    if (arg.startsWith('--') && command !== 'self-extension' && command !== 'skill') {
       throw new Error(`unknown option ${arg}`)
     }
     if (command === '') {
@@ -312,6 +314,15 @@ export async function runProductCli(
   if (parsed.command === 'self-extension') {
     const code = await runSelfExtensionCli([...parsed.rest])
     return code
+  }
+  if (parsed.command === 'skill') {
+    const [action, directory] = parsed.rest
+    if (action !== 'import-local') {
+      io.error('skill import-local <directory>')
+      return 1
+    }
+    const { importLocalSkill } = await import('../runtime/skill-cli-import.js')
+    return importLocalSkill(String(directory ?? ''), parsed.home)
   }
   const envFiles = loadEnvFiles(layout)
   const userConfig = readProductUserConfig(layout)
