@@ -781,4 +781,170 @@ describe('skill lifecycle', () => {
     assert.ok(kinds.includes('rollback'))
     assert.doesNotMatch(JSON.stringify(restarted.events()), /v2 instruction body/)
   })
+
+  it('records bounded activation lastFailure for digest, directory, index-write, and catalog sync', async () => {
+    const cases: { readonly name: string; readonly inject: (service: SkillService, id: string) => void; readonly detail: string }[] = [
+      {
+        name: 'digest-mismatch',
+        detail: 'digest-mismatch',
+        inject: (service, id) => {
+          writeFileSync(
+            path.join(service.layout.candidates, id.replace('@', '--'), 'SKILL.md'),
+            '---\nname: weekly-review\ndescription: tampered sealed bytes\n---\ntampered body\n',
+          )
+        },
+      },
+      {
+        name: 'directory',
+        detail: 'directory-interrupt',
+        inject: (service) => {
+          service.interruptAfter = 'after-incoming'
+        },
+      },
+      {
+        name: 'index-write',
+        detail: 'index-write',
+        inject: (service) => {
+          service.interruptAfter = 'index-write'
+        },
+      },
+      {
+        name: 'catalog-invalidation',
+        detail: 'catalog-invalidation',
+        inject: (service) => {
+          service.attachInvalidation(() => {
+            throw new Error('invalidate failed')
+          })
+        },
+      },
+    ]
+    for (const item of cases) {
+      const isolated = home()
+      const service = new SkillService(isolated, 'assistant')
+      const rootId = Symbol('recovery-root')
+      service.bindRoot(rootId)
+      const human = humanCred(rootId)
+      const { imported, requested } = await authorApproved(service)
+      service.approve(imported.candidateId, requested.fingerprint, human)
+      const activateBefore = service.events().filter((event) => event.kind === 'activate').length
+      item.inject(service, imported.candidateId)
+      assert.throws(() => service.activate(imported.candidateId, human))
+      assert.equal(service.get(imported.candidateId).lifecycle, 'approved')
+      assert.equal(service.get(imported.candidateId).lastFailure?.phase, 'activate')
+      assert.equal(service.get(imported.candidateId).lastFailure?.detail, item.detail)
+      assert.ok(service.health().failed.includes(imported.candidateId))
+      assert.equal(service.events().filter((event) => event.kind === 'activate').length, activateBefore)
+      assert.doesNotMatch(JSON.stringify(service.get(imported.candidateId).lastFailure), /tampered body|SKILL.md|self-extension/)
+      const restarted = new SkillService(isolated, 'assistant')
+      restarted.bindRoot(rootId)
+      assert.equal(restarted.get(imported.candidateId).lastFailure?.detail, item.detail)
+      assert.ok(restarted.health().failed.includes(imported.candidateId))
+      assert.equal(restarted.inspect(imported.candidateId).lastFailure?.phase, 'activate')
+    }
+  })
+
+  it('keeps the same commit-failure contract for activate, update, disable, uninstall, and rollback', async () => {
+    const ops = ['activate', 'update', 'disable', 'uninstall', 'rollback'] as const
+    for (const op of ops) {
+      const isolated = home()
+      const service = new SkillService(isolated, 'assistant')
+      const rootId = Symbol('recovery-root')
+      service.bindRoot(rootId)
+      const human = humanCred(rootId)
+      const first = await authorApproved(service)
+      service.approve(first.imported.candidateId, first.requested.fingerprint, human)
+      let targetId = first.imported.candidateId
+      if (op !== 'activate') service.activate(first.imported.candidateId, human)
+      if (op === 'update' || op === 'rollback') {
+        const forked = service.writeFile(first.imported.candidateId, 'SKILL.md', [
+          '---',
+          'name: weekly-review',
+          'description: Guide a weekly review using existing memory and knowledge tools.',
+          '---',
+          'Use existing tools only. This is a later revision.',
+          '',
+        ].join('\n'))
+        if (op === 'rollback') {
+          await trustActivate(service, forked.id, human)
+          targetId = first.imported.candidateId
+        } else {
+          await service.validate(forked.id)
+          service.seal(forked.id)
+          service.requestReview(forked.id)
+          const { fingerprint } = service.requestApproval(forked.id)
+          service.approve(forked.id, fingerprint, human)
+          targetId = forked.id
+        }
+      }
+      const activateBefore = service.events().filter((event) => event.kind === 'activate' || event.kind === 'rollback').length
+      const run = () => {
+        if (op === 'activate' || op === 'update') service.activate(targetId, human)
+        else if (op === 'disable') service.disable('weekly-review', human)
+        else if (op === 'uninstall') service.uninstall(first.imported.candidateId, human)
+        else service.rollback(human)
+      }
+      service.interruptAfter = 'index-write'
+      assert.throws(run, /index-write/)
+      service.interruptAfter = undefined
+      if (op === 'activate') {
+        assert.equal(service.get(targetId).lifecycle, 'approved')
+        assert.deepEqual(service.catalogNames(), [])
+        assert.equal(service.get(targetId).lastFailure?.phase, 'activate')
+      } else if (op === 'update') {
+        assert.equal(service.get(first.imported.candidateId).lifecycle, 'active')
+        assert.equal(service.get(targetId).lifecycle, 'approved')
+        assert.equal(service.get(targetId).lastFailure?.phase, 'activate')
+      } else if (op === 'rollback') {
+        assert.equal(service.get(targetId).lifecycle, 'disabled')
+        assert.ok(service.catalogNames().includes('weekly-review'))
+        assert.equal(service.get(targetId).lastFailure?.phase, 'activate')
+      } else {
+        assert.equal(service.get(first.imported.candidateId).lifecycle, 'active')
+        assert.deepEqual(service.catalogNames(), ['weekly-review'])
+      }
+      assert.equal(service.events().filter((event) => event.kind === 'activate' || event.kind === 'rollback').length, activateBefore)
+      const afterIndex = new SkillService(isolated, 'assistant')
+      afterIndex.bindRoot(rootId)
+      if (op === 'activate') assert.deepEqual(afterIndex.catalogNames(), [])
+      else assert.ok(afterIndex.catalogNames().includes('weekly-review'))
+
+      if (op === 'activate') continue
+      afterIndex.interruptAfter = 'outgoing-cleanup'
+      const committed = () => {
+        if (op === 'update') afterIndex.activate(targetId, human)
+        else if (op === 'disable') afterIndex.disable('weekly-review', human)
+        else if (op === 'uninstall') afterIndex.uninstall(first.imported.candidateId, human)
+        else afterIndex.rollback(human)
+      }
+      committed()
+      const outgoing = path.join(isolated, 'self-extension', 'skills', 'assistant', 'history', 'outgoing-weekly-review')
+      assert.equal(existsSync(outgoing), true)
+      const recovered = new SkillService(isolated, 'assistant')
+      recovered.bindRoot(rootId)
+      assert.equal(existsSync(outgoing), false)
+      if (op === 'disable') assert.equal(recovered.get(first.imported.candidateId).lifecycle, 'disabled')
+      if (op === 'uninstall') assert.equal(recovered.get(first.imported.candidateId).lifecycle, 'uninstalled')
+      if (op === 'update') assert.equal(recovered.get(targetId).lifecycle, 'active')
+      if (op === 'rollback') assert.equal(recovered.get(first.imported.candidateId).lifecycle, 'active')
+    }
+  })
+
+  it('does not report API failure when cleanup diagnostic persistence fails', async () => {
+    const isolated = home()
+    const service = new SkillService(isolated, 'assistant')
+    const rootId = Symbol('recovery-root')
+    service.bindRoot(rootId)
+    const human = humanCred(rootId)
+    const { imported, requested } = await authorApproved(service)
+    service.approve(imported.candidateId, requested.fingerprint, human)
+    service.activate(imported.candidateId, human)
+    service.interruptAfter = 'cleanup-record'
+    service.disable('weekly-review', human)
+    assert.equal(service.get(imported.candidateId).lifecycle, 'disabled')
+    const outgoing = path.join(isolated, 'self-extension', 'skills', 'assistant', 'history', 'outgoing-weekly-review')
+    assert.equal(existsSync(outgoing), true)
+    const recovered = new SkillService(isolated, 'assistant')
+    assert.equal(recovered.get(imported.candidateId).lifecycle, 'disabled')
+    assert.equal(existsSync(outgoing), false)
+  })
 })

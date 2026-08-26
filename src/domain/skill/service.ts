@@ -65,7 +65,7 @@ type EventInput = {
   readonly detail?: string
 }
 
-export type SkillInterrupt = 'after-outgoing' | 'after-incoming' | 'after-index' | 'index-write' | 'outgoing-cleanup'
+export type SkillInterrupt = 'after-outgoing' | 'after-incoming' | 'after-index' | 'index-write' | 'outgoing-cleanup' | 'cleanup-record'
 
 export class SkillService {
   readonly layout: SkillStoreLayout
@@ -427,66 +427,71 @@ export class SkillService {
     if (record.approvalDecision !== 'approved-for-exact-diff') {
       throw new SkillContractError('approval-required', 'skill approval does not activate; human activation is required')
     }
-    if (fingerprintOf(record) !== record.approvalFingerprint) {
-      throw new SkillContractError('digest-mismatch', 'stale skill approval cannot activate')
-    }
-    const files = this.readCandidateFiles(id)
-    if (digestSkillFiles(files) !== record.digest) {
-      throw new SkillContractError('digest-mismatch', 'skill candidate bytes no longer match the sealed digest')
-    }
-    const previous = readSkillIndex(this.layout)
-    const dest = activeDir(this.layout, record.name)
-    const incoming = incomingDir(this.layout, record.name)
-    const outgoing = outgoingDir(this.layout, record.name)
     try {
-      discardDir(incoming)
-      publishSkillFiles(incoming, files)
-      replaceActiveDirectory({
-        incoming,
+      if (fingerprintOf(record) !== record.approvalFingerprint) {
+        throw new SkillContractError('digest-mismatch', 'stale skill approval cannot activate')
+      }
+      const files = this.readCandidateFiles(id)
+      if (digestSkillFiles(files) !== record.digest) {
+        throw new SkillContractError('digest-mismatch', 'skill candidate bytes no longer match the sealed digest')
+      }
+      const previous = readSkillIndex(this.layout)
+      const dest = activeDir(this.layout, record.name)
+      const incoming = incomingDir(this.layout, record.name)
+      const outgoing = outgoingDir(this.layout, record.name)
+      try {
+        discardDir(incoming)
+        publishSkillFiles(incoming, files)
+        replaceActiveDirectory({
+          incoming,
+          dest,
+          outgoing,
+          interrupt: this.interruptAfter === 'after-outgoing' || this.interruptAfter === 'after-incoming'
+            ? this.interruptAfter
+            : undefined,
+        })
+      } catch (error) {
+        if (error instanceof SkillContractError && error.code === 'skill-interrupt') throw error
+        discardDir(incoming)
+        rollbackActiveDirectory(dest, outgoing)
+        throw error
+      }
+      const next = { ...record, lifecycle: 'active' as SkillLifecycle }
+      const { lastFailure: _cleared, ...cleared } = next
+      const committedRecord = cleared
+      const committed = {
+        ...previous,
+        records: previous.records.map((item) => (
+          item.id === committedRecord.id
+            ? committedRecord
+            : item.name === record.name && item.lifecycle === 'active'
+              ? { ...item, lifecycle: 'disabled' as SkillLifecycle }
+              : item
+        )),
+        active: { ...previous.active, [record.name]: record.version },
+        lastActive: previous.active[record.name] !== undefined
+          ? { name: record.name, version: previous.active[record.name]! }
+          : previous.lastActive,
+      }
+      if (!committed.records.some((item) => item.id === committedRecord.id)) committed.records = [...committed.records, committedRecord]
+      if (this.interruptAfter === 'after-index') {
+        rollbackActiveDirectory(dest, outgoing)
+        throw new SkillContractError('skill-interrupt', 'after-index')
+      }
+      this.finishCatalogCommit({
+        previous,
+        committed,
         dest,
         outgoing,
-        interrupt: this.interruptAfter === 'after-outgoing' || this.interruptAfter === 'after-incoming'
-          ? this.interruptAfter
-          : undefined,
+        name: record.name,
+        skillId: record.id,
+        event: event ?? { kind: 'activate', skillId: record.id, name: record.name, version: record.version, digest: record.digest },
       })
+      return this.get(id)
     } catch (error) {
-      if (error instanceof SkillContractError && error.code === 'skill-interrupt') throw error
-      discardDir(incoming)
-      rollbackActiveDirectory(dest, outgoing)
+      this.recordFailure(id, 'activate', activationFailureDetail(error))
       throw error
     }
-    const next = { ...record, lifecycle: 'active' as SkillLifecycle }
-    const { lastFailure: _cleared, ...cleared } = next
-    const committedRecord = cleared
-    const committed = {
-      ...previous,
-      records: previous.records.map((item) => (
-        item.id === committedRecord.id
-          ? committedRecord
-          : item.name === record.name && item.lifecycle === 'active'
-            ? { ...item, lifecycle: 'disabled' as SkillLifecycle }
-            : item
-      )),
-      active: { ...previous.active, [record.name]: record.version },
-      lastActive: previous.active[record.name] !== undefined
-        ? { name: record.name, version: previous.active[record.name]! }
-        : previous.lastActive,
-    }
-    if (!committed.records.some((item) => item.id === committedRecord.id)) committed.records = [...committed.records, committedRecord]
-    if (this.interruptAfter === 'after-index') {
-      rollbackActiveDirectory(dest, outgoing)
-      throw new SkillContractError('skill-interrupt', 'after-index')
-    }
-    this.finishCatalogCommit({
-      previous,
-      committed,
-      dest,
-      outgoing,
-      name: record.name,
-      skillId: record.id,
-      event: event ?? { kind: 'activate', skillId: record.id, name: record.name, version: record.version, digest: record.digest },
-    })
-    return this.get(id)
   }
 
   disable(name: string, credential: TrustedAuthorityCredential, acknowledgedDependents: readonly string[] = []): void {
@@ -821,24 +826,30 @@ export class SkillService {
       this.syncCatalog()
     } catch {
       const restored = this.rollbackCatalogMutation(input)
-      if (input.skillId !== undefined) this.recordFailure(input.skillId, 'activate', 'catalog invalidation failed')
       if (restored === 'restored') {
         throw new SkillContractError('catalog-sync-failed', 'catalog invalidation failed; previous catalog restored')
       }
       throw new SkillContractError('catalog-degraded', 'catalog sync failed; recovery required')
     }
     try {
-      if (this.interruptAfter === 'outgoing-cleanup') {
-        throw new SkillContractError('skill-interrupt', 'outgoing-cleanup')
+      if (this.interruptAfter === 'outgoing-cleanup' || this.interruptAfter === 'cleanup-record') {
+        throw new SkillContractError('skill-interrupt', this.interruptAfter)
       }
       discardDir(input.outgoing)
     } catch {
-      writeSkillIndex(this.layout, this.withEvent(readSkillIndex(this.layout), {
-        kind: 'recovery',
-        name: input.name,
-        skillId: input.skillId,
-        detail: 'outgoing-cleanup-pending',
-      }))
+      try {
+        if (this.interruptAfter === 'cleanup-record') {
+          throw new SkillContractError('skill-interrupt', 'cleanup-record')
+        }
+        writeSkillIndex(this.layout, this.withEvent(readSkillIndex(this.layout), {
+          kind: 'recovery',
+          name: input.name,
+          skillId: input.skillId,
+          detail: 'outgoing-cleanup-pending',
+        }))
+      } catch {
+        return
+      }
     }
   }
 
@@ -953,6 +964,20 @@ export class SkillService {
       throw new SkillAuthorityError('skill authority requires a credential issued by the recovery root')
     }
   }
+}
+
+function activationFailureDetail(error: unknown): string {
+  if (error instanceof SkillContractError) {
+    if (error.code === 'digest-mismatch') return 'digest-mismatch'
+    if (error.code === 'catalog-sync-failed' || error.code === 'catalog-degraded') return 'catalog-invalidation'
+    if (error.code === 'skill-interrupt') {
+      if (error.message.includes('after-incoming') || error.message.includes('after-outgoing')) return 'directory-interrupt'
+      if (error.message.includes('index-write') || error.message.includes('after-index')) return 'index-write'
+      return 'activation-interrupt'
+    }
+    return error.code
+  }
+  return 'activation-failed'
 }
 
 function boundSkillDetail(detail: string): string {
