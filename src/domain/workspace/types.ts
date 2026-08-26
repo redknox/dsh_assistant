@@ -1,4 +1,5 @@
 import type { CandidateDiff } from '../candidate/types.js'
+import type { SkillRevisionDiff } from '../skill/diff.js'
 import type { SystemState } from '../personality/types.js'
 import type { ActivationViewState, ExtensionLifecycleState } from './lifecycle.js'
 
@@ -222,6 +223,14 @@ export interface MissionControlView {
   readonly conversation: readonly { readonly kind: WorkObjectKind; readonly text: string }[]
   readonly activity: readonly ActivityItem[]
   readonly approvals: readonly ApprovalCard[]
+  readonly skills?: readonly SkillProjection[]
+  readonly skillCatalog?: {
+    readonly state: 'ok' | 'empty' | 'degraded' | 'withheld'
+    readonly failed: readonly string[]
+    readonly recoveryRequired: boolean
+    readonly detail?: string
+  }
+  readonly skillRollback?: { readonly name: string; readonly version: string; readonly digest: string; readonly generation: number }
   readonly approvalResolutions: readonly ApprovalResolution[]
   readonly activations: readonly ActivationCard[]
   readonly plugins: readonly UserPluginView[]
@@ -281,6 +290,41 @@ export interface SessionCatalogView {
   readonly activeCount: number
   readonly archivedCount: number
   readonly sessions: readonly SessionTopicView[]
+}
+
+export interface SkillProjection {
+  readonly id: string
+  readonly name: string
+  readonly version: string
+  readonly profile: string
+  readonly provenance: string
+  readonly origin: string
+  readonly lifecycle: string
+  readonly sealed: boolean
+  readonly modelInvocable: boolean
+  readonly userInvocable: boolean
+  readonly description: string
+  readonly whenToUse?: string
+  readonly resources: readonly string[]
+  readonly validationPassed: boolean
+  readonly reviewComplete: boolean
+  readonly approvalDecision?: string
+  readonly approvalFingerprint?: string
+  readonly digest: string
+  readonly baseVersion?: string
+  readonly dependsOn: readonly string[]
+  readonly dependents: readonly string[]
+  readonly lastFailure?: {
+    readonly phase: string
+    readonly detail: string
+  }
+  readonly system: boolean
+  readonly generation: number
+  readonly revisionDiff?: SkillRevisionDiff
+  readonly resolutionHandoff?: {
+    readonly missingTools: readonly string[]
+    readonly nextAction: 'capability-resolution'
+  }
 }
 
 export interface WorkbenchProjection {
@@ -408,6 +452,21 @@ export interface WorkspaceSnapshotInput {
   readonly runtimeContext?: MissionControlView['runtimeContext']
   readonly sessions?: SessionCatalogView
   readonly approvalOrigins?: Readonly<Record<string, string>>
+  readonly skills?: readonly SkillProjection[]
+  readonly skillCatalog?: {
+    readonly state: 'ok' | 'empty' | 'degraded' | 'withheld'
+    readonly failed: readonly string[]
+    readonly recoveryRequired: boolean
+    readonly detail?: string
+  }
+  readonly skillEvents?: readonly {
+    readonly id: string
+    readonly kind: string
+    readonly name?: string
+    readonly version?: string
+    readonly detail?: string
+  }[]
+  readonly skillRollback?: { readonly name: string; readonly version: string; readonly digest: string; readonly generation: number }
 }
 
 export interface ActivationSnapshotView {

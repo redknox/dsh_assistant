@@ -51,7 +51,7 @@ Operator manual: [docs/operator.md](./docs/operator.md). Soak / feature freeze: 
 
 ## What this is
 
-A governed AI-native product layer and reference assistant: TARS-NG personality, Mission-Control workspace, memory, knowledge, trust/policy, integrations, governed Self-Extension, and operator lifecycle (`start` / `status` / `doctor`).
+A governed AI-native product layer and reference assistant: TARS-NG personality, Mission-Control workspace, memory, knowledge, trust/policy, integrations, governed Self-Extension, DSH-native Skill lifecycle, and operator lifecycle (`start` / `status` / `doctor`).
 
 DSH owns agent loop, sessions, tool execution, events, LLM/provider seams, jobs, lifecycle, and plugin composition. This project **composes and extends** those public APIs. It does not reimplement them.
 

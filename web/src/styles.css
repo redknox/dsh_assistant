@@ -394,6 +394,12 @@ button.nav-item { cursor: pointer; font: inherit; }
 .button:focus-visible { transform: translateY(-1px); box-shadow: 0 3px 0 #2f312e; }
 .button:disabled { opacity: 0.45; cursor: not-allowed; transform: none; box-shadow: none; }
 
+.composer-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 0 clamp(26px, 4vw, 58px) 8px;
+}
 .composer {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 42px 70px;

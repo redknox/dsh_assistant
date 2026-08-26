@@ -1,4 +1,5 @@
 import { projectApprovalResolutions } from './approvals.js'
+import { skillActivity } from './skills.js'
 import type { ActivityItem, WorkspaceSnapshotInput } from './types.js'
 
 const TOOL_LABELS: Record<string, string> = {
@@ -101,6 +102,7 @@ export function projectActivity(input: WorkspaceSnapshotInput): readonly Activit
       source: 'candidate.import',
     })
   }
+  items.push(...skillActivity(input))
   return items
 }
 

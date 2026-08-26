@@ -2,6 +2,7 @@ import type { CapabilityRegistry } from '../registry/types.js'
 import type { CandidateWorkspace } from '../candidate/types.js'
 import { ReviewService, type IndependentReview } from '../review/index.js'
 import { backupSelfExtension, restoreSelfExtension, type SelfExtensionBackupManifest } from '../self-extension/backup.js'
+import type { SkillInterrupt, SkillService } from '../skill/service.js'
 import { GovernanceAuthorityError, GovernanceContractError } from './errors.js'
 import { InMemoryActivationRuntime, type ActivationRuntime } from './runtime.js'
 import { GovernanceService, type ActivationInterrupt, type GovernanceHydrate } from './service.js'
@@ -23,6 +24,7 @@ export class RecoveryRoot {
   readonly independentReview: IndependentReview
   private readonly rootId = Symbol('recovery-root')
   private readonly durableHome?: string
+  private skills?: SkillService
 
   constructor(
     registry: CapabilityRegistry,
@@ -45,6 +47,50 @@ export class RecoveryRoot {
       independentReview: this.independentReview,
     })
     this.durableHome = options.durableHome
+  }
+
+  bindSkills(skills: SkillService): void {
+    this.skills = skills
+    skills.bindRoot(this.rootId)
+  }
+
+  approveSkill(id: string, fingerprint: string, credential: TrustedAuthorityCredential) {
+    this.assertCredential(credential)
+    return this.requireSkills().approve(id, fingerprint, credential)
+  }
+
+  activateSkill(id: string, credential: TrustedAuthorityCredential) {
+    this.assertCredential(credential)
+    return this.requireSkills().activate(id, credential)
+  }
+
+  disableSkill(name: string, credential: TrustedAuthorityCredential, acknowledgedDependents: readonly string[] = []) {
+    this.assertCredential(credential)
+    return this.requireSkills().disable(name, credential, acknowledgedDependents)
+  }
+
+  uninstallSkill(id: string, credential: TrustedAuthorityCredential, acknowledgedDependents: readonly string[] = []) {
+    this.assertCredential(credential)
+    return this.requireSkills().uninstall(id, credential, acknowledgedDependents)
+  }
+
+  rejectSkill(id: string, fingerprint: string, credential: TrustedAuthorityCredential) {
+    this.assertCredential(credential)
+    return this.requireSkills().reject(id, fingerprint, credential)
+  }
+
+  reactivateSkill(name: string, version: string, credential: TrustedAuthorityCredential) {
+    this.assertCredential(credential)
+    return this.requireSkills().reactivate(name, version, credential)
+  }
+
+  rollbackSkill(credential: TrustedAuthorityCredential) {
+    this.assertCredential(credential)
+    return this.requireSkills().rollback(credential)
+  }
+
+  simulateSkillInterrupt(point: SkillInterrupt) {
+    this.requireSkills().interruptAfter = point
   }
 
   issueAuthority(authority: ApprovalAuthority): TrustedAuthorityCredential {
@@ -123,9 +169,16 @@ export class RecoveryRoot {
     restoreSelfExtension(source, this.durableHome)
   }
 
+  private requireSkills(): SkillService {
+    if (this.skills === undefined) {
+      throw new GovernanceContractError('skill lifecycle is not bound to the recovery root')
+    }
+    return this.skills
+  }
+
   private assertCredential(credential: TrustedAuthorityCredential): void {
     if (!(credential instanceof TrustedAuthorityCredential) || !credential.issuedBy(this.rootId)) {
-      throw new GovernanceAuthorityError('backup/restore requires a credential issued by the recovery root')
+      throw new GovernanceAuthorityError('trusted action requires a credential issued by the recovery root')
     }
   }
 

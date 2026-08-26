@@ -6,6 +6,9 @@ import { writeJsonAtomic } from '../persistence/atomic.js'
 import { parseAuthorityFile, type AuthorityFile } from './authority-store.js'
 import { parseCandidateIndexFile, resolveCandidateArtifactDir, type CandidateIndexFile, type CandidateIndexRow } from './candidate-index.js'
 import { isolatedRuntimeOwner } from '../generated-runtime/trust.js'
+import { digestSkillFiles, readAllowlistedSkillFiles, skillId } from '../skill/bundle.js'
+import { encodeSkillId, readSkillIndex, skillStoreLayout } from '../skill/store.js'
+import { SKILL_SCHEMA_VERSION, type SkillIndex, type SkillRecord } from '../skill/types.js'
 import { PersistenceIntegrityError, PersistenceSchemaError } from './errors.js'
 import { SELF_EXTENSION_SCHEMA_VERSION, selfExtensionPaths } from './home.js'
 
@@ -152,6 +155,7 @@ export function backupSelfExtension(assistantHome: string, dest: string): SelfEx
   mkdirSync(dest, { recursive: true })
   cpSync(home.authorityPath, path.join(dest, 'authority.json'))
   copyRequiredArtifacts(home.candidateArea, path.join(dest, 'candidates'), required)
+  copySkillAuthority(assistantHome, dest)
   const files = listRelativeFiles(dest)
   const manifest: SelfExtensionBackupManifest = {
     kind: BACKUP_KIND,
@@ -184,10 +188,151 @@ export function restoreSelfExtension(source: string, assistantHome: string): voi
     mkdirSync(staging, { recursive: true })
     cpSync(authorityPath, path.join(staging, 'authority.json'))
     copyRequiredArtifacts(sourceArea, path.join(staging, 'candidates'), required)
+    copySkillAuthorityFromBackup(source, staging)
     mkdirSync(path.dirname(dest.root), { recursive: true })
     rmSync(dest.root, { recursive: true, force: true })
     renameSync(staging, dest.root)
   } finally {
     rmSync(staging, { recursive: true, force: true })
+  }
+}
+
+function copySkillAuthority(assistantHome: string, dest: string): void {
+  const root = path.join(selfExtensionPaths(assistantHome).root, 'skills')
+  if (!existsSync(root)) return
+  for (const profile of readdirSync(root)) {
+    if (!statSync(path.join(root, profile)).isDirectory()) continue
+    copyDurableSkillProfile(skillStoreLayout(assistantHome, profile), path.join(dest, 'skills', profile))
+  }
+}
+
+function copySkillAuthorityFromBackup(source: string, staging: string): void {
+  const root = path.join(source, 'skills')
+  if (!existsSync(root)) return
+  for (const profile of readdirSync(root)) {
+    if (!statSync(path.join(root, profile)).isDirectory()) continue
+    verifyCopiedSkillProfile(root, profile)
+  }
+  cpSync(root, path.join(staging, 'skills'), { recursive: true })
+}
+
+function copyDurableSkillProfile(layout: ReturnType<typeof skillStoreLayout>, dest: string): void {
+  const index = readSkillIndex(layout)
+  const sealed = durableSkillRecords(index)
+  const tombs = index.records
+    .filter((item) => item.lifecycle === 'uninstalled' && !item.sealed)
+    .map(skillAuditTombstone)
+  const records = [...sealed, ...tombs]
+  const durableIds = new Set(records.map((item) => item.id))
+  const active: Record<string, string> = {}
+  for (const [name, version] of Object.entries(index.active)) {
+    const id = skillId(name, version)
+    if (!durableIds.has(id)) continue
+    active[name] = version
+  }
+  const lastActive = index.lastActive !== undefined && durableIds.has(skillId(index.lastActive.name, index.lastActive.version))
+    ? index.lastActive
+    : undefined
+  const slim: SkillIndex = {
+    schemaVersion: SKILL_SCHEMA_VERSION,
+    profile: layout.profile,
+    records,
+    active,
+    generation: index.generation,
+    ...(lastActive ? { lastActive } : {}),
+    approvals: (index.approvals ?? []).filter((item) => durableIds.has(item.skillId)),
+    reviews: (index.reviews ?? []).filter((item) => durableIds.has(item.candidateId)),
+    ...(index.events ? { events: index.events.slice(-100) } : {}),
+    ...(index.catalog ? { catalog: index.catalog } : {}),
+  }
+  rmSync(dest, { recursive: true, force: true })
+  mkdirSync(path.join(dest, 'candidates'), { recursive: true })
+  mkdirSync(path.join(dest, 'active'), { recursive: true })
+  writeJsonAtomic(path.join(dest, 'index.json'), slim)
+  for (const record of sealed) {
+    const from = path.join(layout.candidates, encodeSkillId(record.id))
+    if (!existsSync(from)) throw new PersistenceIntegrityError(`missing-skill-candidate:${record.id}`)
+    if (digestSkillFiles(readAllowlistedSkillFiles(from)) !== record.digest) {
+      throw new PersistenceIntegrityError(`skill-digest-mismatch:${record.id}`)
+    }
+    cpSync(from, path.join(dest, 'candidates', encodeSkillId(record.id)), { recursive: true })
+  }
+  for (const [name, version] of Object.entries(active)) {
+    const record = records.find((item) => item.id === skillId(name, version))
+    const from = path.join(layout.active, name)
+    if (record === undefined || !existsSync(from)) throw new PersistenceIntegrityError(`missing-skill-artifact:${name}`)
+    if (digestSkillFiles(readAllowlistedSkillFiles(from)) !== record.digest) {
+      throw new PersistenceIntegrityError(`skill-digest-mismatch:${name}`)
+    }
+    cpSync(from, path.join(dest, 'active', name), { recursive: true })
+  }
+  verifyCopiedSkillProfile(path.dirname(dest), layout.profile)
+}
+
+function skillAuditTombstone(record: SkillRecord): SkillRecord {
+  return {
+    ...record,
+    description: `uninstalled ${record.name}@${record.version}`,
+    resources: [],
+  }
+}
+
+function durableSkillRecords(index: SkillIndex): SkillRecord[] {
+  return index.records.filter((item) => item.sealed && (
+    item.lifecycle === 'sealed'
+    || item.lifecycle === 'review-complete'
+    || item.lifecycle === 'approval-requested'
+    || item.lifecycle === 'approved'
+    || item.lifecycle === 'active'
+    || item.lifecycle === 'disabled'
+    || item.lifecycle === 'uninstalled'
+  ))
+}
+
+function verifySkillProfile(homeRoot: string, profile: string): void {
+  verifyCopiedSkillProfile(path.join(selfExtensionPaths(homeRoot).root, 'skills'), profile)
+}
+
+function verifyCopiedSkillProfile(skillsRoot: string, profile: string): void {
+  const layout = {
+    root: path.join(skillsRoot, profile),
+    profile,
+    indexPath: path.join(skillsRoot, profile, 'index.json'),
+    candidates: path.join(skillsRoot, profile, 'candidates'),
+    staging: path.join(skillsRoot, profile, 'staging'),
+    active: path.join(skillsRoot, profile, 'active'),
+    history: path.join(skillsRoot, profile, 'history'),
+  }
+  if (existsSync(layout.staging) && readdirSync(layout.staging).length > 0) {
+    throw new PersistenceIntegrityError('skill-backup-contains-staging')
+  }
+  const index = readSkillIndex(layout)
+  const durable = durableSkillRecords(index)
+  const leftovers = index.records.filter((item) => !durable.some((row) => row.id === item.id))
+  if (leftovers.some((item) => item.lifecycle !== 'uninstalled' || item.sealed)) {
+    throw new PersistenceIntegrityError('skill-backup-contains-unsealed')
+  }
+  if (existsSync(layout.candidates)) {
+    for (const entry of readdirSync(layout.candidates)) {
+      if (!durable.some((item) => encodeSkillId(item.id) === entry)) {
+        throw new PersistenceIntegrityError(`unregistered-skill-candidate:${entry}`)
+      }
+    }
+  }
+  for (const record of durable) {
+    const from = path.join(layout.candidates, encodeSkillId(record.id))
+    if (!existsSync(from) || digestSkillFiles(readAllowlistedSkillFiles(from)) !== record.digest) {
+      throw new PersistenceIntegrityError(`skill-digest-mismatch:${record.id}`)
+    }
+  }
+  for (const [name, version] of Object.entries(index.active)) {
+    const record = index.records.find((item) => item.id === skillId(name, version))
+    const dest = path.join(layout.active, name)
+    if (record === undefined || !existsSync(dest)) {
+      throw new PersistenceIntegrityError(`missing-skill-artifact:${name}`)
+    }
+    if (digestSkillFiles(readAllowlistedSkillFiles(dest)) !== record.digest) {
+      throw new PersistenceIntegrityError(`skill-digest-mismatch:${name}`)
+    }
   }
 }

@@ -12,6 +12,7 @@ import type { ResolutionReview } from '../src/domain/resolution/index.js'
 import { GENERATED_EXTENSION_API_V1 } from '../src/domain/workbench/index.js'
 import { projectMissionControl } from '../src/domain/workspace/index.js'
 import { SimulatedCrashError } from '../src/domain/governance/index.js'
+import { SkillService } from '../src/domain/skill/index.js'
 import { bootAssistantControl, bootSafeModeRuntime, createAssistantAgent } from '../src/runtime/boot.js'
 import { AssistantControlSurface } from '../src/ui/controller.js'
 import {
@@ -196,6 +197,7 @@ describe('local Mission-Control Web UI', () => {
       const first = await fetch(`${url}/api/view`).then((res) => res.json()) as { view: MissionControlView; webUi: string }
       assert.equal(first.view.identity, 'TARS-NG')
       assert.equal(first.view.systemState, 'READY')
+      assert.ok(Array.isArray(first.view.skills))
       assert.match(first.webUi, /^http:\/\/127\.0\.0\.1:\d+$/)
       assert.doesNotMatch(JSON.stringify(first), /reasoning_content|"type":"reasoning"/)
 
@@ -2513,6 +2515,183 @@ export function apply(ctx) {
     assert.match(extensionsPane, /data-extension-action="retry"/)
     assert.match(extensionsPane, /data-extension-action="view-history"/)
 
+    const skillsPane = renderToStaticMarkup(createElement(MissionControlScreen, {
+      view: fixtureView({
+        skills: [{
+          id: 'weekly-review@1.0.0',
+          name: 'weekly-review',
+          version: '1.0.0',
+          profile: 'assistant',
+          provenance: 'third-party',
+          origin: 'import',
+          lifecycle: 'approved',
+          sealed: true,
+          modelInvocable: true,
+          userInvocable: true,
+          description: 'Guide a weekly review.',
+          resources: [],
+          validationPassed: true,
+          reviewComplete: true,
+          approvalDecision: 'approved-for-exact-diff',
+          digest: 'abc',
+          dependsOn: [],
+          dependents: [],
+          system: false,
+          generation: 0,
+        }, {
+          id: 'host-brief@1.0.0',
+          name: 'host-brief',
+          version: '1.0.0',
+          profile: 'assistant',
+          provenance: 'system',
+          origin: 'host',
+          lifecycle: 'active',
+          sealed: true,
+          modelInvocable: true,
+          userInvocable: true,
+          description: 'Host briefing skill.',
+          resources: [],
+          validationPassed: true,
+          reviewComplete: true,
+          digest: 'def',
+          dependsOn: [],
+          dependents: [],
+          system: true,
+          generation: 0,
+        }],
+      }),
+      pane: 'extensions',
+      connected: true,
+      sending: false,
+      draft: '',
+      onDraft() {},
+      onSend() {},
+      onApprove() {},
+      onReject() {},
+      onRecovery() {},
+    }))
+    assert.match(skillsPane, /data-skills="true"/)
+    assert.match(skillsPane, /data-skill-action="activate"/)
+    assert.match(skillsPane, /profile assistant/)
+    assert.doesNotMatch(skillsPane, /data-skill-id="host-brief@1.0.0"[^]*data-skill-action="uninstall"/)
+
+    const chips = renderToStaticMarkup(createElement(MissionControlScreen, {
+      view: fixtureView({
+        skills: [{
+          id: 'weekly-review@1.0.0',
+          name: 'weekly-review',
+          version: '1.0.0',
+          profile: 'assistant',
+          provenance: 'third-party',
+          origin: 'import',
+          lifecycle: 'active',
+          sealed: true,
+          modelInvocable: true,
+          userInvocable: true,
+          description: 'Guide a weekly review.',
+          resources: [],
+          validationPassed: true,
+          reviewComplete: true,
+          digest: 'abc',
+          dependsOn: [],
+          dependents: [],
+          system: false,
+          generation: 0,
+        }],
+      }),
+      connected: true,
+      sending: false,
+      draft: '',
+      onDraft() {},
+      onSend() {},
+      onApprove() {},
+      onReject() {},
+      onRecovery() {},
+    }))
+    assert.match(chips, /data-skill-chip="weekly-review"/)
+
+    const withheldChips = renderToStaticMarkup(createElement(MissionControlScreen, {
+      view: fixtureView({
+        systemState: 'SAFE_MODE',
+        skillCatalog: { state: 'withheld', failed: [], recoveryRequired: false, detail: 'persisted Skills remain inspectable; user/third-party catalog is withheld' },
+        skills: [{
+          id: 'weekly-review@1.0.0',
+          name: 'weekly-review',
+          version: '1.0.0',
+          profile: 'assistant',
+          provenance: 'third-party',
+          origin: 'import',
+          lifecycle: 'active',
+          sealed: true,
+          modelInvocable: true,
+          userInvocable: true,
+          description: 'Guide a weekly review.',
+          resources: [],
+          validationPassed: true,
+          reviewComplete: true,
+          digest: 'abc',
+          dependsOn: [],
+          dependents: [],
+          system: false,
+          generation: 4,
+        }, {
+          id: 'weekly-review@1.0.1',
+          name: 'weekly-review',
+          version: '1.0.1',
+          profile: 'assistant',
+          provenance: 'third-party',
+          origin: 'import',
+          lifecycle: 'disabled',
+          sealed: true,
+          modelInvocable: true,
+          userInvocable: true,
+          description: 'Guide a weekly review.',
+          resources: [],
+          validationPassed: true,
+          reviewComplete: true,
+          digest: 'def',
+          dependsOn: [],
+          dependents: [],
+          system: false,
+          generation: 4,
+        }, {
+          id: 'draft-review@1.0.0',
+          name: 'draft-review',
+          version: '1.0.0',
+          profile: 'assistant',
+          provenance: 'assistant-authored',
+          origin: 'assistant',
+          lifecycle: 'approved',
+          sealed: true,
+          modelInvocable: true,
+          userInvocable: true,
+          description: 'Approved but not active.',
+          resources: [],
+          validationPassed: true,
+          reviewComplete: true,
+          digest: 'ghi',
+          dependsOn: [],
+          dependents: [],
+          system: false,
+          generation: 4,
+        }],
+      }),
+      pane: 'extensions',
+      connected: true,
+      sending: false,
+      draft: '',
+      onDraft() {},
+      onSend() {},
+      onApprove() {},
+      onReject() {},
+      onRecovery() {},
+    }))
+    assert.match(withheldChips, /data-skill-lifecycle="active"/)
+    assert.match(withheldChips, /data-skill-action="disable"/)
+    assert.doesNotMatch(withheldChips, /data-skill-chip=/)
+    assert.doesNotMatch(withheldChips, /data-skill-action="activate"/)
+    assert.doesNotMatch(withheldChips, /data-skill-action="reactivate"/)
+
     const workbench = renderToStaticMarkup(createElement(MissionControlScreen, {
       view: fixtureView({
         candidates: [{
@@ -2720,6 +2899,246 @@ export function apply(ctx) {
     assert.doesNotMatch(longForm, /chain-of-thought|sk-secret/)
     assert.match(ready, /href="#memory"/)
     assert.match(ready, /id="memory"/)
+  })
+
+  it('approves and activates Skills only through /api/skill', async () => {
+    const isolated = mkdtempSync(join(tmpdir(), 'tars-ng-web-skill-'))
+    await withServer(() => bootAssistantControl({ home: isolated }), 'web-ui-skill', async (url, _surface, _agent, ctx) => {
+      const imported = await new SkillService(isolated, 'assistant').importLocal(join(import.meta.dirname, '../fixtures/skills/weekly-review'))
+      await ctx.skillLifecycle.validate(imported.candidateId)
+      ctx.skillLifecycle.seal(imported.candidateId)
+      ctx.skillLifecycle.requestReview(imported.candidateId)
+      ctx.skillLifecycle.requestApproval(imported.candidateId)
+      assert.equal((ctx.skillLifecycle as unknown as { importLocal?: unknown }).importLocal, undefined)
+      const cookie = await cookieHeader(url)
+      const before = await fetch(`${url}/api/view`).then((res) => res.json()) as { view: MissionControlView }
+      const skill = before.view.skills?.find((item) => item.id === imported.candidateId)
+      assert.equal(skill?.lifecycle, 'approval-requested')
+      assert.ok(skill?.approvalFingerprint)
+      assert.ok(skill?.revisionDiff)
+      const headers = { 'content-type': 'application/json', ...authHeaders(cookie) }
+      const bound = {
+        action: 'approve',
+        id: skill.id,
+        name: skill.name,
+        version: skill.version,
+        digest: skill.digest,
+        fingerprint: skill.approvalFingerprint,
+        generation: skill.generation,
+      }
+      assert.equal((await fetch(`${url}/api/skill`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify(bound),
+      })).status, 409)
+      assert.equal((await fetch(`${url}/api/skill`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({ ...bound, confirm: true, digest: 'stale' }),
+      })).status, 409)
+      const approved = await fetch(`${url}/api/skill`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({ ...bound, confirm: true }),
+      })
+      assert.equal(approved.status, 200)
+      const replay = await fetch(`${url}/api/skill`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({ ...bound, confirm: true }),
+      })
+      assert.equal(replay.status, 409)
+      const afterApprove = await fetch(`${url}/api/view`).then((res) => res.json()) as { view: MissionControlView }
+      const ready = afterApprove.view.skills?.find((item) => item.id === imported.candidateId)
+      assert.equal(ready?.lifecycle, 'approved')
+      const activated = await fetch(`${url}/api/skill`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({
+          action: 'activate',
+          confirm: true,
+          id: ready?.id,
+          name: ready?.name,
+          version: ready?.version,
+          digest: ready?.digest,
+          generation: ready?.generation,
+        }),
+      })
+      assert.equal(activated.status, 200)
+      assert.equal(ctx.skillLifecycle.get(imported.candidateId).lifecycle, 'active')
+      const dependent = ctx.skillLifecycle.create({
+        name: 'needs-weekly',
+        description: 'Host-declared hard dependent of weekly-review.',
+        body: 'This skill needs the exact weekly-review revision.',
+        dependsOn: [{ name: 'weekly-review', version: '1.0.0' }],
+      })
+      await ctx.skillLifecycle.validate(dependent.id)
+      ctx.skillLifecycle.seal(dependent.id)
+      ctx.skillLifecycle.requestReview(dependent.id)
+      ctx.skillLifecycle.requestApproval(dependent.id)
+      const pendingDep = await fetch(`${url}/api/view`).then((res) => res.json()) as { view: MissionControlView }
+      const depSkill = pendingDep.view.skills?.find((item) => item.id === dependent.id)
+      assert.equal((await fetch(`${url}/api/skill`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({
+          action: 'approve',
+          confirm: true,
+          id: depSkill?.id,
+          name: depSkill?.name,
+          version: depSkill?.version,
+          digest: depSkill?.digest,
+          fingerprint: depSkill?.approvalFingerprint,
+          generation: depSkill?.generation,
+        }),
+      })).status, 200)
+      const approvedDep = await fetch(`${url}/api/view`).then((res) => res.json()) as { view: MissionControlView }
+      const readyDep = approvedDep.view.skills?.find((item) => item.id === dependent.id)
+      assert.equal((await fetch(`${url}/api/skill`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({
+          action: 'activate',
+          confirm: true,
+          id: readyDep?.id,
+          name: readyDep?.name,
+          version: readyDep?.version,
+          digest: readyDep?.digest,
+          generation: readyDep?.generation,
+        }),
+      })).status, 200)
+      const listed = await fetch(`${url}/api/view`).then((res) => res.json()) as { view: MissionControlView }
+      const active = listed.view.skills?.find((item) => item.id === imported.candidateId)
+      const blocked = await fetch(`${url}/api/skill`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({
+          action: 'uninstall',
+          confirm: true,
+          id: active?.id,
+          name: active?.name,
+          version: active?.version,
+          digest: active?.digest,
+          generation: active?.generation,
+        }),
+      })
+      assert.equal(blocked.status, 409)
+      const blockedBody = await blocked.json() as { error?: string; dependents?: string[] }
+      assert.equal(blockedBody.error, 'dependents-required')
+      assert.deepEqual(blockedBody.dependents, [dependent.id])
+      const acked = await fetch(`${url}/api/skill`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({
+          action: 'uninstall',
+          confirm: true,
+          id: active?.id,
+          name: active?.name,
+          version: active?.version,
+          digest: active?.digest,
+          generation: active?.generation,
+          acknowledgeDependents: true,
+          dependents: blockedBody.dependents,
+        }),
+      })
+      assert.equal(acked.status, 200)
+      assert.equal(ctx.skillLifecycle.get(imported.candidateId).lifecycle, 'uninstalled')
+    })
+  })
+
+  it('withholds Skill chips and Activate/Reactivate after a user Skill is already active', async () => {
+    const isolated = mkdtempSync(join(tmpdir(), 'tars-ng-web-skill-safe-'))
+    const fixture = join(import.meta.dirname, '../fixtures/skills/weekly-review')
+    const ready = await bootAssistantControl({ home: isolated })
+    let skillId = ''
+    try {
+      const imported = await new SkillService(isolated, 'assistant').importLocal(fixture)
+      skillId = imported.candidateId
+      await ready.ctx.skillLifecycle.validate(skillId)
+      ready.ctx.skillLifecycle.seal(skillId)
+      ready.ctx.skillLifecycle.requestReview(skillId)
+      const requested = ready.ctx.skillLifecycle.requestApproval(skillId)
+      const human = ready.recoveryRoot.issueAuthority({ kind: 'human-control', source: 'application-ui' })
+      ready.recoveryRoot.approveSkill(skillId, requested.fingerprint, human)
+      ready.recoveryRoot.activateSkill(skillId, human)
+      assert.equal(ready.ctx.skillLifecycle.get(skillId).lifecycle, 'active')
+    } finally {
+      await ready.ctx.fiber.dispose()
+    }
+    await withServer(async () => {
+      const control = await bootSafeModeRuntime({ home: isolated })
+      const human = control.recoveryRoot.issueAuthority({ kind: 'human-control', source: 'application-ui' })
+      await control.recoveryRoot.enterSafeMode(human)
+      return control
+    }, 'web-ui-skill-withheld', async (url, _surface, _agent, ctx) => {
+      assert.equal(ctx.tools.get('skill'), undefined)
+      assert.equal(ctx.skillLifecycle.health().catalog, 'withheld')
+      const cookie = await cookieHeader(url)
+      const before = await fetch(`${url}/api/view`).then((res) => res.json()) as { view: MissionControlView }
+      const skill = before.view.skills?.find((item) => item.id === skillId)
+      assert.equal(before.view.skillCatalog?.state, 'withheld')
+      assert.equal(before.view.systemState, 'SAFE_MODE')
+      assert.equal(skill?.lifecycle, 'active')
+      assert.ok(skill?.digest)
+      const generation = skill.generation
+      const digest = skill.digest
+      const markup = renderToStaticMarkup(createElement(MissionControlScreen, {
+        view: before.view,
+        connected: true,
+        sending: false,
+        draft: '',
+        onDraft() {},
+        onSend() {},
+        onApprove() {},
+        onReject() {},
+        onRecovery() {},
+      }))
+      const skillsPane = renderToStaticMarkup(createElement(MissionControlScreen, {
+        view: before.view,
+        pane: 'extensions',
+        connected: true,
+        sending: false,
+        draft: '',
+        onDraft() {},
+        onSend() {},
+        onApprove() {},
+        onReject() {},
+        onRecovery() {},
+      }))
+      assert.doesNotMatch(markup, /data-skill-chip=/)
+      assert.doesNotMatch(skillsPane, /data-skill-action="activate"/)
+      assert.doesNotMatch(skillsPane, /data-skill-action="reactivate"/)
+      assert.match(skillsPane, /data-skill-lifecycle="active"/)
+      assert.match(skillsPane, /data-skill-catalog="withheld"/)
+      const headers = { 'content-type': 'application/json', ...authHeaders(cookie) }
+      const bound = {
+        confirm: true,
+        id: skill.id,
+        name: skill.name,
+        version: skill.version,
+        digest,
+        generation,
+      }
+      const activate = await fetch(`${url}/api/skill`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({ ...bound, action: 'activate' }),
+      }).then(async (res) => ({ status: res.status, body: await res.json() as { error?: string } }))
+      assert.equal(activate.status, 409)
+      assert.equal(activate.body.error, 'catalog-withheld')
+      const reactivate = await fetch(`${url}/api/skill`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({ ...bound, action: 'reactivate' }),
+      }).then(async (res) => ({ status: res.status, body: await res.json() as { error?: string } }))
+      assert.equal(reactivate.status, 409)
+      assert.equal(reactivate.body.error, 'catalog-withheld')
+      const later = await fetch(`${url}/api/view`).then((res) => res.json()) as { view: MissionControlView }
+      const after = later.view.skills?.find((item) => item.id === skillId)
+      assert.equal(after?.lifecycle, 'active')
+      assert.equal(after?.digest, digest)
+      assert.equal(after?.generation, generation)
+    })
   })
 
   it('keeps essential WUI text readable and narrow-screen Memory reachable', () => {

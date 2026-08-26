@@ -3,6 +3,7 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { ActivationDeniedError, GovernanceContractError, RollbackDeniedError, UninstallDeniedError } from '../domain/governance/errors.js'
+import { SkillContractError } from '../domain/skill/errors.js'
 import { SimulatedCrashError } from '../domain/governance/service.js'
 import type { RecoveryRoot } from '../domain/governance/root.js'
 import { acknowledgementOf } from '../domain/workspace/approvals.js'
@@ -10,7 +11,7 @@ import { runIdEquals } from './runtime-lease.js'
 import { boundActivationDiagnostics } from '../domain/workspace/failure.js'
 import { redactText } from '../domain/workspace/redact.js'
 import { AssistantControlSurface } from '../ui/controller.js'
-import type { ActivationCard, ApprovalCard, MissionControlView, RollbackCard, UserPluginView } from '../domain/workspace/types.js'
+import type { ActivationCard, ApprovalCard, MissionControlView, RollbackCard, SkillProjection, UserPluginView } from '../domain/workspace/types.js'
 import { PRODUCT_UI_SESSION_ID } from './constants.js'
 import { SessionCatalogError } from './session-catalog.js'
 import type { LiveSessionHost } from './session-lifecycle.js'
@@ -33,6 +34,21 @@ export interface WebUiRuntimeControl {
   readonly normalizedHome: string
   readonly runId: string
   readonly onStop: () => void
+  readonly inspectLive?: () => {
+    readonly safeMode: boolean
+    readonly recoveryRequired: boolean
+    readonly persistence?: string
+    readonly skills?: {
+      readonly profile: string
+      readonly candidates: number
+      readonly active: readonly string[]
+      readonly disabled: readonly string[]
+      readonly failed: readonly string[]
+      readonly catalog: 'ok' | 'empty' | 'degraded' | 'withheld'
+      readonly recoveryRequired?: boolean
+      readonly catalogDetail?: string
+    }
+  }
 }
 
 export interface WebUiServerOptions extends WebUiListenOptions {
@@ -339,6 +355,59 @@ export function startWebUiServer(options: WebUiServerOptions): Promise<WebUiServ
     return { card }
   }
 
+  const bindSkillAction = (body: {
+    action?: unknown
+    id?: unknown
+    name?: unknown
+    version?: unknown
+    digest?: unknown
+    fingerprint?: unknown
+    generation?: unknown
+  }, view: MissionControlView): { error: string } | { skill: SkillProjection } => {
+    const action = String(body.action ?? '')
+    const allowed = new Set(['approve', 'reject', 'activate', 'disable', 'reactivate', 'uninstall', 'rollback'])
+    if (!allowed.has(action)) return { error: 'malformed' }
+    if (typeof body.generation !== 'number' || !Number.isInteger(body.generation)) return { error: 'malformed' }
+    if (action === 'rollback') {
+      const target = view.skillRollback
+      if (target === undefined) return { error: 'unknown-skill' }
+      if (typeof body.name !== 'string' || body.name !== target.name) return { error: 'stale-skill' }
+      if (typeof body.version !== 'string' || body.version !== target.version) return { error: 'stale-skill' }
+      if (typeof body.digest !== 'string' || body.digest !== target.digest) return { error: 'stale-digest' }
+      if (body.generation !== target.generation) return { error: 'stale-generation' }
+      const skill = (view.skills ?? []).find((item) => item.name === target.name && item.version === target.version)
+      if (skill === undefined) return { error: 'unknown-skill' }
+      return { skill }
+    }
+    if (typeof body.id !== 'string' || body.id === '') return { error: 'malformed' }
+    const skill = (view.skills ?? []).find((item) => item.id === body.id)
+    if (skill === undefined) return { error: 'unknown-skill' }
+    if (typeof body.name !== 'string' || body.name !== skill.name) return { error: 'stale-skill' }
+    if (typeof body.version !== 'string' || body.version !== skill.version) return { error: 'stale-skill' }
+    if (typeof body.digest !== 'string' || body.digest !== skill.digest) return { error: 'stale-digest' }
+    if (body.generation !== skill.generation) return { error: 'stale-generation' }
+    if (action === 'approve' || action === 'reject') {
+      if (skill.lifecycle !== 'approval-requested') return { error: 'stale-lifecycle' }
+      if (typeof body.fingerprint !== 'string' || body.fingerprint !== skill.approvalFingerprint) return { error: 'stale-fingerprint' }
+    }
+    if (action === 'activate' && skill.lifecycle !== 'approved') return { error: 'stale-lifecycle' }
+    if (action === 'disable' && skill.lifecycle !== 'active') return { error: 'stale-lifecycle' }
+    if (action === 'reactivate' && skill.lifecycle !== 'disabled') return { error: 'stale-lifecycle' }
+    if (action === 'uninstall' && skill.lifecycle === 'uninstalled') return { error: 'stale-lifecycle' }
+    return { skill }
+  }
+
+  const withheldSkillCatalogMutation = (action: string, view: MissionControlView): string | undefined => {
+    if (action !== 'activate' && action !== 'reactivate') return undefined
+    if (view.skillCatalog?.state === 'withheld') return 'catalog-withheld'
+    if (view.systemState === 'SAFE_MODE' || view.runtimeContext?.safeMode === true) return 'safe-mode'
+    return undefined
+  }
+
+  const sameStringSet = (left: readonly string[], right: readonly string[]) => (
+    left.length === right.length && left.every((item) => right.includes(item))
+  )
+
   const bindRollback = (body: {
     id?: unknown
     fingerprint?: unknown
@@ -415,6 +484,7 @@ export function startWebUiServer(options: WebUiServerOptions): Promise<WebUiServ
           startedAt: control.startedAt,
           productVersion: control.productVersion,
           normalizedHome: control.normalizedHome,
+          ...(control.inspectLive ? control.inspectLive() : {}),
         })
         return
       }
@@ -642,6 +712,83 @@ export function startWebUiServer(options: WebUiServerOptions): Promise<WebUiServ
           broadcast()
         } finally {
           activationBusy = false
+        }
+        return
+      }
+      if (req.method === 'POST' && requestUrl.pathname === '/api/skill') {
+        const body = JSON.parse(await readBody(req)) as {
+          action?: unknown
+          id?: unknown
+          name?: unknown
+          version?: unknown
+          digest?: unknown
+          fingerprint?: unknown
+          generation?: unknown
+          confirm?: unknown
+          dependents?: unknown
+          acknowledgeDependents?: unknown
+        }
+        if (body.confirm !== true) {
+          sendJson(res, 409, { error: 'confirmation-required' })
+          return
+        }
+        const action = String(body.action ?? '')
+        const view = snapshot()
+        const withheld = withheldSkillCatalogMutation(action, view)
+        if (withheld !== undefined) {
+          sendJson(res, 409, { error: withheld, view, webUi: url })
+          return
+        }
+        const bound = bindSkillAction(body, view)
+        if ('error' in bound) {
+          sendJson(res, bound.error === 'malformed' ? 400 : 409, { error: bound.error })
+          return
+        }
+        const human = options.recoveryRoot.issueAuthority({ kind: 'human-control', source: 'application-ui' })
+        try {
+          if (action === 'approve') {
+            options.recoveryRoot.approveSkill(bound.skill.id, bound.skill.approvalFingerprint ?? '', human)
+          } else if (action === 'reject') {
+            options.recoveryRoot.rejectSkill(bound.skill.id, bound.skill.approvalFingerprint ?? '', human)
+          } else if (action === 'activate') {
+            options.recoveryRoot.activateSkill(bound.skill.id, human)
+          } else if (action === 'reactivate') {
+            options.recoveryRoot.reactivateSkill(bound.skill.name, bound.skill.version, human)
+          } else if (action === 'disable' || action === 'uninstall') {
+            const dependents = bound.skill.dependents
+            if (dependents.length > 0 && body.acknowledgeDependents !== true) {
+              sendJson(res, 409, {
+                error: 'dependents-required',
+                dependents,
+                detail: `hard dependents must be acknowledged: ${dependents.join(', ')}`,
+                view,
+                webUi: url,
+              })
+              return
+            }
+            const acknowledged = Array.isArray(body.dependents) ? body.dependents.map((item) => String(item)) : []
+            if (body.acknowledgeDependents === true && !sameStringSet(dependents, acknowledged)) {
+              sendJson(res, 409, { error: 'stale-dependents', dependents, view, webUi: url })
+              return
+            }
+            const ack = body.acknowledgeDependents === true ? acknowledged : []
+            if (action === 'disable') options.recoveryRoot.disableSkill(bound.skill.name, human, ack)
+            else options.recoveryRoot.uninstallSkill(bound.skill.id, human, ack)
+          } else if (action === 'rollback') {
+            options.recoveryRoot.rollbackSkill(human)
+          } else {
+            sendJson(res, 400, { error: 'malformed', detail: 'unknown skill action' })
+            return
+          }
+          sendJson(res, 200, envelope({ acknowledgement: { text: `Skill ${action} recorded.` } }))
+          broadcast()
+        } catch (error) {
+          const message = error instanceof Error ? error.message : 'skill action failed'
+          const code = error instanceof SkillContractError
+            && (error.code === 'catalog-degraded' || error.code === 'catalog-sync-failed')
+            ? error.code
+            : 'skill-action-denied'
+          sendJson(res, 409, { error: code, detail: redactText(message), view: snapshot(), webUi: url })
         }
         return
       }

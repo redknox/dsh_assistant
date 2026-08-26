@@ -12,6 +12,7 @@ export type {
   RecoveryView,
   SessionCatalogView,
   SessionTopicView,
+  SkillProjection,
   RollbackCard,
   RollbackOwnerChange,
   UserCapabilityArea,

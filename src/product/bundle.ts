@@ -23,6 +23,8 @@ import * as governancePlugin from '../plugins/governance-plugin.js'
 import type { GovernancePluginConfig } from '../plugins/governance-plugin.js'
 import * as workbenchPlugin from '../plugins/workbench-plugin.js'
 import type { WorkbenchPluginConfig } from '../plugins/workbench-plugin.js'
+import * as skillPlugin from '../plugins/skill-plugin.js'
+import type { SkillPluginConfig } from '../plugins/skill-plugin.js'
 
 export const name = 'dsh-assistant'
 export const inject = ['systemPrompt', 'agents']
@@ -42,6 +44,7 @@ export interface AssistantBundleConfig {
   readonly safeMode?: boolean
   readonly governance?: GovernancePluginConfig
   readonly workbench?: WorkbenchPluginConfig
+  readonly skills?: SkillPluginConfig
 }
 
 /** Bundle entry: compose product plugins through public Cordis lifecycle. */
@@ -57,6 +60,10 @@ export async function apply(ctx: Context, config: AssistantBundleConfig = {}) {
   })
   await ctx.plugin(workbenchPlugin, {
     ...config.workbench,
+    inspectOnly: config.safeMode === true,
+  })
+  await ctx.plugin(skillPlugin, {
+    ...config.skills,
     inspectOnly: config.safeMode === true,
   })
   if (config.safeMode) return
@@ -78,6 +85,7 @@ export const SAFE_MODE_TOOL_NAMES = [
   'inspect_candidate',
   'inspect_candidate_review',
   'inspect_validation_diagnostics',
+  'inspect_skill',
 ] as const
 
 export const PRODUCT_TOOL_NAMES = [

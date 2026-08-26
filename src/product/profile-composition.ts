@@ -113,6 +113,9 @@ export const OFFICIAL_RUNTIME_MOUNTS = Object.freeze([
   { official: 'llm-deepseek', runtime: 'llm-deepseek', when: 'always' },
   { official: 'system-prompt', runtime: 'SystemPrompt', when: 'always' },
   { official: 'tools', runtime: 'ToolRuntime', when: 'always' },
+  { official: 'skill', runtime: 'SkillRegistry', when: 'always' },
+  { official: 'skill-filesystem', runtime: 'skill-filesystem', when: 'ready' },
+  { official: 'tool-skill', runtime: 'tool-skill', when: 'ready' },
   { official: 'jobs', runtime: 'LocalJobRegistry', when: 'ready' },
   { official: 'session-persistence-jsonl', runtime: 'JsonlSessionPersistence', when: 'session-persistence' },
 ] as const satisfies readonly OfficialRuntimeMount[])
@@ -131,6 +134,7 @@ export const PRODUCT_ONLY_SEAMS = Object.freeze([
   { runtime: 'dsh-assistant-knowledge', when: 'ready', reason: 'personal knowledge' },
   { runtime: 'dsh-assistant-memory', when: 'ready', reason: 'personal memory' },
   { runtime: 'dsh-assistant-policy', when: 'ready', reason: 'product trust policy' },
+  { runtime: 'dsh-assistant-skills', when: 'always', reason: 'profile-scoped Skill lifecycle' },
 ] as const satisfies readonly ProductOnlySeam[])
 
 export const PROTECTED_PLUGIN_IDS = Object.freeze(['dsh-assistant'] as const)

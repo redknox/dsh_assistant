@@ -63,7 +63,7 @@ describe('product package and profile', () => {
       dsh: { profile: { bundles: string[] } }
     }
     assert.deepEqual(profile.dsh.profile.bundles, ['@deepseek-ai/dsh-base', 'dsh-assistant'])
-    assert.match(readFileSync(join(root, 'profiles/assistant/cordis.patch.yml'), 'utf8'), /id: skill\n  disabled: true/)
+    assert.match(readFileSync(join(root, 'profiles/assistant/cordis.patch.yml'), 'utf8'), /includeDefaultRoots: false/)
   })
 
   it('remounts the product bundle without duplicate tools or leftover services', async () => {

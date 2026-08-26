@@ -75,6 +75,16 @@ export function sanitizeMissionControlView(view: MissionControlView): MissionCon
       ...plugin,
       digest: plugin.digest === undefined ? undefined : redactText(plugin.digest),
     })),
+    skills: (view.skills ?? []).map((item) => ({
+      ...item,
+      digest: redactText(item.digest),
+      description: redactText(item.description),
+      ...(item.whenToUse ? { whenToUse: redactText(item.whenToUse) } : {}),
+      ...(item.lastFailure ? { lastFailure: { ...item.lastFailure, detail: redactText(item.lastFailure.detail) } } : {}),
+    })),
+    ...(view.skillCatalog?.detail
+      ? { skillCatalog: { ...view.skillCatalog, detail: redactText(view.skillCatalog.detail) } }
+      : {}),
     extensions: (view.extensions ?? []).map((item) => ({
       ...item,
       digest: item.digest === undefined ? undefined : redactText(item.digest),

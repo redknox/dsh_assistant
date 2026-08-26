@@ -9,8 +9,12 @@ import * as DeepSeekLlm from '@deepseek-ai/dsh-llm-deepseek'
 import SessionStore, { SessionId } from '@deepseek-ai/dsh-session'
 import JsonlSessionPersistence from '@deepseek-ai/dsh-session-persistence-jsonl'
 import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
+import SkillRegistry from '@deepseek-ai/dsh-skill'
+import * as toolSkill from '@deepseek-ai/dsh-tool-skill'
 import ToolRuntime from '@deepseek-ai/dsh-tools'
 import type { RecoveryRoot } from '../domain/governance/root.js'
+import { SkillService } from '../domain/skill/index.js'
+import { mountGovernedSkillFilesystem } from './skill-filesystem-mount.js'
 import { persistCandidates, persistGovernance, openDurableSelfExtension, hydrateFromAuthority } from '../domain/self-extension/durable.js'
 import { resolveAssistantHome } from '../domain/self-extension/home.js'
 import { reconstructCommittedExtensions } from '../domain/self-extension/reconstruct.js'
@@ -64,7 +68,7 @@ async function bootStack(options: BootOptions = {}): Promise<AssistantControl> {
   const durable = opened.durable
   const persistBroken = opened.loadError !== undefined
   const safeMode = Boolean(options.safeMode) || persistBroken || Boolean(durable?.authority.snapshot().recovery.safeMode)
-  const holder: { root?: RecoveryRoot } = {}
+  const holder: { root?: RecoveryRoot; skills?: SkillService } = {}
 
   const ctx = new Context()
   await ctx.plugin(InvariantRegistry)
@@ -83,9 +87,11 @@ async function bootStack(options: BootOptions = {}): Promise<AssistantControl> {
   await ctx.plugin(AgentDefaultModel, { provider: DEFAULT_LLM_PROVIDER, model: DEFAULT_LLM_MODEL })
   await ctx.plugin(SystemPrompt, {})
   await ctx.plugin(ToolRuntime)
+  await ctx.plugin(SkillRegistry)
   if (!safeMode) await ctx.plugin(LocalJobRegistry)
   await ctx.plugin(AgentLoop, { agents: [] })
   let recoveryRoot: RecoveryRoot | undefined
+  const skillHome = resolveAssistantHome(options.home)
   await ctx.plugin(assistantProduct, {
     memory: options.memory,
     knowledge: { fixturePaths: options.knowledgeFixturePaths },
@@ -128,7 +134,31 @@ async function bootStack(options: BootOptions = {}): Promise<AssistantControl> {
         recoveryRoot = root
       },
     },
+    skills: {
+      home: skillHome,
+      profile: 'assistant',
+      inspectOnly: safeMode,
+      bindStore: (store) => {
+        holder.skills = store
+      },
+    },
   })
+  if (!safeMode) {
+    const mounted = await mountGovernedSkillFilesystem(ctx, {
+      includeDefaultRoots: false,
+      watch: false,
+      watchFollowSymlinks: false,
+      customSkillDirs: holder.skills === undefined ? [] : [holder.skills.activeRoot()],
+    })
+    holder.skills?.attachInvalidation(() => {
+      mounted.invalidate()
+      mounted.provider.observeHostMutation(holder.skills!.activeRoot())
+    })
+    await ctx.plugin(toolSkill)
+  }
+  if (holder.root !== undefined && holder.skills !== undefined) {
+    holder.root.bindSkills(holder.skills)
+  }
   if (recoveryRoot === undefined) {
     throw new Error('bootstrap did not attach the recovery root')
   }
@@ -157,7 +187,7 @@ async function bootStack(options: BootOptions = {}): Promise<AssistantControl> {
     diagnostics: {
       persistence,
       recoveryRequired: reconstruction.recoveryRequired || persistBroken,
-      safeMode: reconstruction.safeMode || persistBroken,
+      safeMode: safeMode || reconstruction.safeMode || persistBroken,
       reasons: [...opened.diagnostics, ...reconstruction.diagnostics],
     },
   }

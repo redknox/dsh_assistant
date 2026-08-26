@@ -1,6 +1,6 @@
 # Runtime Context
 
-Status: **Implemented**. This is the v0.4.0 host-owned Profile / Workspace / Session contract. Multi-session topic lifecycle is **Implemented** in [session-catalog.md](./session-catalog.md). Governed local third-party import is a separate Self-Extension capability (`import-local`). Marketplace discovery and Skill lifecycle are **not** Implemented here.
+Status: **Implemented**. This is the v0.4.0 host-owned Profile / Workspace / Session contract. Multi-session topic lifecycle is **Implemented** in [session-catalog.md](./session-catalog.md). Governed local third-party import is a separate Self-Extension capability (`import-local`). Profile-scoped DSH Skill lifecycle is **in progress** in [skills.md](./skills.md). Marketplace discovery is not Implemented here.
 
 ```text
 Install Harness

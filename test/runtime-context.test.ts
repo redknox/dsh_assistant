@@ -374,7 +374,7 @@ describe('runtime context', () => {
   it('matches the official assistant Profile composition and rejects unsafe patches', async () => {
     assert.deepEqual([...ASSISTANT_PROFILE_BUNDLES], ['@deepseek-ai/dsh-base', 'dsh-assistant'])
     assertAssistantAdapterContract()
-    const booted = await bootAssistantControl()
+    const booted = await bootAssistantControl({ home: ensureProductHome(isolatedHome()).root })
     try {
       const mounted = mountedAdapterPluginIds(booted.ctx)
       const composition = loadGovernedAssistantComposition()
@@ -383,7 +383,7 @@ describe('runtime context', () => {
       assert.deepEqual(mounted, [...expected])
       assertMountedAdapterContract(booted.ctx, { safeMode: false, sessionPersistence: false })
       assert.ok(active.includes('dsh-assistant'))
-      assert.equal(active.includes('skill'), false)
+      assert.equal(active.includes('skill'), true)
       assert.throws(
         () => assertOfficialEquivalentToAdapter(ASSISTANT_OFFICIAL_COMPOSED_IDS, ['dsh-assistant']),
         /not equivalent to the production adapter/,
@@ -597,7 +597,7 @@ describe('runtime context', () => {
       assert.equal(recovered.profileIdentity, context.profileIdentity)
       assert.equal(recovered.sessionPersistenceDir, context.sessionPersistenceDir)
       const recovery = loadGovernedAssistantComposition({ recovery: true })
-      assert.equal(activeComposedIds(recovery.entries).includes('skill'), false)
+      assert.equal(activeComposedIds(recovery.entries).includes('skill'), true)
       const booted = await bootSafeModeRuntime({
         home: layout.root,
         sessionRoot: recovered.sessionPersistenceDir,
@@ -621,6 +621,7 @@ describe('runtime context', () => {
         error: (text) => doctorLines.push(text),
       })
       assert.match(doctorLines.join('\n'), /profile-composition: recovery-required/)
+      assert.match(doctorLines.join('\n'), /safe-mode: true/)
       const startLines: string[] = []
       const previousPort = process.env.TARS_NG_UI_PORT
       const previousKey = process.env.DEEPSEEK_API_KEY
@@ -637,7 +638,8 @@ describe('runtime context', () => {
         if (previousKey === undefined) delete process.env.DEEPSEEK_API_KEY
         else process.env.DEEPSEEK_API_KEY = previousKey
       }
-      assert.match(startLines.join('\n'), /profile-composition: recovery-required|safe-mode: true/)
+      assert.match(startLines.join('\n'), /profile-composition: recovery-required/)
+      assert.match(startLines.join('\n'), /safe-mode: true/)
       writeFileSync(
         path.join(profiles, 'assistant', 'cordis.patch.yml'),
         readFileSync(path.join(productPackageRoot(), 'profiles', 'assistant', 'cordis.patch.yml'), 'utf8'),
@@ -649,6 +651,77 @@ describe('runtime context', () => {
     } finally {
       if (previous === undefined) delete process.env.TARS_NG_PROFILE_ROOT
       else process.env.TARS_NG_PROFILE_ROOT = previous
+    }
+  })
+
+  it('doctor, status, start --once, and live start agree on Safe Mode when the assistant Profile is missing', async () => {
+    const profiles = mkdtempSync(path.join(tmpdir(), 'tars-profiles-'))
+    cpSync(path.join(productPackageRoot(), 'profiles'), profiles, { recursive: true })
+    const previous = process.env.TARS_NG_PROFILE_ROOT
+    process.env.TARS_NG_PROFILE_ROOT = profiles
+    const layout = ensureProductHome(isolatedHome())
+    writeFileSync(layout.envFile, 'DEEPSEEK_API_KEY=sk-offline-not-a-live-key\n', { mode: 0o600 })
+    chmodSync(layout.envFile, 0o600)
+    writeFileSync(path.join(profiles, 'assistant', 'cordis.patch.yml'), 'not: yaml: [')
+    const previousEnv = {
+      key: process.env.DEEPSEEK_API_KEY,
+      port: process.env.TARS_NG_UI_PORT,
+    }
+    delete process.env.DEEPSEEK_API_KEY
+    process.env.TARS_NG_UI_PORT = '0'
+    const collect = async (argv: string[]) => {
+      const lines: string[] = []
+      await runProductCli(argv, { log: (text) => lines.push(text), error: (text) => lines.push(text) })
+      return lines.join('\n')
+    }
+    try {
+      const doctor = await collect(['doctor', '--home', layout.root])
+      const status = await collect(['status', '--home', layout.root])
+      const once = await collect(['start', '--once', '--home', layout.root])
+      for (const text of [doctor, status, once]) {
+        assert.match(text, /safe-mode: true/)
+        assert.doesNotMatch(text, /catalog=ok/)
+      }
+      assert.match(doctor, /catalog=withheld/)
+      assert.match(once, /catalog=withheld/)
+      let liveDoctor = ''
+      await runProductCli(['start', '--home', layout.root], {
+        log() {},
+        error() {},
+      }, {
+        afterWebUiBound: async (web) => {
+          const payload = await fetch(`${web.url}/api/view`).then((res) => res.json()) as {
+            view: { runtimeContext?: { safeMode?: boolean }; skillCatalog?: { state?: string }; systemState?: string }
+          }
+          assert.equal(payload.view.runtimeContext?.safeMode, true)
+          assert.equal(payload.view.systemState, 'SAFE_MODE')
+          assert.equal(payload.view.skillCatalog?.state, 'withheld')
+          const lines: string[] = []
+          await runProductCli(['doctor', '--home', layout.root], {
+            log: (text) => lines.push(text),
+            error: (text) => lines.push(text),
+          })
+          liveDoctor = lines.join('\n')
+          throw new Error('injected stop after live doctor')
+        },
+      })
+      assert.match(liveDoctor, /safe-mode: true/)
+      assert.match(liveDoctor, /doctor-source: live-runtime/)
+      assert.match(liveDoctor, /catalog=withheld/)
+      writeFileSync(
+        path.join(profiles, 'assistant', 'cordis.patch.yml'),
+        readFileSync(path.join(productPackageRoot(), 'profiles', 'assistant', 'cordis.patch.yml'), 'utf8'),
+      )
+      const restored = await collect(['doctor', '--home', layout.root])
+      assert.match(restored, /safe-mode: false/)
+      assert.doesNotMatch(restored, /catalog=withheld/)
+    } finally {
+      if (previous === undefined) delete process.env.TARS_NG_PROFILE_ROOT
+      else process.env.TARS_NG_PROFILE_ROOT = previous
+      if (previousEnv.key === undefined) delete process.env.DEEPSEEK_API_KEY
+      else process.env.DEEPSEEK_API_KEY = previousEnv.key
+      if (previousEnv.port === undefined) delete process.env.TARS_NG_UI_PORT
+      else process.env.TARS_NG_UI_PORT = previousEnv.port
     }
   })
 
@@ -680,8 +753,8 @@ describe('runtime context', () => {
         await first.ctx.fiber.dispose()
       }
       const patch = readFileSync(path.join(profiles, 'assistant', 'cordis.patch.yml'), 'utf8').replace(
-        '- id: skill\n  disabled: true\n',
-        '- id: skill\n  disabled: false\n',
+        'includeDefaultRoots: false',
+        'includeDefaultRoots: true',
       )
       writeFileSync(path.join(profiles, 'assistant', 'cordis.patch.yml'), patch)
       const mutated = profileIdentityOf(loadGovernedAssistantComposition())
@@ -751,7 +824,8 @@ describe('runtime context', () => {
         if (previousKey === undefined) delete process.env.DEEPSEEK_API_KEY
         else process.env.DEEPSEEK_API_KEY = previousKey
       }
-      assert.match(startLines.join('\n'), /profile-composition: recovery-required|safe-mode: true/)
+      assert.match(startLines.join('\n'), /profile-composition: recovery-required/)
+      assert.match(startLines.join('\n'), /safe-mode: true/)
       assert.equal(existsSync(runtimeContextBindingFile(layout)), false)
       assert.equal(readSessionRootOwner(recovered.sessionRoot.value), undefined)
       assert.equal(existsSync(recoverySessionsDir(layout)), false)

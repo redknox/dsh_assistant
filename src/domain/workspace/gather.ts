@@ -123,6 +123,10 @@ export function gatherWorkspaceSnapshot(input: GatherWorkspaceInput): WorkspaceS
       ...(activation?.rollbackPlan ? { rollbackPlan: activation.rollbackPlan } : {}),
     },
     candidates: workbenchCandidates(ctx),
+    skills: skillProjections(ctx),
+    ...(skillCatalogOf(ctx) ? { skillCatalog: skillCatalogOf(ctx) } : {}),
+    ...(skillEventsOf(ctx).length > 0 ? { skillEvents: skillEventsOf(ctx) } : {}),
+    ...(skillRollbackOf(ctx) ? { skillRollback: skillRollbackOf(ctx)! } : {}),
     memory: (ctx.get('personalMemory') as { query(): { records: { id: string; statement: string; topicKey: string; status: string }[] } } | undefined)
       ?.query().records.map((record) => ({
         id: record.id,
@@ -238,6 +242,113 @@ function toolEventsFromSession(events: readonly SessionEvent[]): WorkspaceSnapsh
     }
   }
   return items
+}
+
+function skillCatalogOf(ctx: Context): WorkspaceSnapshotInput['skillCatalog'] {
+  const skills = ctx.get('skillLifecycle') as {
+    health(): {
+      catalog: 'ok' | 'empty' | 'degraded' | 'withheld'
+      failed: readonly string[]
+      recoveryRequired: boolean
+      catalogDetail?: string
+    }
+  } | undefined
+  const health = skills?.health()
+  if (health === undefined) return undefined
+  return {
+    state: health.catalog,
+    failed: [...health.failed],
+    recoveryRequired: health.recoveryRequired,
+    ...(health.catalogDetail ? { detail: health.catalogDetail } : {}),
+  }
+}
+
+function skillEventsOf(ctx: Context): NonNullable<WorkspaceSnapshotInput['skillEvents']> {
+  const skills = ctx.get('skillLifecycle') as {
+    events(): readonly {
+      id: string
+      kind: string
+      name?: string
+      version?: string
+      detail?: string
+    }[]
+  } | undefined
+  return (skills?.events() ?? []).map((item) => ({
+    id: item.id,
+    kind: item.kind,
+    ...(item.name ? { name: item.name } : {}),
+    ...(item.version ? { version: item.version } : {}),
+    ...(item.detail ? { detail: item.detail } : {}),
+  }))
+}
+
+function skillRollbackOf(ctx: Context): WorkspaceSnapshotInput['skillRollback'] {
+  const skills = ctx.get('skillLifecycle') as {
+    health(): { generation: number; rollbackTarget?: { name: string; version: string; digest: string } }
+  } | undefined
+  const health = skills?.health()
+  return health?.rollbackTarget === undefined ? undefined : { ...health.rollbackTarget, generation: health.generation }
+}
+
+function skillProjections(ctx: Context): WorkspaceSnapshotInput['skills'] {
+  const skills = ctx.get('skillLifecycle') as {
+    health(): { generation: number }
+    diff(id: string): NonNullable<WorkspaceSnapshotInput['skills']>[number]['revisionDiff']
+    list(): readonly {
+      id: string
+      name: string
+      version: string
+      profile: string
+      provenance: { kind: string; origin: string }
+      lifecycle: string
+      sealed: boolean
+      invocation: { modelInvocable: boolean; userInvocable: boolean }
+      description: string
+      whenToUse?: string
+      resources: readonly string[]
+      validationPassed: boolean
+      reviewComplete: boolean
+      approvalDecision?: string
+      approvalFingerprint?: string
+      digest: string
+      baseVersion?: string
+      dependsOn?: readonly { name: string; version: string }[]
+      dependents?: readonly string[]
+      lastFailure?: { phase: string; detail: string }
+      resolutionHandoff?: { missingTools: readonly string[]; nextAction: 'capability-resolution' }
+    }[]
+    inspect(id: string): { dependents: readonly string[] }
+  } | undefined
+  if (skills === undefined) return []
+  const generation = skills.health().generation
+  return skills.list().map((item) => ({
+    id: item.id,
+    name: item.name,
+    version: item.version,
+    profile: item.profile,
+    provenance: item.provenance.kind,
+    origin: item.provenance.origin,
+    lifecycle: item.lifecycle,
+    sealed: item.sealed,
+    modelInvocable: item.invocation.modelInvocable,
+    userInvocable: item.invocation.userInvocable,
+    description: item.description,
+    ...(item.whenToUse ? { whenToUse: item.whenToUse } : {}),
+    resources: [...item.resources],
+    validationPassed: item.validationPassed,
+    reviewComplete: item.reviewComplete,
+    ...(item.approvalDecision ? { approvalDecision: item.approvalDecision } : {}),
+    ...(item.approvalFingerprint && item.lifecycle === 'approval-requested' ? { approvalFingerprint: item.approvalFingerprint } : {}),
+    digest: item.digest,
+    ...(item.baseVersion ? { baseVersion: item.baseVersion } : {}),
+    dependsOn: (item.dependsOn ?? []).map((dep) => `${dep.name}@${dep.version}`),
+    dependents: [...(skills.inspect(item.id).dependents ?? item.dependents ?? [])],
+    system: item.provenance.kind === 'system',
+    generation,
+    ...(item.lastFailure ? { lastFailure: item.lastFailure } : {}),
+    ...(item.resolutionHandoff ? { resolutionHandoff: item.resolutionHandoff } : {}),
+    revisionDiff: skills.diff(item.id),
+  }))
 }
 
 function workbenchCandidates(ctx: Context): WorkspaceSnapshotInput['candidates'] {

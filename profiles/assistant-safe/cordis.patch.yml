@@ -63,8 +63,6 @@
   disabled: true
 - id: agent-instructions
   disabled: true
-- id: skill
-  disabled: true
 - id: skill-filesystem
   disabled: true
 - id: skill-badge

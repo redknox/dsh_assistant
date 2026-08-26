@@ -39,6 +39,8 @@ export interface DoctorReport {
   readonly llm?: LlmDiagnosis
   readonly generatedRuntime?: GeneratedRuntimeDiagnosis
   readonly runtimeContext?: RuntimeContext
+  readonly doctorSource?: 'boot' | 'live-runtime' | 'last-status'
+  readonly skills?: OperatorStatus['skills']
 }
 
 export function calendarDiagnosis(allowFixtures: boolean): IntegrationDiagnosis {
@@ -141,17 +143,21 @@ export function attachRuntimeDoctor(report: DoctorReport, input: {
   readonly persistence: string
   readonly safeMode: boolean
   readonly recoveryRequired: boolean
-  readonly operator: OperatorStatus
+  readonly operator?: OperatorStatus
   readonly llm?: LlmDiagnosis
+  readonly source?: DoctorReport['doctorSource']
+  readonly skills?: OperatorStatus['skills']
 }): DoctorReport {
   return {
     ...report,
     persistence: input.persistence,
     safeMode: input.safeMode,
     recoveryRequired: input.recoveryRequired,
-    operator: input.operator,
+    ...(input.operator ? { operator: input.operator } : {}),
     llm: input.llm,
     generatedRuntime: generatedRuntimeDiagnosis(),
+    ...(input.source ? { doctorSource: input.source } : {}),
+    ...(input.skills ? { skills: input.skills } : {}),
   }
 }
 
@@ -197,6 +203,7 @@ export function formatDoctorReport(report: DoctorReport): string {
     `persistence: ${report.persistence ?? 'not-booted'}`,
     `safe-mode: ${report.safeMode ?? 'not-booted'}`,
     `recovery-required: ${report.recoveryRequired ?? 'not-booted'}`,
+    report.doctorSource ? `doctor-source: ${report.doctorSource}` : undefined,
     report.generatedRuntime ? `generated-runtime: ${report.generatedRuntime.state}` : 'generated-runtime: unavailable',
     report.generatedRuntime ? `isolation: ${report.generatedRuntime.isolation}` : undefined,
     report.generatedRuntime ? `active generated processes: ${report.generatedRuntime.activeProcesses}` : undefined,
@@ -206,8 +213,14 @@ export function formatDoctorReport(report: DoctorReport): string {
     report.operator ? `third-party-imported: ${report.operator.thirdPartyImported}` : undefined,
     report.operator ? `third-party-active: ${report.operator.thirdPartyActive}` : undefined,
     report.operator ? `third-party-failed: ${report.operator.thirdPartyFailed}` : undefined,
+    skillsDoctorLine(report.operator?.skills ?? report.skills),
     report.operator?.lastFailure ? `last-failure: ${report.operator.lastFailure}` : undefined,
   ].filter((item): item is string => item !== undefined).join('\n')
+}
+
+function skillsDoctorLine(skills: OperatorStatus['skills'] | undefined): string | undefined {
+  if (!skills) return undefined
+  return `skills: profile=${skills.profile} catalog=${skills.catalog} candidates=${skills.candidates} active=${skills.active.join(',') || '(none)'} failed=${skills.failed.join(',') || '(none)'}${skills.catalogDetail ? ` detail=${skills.catalogDetail}` : ''}`
 }
 
 function sessionCatalogLine(runtimeContext: RuntimeContext | undefined): string | undefined {
