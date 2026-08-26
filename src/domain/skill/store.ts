@@ -137,6 +137,15 @@ export function restoreRetiredDirectory(dest: string, outgoing: string): void {
   if (!existsSync(dest) && existsSync(outgoing)) renameSync(outgoing, dest)
 }
 
+export function rollbackActiveDirectory(dest: string, outgoing: string): void {
+  if (existsSync(outgoing)) {
+    discardDir(dest)
+    renameSync(outgoing, dest)
+    return
+  }
+  discardDir(dest)
+}
+
 export function discardDir(target: string): void {
   rmSync(target, { recursive: true, force: true })
 }

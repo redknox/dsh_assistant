@@ -242,6 +242,8 @@ function copyDurableSkillProfile(layout: ReturnType<typeof skillStoreLayout>, de
     ...(lastActive ? { lastActive } : {}),
     approvals: (index.approvals ?? []).filter((item) => durableIds.has(item.skillId)),
     reviews: (index.reviews ?? []).filter((item) => durableIds.has(item.candidateId)),
+    ...(index.events ? { events: index.events.slice(-100) } : {}),
+    ...(index.catalog ? { catalog: index.catalog } : {}),
   }
   rmSync(dest, { recursive: true, force: true })
   mkdirSync(path.join(dest, 'candidates'), { recursive: true })

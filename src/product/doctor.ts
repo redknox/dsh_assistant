@@ -207,7 +207,7 @@ export function formatDoctorReport(report: DoctorReport): string {
     report.operator ? `third-party-active: ${report.operator.thirdPartyActive}` : undefined,
     report.operator ? `third-party-failed: ${report.operator.thirdPartyFailed}` : undefined,
     report.operator?.skills
-      ? `skills: profile=${report.operator.skills.profile} catalog=${report.operator.skills.catalog} candidates=${report.operator.skills.candidates} active=${report.operator.skills.active.join(',') || '(none)'}`
+      ? `skills: profile=${report.operator.skills.profile} catalog=${report.operator.skills.catalog} candidates=${report.operator.skills.candidates} active=${report.operator.skills.active.join(',') || '(none)'} failed=${report.operator.skills.failed.join(',') || '(none)'}`
       : undefined,
     report.operator?.lastFailure ? `last-failure: ${report.operator.lastFailure}` : undefined,
   ].filter((item): item is string => item !== undefined).join('\n')

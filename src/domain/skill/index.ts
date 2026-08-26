@@ -13,6 +13,7 @@ export type {
   SkillImportResult,
   SkillInspectSummary,
   SkillLifecycle,
+  SkillLifecycleEvent,
   SkillProvenance,
   SkillRecord,
 } from './types.js'

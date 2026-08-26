@@ -85,6 +85,42 @@ export interface SkillApprovalRecord {
   readonly resources: readonly string[]
 }
 
+export const SKILL_LIFECYCLE_EVENT_KINDS = [
+  'draft',
+  'import',
+  'validate',
+  'seal',
+  'review',
+  'approval-requested',
+  'approved',
+  'rejected',
+  'activate',
+  'disable',
+  'uninstall',
+  'rollback',
+  'recovery',
+  'catalog-degraded',
+] as const
+export type SkillLifecycleEventKind = (typeof SKILL_LIFECYCLE_EVENT_KINDS)[number]
+
+export interface SkillLifecycleEvent {
+  readonly id: string
+  readonly at: string
+  readonly kind: SkillLifecycleEventKind
+  readonly skillId?: string
+  readonly name?: string
+  readonly version?: string
+  readonly digest?: string
+  readonly detail?: string
+}
+
+export interface SkillCatalogState {
+  readonly state: 'ok' | 'empty' | 'degraded'
+  readonly failed?: readonly string[]
+  readonly recoveryRequired?: boolean
+  readonly detail?: string
+}
+
 export interface SkillIndex {
   readonly schemaVersion: typeof SKILL_SCHEMA_VERSION
   readonly profile: string
@@ -94,6 +130,8 @@ export interface SkillIndex {
   readonly lastActive?: { readonly name: string; readonly version: string }
   readonly approvals?: readonly SkillApprovalRecord[]
   readonly reviews?: readonly SkillReviewRecord[]
+  readonly events?: readonly SkillLifecycleEvent[]
+  readonly catalog?: SkillCatalogState
 }
 
 export interface SkillInspectSummary {

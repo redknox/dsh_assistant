@@ -124,6 +124,8 @@ export function gatherWorkspaceSnapshot(input: GatherWorkspaceInput): WorkspaceS
     },
     candidates: workbenchCandidates(ctx),
     skills: skillProjections(ctx),
+    ...(skillCatalogOf(ctx) ? { skillCatalog: skillCatalogOf(ctx) } : {}),
+    ...(skillEventsOf(ctx).length > 0 ? { skillEvents: skillEventsOf(ctx) } : {}),
     ...(skillRollbackOf(ctx) ? { skillRollback: skillRollbackOf(ctx)! } : {}),
     memory: (ctx.get('personalMemory') as { query(): { records: { id: string; statement: string; topicKey: string; status: string }[] } } | undefined)
       ?.query().records.map((record) => ({
@@ -240,6 +242,44 @@ function toolEventsFromSession(events: readonly SessionEvent[]): WorkspaceSnapsh
     }
   }
   return items
+}
+
+function skillCatalogOf(ctx: Context): WorkspaceSnapshotInput['skillCatalog'] {
+  const skills = ctx.get('skillLifecycle') as {
+    health(): {
+      catalog: 'ok' | 'empty' | 'degraded'
+      failed: readonly string[]
+      recoveryRequired: boolean
+      catalogDetail?: string
+    }
+  } | undefined
+  const health = skills?.health()
+  if (health === undefined) return undefined
+  return {
+    state: health.catalog,
+    failed: [...health.failed],
+    recoveryRequired: health.recoveryRequired,
+    ...(health.catalogDetail ? { detail: health.catalogDetail } : {}),
+  }
+}
+
+function skillEventsOf(ctx: Context): NonNullable<WorkspaceSnapshotInput['skillEvents']> {
+  const skills = ctx.get('skillLifecycle') as {
+    events(): readonly {
+      id: string
+      kind: string
+      name?: string
+      version?: string
+      detail?: string
+    }[]
+  } | undefined
+  return (skills?.events() ?? []).map((item) => ({
+    id: item.id,
+    kind: item.kind,
+    ...(item.name ? { name: item.name } : {}),
+    ...(item.version ? { version: item.version } : {}),
+    ...(item.detail ? { detail: item.detail } : {}),
+  }))
 }
 
 function skillRollbackOf(ctx: Context): WorkspaceSnapshotInput['skillRollback'] {

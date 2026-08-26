@@ -941,8 +941,14 @@ describe('TARS-NG mission-control workspace', () => {
         system: false,
         generation: 0,
       }],
+      skillEvents: [{
+        id: 'evt-activate',
+        kind: 'activate',
+        name: 'weekly-review',
+        version: '1.0.0',
+      }],
     }))
-    assert.ok(view.activity.some((item) => item.summary === 'Skill weekly-review@1.0.0 active' && item.source === 'skill.lifecycle'))
+    assert.ok(view.activity.some((item) => item.summary === 'Skill weekly-review@1.0.0 activate' && item.source === 'skill.lifecycle'))
     assert.doesNotMatch(view.activity.map((item) => item.summary).join('\n'), /Use recall_memory|instruction/)
     assert.doesNotMatch(view.skills?.[0]?.description ?? '', /sk-secretvalue123/)
   })

@@ -81,6 +81,9 @@ export function sanitizeMissionControlView(view: MissionControlView): MissionCon
       description: redactText(item.description),
       ...(item.whenToUse ? { whenToUse: redactText(item.whenToUse) } : {}),
     })),
+    ...(view.skillCatalog?.detail
+      ? { skillCatalog: { ...view.skillCatalog, detail: redactText(view.skillCatalog.detail) } }
+      : {}),
     extensions: (view.extensions ?? []).map((item) => ({
       ...item,
       digest: item.digest === undefined ? undefined : redactText(item.digest),

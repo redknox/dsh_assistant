@@ -1,5 +1,7 @@
 # DSH-native Skill lifecycle
 
+Status: **in progress**. The host lifecycle is Implemented in this repository; packaged human soak and issue #94 close-out are not complete.
+
 A Skill is declarative instruction plus bounded resources. It cannot create a tool, grant permission, execute code, or replace policy. Missing executable capability still goes through Capability Resolution and the governed extension lifecycle.
 
 Approval of a Skill means: allow this exact instruction bundle into the active catalog. It does not approve any future tool call that Skill may ask the Agent to use.
@@ -41,7 +43,9 @@ Revision diffs report instruction change plus character counts, invocation, reso
 
 Backtick tool mentions are compared to the bound runtime tool inventory. Missing names become a Capability Resolution handoff; they do not invent Skill authority. If the inventory is not bound, mentions are not treated as missing.
 
-`tars-ng` status, `self-extension status`, and `tars-ng doctor` report the Profile Skill catalog. Home backup/restore copies `$TARS_NG_HOME/self-extension/skills/<profile>` and fail closed on a tampered active digest. Restore replaces the Self-Extension tree, so a backup without Skills would wipe them.
+`tars-ng` status, `self-extension status`, and `tars-ng doctor` report the Profile Skill catalog, including `ok | empty | degraded` and failed names. Catalog invalidation is part of activate/disable/uninstall/rollback commit: a provider sync failure restores the previous directory and index, or persists `degraded` / recovery-required if restore or resync also fails. Home backup/restore copies `$TARS_NG_HOME/self-extension/skills/<profile>` and fail closed on a tampered active digest. Restore replaces the Self-Extension tree, so a backup without Skills would wipe them.
+
+Activity records append-only Skill lifecycle events (draft/import/validate/review/approval/activate/disable/uninstall/recovery). It does not store instruction bodies, CoT, paths, or secrets.
 
 The Web UI Skills Center (Extensions pane) shows catalog metadata, resources, validation/review state, and a bounded revision diff. React does not parse `SKILL.md`. Trusted actions use `POST /api/skill` through Recovery Root and require `confirm: true` plus exact id/name/version/digest/generation binding. Approve is not Activate. Reject is available on the exact approval card. System Skills hide uninstall/disable. Uninstall binds one revision; hard dependents return `dependents-required` until the same set is acknowledged. User-invocable active Skills appear as composer chips. Session history may still show earlier instruction text; disable does not rewrite candidate bytes.
 

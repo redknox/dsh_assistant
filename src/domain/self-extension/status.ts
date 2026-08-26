@@ -28,7 +28,9 @@ export interface OperatorStatus {
     readonly active: readonly string[]
     readonly disabled: readonly string[]
     readonly failed: readonly string[]
-    readonly catalog: 'ok' | 'empty'
+    readonly catalog: 'ok' | 'empty' | 'degraded'
+    readonly recoveryRequired?: boolean
+    readonly catalogDetail?: string
   }
 }
 
@@ -115,7 +117,7 @@ export function formatOperatorStatus(status: OperatorStatus): string {
     `third-party-active: ${status.thirdPartyActive}`,
     `third-party-failed: ${status.thirdPartyFailed}`,
     status.skills
-      ? `skills: profile=${status.skills.profile} catalog=${status.skills.catalog} candidates=${status.skills.candidates} active=${status.skills.active.join(',') || '(none)'} disabled=${status.skills.disabled.join(',') || '(none)'} failed=${status.skills.failed.join(',') || '(none)'}`
+      ? `skills: profile=${status.skills.profile} catalog=${status.skills.catalog} candidates=${status.skills.candidates} active=${status.skills.active.join(',') || '(none)'} disabled=${status.skills.disabled.join(',') || '(none)'} failed=${status.skills.failed.join(',') || '(none)'}${status.skills.recoveryRequired ? ' recovery-required=true' : ''}`
       : undefined,
   ].filter((item): item is string => item !== undefined).join('\n')
 }

@@ -627,4 +627,63 @@ describe('skill lifecycle', () => {
       await ready.ctx.fiber.dispose()
     }
   })
+
+  it('rolls back catalog bytes when invalidation fails and degrades when resync also fails', async () => {
+    const isolated = home()
+    const service = new SkillService(isolated, 'assistant')
+    const rootId = Symbol('recovery-root')
+    service.bindRoot(rootId)
+    const human = humanCred(rootId)
+    const { imported, requested } = await authorApproved(service)
+    service.approve(imported.candidateId, requested.fingerprint, human)
+    let remaining = 1
+    service.attachInvalidation(() => {
+      if (remaining > 0) {
+        remaining -= 1
+        throw new Error('invalidate failed')
+      }
+    })
+    assert.throws(() => service.activate(imported.candidateId, human), /previous catalog restored/)
+    assert.equal(service.get(imported.candidateId).lifecycle, 'approved')
+    assert.deepEqual(service.catalogNames(), [])
+    assert.equal(service.health().catalog, 'empty')
+    assert.equal(existsSync(path.join(isolated, 'self-extension', 'skills', 'assistant', 'active', 'weekly-review')), false)
+    const again = new SkillService(isolated, 'assistant')
+    again.bindRoot(rootId)
+    assert.equal(again.get(imported.candidateId).lifecycle, 'approved')
+    assert.deepEqual(again.catalogNames(), [])
+
+    remaining = 99
+    again.attachInvalidation(() => {
+      throw new Error('invalidate failed')
+    })
+    assert.throws(() => again.activate(imported.candidateId, human), /recovery required/)
+    assert.equal(again.get(imported.candidateId).lifecycle, 'approved')
+    assert.deepEqual(again.catalogNames(), [])
+    assert.equal(again.health().catalog, 'degraded')
+    assert.equal(again.health().recoveryRequired, true)
+    assert.ok(again.health().failed.includes('weekly-review'))
+    assert.throws(() => again.activate(imported.candidateId, human), /recovery is required/)
+    const restarted = new SkillService(isolated, 'assistant')
+    restarted.bindRoot(rootId)
+    assert.equal(restarted.health().catalog, 'degraded')
+    restarted.attachInvalidation(() => {})
+    assert.equal(restarted.health().catalog, 'empty')
+    const activated = restarted.activate(imported.candidateId, human)
+    assert.equal(activated.lifecycle, 'active')
+    restarted.attachInvalidation(() => {
+      throw new Error('invalidate failed')
+    })
+    assert.throws(() => restarted.disable('weekly-review', human), /recovery required|previous catalog restored/)
+    assert.equal(restarted.get(imported.candidateId).lifecycle, 'active')
+    const kinds = restarted.events().map((item) => item.kind)
+    assert.ok(kinds.includes('import'))
+    assert.ok(kinds.includes('validate'))
+    assert.ok(kinds.includes('seal'))
+    assert.ok(kinds.includes('review'))
+    assert.ok(kinds.includes('approval-requested'))
+    assert.ok(kinds.includes('approved'))
+    assert.ok(kinds.includes('activate'))
+    assert.doesNotMatch(JSON.stringify(restarted.events()), /Use existing tools only/)
+  })
 })

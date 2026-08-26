@@ -5,13 +5,19 @@ export function projectSkills(input: WorkspaceSnapshotInput): readonly SkillProj
 }
 
 export function skillActivity(input: WorkspaceSnapshotInput) {
-  return (input.skills ?? []).map((skill) => ({
-    id: `skill-${skill.id}`,
-    kind: skill.lifecycle === 'approval-requested' ? 'APPROVAL_REQUIRED' as const
-      : skill.lifecycle === 'active' ? 'COMPLETED' as const
-        : skill.lifecycle === 'disabled' || skill.lifecycle === 'uninstalled' ? 'RECOVERED' as const
-          : 'OBSERVED' as const,
-    summary: `Skill ${skill.name}@${skill.version} ${skill.lifecycle}`,
+  return (input.skillEvents ?? []).map((event) => ({
+    id: `skill-event-${event.id}`,
+    kind: event.kind === 'catalog-degraded' || event.kind === 'rejected' ? 'FAILED' as const
+      : event.kind === 'recovery' ? 'RECOVERED' as const
+        : event.kind === 'approval-requested' || event.kind === 'review' ? 'APPROVAL_REQUIRED' as const
+          : event.kind === 'disable' || event.kind === 'uninstall' ? 'RECOVERED' as const
+            : event.kind === 'activate' || event.kind === 'approved' ? 'COMPLETED' as const
+              : 'OBSERVED' as const,
+    summary: [
+      event.name && event.version ? `Skill ${event.name}@${event.version}` : 'Skill',
+      event.kind,
+      event.detail,
+    ].filter((item): item is string => Boolean(item)).join(' '),
     source: 'skill.lifecycle',
   }))
 }

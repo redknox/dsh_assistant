@@ -18,6 +18,7 @@ export function projectMissionControl(input: WorkspaceSnapshotInput): MissionCon
   const activations = projectActivationCards(input)
   const jobsRunning = input.jobs.filter((job) => job.lastRunStatus === 'running' || job.lastRunStatus === 'pending').length
   const degraded = input.integrationStatus.filter((item) => !item.available).map((item) => item.capability)
+  if (input.skillCatalog?.state === 'degraded') degraded.push('skill catalog')
   const activationFailure = projectActivationFailure(input)
   const rollback = projectRollbackCard(input, systemState)
   return sanitizeMissionControlView({
@@ -35,6 +36,7 @@ export function projectMissionControl(input: WorkspaceSnapshotInput): MissionCon
     plugins: projectUserPlugins(input),
     extensions: projectExtensions(input),
     skills: projectSkills(input),
+    ...(input.skillCatalog ? { skillCatalog: input.skillCatalog } : {}),
     ...(input.skillRollback ? { skillRollback: input.skillRollback } : {}),
     ...(rollback ? { rollback } : {}),
     capabilities: projectUserCapabilities(input),

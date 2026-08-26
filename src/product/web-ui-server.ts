@@ -3,6 +3,7 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { ActivationDeniedError, GovernanceContractError, RollbackDeniedError, UninstallDeniedError } from '../domain/governance/errors.js'
+import { SkillContractError } from '../domain/skill/errors.js'
 import { SimulatedCrashError } from '../domain/governance/service.js'
 import type { RecoveryRoot } from '../domain/governance/root.js'
 import { acknowledgementOf } from '../domain/workspace/approvals.js'
@@ -755,7 +756,11 @@ export function startWebUiServer(options: WebUiServerOptions): Promise<WebUiServ
           broadcast()
         } catch (error) {
           const message = error instanceof Error ? error.message : 'skill action failed'
-          sendJson(res, 409, { error: 'skill-action-denied', detail: redactText(message), view: snapshot(), webUi: url })
+          const code = error instanceof SkillContractError
+            && (error.code === 'catalog-degraded' || error.code === 'catalog-sync-failed')
+            ? error.code
+            : 'skill-action-denied'
+          sendJson(res, 409, { error: code, detail: redactText(message), view: snapshot(), webUi: url })
         }
         return
       }

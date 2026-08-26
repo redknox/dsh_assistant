@@ -224,6 +224,12 @@ export interface MissionControlView {
   readonly activity: readonly ActivityItem[]
   readonly approvals: readonly ApprovalCard[]
   readonly skills?: readonly SkillProjection[]
+  readonly skillCatalog?: {
+    readonly state: 'ok' | 'empty' | 'degraded'
+    readonly failed: readonly string[]
+    readonly recoveryRequired: boolean
+    readonly detail?: string
+  }
   readonly skillRollback?: { readonly name: string; readonly version: string; readonly digest: string; readonly generation: number }
   readonly approvalResolutions: readonly ApprovalResolution[]
   readonly activations: readonly ActivationCard[]
@@ -443,6 +449,19 @@ export interface WorkspaceSnapshotInput {
   readonly sessions?: SessionCatalogView
   readonly approvalOrigins?: Readonly<Record<string, string>>
   readonly skills?: readonly SkillProjection[]
+  readonly skillCatalog?: {
+    readonly state: 'ok' | 'empty' | 'degraded'
+    readonly failed: readonly string[]
+    readonly recoveryRequired: boolean
+    readonly detail?: string
+  }
+  readonly skillEvents?: readonly {
+    readonly id: string
+    readonly kind: string
+    readonly name?: string
+    readonly version?: string
+    readonly detail?: string
+  }[]
   readonly skillRollback?: { readonly name: string; readonly version: string; readonly digest: string; readonly generation: number }
 }
 

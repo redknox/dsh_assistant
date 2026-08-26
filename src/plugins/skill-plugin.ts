@@ -38,6 +38,7 @@ class SkillLifecycleService extends Service {
     return this.store.declareDependencies(id, dependsOn)
   }
   diff(id: string) { return this.store.diff(id) }
+  events() { return this.store.events() }
   activeRoot() { return this.store.activeRoot() }
   catalogNames() { return this.store.catalogNames() }
   health() { return this.store.health() }
