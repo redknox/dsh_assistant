@@ -30,6 +30,18 @@ export interface SkillInvocationPolicy {
   readonly userInvocable: boolean
 }
 
+export interface SkillDependency {
+  readonly name: string
+  readonly version: string
+}
+
+export interface SkillReviewRecord {
+  readonly candidateId: string
+  readonly digest: string
+  readonly state: 'review-complete' | 'changes-required'
+  readonly createdAt: string
+}
+
 export interface SkillIdentity {
   readonly name: string
   readonly version: string
@@ -51,6 +63,7 @@ export interface SkillRecord extends SkillIdentity {
   readonly resources: readonly string[]
   readonly description: string
   readonly whenToUse?: string
+  readonly dependsOn: readonly SkillDependency[]
   readonly dependents: readonly string[]
 }
 
@@ -75,6 +88,7 @@ export interface SkillIndex {
   readonly active: Record<string, string>
   readonly lastActive?: { readonly name: string; readonly version: string }
   readonly approvals?: readonly SkillApprovalRecord[]
+  readonly reviews?: readonly SkillReviewRecord[]
 }
 
 export interface SkillInspectSummary {
@@ -92,6 +106,8 @@ export interface SkillInspectSummary {
   readonly description: string
   readonly whenToUse?: string
   readonly baseVersion?: string
+  readonly dependsOn: readonly SkillDependency[]
+  readonly dependents: readonly string[]
 }
 
 export interface SkillImportResult {

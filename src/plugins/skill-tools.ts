@@ -169,7 +169,7 @@ export function registerSkillTools(
     output: textOutput(),
     async execute(args) {
       try {
-        const { record, report } = skills.requestReview(String(args.candidateId ?? ''), ctx.independentReview)
+        const { record, report } = skills.requestReview(String(args.candidateId ?? ''))
         return JSON.stringify({
           id: record.id,
           lifecycle: record.lifecycle,
@@ -189,7 +189,7 @@ export function registerSkillTools(
     output: textOutput(),
     async execute(args) {
       try {
-        return JSON.stringify(skills.requestApproval(String(args.candidateId ?? ''), ctx.independentReview))
+        return JSON.stringify(skills.requestApproval(String(args.candidateId ?? '')))
       } catch (error) {
         return bounded(error)
       }

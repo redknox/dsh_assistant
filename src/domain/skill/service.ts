@@ -1,6 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto'
-import { existsSync, readFileSync } from 'node:fs'
-import path from 'node:path'
+import { existsSync } from 'node:fs'
 import { Context } from '@deepseek-ai/cordis'
 import SkillRegistry, { renderSkillContent } from '@deepseek-ai/dsh-skill'
 import * as skillFilesystem from '@deepseek-ai/dsh-skill-filesystem'
@@ -10,7 +9,10 @@ import { SkillAuthorityError, SkillContractError } from './errors.js'
 import {
   applyHostSkillLimits,
   digestSkillFiles,
+  nextSkillVersion,
+  parseDependsOn,
   readAllowlistedSkillFiles,
+  readHostSkillDescriptor,
   skillId,
   STRICT_SEMVER,
 } from './bundle.js'
@@ -36,12 +38,14 @@ import {
 } from './store.js'
 import type {
   SkillApprovalRecord,
+  SkillDependency,
   SkillImportResult,
   SkillInspectSummary,
   SkillInvocationPolicy,
   SkillLifecycle,
   SkillProvenance,
   SkillRecord,
+  SkillReviewRecord,
 } from './types.js'
 
 const DEFAULT_VERSION = '1.0.0'
@@ -54,6 +58,7 @@ export class SkillService {
   interruptAfter?: SkillInterrupt
   private invalidate?: () => void
   private rootId?: symbol
+  private review?: IndependentReview
 
   constructor(homeRoot: string, profile: string, invalidate?: () => void) {
     this.layout = skillStoreLayout(homeRoot, profile)
@@ -65,6 +70,13 @@ export class SkillService {
 
   bindRoot(rootId: symbol): void {
     this.rootId = rootId
+  }
+
+  bindReview(review: IndependentReview): void {
+    if (this.review !== undefined) {
+      throw new SkillAuthorityError('independent review is already bound to this skill store')
+    }
+    this.review = review
   }
 
   attachInvalidation(invalidate: () => void): void {
@@ -98,6 +110,8 @@ export class SkillService {
       description: record.description,
       whenToUse: record.whenToUse,
       baseVersion: record.baseVersion,
+      dependsOn: record.dependsOn ?? [],
+      dependents: this.dependentsOf(record.name, record.version),
     }
   }
 
@@ -111,7 +125,13 @@ export class SkillService {
     return content
   }
 
-  create(input: { readonly name: string; readonly description: string; readonly body: string; readonly whenToUse?: string }): SkillRecord {
+  create(input: {
+    readonly name: string
+    readonly description: string
+    readonly body: string
+    readonly whenToUse?: string
+    readonly dependsOn?: readonly SkillDependency[]
+  }): SkillRecord {
     applyHostSkillLimits({ name: input.name, description: input.description, content: input.body })
     const version = nextVersion(this.layout, input.name)
     return this.publishCandidate({
@@ -123,6 +143,7 @@ export class SkillService {
       invocation: DEFAULT_INVOCATION,
       description: input.description,
       whenToUse: input.whenToUse,
+      dependsOn: parseDependsOn(input.dependsOn),
     })
   }
 
@@ -130,7 +151,8 @@ export class SkillService {
     const files = readAllowlistedSkillFiles(sourceDir)
     const loaded = await loadThroughDshCatalog(sourceDir)
     applyHostSkillLimits(loaded)
-    const version = hostVersionHint(sourceDir) ?? DEFAULT_VERSION
+    const descriptor = readHostSkillDescriptor(sourceDir)
+    const version = descriptor.version ?? DEFAULT_VERSION
     if (!STRICT_SEMVER.test(version)) throw new SkillContractError('skill-version', `invalid skill version: ${version}`)
     const plannedDigest = digestSkillFiles(files)
     const id = skillId(loaded.name, version)
@@ -159,6 +181,7 @@ export class SkillService {
       invocation: loaded.invocation,
       description: loaded.description,
       whenToUse: loaded.whenToUse,
+      dependsOn: descriptor.dependsOn,
     })
     return {
       status: 'imported',
@@ -174,7 +197,6 @@ export class SkillService {
 
   writeFile(id: string, relativePath: string, content: string): SkillRecord {
     const record = this.get(id)
-    if (record.lifecycle === 'active') throw new SkillAuthorityError('active skills are not writable')
     const current = this.readCandidateFiles(id)
     current[relativePath] = content
     if (relativePath === 'SKILL.md') applyHostSkillLimits({
@@ -182,18 +204,18 @@ export class SkillService {
       description: record.description,
       content,
     })
-    if (record.sealed) {
-      const version = nextVersion(this.layout, record.name)
+    if (record.sealed || record.lifecycle === 'active') {
       return this.publishCandidate({
         name: record.name,
-        version,
+        version: nextVersion(this.layout, record.name),
         files: current,
-        provenance: record.provenance,
+        provenance: record.provenance.kind === 'system' ? record.provenance : { kind: 'assistant-authored', origin: 'assistant' },
         lifecycle: 'drafted',
         invocation: record.invocation,
         description: record.description,
         whenToUse: record.whenToUse,
         baseVersion: record.version,
+        dependsOn: record.dependsOn ?? [],
       })
     }
     publishSkillFiles(candidateDir(this.layout, id), current)
@@ -231,25 +253,39 @@ export class SkillService {
     }))
   }
 
-  requestReview(id: string, review: IndependentReview): { readonly record: SkillRecord; readonly report: ReviewReport } {
+  requestReview(id: string): { readonly record: SkillRecord; readonly report: ReviewReport } {
     const record = this.get(id)
     if (!record.sealed) throw new SkillContractError('not-sealed', 'skill must be sealed before independent review')
     if (!record.validationPassed) throw new SkillContractError('not-validated', 'skill must be validated before independent review')
-    const report = review.review(skillReviewPackage(record))
+    const report = this.requireReview().review(skillReviewPackage(record))
     const complete = report.state === 'review-complete' && report.digest === record.digest
+    const stored: SkillReviewRecord = {
+      candidateId: record.id,
+      digest: record.digest,
+      state: complete ? 'review-complete' : 'changes-required',
+      createdAt: new Date().toISOString(),
+    }
     const updated = this.update(id, (item) => ({
       ...item,
       lifecycle: complete ? 'review-complete' : item.lifecycle,
       reviewComplete: complete,
     }))
-    return { record: updated, report }
+    const index = readSkillIndex(this.layout)
+    writeSkillIndex(this.layout, {
+      ...index,
+      reviews: [...(index.reviews ?? []).filter((item) => item.candidateId !== record.id || item.digest !== record.digest), stored],
+    })
+    return { record: this.get(id), report }
   }
 
-  requestApproval(id: string, review: IndependentReview): { readonly fingerprint: string; readonly record: SkillRecord } {
+  requestApproval(id: string): { readonly fingerprint: string; readonly record: SkillRecord } {
     const record = this.get(id)
     if (!record.sealed) throw new SkillContractError('not-sealed', 'skill must be sealed before approval can be requested')
     if (!record.validationPassed) throw new SkillContractError('not-validated', 'skill must be validated before approval can be requested')
-    if (review.status({ id: record.id, digest: record.digest }) !== 'review-complete') {
+    const stored = (readSkillIndex(this.layout).reviews ?? []).find((item) => (
+      item.candidateId === record.id && item.digest === record.digest && item.state === 'review-complete'
+    ))
+    if (stored === undefined) {
       throw new SkillContractError('review-required', 'independent review is required before approval can be requested')
     }
     const fingerprint = fingerprintOf(record)
@@ -372,7 +408,7 @@ export class SkillService {
     if (version === undefined) throw new SkillContractError('unknown-skill', `unknown skill: ${name}`)
     const record = this.get(skillId(name, version))
     if (record.provenance.kind === 'system') throw new SkillAuthorityError('system skills cannot be uninstalled')
-    const dependents = this.dependentsOf(name)
+    const dependents = this.dependentsOf(name, version)
     if (dependents.length > 0 && !sameSet(dependents, acknowledgedDependents)) {
       throw new SkillContractError('dependents', `hard dependents must be acknowledged: ${dependents.join(', ')}`)
     }
@@ -504,19 +540,34 @@ export class SkillService {
     }
   }
 
-  private dependentsOf(name: string): string[] {
-    const index = readSkillIndex(this.layout)
-    const deps: string[] = []
-    for (const item of index.records) {
-      if (item.name === name || item.lifecycle === 'uninstalled') continue
-      try {
-        const files = readAllowlistedSkillFiles(candidateDir(this.layout, item.id))
-        if (Object.values(files).some((text) => text.includes(name))) deps.push(item.id)
-      } catch {
-        continue
-      }
+  declareDependencies(id: string, dependsOn: readonly SkillDependency[]): SkillRecord {
+    const record = this.get(id)
+    const parsed = parseDependsOn(dependsOn)
+    if (record.sealed || record.lifecycle === 'active') {
+      return this.publishCandidate({
+        name: record.name,
+        version: nextVersion(this.layout, record.name),
+        files: this.readCandidateFiles(id),
+        provenance: record.provenance,
+        lifecycle: 'drafted',
+        invocation: record.invocation,
+        description: record.description,
+        whenToUse: record.whenToUse,
+        baseVersion: record.version,
+        dependsOn: parsed,
+      })
     }
-    return deps
+    return this.update(id, (item) => ({ ...item, dependsOn: parsed }))
+  }
+
+  private dependentsOf(name: string, version: string): string[] {
+    return readSkillIndex(this.layout).records
+      .filter((item) => (
+        item.lifecycle !== 'uninstalled'
+        && (item.dependsOn ?? []).some((dep) => dep.name === name && dep.version === version)
+      ))
+      .map((item) => item.id)
+      .sort()
   }
 
   private readCandidateFiles(id: string): Record<string, string> {
@@ -533,6 +584,7 @@ export class SkillService {
     readonly description: string
     readonly whenToUse?: string
     readonly baseVersion?: string
+    readonly dependsOn?: readonly SkillDependency[]
   }): SkillRecord {
     const id = skillId(input.name, input.version)
     const index = readSkillIndex(this.layout)
@@ -553,7 +605,8 @@ export class SkillService {
       resources: Object.keys(input.files).filter((name) => name !== 'SKILL.md').sort(),
       description: input.description,
       whenToUse: input.whenToUse,
-      dependents: this.dependentsOf(input.name),
+      dependsOn: input.dependsOn ?? [],
+      dependents: this.dependentsOf(input.name, input.version),
     }
     const staging = stagingDir(this.layout, id)
     const finalDir = candidateDir(this.layout, id)
@@ -579,6 +632,13 @@ export class SkillService {
     return next
   }
 
+  private requireReview(): IndependentReview {
+    if (this.review === undefined) {
+      throw new SkillAuthorityError('independent review is not bound to the skill store')
+    }
+    return this.review
+  }
+
   private assertTrusted(credential: TrustedAuthorityCredential): void {
     if (
       this.rootId === undefined
@@ -599,23 +659,13 @@ function fingerprintOf(record: SkillRecord): string {
     provenance: record.provenance,
     invocation: record.invocation,
     resources: record.resources,
+    dependsOn: record.dependsOn ?? [],
     baseVersion: record.baseVersion ?? '',
   })).digest('hex')
 }
 
 function nextVersion(layout: SkillStoreLayout, name: string): string {
-  const versions = readSkillIndex(layout).records.filter((item) => item.name === name).map((item) => item.version)
-  if (versions.length === 0) return DEFAULT_VERSION
-  const last = versions.sort().at(-1) ?? DEFAULT_VERSION
-  const [major, minor, patch] = last.split('.').map(Number)
-  return `${major}.${minor}.${(patch ?? 0) + 1}`
-}
-
-function hostVersionHint(sourceDir: string): string | undefined {
-  const descriptor = path.join(sourceDir, 'tars-ng.skill.json')
-  if (!existsSync(descriptor)) return undefined
-  const raw = JSON.parse(readFileSync(descriptor, 'utf8')) as { version?: string }
-  return typeof raw.version === 'string' && STRICT_SEMVER.test(raw.version) ? raw.version : undefined
+  return nextSkillVersion(readSkillIndex(layout).records.filter((item) => item.name === name).map((item) => item.version))
 }
 
 function skillMarkdown(name: string, description: string, body: string, whenToUse?: string): string {

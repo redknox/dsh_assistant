@@ -33,7 +33,9 @@ tars-ng skill approve <id> <fingerprint>
 tars-ng skill activate <id>
 ```
 
-Import publishes an inactive `third-party/import` candidate. Validate → seal → Independent Review (`ctx.independentReview`) → exact Recovery Root approval → separate activation remain distinct. Model tools cannot approve or activate.
+Import publishes an inactive `third-party/import` candidate. Validate → seal → host-bound Independent Review → exact Recovery Root approval → separate activation remain distinct. Model tools cannot approve or activate. Callers cannot supply a reviewer or review report.
+
+Hard Skill dependencies come only from host-owned `tars-ng.skill.json` `dependsOn: [{ name, version }]` (or `declareDependencies`). Prose mentions in `SKILL.md` are not a dependency graph.
 
 ## Scope
 

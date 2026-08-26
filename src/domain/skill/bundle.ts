@@ -3,7 +3,7 @@ import { existsSync, lstatSync, readdirSync, readFileSync, statSync } from 'node
 import path from 'node:path'
 import { isSkillName } from '@deepseek-ai/dsh-skill'
 import { SkillContractError } from './errors.js'
-import type { SkillInvocationPolicy } from './types.js'
+import type { SkillDependency, SkillInvocationPolicy } from './types.js'
 
 export const STRICT_SEMVER = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/
 const SECRET_KEY = /(secret|password|passwd|api[_-]?key|token|credential|private[_-]?key|authorization)/i
@@ -35,6 +35,69 @@ export interface InspectedSkillBundle {
 
 export function skillId(name: string, version: string): string {
   return `${name}@${version}`
+}
+
+export function parseSkillVersion(version: string): readonly [number, number, number] {
+  if (!STRICT_SEMVER.test(version)) throw new SkillContractError('skill-version', `invalid skill version: ${version}`)
+  const [major, minor, patch] = version.split('.').map(Number)
+  return [major ?? 0, minor ?? 0, patch ?? 0]
+}
+
+export function compareSkillVersion(left: string, right: string): number {
+  const a = parseSkillVersion(left)
+  const b = parseSkillVersion(right)
+  return a[0] - b[0] || a[1] - b[1] || a[2] - b[2]
+}
+
+export function nextSkillVersion(versions: readonly string[]): string {
+  if (versions.length === 0) return '1.0.0'
+  const last = versions.reduce((max, item) => compareSkillVersion(item, max) > 0 ? item : max)
+  const [major, minor, patch] = parseSkillVersion(last)
+  return `${major}.${minor}.${patch + 1}`
+}
+
+export function readHostSkillDescriptor(sourceDir: string): {
+  readonly version?: string
+  readonly dependsOn: readonly SkillDependency[]
+} {
+  const descriptor = path.join(path.resolve(sourceDir), 'tars-ng.skill.json')
+  if (!existsSync(descriptor)) return { dependsOn: [] }
+  let raw: unknown
+  try {
+    raw = JSON.parse(readFileSync(descriptor, 'utf8'))
+  } catch {
+    throw new SkillContractError('skill-descriptor', 'tars-ng.skill.json is not valid JSON')
+  }
+  if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) {
+    throw new SkillContractError('skill-descriptor', 'tars-ng.skill.json must be a host object')
+  }
+  const data = raw as { version?: unknown; dependsOn?: unknown }
+  const version = typeof data.version === 'string' && STRICT_SEMVER.test(data.version) ? data.version : undefined
+  return { version, dependsOn: parseDependsOn(data.dependsOn) }
+}
+
+export function parseDependsOn(value: unknown): readonly SkillDependency[] {
+  if (value === undefined) return []
+  if (!Array.isArray(value)) throw new SkillContractError('skill-dependency', 'dependsOn must be an array of exact skill identities')
+  const out: SkillDependency[] = []
+  for (const item of value) {
+    if (typeof item !== 'object' || item === null || Array.isArray(item)) {
+      throw new SkillContractError('skill-dependency', 'dependsOn entries must be { name, version }')
+    }
+    const name = (item as { name?: unknown }).name
+    const version = (item as { version?: unknown }).version
+    if (typeof name !== 'string' || !isSkillName(name)) {
+      throw new SkillContractError('skill-dependency', `invalid dependency name: ${String(name)}`)
+    }
+    if (typeof version !== 'string' || !STRICT_SEMVER.test(version)) {
+      throw new SkillContractError('skill-dependency', `invalid dependency version: ${String(version)}`)
+    }
+    if (out.some((dep) => dep.name === name && dep.version === version)) {
+      throw new SkillContractError('skill-dependency', `duplicate hard dependency: ${name}@${version}`)
+    }
+    out.push({ name, version })
+  }
+  return out
 }
 
 export function digestSkillFiles(files: Readonly<Record<string, string>>): string {

@@ -9,7 +9,7 @@ declare module '@deepseek-ai/cordis' {
 }
 
 export const name = 'dsh-assistant-skills'
-export const inject = ['tools']
+export const inject = ['tools', 'independentReview']
 
 export interface SkillPluginConfig {
   readonly home?: string
@@ -33,11 +33,10 @@ class SkillLifecycleService extends Service {
   writeFile(id: string, relativePath: string, content: string) { return this.store.writeFile(id, relativePath, content) }
   validate(id: string) { return this.store.validate(id) }
   seal(id: string) { return this.store.seal(id) }
-  requestReview(id: string, review: Parameters<SkillService['requestReview']>[1]) {
-    return this.store.requestReview(id, review)
-  }
-  requestApproval(id: string, review: Parameters<SkillService['requestApproval']>[1]) {
-    return this.store.requestApproval(id, review)
+  requestReview(id: string) { return this.store.requestReview(id) }
+  requestApproval(id: string) { return this.store.requestApproval(id) }
+  declareDependencies(id: string, dependsOn: Parameters<SkillService['declareDependencies']>[1]) {
+    return this.store.declareDependencies(id, dependsOn)
   }
   activeRoot() { return this.store.activeRoot() }
   catalogNames() { return this.store.catalogNames() }
@@ -47,6 +46,7 @@ class SkillLifecycleService extends Service {
 export async function apply(ctx: Context, config: SkillPluginConfig = {}) {
   if (config.home === undefined) return
   const store = new SkillService(config.home, config.profile ?? 'assistant')
+  store.bindReview(ctx.independentReview)
   config.bindStore?.(store)
   await ctx.plugin(class extends SkillLifecycleService {
     constructor(scope: Context) {

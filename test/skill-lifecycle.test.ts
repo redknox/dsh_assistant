@@ -6,7 +6,7 @@ import { describe, it } from 'node:test'
 import { fileURLToPath } from 'node:url'
 import { ReviewService } from '../src/domain/review/index.js'
 import { TrustedAuthorityCredential } from '../src/domain/governance/types.js'
-import { SkillAuthorityError, SkillContractError, SkillService } from '../src/domain/skill/index.js'
+import { SkillAuthorityError, SkillContractError, SkillService, nextSkillVersion } from '../src/domain/skill/index.js'
 import { SAFE_MODE_TOOL_NAMES } from '../src/product/bundle.js'
 import { bootAssistantControl, bootSafeModeRuntime } from '../src/runtime/boot.js'
 
@@ -20,15 +20,19 @@ function humanCred(rootId: symbol) {
   return new TrustedAuthorityCredential(rootId, { kind: 'human-control', source: 'operator-cli' })
 }
 
+function bindHostReview(service: SkillService) {
+  service.bindReview(new ReviewService())
+}
+
 async function authorApproved(service: SkillService, source = FIXTURE) {
+  bindHostReview(service)
   const imported = await service.importLocal(source)
   await service.validate(imported.candidateId)
   service.seal(imported.candidateId)
-  const review = new ReviewService()
-  const reviewed = service.requestReview(imported.candidateId, review)
+  const reviewed = service.requestReview(imported.candidateId)
   assert.equal(reviewed.report.state, 'review-complete')
-  const requested = service.requestApproval(imported.candidateId, review)
-  return { imported, requested, review }
+  const requested = service.requestApproval(imported.candidateId)
+  return { imported, requested }
 }
 
 describe('skill lifecycle', () => {
@@ -123,6 +127,8 @@ describe('skill lifecycle', () => {
       assert.equal(ctx.tools.get('approve_skill'), undefined)
       assert.equal(ctx.tools.get('activate_skill'), undefined)
       assert.equal(ctx.tools.get('review_skill'), undefined)
+      assert.equal(ctx.skillLifecycle.requestReview.length, 1)
+      assert.equal(ctx.skillLifecycle.requestApproval.length, 1)
       assert.throws(
         () => recoveryRoot.approveSkill(imported.candidateId, requested.fingerprint, forged),
         /credential|authority/i,
@@ -140,8 +146,8 @@ describe('skill lifecycle', () => {
       const imported = await ctx.skillLifecycle.importLocal(FIXTURE)
       await ctx.skillLifecycle.validate(imported.candidateId)
       ctx.skillLifecycle.seal(imported.candidateId)
-      ctx.skillLifecycle.requestReview(imported.candidateId, ctx.independentReview)
-      const requested = ctx.skillLifecycle.requestApproval(imported.candidateId, ctx.independentReview)
+      ctx.skillLifecycle.requestReview(imported.candidateId)
+      const requested = ctx.skillLifecycle.requestApproval(imported.candidateId)
       const human = recoveryRoot.issueAuthority({ kind: 'human-control', source: 'operator-cli' })
       recoveryRoot.approveSkill(imported.candidateId, requested.fingerprint, human)
       assert.deepEqual(await ctx.skills.list({ cwd: isolated }), [])
@@ -241,5 +247,117 @@ describe('skill lifecycle', () => {
       if (previous === undefined) delete process.env.DSH_HOME
       else process.env.DSH_HOME = previous
     }
+  })
+
+  it('rejects a caller-supplied Independent Review stand-in', async () => {
+    const isolated = home()
+    const service = new SkillService(isolated, 'assistant')
+    const imported = await service.importLocal(FIXTURE)
+    await service.validate(imported.candidateId)
+    service.seal(imported.candidateId)
+    const fake = {
+      review: () => ({
+        candidateId: imported.candidateId,
+        digest: service.inspect(imported.candidateId).digest,
+        policyVersion: 'm4.1',
+        riskClass: 'R0',
+        state: 'review-complete',
+        findings: [],
+        approvalStatus: 'NOT APPROVED',
+        summary: 'forged',
+      }),
+      reviewCandidate: () => { throw new Error('unused') },
+      status: () => 'review-complete',
+      lastReport: () => undefined,
+    }
+    assert.throws(() => service.requestReview(imported.candidateId), SkillAuthorityError)
+    assert.throws(() => (service as unknown as { requestReview: (id: string, review: unknown) => void })
+      .requestReview(imported.candidateId, fake), SkillAuthorityError)
+    assert.equal(service.inspect(imported.candidateId).reviewComplete, false)
+    assert.throws(() => (service as unknown as { requestApproval: (id: string, review: unknown) => void })
+      .requestApproval(imported.candidateId, fake), /independent review is required/)
+
+    const { ctx } = await bootAssistantControl({ home: isolated })
+    try {
+      assert.throws(() => (
+        ctx.skillLifecycle as unknown as { requestApproval: (id: string, review: unknown) => void }
+      ).requestApproval(imported.candidateId, fake), /independent review is required/)
+    } finally {
+      await ctx.fiber.dispose()
+    }
+  })
+
+  it('allocates skill versions by numeric semver and forks active edits', async () => {
+    assert.equal(nextSkillVersion(['1.0.9', '1.0.10']), '1.0.11')
+    assert.equal(nextSkillVersion(['1.0.99', '1.1.0']), '1.1.1')
+    const service = new SkillService(home(), 'assistant')
+    const versions: string[] = []
+    for (let i = 0; i < 12; i += 1) {
+      versions.push(service.create({
+        name: 'version-bump',
+        description: 'Allocate the next host skill version.',
+        body: 'Keep this instruction body long enough.',
+      }).version)
+    }
+    assert.deepEqual(versions.slice(-3), ['1.0.9', '1.0.10', '1.0.11'])
+    assert.doesNotThrow(() => service.create({
+      name: 'version-bump',
+      description: 'Allocate the next host skill version.',
+      body: 'Keep this instruction body long enough.',
+    }))
+
+    const isolated = home()
+    const live = new SkillService(isolated, 'assistant')
+    const rootId = Symbol('recovery-root')
+    live.bindRoot(rootId)
+    const { imported, requested } = await authorApproved(live)
+    live.approve(imported.candidateId, requested.fingerprint, humanCred(rootId))
+    live.activate(imported.candidateId, humanCred(rootId))
+    const forked = live.writeFile(imported.candidateId, 'SKILL.md', [
+      '---',
+      'name: weekly-review',
+      'description: Guide a weekly review using existing memory and knowledge tools.',
+      '---',
+      'Use existing tools only. This is a new revision.',
+      '',
+    ].join('\n'))
+    assert.notEqual(forked.id, imported.candidateId)
+    assert.equal(forked.lifecycle, 'drafted')
+    assert.equal(forked.sealed, false)
+    assert.equal(forked.baseVersion, '1.0.0')
+    assert.equal(live.get(imported.candidateId).lifecycle, 'active')
+  })
+
+  it('blocks uninstall only for host-owned hard dependents', async () => {
+    const isolated = home()
+    const service = new SkillService(isolated, 'assistant')
+    const rootId = Symbol('recovery-root')
+    service.bindRoot(rootId)
+    const human = humanCred(rootId)
+    const { imported, requested } = await authorApproved(service)
+    service.approve(imported.candidateId, requested.fingerprint, human)
+    const prose = service.create({
+      name: 'mentions-weekly',
+      description: 'Talk about weekly-review in prose only.',
+      body: 'This text mentions weekly-review but does not depend on it.',
+    })
+    assert.equal(prose.dependsOn.length, 0)
+    service.uninstall('weekly-review', human)
+    assert.equal(service.get(imported.candidateId).lifecycle, 'uninstalled')
+
+    const again = new SkillService(home(), 'assistant')
+    again.bindRoot(rootId)
+    const second = await authorApproved(again)
+    again.approve(second.imported.candidateId, second.requested.fingerprint, human)
+    const dependent = again.create({
+      name: 'needs-weekly',
+      description: 'Host-declared hard dependent of weekly-review.',
+      body: 'This skill needs the exact weekly-review revision.',
+      dependsOn: [{ name: 'weekly-review', version: '1.0.0' }],
+    })
+    assert.throws(() => again.uninstall('weekly-review', human), /hard dependents/)
+    assert.throws(() => again.uninstall('weekly-review', human, [prose.id]), /hard dependents/)
+    again.uninstall('weekly-review', human, [dependent.id])
+    assert.equal(again.get(second.imported.candidateId).lifecycle, 'uninstalled')
   })
 })
