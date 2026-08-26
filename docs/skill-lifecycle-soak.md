@@ -36,7 +36,7 @@ Do not paste credentials, tokens, home paths, candidate source dumps, or instruc
 | Disable, reactivate, uninstall, rollback | Disable `1.0.1` → catalog `empty`. Reactivate restored `1.0.0` active. Uninstall exact `weekly-review@1.0.0` → `uninstalled`, catalog `empty`. Rollback restored `1.0.0` active, catalog `ok`. |
 | Import one equivalent local third-party Skill from outside the package | Same name/version as sealed `1.0.0` → `import-duplicate-conflict`. Outside copy bumped to `2.0.0` only: `tars-ng skill import-local` → `weekly-review@2.0.0` `provenance.kind=third-party` `lifecycle=imported` `nextAction=validate`. |
 | One malformed/symlink bundle rejection | Symlink `SKILL.md` → `skill-boundary: symlink rejected: SKILL.md` (exit 1). Catalog unchanged. |
-| Safe Mode: user/third-party Skills withheld | Bound Home start with shipped `profiles/assistant` removed: live WUI `systemState=SAFE_MODE`, `runtimeContext.safeMode=true`. Skills remain inspectable in the Center; capability list had no Skill-tool chip. CLI `doctor` still printed `safe-mode: false` (see limitations). Profile restored before leaving the soak prefix. |
+| Safe Mode: user/third-party Skills withheld | First soak: live WUI `SAFE_MODE` / `safeMode=true`; CLI disagreed (see append). |
 
 ### Bounded Skill ids
 
@@ -66,12 +66,66 @@ Trusted WUI actions used `POST /api/skill` with `confirm: true` and exact id/nam
 - Operator XDG env had Calendar token **present**; soak prompts forbade calendar/mail/filesystem/network tools. The invoke path observed `skill` + memory + knowledge only.
 - After restart, a stale WUI cookie shows `Web UI session is untrusted; reload the page.` Reload is required. One post-restart soak process was stopped (product `lifecycle stop`); the soak Home was started again. Daily 8787 was not that stop target.
 - Global Activity does not isolate per-conversation `COMPLETED skill` rows; post-restart invoke is recorded by new session id + message, not a unique activity id.
-- `reactivate` after disabling `1.0.1` bound the disabled `1.0.0` row first (name-based). Uninstall/rollback were still exercised on exact ids.
+- First soak `reactivate` after disabling `1.0.1` used the disabled `1.0.0` row (name-based). Exact `1.0.1` reactivate is in the append.
 - Same-name same-version third-party import is refused (`import-duplicate-conflict`). Equivalent import used version `2.0.0`.
-- CLI `doctor` `safe-mode:` can disagree with live WUI `SAFE_MODE` when the assistant Profile patch is missing. Live withhold evidence is the WUI view, not that doctor line.
-- `start --once` with a missing Profile still printed `safe-mode: false` and `catalog=ok`; full `start` was required to observe Safe Mode.
+- First soak CLI `doctor` / `start --once` disagreed with live WUI on Safe Mode. Fixed in `ed6c002`; four-way evidence is in the append.
 - This record does not accept #94. No tag, no version bump.
+
+## Append — review follow-up (`ed6c002`)
+
+Code P1: doctor / status / `start --once` / live start share the same Home/Profile Safe Mode composition. Held `doctor` reads live `/api/runtime-health` (`doctor-source: live-runtime`) using the on-disk `runId`. Safe Mode Skill health is `catalog=withheld`, not ordinary `ok`.
+
+Packaged identity for this append:
+
+| Field | Value |
+| --- | --- |
+| Commit | `ed6c002` |
+| Tarball SHA-256 | `315d41a3162783a8b13cc62a1db6a31bfec872373ae643066fa9eb50104e6bbc` |
+| Install | `npm install --omit=dev` of that tarball into a clean prefix (no `src/`) |
+| Skill Home | same isolated Home as the first soak (not daily 8787) |
+| Safe Mode Home | a second isolated Home + `TARS_NG_PROFILE_ROOT` copy with a broken `assistant` patch |
+| Web UI | **8799** (Skill Home); **8801** (Safe Mode Home) |
+
+### Four-way Safe Mode
+
+Broken assistant Profile patch on the Safe Mode Home:
+
+| Surface | Observed |
+| --- | --- |
+| `doctor` | `safe-mode: true`, `doctor-source: boot`, `catalog=withheld` |
+| `status` | `safe-mode: true` |
+| `start --once` | `safe-mode: true`, `catalog=withheld` |
+| live `start` + WUI | `systemState=SAFE_MODE`, `runtimeContext.safeMode=true`, `skillCatalog.state=withheld` |
+| held `doctor` | `safe-mode: true`, `doctor-source: live-runtime`, `catalog=withheld`, `home-owner: verified runtime … (doctor stayed read-only)` |
+| held `status` | `safe-mode: true` |
+
+After restoring the shipped patch: `doctor` / `status` `safe-mode: false`; catalog `empty` (no user Skills on that Home). Daily `127.0.0.1:8787` stayed up.
+
+### Failed activation LKG (packaged WUI)
+
+Skill Home started with `weekly-review@1.0.0` active and `weekly-review@1.0.1` disabled. Sealed `1.0.1` candidate bytes were mutated so they no longer matched digest `f8e0841b…`. WUI `POST /api/skill` **reactivate** bound exact `weekly-review@1.0.1` / digest / generation.
+
+- HTTP **409** `skill-action-denied`
+- `1.0.0` remained **active**
+- `1.0.1` stayed **disabled** with bounded `lastFailure.phase=activate` `detail=digest-mismatch` (no body/path)
+- live `doctor`: `doctor-source: live-runtime`, `active=weekly-review@1.0.0`, `failed=weekly-review@1.0.1`
+- After `stop` + `start`, WUI and `doctor` still showed the same LKG + `lastFailure`
+
+### Exact `weekly-review@1.0.1` Reactivate
+
+Candidate bytes restored to the sealed digest. WUI **reactivate** bound `weekly-review@1.0.1` digest `f8e0841b…` generation `22` (`confirm: true`).
+
+- HTTP **200**
+- catalog `ok`, `active=weekly-review@1.0.1`, `failed=(none)`
+- `1.0.0` stayed **disabled** (no silent version pick)
+- `start --once` after `stop`: `active=weekly-review@1.0.1`
+
+### backup / restore + Home isolation
+
+`tars-ng self-extension backup` while the Skill Home was not held. Backup index kept exact `weekly-review@1.0.1` active digest `f8e0841b…` and disabled `1.0.0` digest `351f49a1…`. Unsealed imported `2.0.0` was not in the sealed backup set.
+
+A **second** isolated Home: `catalog=empty`, no `weekly-review` active directory; restore into a **third** Home reproduced `active=weekly-review@1.0.1` with the same digests. The source Skill Home was unchanged. The second Home stayed empty.
 
 ## Outcome
 
-Packaged human soak **executed and recorded** against PR head `3db11da`. Acceptance remains a human decision on #94.
+Packaged human soak **executed and recorded** against `3db11da`, then append-recorded against `ed6c002`. Acceptance remains a human decision on #94.
