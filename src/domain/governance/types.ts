@@ -1,4 +1,4 @@
-import type { CandidateDiff, NamedDiff, OperationalEffects } from '../candidate/types.js'
+import type { CandidateDiff, CandidateLifecycle, NamedDiff, OperationalEffects } from '../candidate/types.js'
 
 export const APPROVAL_DECISIONS = [
   'unreviewed',
@@ -71,6 +71,11 @@ export interface ApprovalSummary {
   readonly validationPassed: boolean
 }
 
+export interface InspectSummary extends ApprovalSummary {
+  readonly lifecycle: CandidateLifecycle
+  readonly sealed: boolean
+}
+
 export interface EligibilityDenial {
   readonly reason: string
   readonly detail: string
@@ -137,7 +142,7 @@ export interface TrustedApprovalInput {
 export interface ExtensionGovernance {
   requestApproval(candidateId: string): ApprovalRecord
   inspectApproval(candidateId: string): ApprovalRecord | undefined
-  inspectSummary(candidateId: string): ApprovalSummary
+  inspectSummary(candidateId: string): InspectSummary
   eligibility(candidateId: string): EligibilityResult
   requestEligibility(candidateId: string): EligibilityResult
   recordUntrustedApproval(input: { approved?: boolean; authority?: string }): never

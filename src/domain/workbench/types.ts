@@ -129,6 +129,7 @@ export interface CandidateWorkbench {
   rememberPlan(review: ResolutionReview): WorkbenchPlanView
   getPlan(planId: string): WorkbenchPlan
   create(input: WorkbenchCreateInput): WorkbenchCandidateView
+  adoptImported(candidateId: string): WorkbenchCandidateView
   inspect(candidateId: string): WorkbenchCandidateView
   inspectAuthoringContract(version?: string): AuthoringContractV1
   scaffold(input: WorkbenchScaffoldInput): WorkbenchCandidateView

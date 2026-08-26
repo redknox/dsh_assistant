@@ -636,7 +636,7 @@ function ExtensionsWorkspace(props: {
           <h2 id="extensions-title">EXTENSIONS</h2>
           <ul className="workbench-list" data-extensions="true">
             {(props.view.extensions ?? []).length === 0 ? (
-              <li className="workbench-item">No generated or user extensions in this home.</li>
+              <li className="workbench-item">No generated or third-party extensions in this home.</li>
             ) : (props.view.extensions ?? []).map((item) => {
               const approval = (props.view.approvals ?? []).find((card) => card.candidateId === item.candidateId)
               const card = (props.view.activations ?? []).find((activation) => activation.candidateId === item.candidateId)
@@ -659,7 +659,10 @@ function ExtensionsWorkspace(props: {
                   <div className="workbench-identity">{item.owner}@{item.version}</div>
                   <div className="workbench-meta">lifecycle {item.lifecycle.replaceAll('_', ' ')}</div>
                   <div className="workbench-meta">registry {item.registryStatus} · {item.mounted ? 'mounted' : 'unmounted'}</div>
-                  <div className="workbench-meta">provenance {item.provenance}{item.provenanceOrigin ? ` / ${item.provenanceOrigin}` : ''}</div>
+                  <div className="workbench-meta" data-extension-provenance={item.provenance}>
+                    provenance {item.provenance === 'third-party' || item.provenanceOrigin === 'import' ? 'Third-party' : item.provenance}
+                    {item.provenanceOrigin ? ` / ${item.provenanceOrigin}` : ''}
+                  </div>
                   <div className="workbench-meta">capabilities {item.capabilities.join(', ') || 'none'}</div>
                   {item.candidateId ? <div className="workbench-meta">candidate {item.candidateId}</div> : null}
                   {item.digest ? <div className="workbench-meta">digest {item.digest}</div> : null}

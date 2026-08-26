@@ -682,8 +682,12 @@ describe('TARS-NG Home runtime lease', () => {
         assert.equal(losers[0]?.code, 1)
         const match = winners[0]?.text.match(/Web UI: (http:\/\/127\.0\.0\.1:\d+)/)
         assert.ok(match?.[1])
-        const page = await fetch(match[1])
-        assert.equal(page.status, 200)
+        // Probe a built-in API. GET / 404s when dist/web is not packed, which CI does
+        // because `npm test` runs before `npm run build`.
+        const health = await fetch(`${match[1]}/api/runtime-health`)
+        assert.equal(health.status, 200)
+        const body = await health.json() as { pid?: number }
+        assert.equal(typeof body.pid, 'number')
       } finally {
         for (const child of [first, second]) {
           if (child.exitCode === null) child.kill('SIGTERM')

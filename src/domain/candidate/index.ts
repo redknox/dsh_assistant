@@ -20,10 +20,15 @@ export type {
 export { ALLOWED_VALIDATION_TASKS, CANDIDATE_LIFECYCLES, REMOTE_SIDE_EFFECTS, VALIDATION_STAGE_STATUSES } from './types.js'
 export {
   CandidateContractError,
+  ImportLocalError,
   SealedCandidateError,
   ValidationPolicyError,
   WorkspaceEscapeError,
 } from './errors.js'
 export { CandidateService } from './service.js'
+export {
+  importLocalExtension,
+  type ImportLocalResult,
+} from './import-local.js'
 export { assertWorkspacePath } from './service.js'
 export { resolveInsideRoot } from './paths.js'

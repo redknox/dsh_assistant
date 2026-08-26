@@ -22,6 +22,7 @@ import type {
   RollbackPlan,
   ApprovalRecord,
   ApprovalSummary,
+  InspectSummary,
   EligibilityDenial,
   EligibilityResult,
   ExtensionActivation,
@@ -177,9 +178,13 @@ export class GovernanceService implements ExtensionGovernance, ExtensionActivati
     return this.approvals.get(candidateId)
   }
 
-  inspectSummary(candidateId: string): ApprovalSummary {
-    const { record, diff } = this.facts(candidateId)
-    return approvalSummary(record, diff)
+  inspectSummary(candidateId: string): InspectSummary {
+    const { record, diff } = this.candidateView(candidateId)
+    return {
+      ...approvalSummary(record, diff),
+      lifecycle: record.lifecycle,
+      sealed: record.sealed,
+    }
   }
 
   eligibility(candidateId: string): EligibilityResult {
@@ -988,11 +993,15 @@ export class GovernanceService implements ExtensionGovernance, ExtensionActivati
     }
   }
 
-  private facts(candidateId: string) {
+  private candidateView(candidateId: string) {
     const record = this.workspace.get(candidateId)
     const diff = this.workspace.diff(candidateId)
-    const fingerprint = fingerprintFromCandidate(record, diff)
-    return { record, diff, fingerprint }
+    return { record, diff }
+  }
+
+  private facts(candidateId: string) {
+    const { record, diff } = this.candidateView(candidateId)
+    return { record, diff, fingerprint: fingerprintFromCandidate(record, diff) }
   }
 
   private approvalRequestDenials(candidateId: string): EligibilityDenial[] {
@@ -1245,7 +1254,10 @@ export class GovernanceService implements ExtensionGovernance, ExtensionActivati
 }
 
 function missingHostAuthoringContract(record: CandidateRecord): boolean {
-  const generated = record.provenance.kind === 'generated' || record.owner.startsWith('generated/')
+  const generated = record.provenance.kind === 'generated'
+    || record.provenance.kind === 'third-party'
+    || record.owner.startsWith('generated/')
+    || record.owner.startsWith('third-party/')
   return generated && record.manifest.runtimeContractVersion !== GENERATED_EXTENSION_API_V1
 }
 

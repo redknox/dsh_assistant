@@ -3,6 +3,7 @@ import { createHash } from 'node:crypto'
 import path from 'node:path'
 import { contractDigestExtras } from '../candidate/digest.js'
 import { defaultProvenance } from '../candidate/manifest.js'
+import { isImportedThirdParty } from '../generated-runtime/trust.js'
 import { resolveInsideRoot } from '../candidate/paths.js'
 import { SealedCandidateError } from '../candidate/errors.js'
 import type { CandidateManifest, CandidateManifestInput, CandidateRecord, CandidateValidation, CandidateWorkspace } from '../candidate/types.js'
@@ -124,6 +125,42 @@ export class WorkbenchService implements CandidateWorkbench {
     return this.inspect(record.id)
   }
 
+  adoptImported(candidateId: string): WorkbenchCandidateView {
+    const record = this.workspace.get(candidateId)
+    if (!isImportedThirdParty({
+      owner: record.owner,
+      provenanceKind: record.provenance.kind,
+      origin: record.provenance.origin,
+    })) {
+      throw new WorkbenchContractError('adoptImported only accepts host-stamped third-party imports')
+    }
+    const existing = this.bindings.get(candidateId)
+    if (existing) return this.inspect(candidateId)
+    const plan = this.rememberPlan({
+      kind: 'adopt-existing',
+      capability: record.manifest.resolutionCapability,
+      need: record.manifest.resolutionNeed,
+      recommendation: 'Imported local third-party bundle awaiting existing validation and governance.',
+      rationale: 'Host-stamped third-party import. Bundle claims cannot elevate provenance.',
+      implications: [],
+      assumptions: [],
+      unresolved: [],
+      steps: [],
+      registryFacts: {
+        exact: { kind: 'unknown', capability: record.manifest.resolutionCapability },
+        domainOwners: [],
+        conflicts: [],
+      },
+      target: { owner: record.owner, version: record.version },
+    })
+    this.bindings.set(candidateId, {
+      planId: plan.planId,
+      runtimeContractVersion: record.manifest.runtimeContractVersion,
+    })
+    this.flush()
+    return this.inspect(candidateId)
+  }
+
   inspect(candidateId: string): WorkbenchCandidateView {
     const record = this.workspace.get(candidateId)
     const binding = this.bindings.get(candidateId)
@@ -175,6 +212,7 @@ export class WorkbenchService implements CandidateWorkbench {
 
   scaffold(input: WorkbenchScaffoldInput): WorkbenchCandidateView {
     const record = this.workspace.get(input.candidateId)
+    assertImportedReadOnly(record)
     if (record.sealed) throw new WorkbenchContractError('cannot scaffold a sealed candidate')
     const plan = this.bindings.get(record.id)?.planId === undefined
       ? undefined
@@ -291,6 +329,7 @@ export class WorkbenchService implements CandidateWorkbench {
       throw new WorkbenchContractError(`candidate write exceeds the ${WORKBENCH_MAX_FILE_BYTES} byte bound`)
     }
     const record = this.workspace.get(candidateId)
+    assertImportedReadOnly(record)
     assertWorkspaceBudget(record, relativePath, content)
     try {
       this.workspace.writeFile(record.id, relativePath, content)
@@ -307,7 +346,9 @@ export class WorkbenchService implements CandidateWorkbench {
       throw new WorkbenchContractError('candidate manifest cannot include argv, scripts, or a shell runner')
     }
     if (manifest.riskModel !== undefined) parseWorkbenchRiskModel(manifest.riskModel)
-    const current = this.workspace.get(candidateId).manifest
+    const record = this.workspace.get(candidateId)
+    assertImportedReadOnly(record)
+    const current = record.manifest
     this.workspace.setManifest(candidateId, mergeManifestPatch(current, manifest))
     this.flush()
     return this.inspect(candidateId)
@@ -348,6 +389,7 @@ export class WorkbenchService implements CandidateWorkbench {
 
   repair(candidateId: string): WorkbenchCandidateView {
     const parent = this.workspace.get(candidateId)
+    assertImportedReadOnly(parent)
     if (!parent.sealed) throw new WorkbenchContractError('repair requires a sealed parent revision')
     const last = this.independentReview.lastReport(parent.id)
     if (last?.state !== 'changes-required') {
@@ -502,6 +544,16 @@ export class WorkbenchService implements CandidateWorkbench {
         ? { activationFailureSummary: boundActivationDiagnostics(inspected.lastFailure.diagnostics ?? '') }
         : {}),
     }
+  }
+}
+
+function assertImportedReadOnly(record: CandidateRecord): void {
+  if (isImportedThirdParty({
+    owner: record.owner,
+    provenanceKind: record.provenance.kind,
+    origin: record.provenance.origin,
+  })) {
+    throw new WorkbenchContractError('imported third-party candidate is read-only; import a new version')
   }
 }
 

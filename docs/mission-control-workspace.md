@@ -24,7 +24,7 @@ Approvals in the Web UI call `AssistantControlSurface.approve` / `deny` (and Rec
 | Region | Product concept | Not |
 | --- | --- | --- |
 | Context | Today, calendar/tasks, memory, knowledge, user-facing capabilities | DSH internal service browser |
-| Extensions | Primary pane for generated/user revisions: approved, active, disabled, blocked, superseded, with inspect/approve/activate/uninstall/reactivate/history from the record | Marketplace, ops-panel-only list, or invented React plugin state |
+| Extensions | Primary pane for generated and **Third-party** revisions: approved, active, disabled, blocked, superseded, with inspect/approve/activate/uninstall/reactivate/history from the record | Marketplace, browser path picker, ops-panel-only list, or invented React plugin state |
 | Work | Conversation plus plans, proposals, approvals, failures | Identical chat bubbles for every object |
 | Activity | Operational facts from session tools, jobs, policy, recovery | Hidden chain-of-thought |
 | Control strip | Pending approval, jobs, objective, degradation, mode | Noisy decorative HUD |

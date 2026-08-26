@@ -19,6 +19,9 @@ export interface OperatorStatus {
   readonly restartRecoveryRequired: boolean
   readonly persistence?: string
   readonly reasons: readonly string[]
+  readonly thirdPartyImported: number
+  readonly thirdPartyActive: number
+  readonly thirdPartyFailed: number
 }
 
 function generatedActive(input: {
@@ -45,6 +48,16 @@ export function operatorStatus(input: {
   const pending = input.activation.state === 'activation-pending' || input.activation.state === 'activating' || input.activation.state === 'rollback-pending'
   const reasons = input.reasons ?? []
   const activeGenerated = generatedActive(input)
+  const thirdPartyCandidates = input.candidates.filter((item) => (
+    item.provenance.kind === 'third-party' || item.owner.startsWith('third-party/')
+  ))
+  const thirdPartyActive = input.registry.filter((record) => (
+    record.status === 'active'
+    && (record.provenance.kind === 'third-party' || record.owner.startsWith('third-party/'))
+  )).length
+  const thirdPartyFailed = thirdPartyCandidates.filter((item) => (
+    item.lifecycle === 'validation-failed' || item.lifecycle === 'validation-incomplete'
+  )).length
   return {
     mode: input.activation.safeMode ? 'safe-mode' : 'normal',
     registryGeneration: input.activation.current?.generation ?? 0,
@@ -66,6 +79,9 @@ export function operatorStatus(input: {
     )),
     persistence: input.persistence,
     reasons,
+    thirdPartyImported: thirdPartyCandidates.length,
+    thirdPartyActive,
+    thirdPartyFailed,
   }
 }
 
@@ -85,5 +101,8 @@ export function formatOperatorStatus(status: OperatorStatus): string {
     `persistence: ${status.persistence ?? '(none)'}`,
     `reasons: ${status.reasons.join('; ') || '(none)'}`,
     `restart-recovery-required: ${status.restartRecoveryRequired}`,
+    `third-party-imported: ${status.thirdPartyImported}`,
+    `third-party-active: ${status.thirdPartyActive}`,
+    `third-party-failed: ${status.thirdPartyFailed}`,
   ].join('\n')
 }

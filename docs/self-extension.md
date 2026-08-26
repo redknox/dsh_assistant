@@ -14,7 +14,9 @@ Three principles are normative. A later implementation that violates them is out
 
 Self-Extension is extension through **public DSH** plugin, service, provider, tool, event, profile, and bundle seams. It is not unrestricted self-modification of the running product, and it must not patch or depend on DSH package-internal Agent Loop / `src/*` internals.
 
-Assistant-generated code has **no privileged runtime path**. Human-maintained `managed/*` product plugins may use the in-process Cordis lifecycle. `generated/*` candidates are not imported into the TARS-NG process and do not receive the live Cordis context; they run in a fail-closed isolated runner with a host-owned proxy and capability broker.
+Assistant-generated and imported third-party code has **no privileged runtime path**. Human-maintained `managed/*` product plugins may use the in-process Cordis lifecycle. `generated/*` and `third-party/*` candidates are not imported into the TARS-NG process and do not receive the live Cordis context; they run in a fail-closed isolated runner with a host-owned proxy and capability broker.
+
+A trusted operator may import one local directory with `tars-ng self-extension import-local <directory>`. Import publishes an inactive Workbench candidate only. Discovery != Import != Validation != Approval != Activation. Marketplace discovery and Skill lifecycle are not part of this command.
 
 ```text
 v0.3.0 = Governance + Mission-Control product baseline
@@ -50,6 +52,7 @@ Logical prefixes (management paths, not a required filesystem layout in this iss
 | --- | --- |
 | `managed/*` | Human-maintained, or a generated candidate that a human promoted to stable |
 | `generated/*` | Assistant-generated candidates or not-yet-promoted plugins |
+| `third-party/*` | Operator-imported local bundles. Host-stamped `kind: third-party`, `origin: import`. Bundle claims cannot elevate this. |
 
 Required provenance fields for every managed or generated plugin record:
 

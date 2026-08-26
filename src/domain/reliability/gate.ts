@@ -70,7 +70,7 @@ function requiredFor(risk: RiskClass): readonly ReliabilityCheckName[] {
 function evaluateChecks(manifest: CandidateManifest, derived: RiskClass, model: RiskModel, synthesized: boolean): ReliabilityCheck[] {
   const declared = model.declaredClass
   const downgrade = declared !== undefined && riskRank(declared) < riskRank(derived)
-  const generated = manifest.provenance.kind === 'generated'
+  const generated = manifest.provenance.kind === 'generated' || manifest.provenance.kind === 'third-party'
   const requiredScenarios = derived === 'R3' ? R3_SCENARIOS : derived === 'R2' ? R2_SCENARIOS : derived === 'R1' ? R1_SCENARIOS : ['happy-path'] as const
   const missingScenarios = coveredOrOmitted(model, requiredScenarios)
   const mutatingWrite = model.sideEffects.some((item) => item.outcomes.length > 0)

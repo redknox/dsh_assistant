@@ -92,7 +92,9 @@ function resolveStatus(
   row: CatalogRow,
   record?: WorkspaceSnapshotInput['registry'][number],
 ): UserCapabilityStatus {
-  if (input.safeMode && record?.provenance === 'generated') return 'safe-mode-disabled'
+  if (input.safeMode && (record?.provenance === 'generated' || record?.provenance === 'third-party')) {
+    return 'safe-mode-disabled'
+  }
   const integration = input.integrationStatus.find((item) => item.capability === row.area.toLowerCase())
   if (integration) {
     if (input.safeMode && record === undefined) return 'safe-mode-disabled'

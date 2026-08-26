@@ -174,6 +174,8 @@ export interface CreateCandidateInput {
   readonly baseVersion?: string
   readonly provenance?: ExtensionProvenance
   readonly manifest?: CandidateManifestInput
+  readonly files?: Readonly<Record<string, string>>
+  readonly onAfterWriteFile?: (relativePath: string) => void
 }
 
 export interface CandidateWorkspace {

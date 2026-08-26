@@ -203,6 +203,9 @@ export function formatDoctorReport(report: DoctorReport): string {
     report.generatedRuntime?.lastFailure ? `last runner failure: ${report.generatedRuntime.lastFailure}` : undefined,
     report.operator ? `activation: ${report.operator.activationState}` : 'activation: not-booted',
     report.operator ? `active: ${report.operator.active.join(', ') || '(none)'}` : undefined,
+    report.operator ? `third-party-imported: ${report.operator.thirdPartyImported}` : undefined,
+    report.operator ? `third-party-active: ${report.operator.thirdPartyActive}` : undefined,
+    report.operator ? `third-party-failed: ${report.operator.thirdPartyFailed}` : undefined,
     report.operator?.lastFailure ? `last-failure: ${report.operator.lastFailure}` : undefined,
   ].filter((item): item is string => item !== undefined).join('\n')
 }

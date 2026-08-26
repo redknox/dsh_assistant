@@ -36,7 +36,9 @@ export function reviewPackageFromCandidate(record: CandidateRecord, extras: Revi
     idempotencyStrategy: extras.idempotencyStrategy ?? riskModel?.idempotency.strategy,
     cancelledContextReuse: extras.cancelledContextReuse ?? riskModel?.reconciliation.cancelledContextReuse,
     independentReconciliation: extras.independentReconciliation ?? riskModel?.reconciliation.independentContext,
-    generated: extras.generated ?? record.provenance.kind === 'generated',
+    generated: extras.generated ?? (
+      record.provenance.kind === 'generated' || record.provenance.kind === 'third-party'
+    ),
     priorFindings: extras.priorFindings ?? [],
     builderClaims: extras.builderClaims ?? (claimed !== undefined ? { reviewPassed: claimed } : undefined),
   }

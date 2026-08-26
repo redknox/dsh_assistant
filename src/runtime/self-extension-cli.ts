@@ -1,6 +1,7 @@
 import path from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { bootAssistantControl, bootSafeModeRuntime, type AssistantControl } from './boot.js'
+import { importLocalExtension, ImportLocalError } from '../domain/candidate/index.js'
 import { formatOperatorStatus, operatorStatus } from '../domain/self-extension/status.js'
 import { ensureProductHome, resolveProductHome } from '../product/home.js'
 import { acquireRuntimeLease, inspectRuntimeLease } from '../product/runtime-lease.js'
@@ -10,6 +11,7 @@ function usage(): string {
   status | candidates | inspect <id> | diff <id> | request-approval <id>
   approve <id> <fingerprint> | activate <id> | rollback | disable <owner> <version>
   migrate-authoring-contract <id>
+  import-local <directory>
   lkg | diagnostics | safe-mode status|enter|exit
   backup <dir> | restore <dir>
 
@@ -81,7 +83,14 @@ export async function runSelfExtensionCli(argv: string[], hooks: SelfExtensionCl
         return 0
       }
       if (command === 'inspect') {
-        console.log(JSON.stringify(ctx.extensionGovernance.inspectSummary(String(rest[0])), null, 2))
+        const candidateId = String(rest[0])
+        const record = ctx.candidateWorkspace.get(candidateId)
+        const summary = ctx.extensionGovernance.inspectSummary(candidateId)
+        console.log(JSON.stringify({
+          ...summary,
+          lifecycle: record.lifecycle,
+          sealed: record.sealed,
+        }, null, 2))
         return 0
       }
       if (command === 'diff') {
@@ -112,6 +121,22 @@ export async function runSelfExtensionCli(argv: string[], hooks: SelfExtensionCl
         recoveryRoot.disable(human, String(rest[0]), String(rest[1]))
         console.log(`disabled ${rest[0]}@${rest[1]}`)
         return 0
+      }
+      if (command === 'import-local') {
+        try {
+          const imported = importLocalExtension({
+            sourceDir: String(rest[0] ?? ''),
+            workspace: ctx.candidateWorkspace,
+            workbench: ctx.candidateWorkbench,
+            registry: ctx.capabilityRegistry,
+          })
+          console.log(JSON.stringify(imported, null, 2))
+          return 0
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error)
+          console.error(error instanceof ImportLocalError ? `${error.code}: ${message}` : message)
+          return 1
+        }
       }
       if (command === 'migrate-authoring-contract') {
         const migrated = recoveryRoot.migrateAuthoringContract(human, String(rest[0]))
@@ -150,6 +175,10 @@ export async function runSelfExtensionCli(argv: string[], hooks: SelfExtensionCl
         return 0
       }
       console.error(usage())
+      return 1
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      console.error(error instanceof ImportLocalError ? `${error.code}: ${message}` : message.split(/\r?\n/, 1)[0] ?? message)
       return 1
     } finally {
       await ctx.fiber.dispose()

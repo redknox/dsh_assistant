@@ -18,6 +18,7 @@ export class CandidateWorkbenchService extends Service implements CandidateWorkb
   rememberPlan(review: Parameters<CandidateWorkbench['rememberPlan']>[0]) { return this.store.rememberPlan(review) }
   getPlan(planId: string) { return this.store.getPlan(planId) }
   create(input: Parameters<CandidateWorkbench['create']>[0]) { return this.store.create(input) }
+  adoptImported(candidateId: string) { return this.store.adoptImported(candidateId) }
   inspect(candidateId: string) { return this.store.inspect(candidateId) }
   inspectAuthoringContract(version?: string) { return this.store.inspectAuthoringContract(version) }
   scaffold(input: Parameters<CandidateWorkbench['scaffold']>[0]) { return this.store.scaffold(input) }

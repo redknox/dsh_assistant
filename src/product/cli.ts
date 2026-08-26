@@ -68,6 +68,7 @@ function usage(): string {
   doctor [--home <dir>] [--allow-fixtures] [--profile <name>] [--workspace <dir>] [--session-root <dir>] [--session-id <id>]
   stop [--home <dir>]
   self-extension <subcommand>
+    import-local <directory>   trusted operator only; no model or browser path
 
 TARS-NG home defaults to $TARS_NG_HOME, then $DSH_ASSISTANT_HOME, then ~/.local/share/tars-ng.
 Runtime context precedence: CLI → environment → $TARS_NG_HOME/config/product.json → defaults (profile=assistant, workspace=$HOME/workspace, sessions=$HOME/sessions, session-id=main).

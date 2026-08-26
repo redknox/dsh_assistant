@@ -30,7 +30,8 @@ export class OwnershipConflictError extends RegistryContractError {
   }
 }
 
-const OWNER_ID = /^(managed|generated)\/[a-z][a-z0-9-]*$/
+const OWNER_ID = /^(managed|generated|third-party)\/[a-z][a-z0-9-]*$/
+const STRICT_SEMVER = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/
 const VERSION = /^[A-Za-z0-9][A-Za-z0-9._-]*$/
 const CAPABILITY = /^[a-z][a-z0-9-]*(?:\.[a-z][a-z0-9-]*)+$/
 const TOKEN = /^[a-z][a-z0-9-]*(?:\.[a-z][a-z0-9-]*)*$/
@@ -96,6 +97,18 @@ export function normalizeRegisterInput(input: RegistryRegisterInput): RegistryRe
   }
   if (provenance.kind === 'generated' && !owner.startsWith('generated/')) {
     throw new RegistryContractError('generated provenance requires a generated/* owner')
+  }
+  if (provenance.kind === 'third-party' && !owner.startsWith('third-party/')) {
+    throw new RegistryContractError('third-party provenance requires a third-party/* owner')
+  }
+  if (owner.startsWith('third-party/') && provenance.kind !== 'third-party') {
+    throw new RegistryContractError('third-party/* owners require third-party provenance')
+  }
+  if (provenance.kind === 'third-party' && provenance.origin !== 'import') {
+    throw new RegistryContractError('third-party provenance requires origin import')
+  }
+  if (provenance.kind === 'third-party' && !STRICT_SEMVER.test(input.version)) {
+    throw new RegistryContractError(`third-party version must be strict semver: ${JSON.stringify(input.version)}`)
   }
   const capabilities = Object.freeze(input.capabilities.map(parseCapabilityClaim))
   if (new Set(capabilities.map((item) => item.id)).size !== capabilities.length) {
