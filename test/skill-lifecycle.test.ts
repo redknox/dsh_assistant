@@ -1,11 +1,12 @@
 import assert from 'node:assert/strict'
-import { mkdirSync, mkdtempSync, readFileSync, symlinkSync, writeFileSync } from 'node:fs'
+import { cpSync, mkdirSync, mkdtempSync, readFileSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { describe, it } from 'node:test'
 import { fileURLToPath } from 'node:url'
 import { ReviewService } from '../src/domain/review/index.js'
 import { TrustedAuthorityCredential } from '../src/domain/governance/types.js'
+import { backupSelfExtension, formatOperatorStatus, operatorStatus, PersistenceIntegrityError, restoreSelfExtension } from '../src/domain/self-extension/index.js'
 import { SkillAuthorityError, SkillContractError, SkillService, nextSkillVersion } from '../src/domain/skill/index.js'
 import { SAFE_MODE_TOOL_NAMES } from '../src/product/bundle.js'
 import { bootAssistantControl, bootSafeModeRuntime } from '../src/runtime/boot.js'
@@ -359,5 +360,134 @@ describe('skill lifecycle', () => {
     assert.throws(() => again.uninstall('weekly-review', human, [prose.id]), /hard dependents/)
     again.uninstall('weekly-review', human, [dependent.id])
     assert.equal(again.get(second.imported.candidateId).lifecycle, 'uninstalled')
+  })
+
+  it('isolates Skill stores by Home and Profile', async () => {
+    const firstHome = home()
+    const secondHome = home()
+    const assistant = new SkillService(firstHome, 'assistant')
+    const otherProfile = new SkillService(firstHome, 'other')
+    const otherHome = new SkillService(secondHome, 'assistant')
+    const imported = await assistant.importLocal(FIXTURE)
+    assert.equal(otherProfile.list().some((item) => item.id === imported.candidateId), false)
+    assert.equal(otherHome.list().some((item) => item.id === imported.candidateId), false)
+    assert.equal(assistant.list().some((item) => item.id === imported.candidateId), true)
+  })
+
+  it('refuses to disable or uninstall a system Skill', async () => {
+    const isolated = home()
+    const service = new SkillService(isolated, 'assistant')
+    const rootId = Symbol('recovery-root')
+    service.bindRoot(rootId)
+    const human = humanCred(rootId)
+    const drafted = service.installSystem({
+      name: 'system-brief',
+      description: 'Host-owned system briefing skill.',
+      body: 'Use recall_memory only for this system brief.',
+    })
+    bindHostReview(service)
+    await service.validate(drafted.id)
+    service.seal(drafted.id)
+    service.requestReview(drafted.id)
+    const requested = service.requestApproval(drafted.id)
+    service.approve(drafted.id, requested.fingerprint, human)
+    service.activate(drafted.id, human)
+    assert.throws(() => service.disable('system-brief', human), /cannot be disabled or uninstalled/)
+    assert.throws(() => service.uninstall('system-brief', human), /cannot be disabled or uninstalled/)
+    assert.equal(service.get(drafted.id).lifecycle, 'active')
+  })
+
+  it('diffs v1 to v2 without leaking instruction body', async () => {
+    const isolated = home()
+    const service = new SkillService(isolated, 'assistant')
+    const rootId = Symbol('recovery-root')
+    service.bindRoot(rootId)
+    const { imported, requested } = await authorApproved(service)
+    service.approve(imported.candidateId, requested.fingerprint, humanCred(rootId))
+    service.activate(imported.candidateId, humanCred(rootId))
+    const before = service.readFile(imported.candidateId, 'SKILL.md')
+    const forked = service.writeFile(imported.candidateId, 'SKILL.md', [
+      '---',
+      'name: weekly-review',
+      'description: Guide a weekly review using existing memory and knowledge tools.',
+      '---',
+      'Use existing tools only. This is an exact v2 instruction body.',
+      '',
+    ].join('\n'))
+    await service.validate(forked.id)
+    const diff = service.diff(forked.id)
+    assert.equal(diff.from?.version, '1.0.0')
+    assert.equal(diff.to.version, '1.0.1')
+    assert.equal(diff.instructionChanged, true)
+    assert.ok(diff.instructionBeforeChars > 0)
+    assert.ok(diff.instructionAfterChars > 0)
+    assert.doesNotMatch(JSON.stringify(diff), /exact v2 instruction body/)
+    service.disable('weekly-review', humanCred(rootId))
+    assert.equal(service.readFile(imported.candidateId, 'SKILL.md'), before)
+    assert.equal(service.get(imported.candidateId).lifecycle, 'disabled')
+  })
+
+  it('hands missing tools to Capability Resolution and does not invent authority', async () => {
+    const unbound = new SkillService(home(), 'assistant')
+    const imported = await unbound.importLocal(FIXTURE)
+    await unbound.validate(imported.candidateId)
+    assert.equal(unbound.inspect(imported.candidateId).resolutionHandoff, undefined)
+
+    const service = new SkillService(home(), 'assistant')
+    service.bindKnownTools(() => ['recall_memory'])
+    const drafted = service.create({
+      name: 'needs-resolution',
+      description: 'Mentions a tool that is not in inventory.',
+      body: 'Call `missing_calendar_tool` then `recall_memory` if needed.',
+    })
+    await service.validate(drafted.id)
+    assert.deepEqual(service.inspect(drafted.id).resolutionHandoff, {
+      missingTools: ['missing_calendar_tool'],
+      nextAction: 'capability-resolution',
+    })
+  })
+
+  it('backs up and restores Skills and fails closed on a tampered active digest', async () => {
+    const isolated = home()
+    const ready = await bootAssistantControl({ home: isolated })
+    try {
+      const service = ready.ctx.skillLifecycle
+      const imported = await service.importLocal(FIXTURE)
+      await service.validate(imported.candidateId)
+      service.seal(imported.candidateId)
+      service.requestReview(imported.candidateId)
+      const requested = service.requestApproval(imported.candidateId)
+      const human = ready.recoveryRoot.issueAuthority({ kind: 'human-control', source: 'operator-cli' })
+      ready.recoveryRoot.approveSkill(imported.candidateId, requested.fingerprint, human)
+      ready.recoveryRoot.activateSkill(imported.candidateId, human)
+      const dest = mkdtempSync(path.join(tmpdir(), 'skill-bak-'))
+      const tampered = mkdtempSync(path.join(tmpdir(), 'skill-bak-bad-'))
+      backupSelfExtension(isolated, dest)
+      assert.ok(service.health().active.includes(imported.candidateId))
+      const status = formatOperatorStatus(operatorStatus({
+        activation: ready.recoveryRoot.inspect(),
+        registry: [...ready.ctx.capabilityRegistry.list()],
+        candidates: [...ready.ctx.candidateWorkspace.list()],
+        skills: service.health(),
+      }))
+      assert.match(status, /skills: profile=assistant catalog=ok/)
+      cpSync(dest, tampered, { recursive: true })
+      writeFileSync(
+        path.join(tampered, 'skills', 'assistant', 'active', 'weekly-review', 'SKILL.md'),
+        '---\nname: weekly-review\ndescription: tampered\n---\ntampered body\n',
+      )
+      assert.throws(() => restoreSelfExtension(tampered, home()), PersistenceIntegrityError)
+      const restoredHome = home()
+      const empty = await bootAssistantControl({ home: restoredHome })
+      try {
+        restoreSelfExtension(dest, restoredHome)
+      } finally {
+        await empty.ctx.fiber.dispose()
+      }
+      const restored = new SkillService(restoredHome, 'assistant')
+      assert.equal(restored.get(imported.candidateId).lifecycle, 'active')
+    } finally {
+      await ready.ctx.fiber.dispose()
+    }
   })
 })

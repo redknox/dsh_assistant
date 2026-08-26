@@ -5,7 +5,9 @@ import SkillRegistry, { renderSkillContent } from '@deepseek-ai/dsh-skill'
 import * as skillFilesystem from '@deepseek-ai/dsh-skill-filesystem'
 import { TrustedAuthorityCredential } from '../governance/types.js'
 import { REVIEW_POLICY_VERSION, type IndependentReview, type ReviewPackage, type ReviewReport } from '../review/types.js'
+import { diffSkillRevisions, instructionBody, type SkillRevisionDiff } from './diff.js'
 import { SkillAuthorityError, SkillContractError } from './errors.js'
+import { skillResolutionHandoff } from './resolution.js'
 import {
   applyHostSkillLimits,
   digestSkillFiles,
@@ -59,6 +61,7 @@ export class SkillService {
   private invalidate?: () => void
   private rootId?: symbol
   private review?: IndependentReview
+  private knownTools?: () => readonly string[]
 
   constructor(homeRoot: string, profile: string, invalidate?: () => void) {
     this.layout = skillStoreLayout(homeRoot, profile)
@@ -81,6 +84,10 @@ export class SkillService {
 
   attachInvalidation(invalidate: () => void): void {
     this.invalidate = invalidate
+  }
+
+  bindKnownTools(knownTools: () => readonly string[]): void {
+    this.knownTools = knownTools
   }
 
   list(): SkillRecord[] {
@@ -112,6 +119,7 @@ export class SkillService {
       baseVersion: record.baseVersion,
       dependsOn: record.dependsOn ?? [],
       dependents: this.dependentsOf(record.name, record.version),
+      resolutionHandoff: record.resolutionHandoff,
     }
   }
 
@@ -231,6 +239,10 @@ export class SkillService {
     const loaded = await loadThroughDshCatalog(candidateDir(this.layout, id))
     if (loaded.name !== record.name) throw new SkillContractError('skill-name', 'DSH parser name does not match host identity')
     applyHostSkillLimits(loaded)
+    const inventory = this.knownTools?.()
+    const handoff = inventory === undefined
+      ? undefined
+      : skillResolutionHandoff(instructionBody(loaded.content), inventory)
     return this.update(id, (item) => ({
       ...item,
       lifecycle: 'validated',
@@ -238,7 +250,34 @@ export class SkillService {
       description: loaded.description,
       whenToUse: loaded.whenToUse,
       invocation: loaded.invocation,
+      resolutionHandoff: handoff,
     }))
+  }
+
+  diff(id: string): SkillRevisionDiff {
+    const record = this.get(id)
+    const base = record.baseVersion === undefined
+      ? undefined
+      : readSkillIndex(this.layout).records.find((item) => item.id === skillId(record.name, record.baseVersion!))
+    return diffSkillRevisions({
+      from: base,
+      to: record,
+      fromBody: base === undefined ? undefined : this.readFile(base.id, 'SKILL.md'),
+      toBody: this.readFile(id, 'SKILL.md'),
+    })
+  }
+
+  installSystem(input: { readonly name: string; readonly description: string; readonly body: string }): SkillRecord {
+    applyHostSkillLimits({ name: input.name, description: input.description, content: input.body })
+    return this.publishCandidate({
+      name: input.name,
+      version: nextVersion(this.layout, input.name),
+      files: { 'SKILL.md': skillMarkdown(input.name, input.description, input.body) },
+      provenance: { kind: 'system', origin: 'host' },
+      lifecycle: 'drafted',
+      invocation: DEFAULT_INVOCATION,
+      description: input.description,
+    })
   }
 
   seal(id: string): SkillRecord {
@@ -397,7 +436,7 @@ export class SkillService {
     const version = index.active[name]
     if (version === undefined) throw new SkillContractError('unknown-skill', `no active skill: ${name}`)
     const record = this.get(skillId(name, version))
-    if (record.provenance.kind === 'system') throw new SkillAuthorityError('system skills cannot be uninstalled')
+    if (record.provenance.kind === 'system') throw new SkillAuthorityError('system skills cannot be disabled or uninstalled')
     this.retireActive(name, version, 'disabled')
   }
 
@@ -407,7 +446,7 @@ export class SkillService {
     const version = index.active[name] ?? index.records.find((item) => item.name === name)?.version
     if (version === undefined) throw new SkillContractError('unknown-skill', `unknown skill: ${name}`)
     const record = this.get(skillId(name, version))
-    if (record.provenance.kind === 'system') throw new SkillAuthorityError('system skills cannot be uninstalled')
+    if (record.provenance.kind === 'system') throw new SkillAuthorityError('system skills cannot be disabled or uninstalled')
     const dependents = this.dependentsOf(name, version)
     if (dependents.length > 0 && !sameSet(dependents, acknowledgedDependents)) {
       throw new SkillContractError('dependents', `hard dependents must be acknowledged: ${dependents.join(', ')}`)
@@ -450,17 +489,25 @@ export class SkillService {
   }
 
   health(): {
+    readonly profile: string
     readonly candidates: number
     readonly active: readonly string[]
     readonly disabled: readonly string[]
     readonly failed: readonly string[]
+    readonly catalog: 'ok' | 'empty'
+    readonly rollbackTarget?: { readonly name: string; readonly version: string }
   } {
-    const records = this.list()
+    const index = readSkillIndex(this.layout)
+    const records = index.records
+    const active = records.filter((item) => item.lifecycle === 'active').map((item) => item.id)
     return {
+      profile: this.layout.profile,
       candidates: records.filter((item) => item.lifecycle !== 'active' && item.lifecycle !== 'uninstalled').length,
-      active: records.filter((item) => item.lifecycle === 'active').map((item) => item.id),
+      active,
       disabled: records.filter((item) => item.lifecycle === 'disabled').map((item) => item.id),
       failed: [],
+      catalog: active.length === 0 ? 'empty' : 'ok',
+      ...(index.lastActive ? { rollbackTarget: index.lastActive } : {}),
     }
   }
 

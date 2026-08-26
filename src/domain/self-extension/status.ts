@@ -22,6 +22,14 @@ export interface OperatorStatus {
   readonly thirdPartyImported: number
   readonly thirdPartyActive: number
   readonly thirdPartyFailed: number
+  readonly skills?: {
+    readonly profile: string
+    readonly candidates: number
+    readonly active: readonly string[]
+    readonly disabled: readonly string[]
+    readonly failed: readonly string[]
+    readonly catalog: 'ok' | 'empty'
+  }
 }
 
 function generatedActive(input: {
@@ -44,6 +52,7 @@ export function operatorStatus(input: {
   readonly fingerprints?: ReadonlyMap<string, string>
   readonly persistence?: string
   readonly reasons?: readonly string[]
+  readonly skills?: OperatorStatus['skills']
 }): OperatorStatus {
   const pending = input.activation.state === 'activation-pending' || input.activation.state === 'activating' || input.activation.state === 'rollback-pending'
   const reasons = input.reasons ?? []
@@ -82,6 +91,7 @@ export function operatorStatus(input: {
     thirdPartyImported: thirdPartyCandidates.length,
     thirdPartyActive,
     thirdPartyFailed,
+    ...(input.skills ? { skills: input.skills } : {}),
   }
 }
 
@@ -104,5 +114,8 @@ export function formatOperatorStatus(status: OperatorStatus): string {
     `third-party-imported: ${status.thirdPartyImported}`,
     `third-party-active: ${status.thirdPartyActive}`,
     `third-party-failed: ${status.thirdPartyFailed}`,
-  ].join('\n')
+    status.skills
+      ? `skills: profile=${status.skills.profile} catalog=${status.skills.catalog} candidates=${status.skills.candidates} active=${status.skills.active.join(',') || '(none)'} disabled=${status.skills.disabled.join(',') || '(none)'} failed=${status.skills.failed.join(',') || '(none)'}`
+      : undefined,
+  ].filter((item): item is string => item !== undefined).join('\n')
 }

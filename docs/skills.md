@@ -37,6 +37,14 @@ Import publishes an inactive `third-party/import` candidate. Validate â†’ seal â
 
 Hard Skill dependencies come only from host-owned `tars-ng.skill.json` `dependsOn: [{ name, version }]` (or `declareDependencies`). Prose mentions in `SKILL.md` are not a dependency graph.
 
+Revision diffs report instruction change plus character counts, invocation, resources, and `dependsOn`. They do not include the instruction body.
+
+Backtick tool mentions are compared to the bound runtime tool inventory. Missing names become a Capability Resolution handoff; they do not invent Skill authority. If the inventory is not bound, mentions are not treated as missing.
+
+`tars-ng` status, `self-extension status`, and `tars-ng doctor` report the Profile Skill catalog. Home backup/restore copies `$TARS_NG_HOME/self-extension/skills/<profile>` and fail closed on a tampered active digest. Restore replaces the Self-Extension tree, so a backup without Skills would wipe them.
+
+The Web UI Skills Center (Extensions pane) shows catalog metadata only. React does not parse `SKILL.md`. Trusted actions use `POST /api/skill` through Recovery Root. Approve is not Activate. System Skills hide uninstall/disable. User-invocable active Skills appear as composer chips. Session history may still show earlier instruction text; disable does not rewrite candidate bytes.
+
 ## Scope
 
 v0.4.0 Skills are Profile-scoped (`assistant`) inside one bound Home. Workspace-specific and cross-Profile scopes are future work.

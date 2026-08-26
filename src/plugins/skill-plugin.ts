@@ -47,6 +47,16 @@ export async function apply(ctx: Context, config: SkillPluginConfig = {}) {
   if (config.home === undefined) return
   const store = new SkillService(config.home, config.profile ?? 'assistant')
   store.bindReview(ctx.independentReview)
+  store.bindKnownTools(() => {
+    const names: string[] = []
+    for (const name of [
+      'recall_memory', 'retrieve_knowledge', 'remember_memory', 'forget_memory',
+      'skill', 'list_capabilities', 'lookup_capability', 'review_capability_resolution',
+    ]) {
+      if (ctx.tools.get(name)) names.push(name)
+    }
+    return names
+  })
   config.bindStore?.(store)
   await ctx.plugin(class extends SkillLifecycleService {
     constructor(scope: Context) {

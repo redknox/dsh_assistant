@@ -123,6 +123,8 @@ export function gatherWorkspaceSnapshot(input: GatherWorkspaceInput): WorkspaceS
       ...(activation?.rollbackPlan ? { rollbackPlan: activation.rollbackPlan } : {}),
     },
     candidates: workbenchCandidates(ctx),
+    skills: skillProjections(ctx),
+    ...(skillRollbackOf(ctx) ? { skillRollback: skillRollbackOf(ctx)! } : {}),
     memory: (ctx.get('personalMemory') as { query(): { records: { id: string; statement: string; topicKey: string; status: string }[] } } | undefined)
       ?.query().records.map((record) => ({
         id: record.id,
@@ -238,6 +240,67 @@ function toolEventsFromSession(events: readonly SessionEvent[]): WorkspaceSnapsh
     }
   }
   return items
+}
+
+function skillRollbackOf(ctx: Context): WorkspaceSnapshotInput['skillRollback'] {
+  const skills = ctx.get('skillLifecycle') as {
+    health(): { rollbackTarget?: { name: string; version: string } }
+  } | undefined
+  return skills?.health().rollbackTarget
+}
+
+function skillProjections(ctx: Context): WorkspaceSnapshotInput['skills'] {
+  const skills = ctx.get('skillLifecycle') as {
+    list(): readonly {
+      id: string
+      name: string
+      version: string
+      profile: string
+      provenance: { kind: string; origin: string }
+      lifecycle: string
+      sealed: boolean
+      invocation: { modelInvocable: boolean; userInvocable: boolean }
+      description: string
+      whenToUse?: string
+      resources: readonly string[]
+      validationPassed: boolean
+      reviewComplete: boolean
+      approvalDecision?: string
+      approvalFingerprint?: string
+      digest: string
+      baseVersion?: string
+      dependsOn?: readonly { name: string; version: string }[]
+      dependents?: readonly string[]
+      resolutionHandoff?: { missingTools: readonly string[]; nextAction: 'capability-resolution' }
+    }[]
+    inspect(id: string): { dependents: readonly string[] }
+  } | undefined
+  if (skills === undefined) return []
+  return skills.list().map((item) => ({
+    id: item.id,
+    name: item.name,
+    version: item.version,
+    profile: item.profile,
+    provenance: item.provenance.kind,
+    origin: item.provenance.origin,
+    lifecycle: item.lifecycle,
+    sealed: item.sealed,
+    modelInvocable: item.invocation.modelInvocable,
+    userInvocable: item.invocation.userInvocable,
+    description: item.description,
+    ...(item.whenToUse ? { whenToUse: item.whenToUse } : {}),
+    resources: [...item.resources],
+    validationPassed: item.validationPassed,
+    reviewComplete: item.reviewComplete,
+    ...(item.approvalDecision ? { approvalDecision: item.approvalDecision } : {}),
+    ...(item.approvalFingerprint && item.lifecycle === 'approval-requested' ? { approvalFingerprint: item.approvalFingerprint } : {}),
+    digest: item.digest,
+    ...(item.baseVersion ? { baseVersion: item.baseVersion } : {}),
+    dependsOn: (item.dependsOn ?? []).map((dep) => `${dep.name}@${dep.version}`),
+    dependents: [...(skills.inspect(item.id).dependents ?? item.dependents ?? [])],
+    system: item.provenance.kind === 'system',
+    ...(item.resolutionHandoff ? { resolutionHandoff: item.resolutionHandoff } : {}),
+  }))
 }
 
 function workbenchCandidates(ctx: Context): WorkspaceSnapshotInput['candidates'] {

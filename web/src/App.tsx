@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState, type FormEvent } from 'react'
-import type { ActivationCard, ApprovalCard, MissionControlView, RollbackCard, UserCapabilityStatus, UserPluginView, WorkObjectKind, WorkbenchProjection } from '../../src/domain/workspace/types'
+import type { ActivationCard, ApprovalCard, MissionControlView, RollbackCard, SkillProjection, UserCapabilityStatus, UserPluginView, WorkObjectKind, WorkbenchProjection } from '../../src/domain/workspace/types'
 import {
   activateCandidate,
   decideApproval,
@@ -11,6 +11,7 @@ import {
   rollbackSystemState,
   runConversation,
   runRecovery,
+  runSkillAction,
   sendMessage,
   uninstallPlugin,
   type UiEnvelope,
@@ -456,6 +457,7 @@ function ConversationWorkspace(props: {
   readonly armedRollback?: boolean
   readonly onAskRollback?: (card: RollbackCard) => void
   readonly onDeferRollback?: (card: RollbackCard) => void
+  readonly onPickSkill?: (skill: SkillProjection) => void
 }) {
   const locked = !props.connected
   return (
@@ -506,6 +508,22 @@ function ConversationWorkspace(props: {
         ) : null}
       </div>
       <div>
+        {(props.view.skills ?? []).some((skill) => skill.userInvocable && skill.lifecycle === 'active') ? (
+          <div className="composer-chips" data-skill-chips="true">
+            {(props.view.skills ?? []).filter((skill) => skill.userInvocable && skill.lifecycle === 'active').map((skill) => (
+              <button
+                key={skill.id}
+                type="button"
+                className="button button--secondary"
+                data-skill-chip={skill.name}
+                disabled={locked}
+                onClick={() => props.onPickSkill?.(skill)}
+              >
+                {skill.name}
+              </button>
+            ))}
+          </div>
+        ) : null}
         <form className="composer" aria-label="Send a message" onSubmit={(event: FormEvent) => { event.preventDefault(); props.onSend() }}>
           <label className="sr-only" htmlFor="message">Message TARS-NG</label>
           <textarea
@@ -628,6 +646,9 @@ function ExtensionsWorkspace(props: {
   readonly onAskUninstall?: (plugin: UserPluginView) => void
   readonly onCancelUninstall?: () => void
   readonly onConfirmUninstall?: (plugin: UserPluginView) => void
+  readonly confirmingSkill?: string
+  readonly armedSkill?: string
+  readonly onSkillAction?: (action: 'approve' | 'activate' | 'disable' | 'reactivate' | 'uninstall' | 'rollback', skill?: SkillProjection) => void
 }) {
   return (
     <main className="conversation-panel extensions-panel" id="extensions" data-workspace-pane="extensions">
@@ -729,8 +750,92 @@ function ExtensionsWorkspace(props: {
             })}
           </ul>
         </section>
+        <SkillsCenter
+          view={props.view}
+          locked={props.locked}
+          confirmingSkill={props.confirmingSkill}
+          armedSkill={props.armedSkill}
+          onSkillAction={props.onSkillAction ?? (() => {})}
+        />
       </div>
     </main>
+  )
+}
+
+function SkillsCenter(props: {
+  readonly view: MissionControlView
+  readonly locked: boolean
+  readonly confirmingSkill?: string
+  readonly armedSkill?: string
+  readonly onSkillAction: (action: 'approve' | 'activate' | 'disable' | 'reactivate' | 'uninstall' | 'rollback', skill?: SkillProjection) => void
+}) {
+  const skills = props.view.skills ?? []
+  return (
+    <section className="capability-section" aria-labelledby="skills-title">
+      <h2 id="skills-title">SKILLS</h2>
+      <ul className="workbench-list" data-skills="true">
+        {skills.length === 0 ? (
+          <li className="workbench-item">No Skills in this Profile catalog.</li>
+        ) : skills.map((skill) => (
+          <li
+            key={skill.id}
+            className="workbench-item"
+            data-skill-id={skill.id}
+            data-skill-lifecycle={skill.lifecycle}
+            data-skill-system={skill.system ? 'yes' : 'no'}
+          >
+            <div className="workbench-identity">{skill.name}@{skill.version}</div>
+            <div className="workbench-meta">lifecycle {skill.lifecycle} · {skill.provenance}</div>
+            <div className="workbench-meta">{skill.description}</div>
+            {skill.whenToUse ? <div className="workbench-meta">when {skill.whenToUse}</div> : null}
+            <div className="workbench-meta">
+              invocation model {skill.modelInvocable ? 'yes' : 'no'} · user {skill.userInvocable ? 'yes' : 'no'}
+            </div>
+            {skill.dependsOn.length > 0 ? <div className="workbench-meta">depends on {skill.dependsOn.join(', ')}</div> : null}
+            {skill.resolutionHandoff ? (
+              <div className="workbench-meta" data-skill-handoff="capability-resolution">
+                missing tools {skill.resolutionHandoff.missingTools.join(', ')} · next Capability Resolution
+              </div>
+            ) : null}
+            <div className="approval-actions">
+              {skill.lifecycle === 'approval-requested' ? (
+                <button type="button" className="button button--approval" data-skill-action="approve" disabled={props.locked} onClick={() => props.onSkillAction('approve', skill)}>APPROVE</button>
+              ) : null}
+              {skill.lifecycle === 'approved' ? (
+                <button type="button" className="button button--approval" data-skill-action="activate" disabled={props.locked} onClick={() => props.onSkillAction('activate', skill)}>
+                  {props.armedSkill === `activate:${skill.id}` ? 'CONFIRM ACTIVATE' : 'ACTIVATE'}
+                </button>
+              ) : null}
+              {skill.lifecycle === 'disabled' ? (
+                <button type="button" className="button button--approval" data-skill-action="reactivate" disabled={props.locked} onClick={() => props.onSkillAction('reactivate', skill)}>
+                  {props.armedSkill === `reactivate:${skill.id}` ? 'CONFIRM REACTIVATE' : 'REACTIVATE'}
+                </button>
+              ) : null}
+              {skill.lifecycle === 'active' && !skill.system ? (
+                <button type="button" className="button button--secondary" data-skill-action="disable" disabled={props.locked} onClick={() => props.onSkillAction('disable', skill)}>
+                  {props.armedSkill === `disable:${skill.id}` ? 'CONFIRM DISABLE' : 'DISABLE'}
+                </button>
+              ) : null}
+              {!skill.system && skill.lifecycle !== 'uninstalled' ? (
+                props.confirmingSkill === skill.id ? (
+                  <>
+                    <button type="button" className="button button--secondary" data-skill-action="cancel-uninstall" disabled={props.locked} onClick={() => props.onSkillAction('uninstall')}>CANCEL</button>
+                    <button type="button" className="button button--approval" data-skill-action="confirm-uninstall" disabled={props.locked} onClick={() => props.onSkillAction('uninstall', skill)}>CONFIRM UNINSTALL</button>
+                  </>
+                ) : (
+                  <button type="button" className="button button--secondary" data-skill-action="uninstall" disabled={props.locked} onClick={() => props.onSkillAction('uninstall', skill)}>UNINSTALL</button>
+                )
+              ) : null}
+            </div>
+          </li>
+        ))}
+      </ul>
+      {props.view.skillRollback ? (
+        <button type="button" className="button button--secondary" data-skill-action="rollback" disabled={props.locked} onClick={() => props.onSkillAction('rollback')}>
+          {props.armedSkill === 'rollback' ? 'CONFIRM ROLLBACK' : `ROLLBACK ${props.view.skillRollback.name}@${props.view.skillRollback.version}`}
+        </button>
+      ) : null}
+    </section>
   )
 }
 
@@ -973,6 +1078,10 @@ export function MissionControlScreen(props: {
   readonly onRecovery: (action: 'diagnostics' | 'rollback' | 'exit-safe-mode') => void
   readonly acknowledgement?: { readonly text: string }
   readonly onDismissAcknowledgement?: () => void
+  readonly confirmingSkill?: string
+  readonly armedSkill?: string
+  readonly onSkillAction?: (action: 'approve' | 'activate' | 'disable' | 'reactivate' | 'uninstall' | 'rollback', skill?: SkillProjection) => void
+  readonly onPickSkill?: (skill: SkillProjection) => void
 }) {
   const { view } = props
   const safe = view.systemState === 'SAFE_MODE' || view.systemState === 'RECOVERY'
@@ -1033,6 +1142,9 @@ export function MissionControlScreen(props: {
             onAskUninstall={props.onAskUninstall}
             onCancelUninstall={props.onCancelUninstall}
             onConfirmUninstall={props.onConfirmUninstall}
+            confirmingSkill={props.confirmingSkill}
+            armedSkill={props.armedSkill}
+            onSkillAction={props.onSkillAction}
           />
         ) : (
         <ConversationWorkspace
@@ -1049,6 +1161,7 @@ export function MissionControlScreen(props: {
           armedActivation={props.armedActivation}
           onActivate={props.onActivate ?? (() => {})}
           onDefer={props.onDeferActivation ?? (() => {})}
+          onPickSkill={props.onPickSkill}
           rollback={view.rollback}
           deferredRollback={props.deferredRollback}
           armedRollback={props.armedRollback}
@@ -1087,6 +1200,8 @@ export function App() {
   const [pane, setPane] = useState<WorkspacePane>(paneFromHash)
   const [confirmingSession, setConfirmingSession] = useState<string>()
   const [inspectingExtension, setInspectingExtension] = useState<string>()
+  const [confirmingSkill, setConfirmingSkill] = useState<string>()
+  const [armedSkill, setArmedSkill] = useState<string>()
   const [acknowledgement, setAcknowledgement] = useState<{ readonly text: string }>()
 
   useEffect(() => {
@@ -1209,6 +1324,37 @@ export function App() {
       }}
       inspectingExtension={inspectingExtension}
       onInspectExtension={(id) => { setInspectingExtension((current) => current === id ? undefined : id) }}
+      confirmingSkill={confirmingSkill}
+      armedSkill={armedSkill}
+      onPickSkill={(skill) => {
+        setDraft((current) => current.trim() === '' ? `Use the ${skill.name} skill.` : `${current.trim()} ${skill.name}`)
+      }}
+      onSkillAction={(action, skill) => {
+        if (action === 'uninstall') {
+          if (skill === undefined) {
+            setConfirmingSkill(undefined)
+            return
+          }
+          if (confirmingSkill !== skill.id) {
+            setConfirmingSkill(skill.id)
+            return
+          }
+          setConfirmingSkill(undefined)
+          void act(() => runSkillAction({ action, skill }))
+          return
+        }
+        if (action === 'activate' || action === 'disable' || action === 'reactivate' || action === 'rollback') {
+          const key = action === 'rollback' ? 'rollback' : `${action}:${skill?.id ?? ''}`
+          if (armedSkill !== key) {
+            setArmedSkill(key)
+            return
+          }
+          setArmedSkill(undefined)
+          void act(() => runSkillAction({ action, skill }))
+          return
+        }
+        void act(() => runSkillAction({ action, skill }))
+      }}
       confirmingPlugin={confirmingPlugin}
       onAskUninstall={(plugin) => { setConfirmingPlugin(plugin.id) }}
       onCancelUninstall={() => { setConfirmingPlugin(undefined) }}

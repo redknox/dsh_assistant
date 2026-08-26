@@ -75,6 +75,7 @@ export async function runSelfExtensionCli(argv: string[], hooks: SelfExtensionCl
           fingerprints,
           persistence: diagnostics.persistence,
           reasons: diagnostics.reasons,
+          skills: ctx.get('skillLifecycle')?.health(),
         })))
         return 0
       }

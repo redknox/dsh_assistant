@@ -1,4 +1,4 @@
-import type { ActivationCard, ApprovalCard, MissionControlView, RollbackCard, UserPluginView, WorkObjectKind } from '../../src/domain/workspace/types'
+import type { ActivationCard, ApprovalCard, MissionControlView, RollbackCard, SkillProjection, UserPluginView, WorkObjectKind } from '../../src/domain/workspace/types'
 
 export interface UiEnvelope {
   readonly view: MissionControlView
@@ -67,6 +67,26 @@ export async function decideApproval(card: ApprovalCard, decision: 'approve' | '
       fingerprint: card.fingerprint,
       ...(card.candidateId ? { candidateId: card.candidateId } : {}),
       ...(card.digest ? { digest: card.digest } : {}),
+    }),
+  }))
+}
+
+export async function runSkillAction(input: {
+  readonly action: 'approve' | 'activate' | 'disable' | 'reactivate' | 'uninstall' | 'rollback'
+  readonly skill?: SkillProjection
+  readonly dependents?: readonly string[]
+}): Promise<UiEnvelope> {
+  return parseEnvelope(await fetch('/api/skill', {
+    ...include,
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({
+      action: input.action,
+      id: input.skill?.id,
+      name: input.skill?.name,
+      version: input.skill?.version,
+      fingerprint: input.skill?.approvalFingerprint,
+      dependents: input.dependents ?? input.skill?.dependents ?? [],
     }),
   }))
 }

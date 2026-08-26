@@ -917,4 +917,32 @@ describe('TARS-NG mission-control workspace', () => {
       await ctx.fiber.dispose()
     }
   })
+
+  it('projects Skill lifecycle facts without instruction bodies', () => {
+    const view = projectMissionControl(snapshot({
+      skills: [{
+        id: 'weekly-review@1.0.0',
+        name: 'weekly-review',
+        version: '1.0.0',
+        profile: 'assistant',
+        provenance: 'third-party',
+        origin: 'import',
+        lifecycle: 'active',
+        sealed: true,
+        modelInvocable: true,
+        userInvocable: true,
+        description: 'Guide a weekly review with sk-secretvalue123',
+        resources: ['references/notes.md'],
+        validationPassed: true,
+        reviewComplete: true,
+        digest: 'deadbeefdeadbeef',
+        dependsOn: [],
+        dependents: [],
+        system: false,
+      }],
+    }))
+    assert.ok(view.activity.some((item) => item.summary === 'Skill weekly-review@1.0.0 active' && item.source === 'skill.lifecycle'))
+    assert.doesNotMatch(view.activity.map((item) => item.summary).join('\n'), /Use recall_memory|instruction/)
+    assert.doesNotMatch(view.skills?.[0]?.description ?? '', /sk-secretvalue123/)
+  })
 })

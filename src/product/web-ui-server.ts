@@ -645,6 +645,43 @@ export function startWebUiServer(options: WebUiServerOptions): Promise<WebUiServ
         }
         return
       }
+      if (req.method === 'POST' && requestUrl.pathname === '/api/skill') {
+        const body = JSON.parse(await readBody(req)) as {
+          action?: unknown
+          id?: unknown
+          name?: unknown
+          version?: unknown
+          fingerprint?: unknown
+          dependents?: unknown
+        }
+        const action = String(body.action ?? '')
+        const human = options.recoveryRoot.issueAuthority({ kind: 'human-control', source: 'application-ui' })
+        try {
+          if (action === 'approve') {
+            options.recoveryRoot.approveSkill(String(body.id ?? ''), String(body.fingerprint ?? ''), human)
+          } else if (action === 'activate') {
+            options.recoveryRoot.activateSkill(String(body.id ?? ''), human)
+          } else if (action === 'disable') {
+            options.recoveryRoot.disableSkill(String(body.name ?? ''), human)
+          } else if (action === 'reactivate') {
+            options.recoveryRoot.reactivateSkill(String(body.name ?? ''), String(body.version ?? ''), human)
+          } else if (action === 'uninstall') {
+            const dependents = Array.isArray(body.dependents) ? body.dependents.map((item) => String(item)) : []
+            options.recoveryRoot.uninstallSkill(String(body.name ?? ''), human, dependents)
+          } else if (action === 'rollback') {
+            options.recoveryRoot.rollbackSkill(human)
+          } else {
+            sendJson(res, 400, { error: 'malformed', detail: 'unknown skill action' })
+            return
+          }
+          sendJson(res, 200, envelope({ acknowledgement: { text: `Skill ${action} recorded.` } }))
+          broadcast()
+        } catch (error) {
+          const message = error instanceof Error ? error.message : 'skill action failed'
+          sendJson(res, 409, { error: 'skill-action-denied', detail: redactText(message), view: snapshot(), webUi: url })
+        }
+        return
+      }
       if (req.method === 'POST' && requestUrl.pathname === '/api/uninstall') {
         const body = JSON.parse(await readBody(req)) as {
           id?: unknown

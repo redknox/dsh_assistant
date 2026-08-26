@@ -6,6 +6,8 @@ import { writeJsonAtomic } from '../persistence/atomic.js'
 import { parseAuthorityFile, type AuthorityFile } from './authority-store.js'
 import { parseCandidateIndexFile, resolveCandidateArtifactDir, type CandidateIndexFile, type CandidateIndexRow } from './candidate-index.js'
 import { isolatedRuntimeOwner } from '../generated-runtime/trust.js'
+import { digestSkillFiles, readAllowlistedSkillFiles, skillId } from '../skill/bundle.js'
+import { readSkillIndex } from '../skill/store.js'
 import { PersistenceIntegrityError, PersistenceSchemaError } from './errors.js'
 import { SELF_EXTENSION_SCHEMA_VERSION, selfExtensionPaths } from './home.js'
 
@@ -152,6 +154,7 @@ export function backupSelfExtension(assistantHome: string, dest: string): SelfEx
   mkdirSync(dest, { recursive: true })
   cpSync(home.authorityPath, path.join(dest, 'authority.json'))
   copyRequiredArtifacts(home.candidateArea, path.join(dest, 'candidates'), required)
+  copySkillAuthority(assistantHome, dest)
   const files = listRelativeFiles(dest)
   const manifest: SelfExtensionBackupManifest = {
     kind: BACKUP_KIND,
@@ -184,10 +187,57 @@ export function restoreSelfExtension(source: string, assistantHome: string): voi
     mkdirSync(staging, { recursive: true })
     cpSync(authorityPath, path.join(staging, 'authority.json'))
     copyRequiredArtifacts(sourceArea, path.join(staging, 'candidates'), required)
+    copySkillAuthorityFromBackup(source, staging)
     mkdirSync(path.dirname(dest.root), { recursive: true })
     rmSync(dest.root, { recursive: true, force: true })
     renameSync(staging, dest.root)
   } finally {
     rmSync(staging, { recursive: true, force: true })
+  }
+}
+
+function copySkillAuthority(assistantHome: string, dest: string): void {
+  const root = path.join(selfExtensionPaths(assistantHome).root, 'skills')
+  if (!existsSync(root)) return
+  for (const profile of readdirSync(root)) {
+    if (!statSync(path.join(root, profile)).isDirectory()) continue
+    verifySkillProfile(assistantHome, profile)
+  }
+  cpSync(root, path.join(dest, 'skills'), { recursive: true })
+}
+
+function copySkillAuthorityFromBackup(source: string, staging: string): void {
+  const root = path.join(source, 'skills')
+  if (!existsSync(root)) return
+  for (const profile of readdirSync(root)) {
+    if (!statSync(path.join(root, profile)).isDirectory()) continue
+    verifyCopiedSkillProfile(root, profile)
+  }
+  cpSync(root, path.join(staging, 'skills'), { recursive: true })
+}
+
+function verifySkillProfile(homeRoot: string, profile: string): void {
+  verifyCopiedSkillProfile(path.join(selfExtensionPaths(homeRoot).root, 'skills'), profile)
+}
+
+function verifyCopiedSkillProfile(skillsRoot: string, profile: string): void {
+  const index = readSkillIndex({
+    root: path.join(skillsRoot, profile),
+    profile,
+    indexPath: path.join(skillsRoot, profile, 'index.json'),
+    candidates: path.join(skillsRoot, profile, 'candidates'),
+    staging: path.join(skillsRoot, profile, 'staging'),
+    active: path.join(skillsRoot, profile, 'active'),
+    history: path.join(skillsRoot, profile, 'history'),
+  })
+  for (const [name, version] of Object.entries(index.active)) {
+    const record = index.records.find((item) => item.id === skillId(name, version))
+    const dest = path.join(skillsRoot, profile, 'active', name)
+    if (record === undefined || !existsSync(dest)) {
+      throw new PersistenceIntegrityError(`missing-skill-artifact:${name}`)
+    }
+    if (digestSkillFiles(readAllowlistedSkillFiles(dest)) !== record.digest) {
+      throw new PersistenceIntegrityError(`skill-digest-mismatch:${name}`)
+    }
   }
 }

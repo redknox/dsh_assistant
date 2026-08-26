@@ -264,6 +264,7 @@ async function operatorFromBoot(booted: Awaited<ReturnType<typeof bootAssistantC
     fingerprints,
     persistence: diagnostics.persistence,
     reasons: diagnostics.reasons,
+    skills: ctx.get('skillLifecycle')?.health(),
   })
 }
 

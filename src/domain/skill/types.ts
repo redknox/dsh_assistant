@@ -65,6 +65,10 @@ export interface SkillRecord extends SkillIdentity {
   readonly whenToUse?: string
   readonly dependsOn: readonly SkillDependency[]
   readonly dependents: readonly string[]
+  readonly resolutionHandoff?: {
+    readonly missingTools: readonly string[]
+    readonly nextAction: 'capability-resolution'
+  }
 }
 
 export interface SkillApprovalRecord {
@@ -108,6 +112,10 @@ export interface SkillInspectSummary {
   readonly baseVersion?: string
   readonly dependsOn: readonly SkillDependency[]
   readonly dependents: readonly string[]
+  readonly resolutionHandoff?: {
+    readonly missingTools: readonly string[]
+    readonly nextAction: 'capability-resolution'
+  }
 }
 
 export interface SkillImportResult {
