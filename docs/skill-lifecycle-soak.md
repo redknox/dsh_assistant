@@ -126,6 +126,18 @@ Candidate bytes restored to the sealed digest. WUI **reactivate** bound `weekly-
 
 A **second** isolated Home: `catalog=empty`, no `weekly-review` active directory; restore into a **third** Home reproduced `active=weekly-review@1.0.1` with the same digests. The source Skill Home was unchanged. The second Home stayed empty.
 
+## Append — withheld invocation (`6262c55`)
+
+Active user Skill then the same Skill Home entered Safe Mode (`tars-ng self-extension safe-mode enter`). Packed tarball SHA-256 `cf716729eb148bc0b772a8490accd8333c70ce8cfc3d09038bf46031e3f6c308`. WUI **8799**. Daily 8787 stayed up.
+
+- Live `doctor`: `safe-mode: true`, `doctor-source: live-runtime`, `catalog=withheld`, `active=weekly-review@1.0.1`
+- WUI: `SAFE_MODE`, `skillCatalog.state=withheld`, persisted rows still listed (`1.0.1` active, `1.0.0` disabled)
+- Composer: no Skill chip (`data-skill-chip` count 0)
+- Skills Center: inspectable rows, Disable/Uninstall/Rollback present; no Activate / Reactivate
+- Capability strip: no Skill tool row
+- `POST /api/skill` activate and reactivate with exact id/digest/generation → **409** `catalog-withheld`; lifecycle/digest/generation unchanged
+- Safe Mode exited after the probe; `weekly-review@1.0.1` remained the committed active revision
+
 ## Outcome
 
-Packaged human soak **executed and recorded** against `3db11da`, then append-recorded against `ed6c002`. Acceptance remains a human decision on #94.
+Packaged human soak **executed and recorded** against `3db11da`, then append-recorded against `ed6c002` and `6262c55`. Acceptance remains a human decision on #94.
