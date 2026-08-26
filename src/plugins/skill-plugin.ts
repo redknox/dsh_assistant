@@ -46,7 +46,9 @@ class SkillLifecycleService extends Service {
 
 export async function apply(ctx: Context, config: SkillPluginConfig = {}) {
   if (config.home === undefined) return
-  const store = new SkillService(config.home, config.profile ?? 'assistant')
+  const store = new SkillService(config.home, config.profile ?? 'assistant', undefined, {
+    inspectOnly: config.inspectOnly === true,
+  })
   store.bindReview(ctx.independentReview)
   store.bindKnownTools(() => {
     const names: string[] = []

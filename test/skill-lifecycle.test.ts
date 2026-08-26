@@ -252,6 +252,8 @@ describe('skill lifecycle', () => {
         const listed = await safe.ctx.skills.list({ cwd: isolated })
         assert.equal(listed.some((item) => item.name === 'weekly-review'), false)
         assert.equal(safe.ctx.tools.get('skill'), undefined)
+        assert.equal(safe.diagnostics.safeMode, true)
+        assert.equal(safe.ctx.skillLifecycle.health().catalog, 'withheld')
       } finally {
         await safe.ctx.fiber.dispose()
       }

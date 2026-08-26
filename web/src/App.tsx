@@ -776,9 +776,11 @@ function SkillsCenter(props: {
   return (
     <section className="capability-section" aria-labelledby="skills-title">
       <h2 id="skills-title">SKILLS</h2>
-      {props.view.skillCatalog?.state === 'degraded' ? (
-        <p className="workbench-meta" data-skill-catalog="degraded">
-          catalog degraded{props.view.skillCatalog.failed.length > 0 ? ` · failed ${props.view.skillCatalog.failed.join(', ')}` : ''}
+      {props.view.skillCatalog?.state === 'degraded' || props.view.skillCatalog?.state === 'withheld' ? (
+        <p className="workbench-meta" data-skill-catalog={props.view.skillCatalog.state}>
+          {props.view.skillCatalog.state === 'withheld'
+            ? 'catalog withheld'
+            : `catalog degraded${props.view.skillCatalog.failed.length > 0 ? ` · failed ${props.view.skillCatalog.failed.join(', ')}` : ''}`}
           {props.view.skillCatalog.detail ? ` · ${props.view.skillCatalog.detail}` : ''}
         </p>
       ) : null}

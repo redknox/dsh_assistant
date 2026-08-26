@@ -74,10 +74,12 @@ export class SkillService {
   private rootId?: symbol
   private review?: IndependentReview
   private knownTools?: () => readonly string[]
+  private readonly inspectOnly: boolean
 
-  constructor(homeRoot: string, profile: string, invalidate?: () => void) {
+  constructor(homeRoot: string, profile: string, invalidate?: () => void, options?: { readonly inspectOnly?: boolean }) {
     this.layout = skillStoreLayout(homeRoot, profile)
     this.invalidate = invalidate
+    this.inspectOnly = options?.inspectOnly === true
     ensureSkillStore(this.layout)
     this.recoverInterrupted()
     this.preflightActiveCatalog()
@@ -566,7 +568,7 @@ export class SkillService {
     readonly active: readonly string[]
     readonly disabled: readonly string[]
     readonly failed: readonly string[]
-    readonly catalog: 'ok' | 'empty' | 'degraded'
+    readonly catalog: 'ok' | 'empty' | 'degraded' | 'withheld'
     readonly generation: number
     readonly recoveryRequired: boolean
     readonly catalogDetail?: string
@@ -585,10 +587,13 @@ export class SkillService {
       active,
       disabled: records.filter((item) => item.lifecycle === 'disabled').map((item) => item.id),
       failed: records.filter((item) => item.lastFailure !== undefined).map((item) => item.id),
-      catalog: degraded ? 'degraded' : active.length === 0 ? 'empty' : 'ok',
+      catalog: degraded ? 'degraded' : this.inspectOnly ? 'withheld' : active.length === 0 ? 'empty' : 'ok',
       generation: index.generation,
       recoveryRequired: degraded,
-      ...(index.catalog?.detail ? { catalogDetail: index.catalog.detail } : {}),
+      ...(index.catalog?.detail && !this.inspectOnly ? { catalogDetail: index.catalog.detail } : {}),
+      ...(this.inspectOnly && !degraded
+        ? { catalogDetail: 'persisted Skills remain inspectable; user/third-party catalog is withheld' }
+        : {}),
       ...(rollback ? { rollbackTarget: { name: rollback.name, version: rollback.version, digest: rollback.digest } } : {}),
     }
   }

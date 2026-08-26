@@ -34,6 +34,21 @@ export interface WebUiRuntimeControl {
   readonly normalizedHome: string
   readonly runId: string
   readonly onStop: () => void
+  readonly inspectLive?: () => {
+    readonly safeMode: boolean
+    readonly recoveryRequired: boolean
+    readonly persistence?: string
+    readonly skills?: {
+      readonly profile: string
+      readonly candidates: number
+      readonly active: readonly string[]
+      readonly disabled: readonly string[]
+      readonly failed: readonly string[]
+      readonly catalog: 'ok' | 'empty' | 'degraded' | 'withheld'
+      readonly recoveryRequired?: boolean
+      readonly catalogDetail?: string
+    }
+  }
 }
 
 export interface WebUiServerOptions extends WebUiListenOptions {
@@ -462,6 +477,7 @@ export function startWebUiServer(options: WebUiServerOptions): Promise<WebUiServ
           startedAt: control.startedAt,
           productVersion: control.productVersion,
           normalizedHome: control.normalizedHome,
+          ...(control.inspectLive ? control.inspectLive() : {}),
         })
         return
       }

@@ -187,7 +187,7 @@ async function bootStack(options: BootOptions = {}): Promise<AssistantControl> {
     diagnostics: {
       persistence,
       recoveryRequired: reconstruction.recoveryRequired || persistBroken,
-      safeMode: reconstruction.safeMode || persistBroken,
+      safeMode: safeMode || reconstruction.safeMode || persistBroken,
       reasons: [...opened.diagnostics, ...reconstruction.diagnostics],
     },
   }

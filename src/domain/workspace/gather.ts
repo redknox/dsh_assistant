@@ -247,7 +247,7 @@ function toolEventsFromSession(events: readonly SessionEvent[]): WorkspaceSnapsh
 function skillCatalogOf(ctx: Context): WorkspaceSnapshotInput['skillCatalog'] {
   const skills = ctx.get('skillLifecycle') as {
     health(): {
-      catalog: 'ok' | 'empty' | 'degraded'
+      catalog: 'ok' | 'empty' | 'degraded' | 'withheld'
       failed: readonly string[]
       recoveryRequired: boolean
       catalogDetail?: string

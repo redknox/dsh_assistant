@@ -1,5 +1,5 @@
 import { existsSync, unlinkSync, writeFileSync } from 'node:fs'
-import { operatorStatus } from '../domain/self-extension/status.js'
+import { operatorStatus, type OperatorStatus } from '../domain/self-extension/status.js'
 import { runSelfExtensionCli } from '../runtime/self-extension-cli.js'
 import { bootAssistantControl, createAssistantAgent, type AssistantControl } from '../runtime/boot.js'
 import { inspectCompatibility } from './compatibility.js'
@@ -25,6 +25,7 @@ import {
   readRuntimeIdentity,
   removeLeaseIfRunId,
   runIdEquals,
+  runtimeHealthUrl,
   runtimeStopUrl,
   type RuntimeIdentity,
 } from './runtime-lease.js'
@@ -234,6 +235,72 @@ async function waitUntilStopConfirmed(layout: ProductHomeLayout, identity: Runti
   return current === undefined || !runIdEquals(current.runId, identity.runId) || !processAlive(current.pid)
 }
 
+function withProductSafeMode(context: RuntimeContext): RuntimeContext {
+  if (context.safeMode || context.profileCompositionError !== undefined) {
+    return { ...context, safeMode: true }
+  }
+  try {
+    assertSelectedProfile(context.profile.value)
+    assertAssistantAdapterContract()
+    return context
+  } catch (error) {
+    return {
+      ...context,
+      safeMode: true,
+      profileCompositionError: error instanceof Error ? error.message : 'normal Profile composition failed',
+    }
+  }
+}
+
+function lastStatusSnapshot(last: unknown): {
+  readonly safeMode?: boolean
+  readonly recoveryRequired?: boolean
+  readonly persistence?: string
+  readonly skills?: OperatorStatus['skills']
+} {
+  if (last === null || typeof last !== 'object') return {}
+  const row = last as Record<string, unknown>
+  return {
+    ...(typeof row.safeMode === 'boolean' ? { safeMode: row.safeMode } : {}),
+    ...(typeof row.recoveryRequired === 'boolean' ? { recoveryRequired: row.recoveryRequired } : {}),
+    ...(typeof row.persistence === 'string' ? { persistence: row.persistence } : {}),
+    ...(row.skills !== null && typeof row.skills === 'object' ? { skills: row.skills as OperatorStatus['skills'] } : {}),
+  }
+}
+
+async function readLiveRuntimeDoctor(identity: RuntimeIdentity): Promise<{
+  readonly safeMode: boolean
+  readonly recoveryRequired: boolean
+  readonly persistence?: string
+  readonly skills?: OperatorStatus['skills']
+} | undefined> {
+  if (identity.controlEndpoint === undefined || !isLoopbackControlEndpoint(identity.controlEndpoint)) return undefined
+  try {
+    const response = await fetch(runtimeHealthUrl(identity.controlEndpoint), {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ runId: identity.runId }),
+      signal: AbortSignal.timeout(800),
+    })
+    if (!response.ok) return undefined
+    const body = await response.json() as {
+      safeMode?: unknown
+      recoveryRequired?: unknown
+      persistence?: unknown
+      skills?: OperatorStatus['skills']
+    }
+    if (typeof body.safeMode !== 'boolean') return undefined
+    return {
+      safeMode: body.safeMode,
+      recoveryRequired: body.recoveryRequired === true,
+      ...(typeof body.persistence === 'string' ? { persistence: body.persistence } : {}),
+      ...(body.skills ? { skills: body.skills } : {}),
+    }
+  } catch {
+    return undefined
+  }
+}
+
 async function defaultBootProduct(layout: ProductHomeLayout, allowFixtures: boolean, context?: RuntimeContext, persistSessions = false) {
   return bootAssistantControl({
     home: layout.root,
@@ -337,6 +404,7 @@ export async function runProductCli(
       io.error(error instanceof Error ? error.message : 'runtime context failed')
       return 1
     }
+    if (runtimeContext) runtimeContext = withProductSafeMode(runtimeContext)
   }
   const compatibility = inspectCompatibility()
   if (!compatibility.ok && (parsed.command === 'start' || parsed.command === 'doctor')) {
@@ -378,6 +446,11 @@ export async function runProductCli(
     const inspected = await inspectRuntimeLease(layout)
     const running = inspected.state === 'held'
     const last = readLastStatus(layout)
+    const liveIdentity = running ? readRuntimeIdentity(layout) : undefined
+    const live = liveIdentity ? await readLiveRuntimeDoctor(liveIdentity) : undefined
+    const recorded = lastStatusSnapshot(last)
+    const safeMode = live?.safeMode ?? recorded.safeMode ?? runtimeContext?.safeMode === true
+    const recoveryRequired = live?.recoveryRequired ?? recorded.recoveryRequired ?? runtimeContext?.profileCompositionError !== undefined
     const webUi = running ? (inspected.identity.controlEndpoint ?? webUiFromLast(last)) : undefined
     io.log([
       `${PRODUCT_NAME} ${compatibility.productVersion}`,
@@ -392,6 +465,8 @@ export async function runProductCli(
       runtimeContext ? `profile-identity: ${runtimeContext.profileIdentity}` : 'profile-identity: unresolved',
       runtimeContext ? `workspace: ${runtimeContext.workspaceLabel} (${runtimeContext.workspace.source})` : 'workspace: unresolved',
       runtimeContext ? `session: ${runtimeContext.sessionId.value} (${runtimeContext.sessionId.source})` : 'session: unresolved',
+      `safe-mode: ${safeMode}`,
+      `recovery-required: ${recoveryRequired}`,
       catalogStatusLine(runtimeContext),
       inspected.state === 'ambiguous' ? `lease: ambiguous` : `lease: ${inspected.state}`,
     ].join('\n'))
@@ -410,6 +485,18 @@ export async function runProductCli(
     if (parsed.command === 'doctor') {
       const inspected = await inspectRuntimeLease(layout)
       if (inspected.state === 'held') {
+        const liveIdentity = readRuntimeIdentity(layout)
+        const live = liveIdentity ? await readLiveRuntimeDoctor(liveIdentity) : undefined
+        const recorded = lastStatusSnapshot(readLastStatus(layout))
+        const safeMode = live?.safeMode ?? recorded.safeMode ?? runtimeContext?.safeMode === true
+        const recoveryRequired = live?.recoveryRequired ?? recorded.recoveryRequired ?? runtimeContext?.profileCompositionError !== undefined
+        report = attachRuntimeDoctor(report, {
+          persistence: live?.persistence ?? recorded.persistence ?? 'not-booted',
+          safeMode,
+          recoveryRequired,
+          source: live ? 'live-runtime' : recorded.safeMode !== undefined ? 'last-status' : 'boot',
+          ...(live?.skills ?? recorded.skills ? { skills: live?.skills ?? recorded.skills } : {}),
+        })
         io.log(`${formatDoctorReport(report)}\nhome-owner: verified runtime pid ${inspected.identity.pid} (doctor stayed read-only)`)
         return compatibility.ok ? 0 : 1
       }
@@ -437,16 +524,7 @@ export async function runProductCli(
         if (runtimeContext.profileCompositionError !== undefined) {
           assertRecoveryAdapterContract()
         } else {
-          try {
-            assertAssistantAdapterContract()
-          } catch (error) {
-            runtimeContext = {
-              ...runtimeContext,
-              safeMode: true,
-              profileCompositionError: error instanceof Error ? error.message : 'normal Profile composition failed',
-            }
-            assertRecoveryAdapterContract()
-          }
+          assertAssistantAdapterContract()
         }
         if (!runtimeContext.bound && runtimeContext.profileCompositionError !== undefined) {
           runtimeContext = {
@@ -529,20 +607,24 @@ export async function runProductCli(
       const llm = await inspectLlmRuntime(booted.ctx)
       report = attachRuntimeDoctor(report, {
         persistence: booted.diagnostics.persistence,
-        safeMode: booted.diagnostics.safeMode,
-        recoveryRequired: booted.diagnostics.recoveryRequired,
+        safeMode: booted.diagnostics.safeMode || runtimeContext?.safeMode === true,
+        recoveryRequired: booted.diagnostics.recoveryRequired || runtimeContext?.profileCompositionError !== undefined,
         operator,
         llm,
+        source: 'boot',
+        ...(operator.skills ? { skills: operator.skills } : {}),
       })
       const snapshot = {
         productVersion: report.productVersion,
         home: layout.root,
         safeMode: report.safeMode,
+        recoveryRequired: report.recoveryRequired,
         persistence: report.persistence,
         allowFixtures,
         missingConfiguration: report.missingConfiguration,
         calendar: report.integrations.find((item) => item.capability === 'calendar')?.mode,
         llm: { provider: llm.provider, model: llm.model, routeAvailable: llm.routeAvailable, usable: llm.usable },
+        ...(operator.skills ? { skills: operator.skills } : {}),
         ...(runtimeContext ? {
           profile: runtimeContext.profile.value,
           workspaceIdentity: runtimeContext.workspaceIdentity,
@@ -618,6 +700,15 @@ export async function runProductCli(
             normalizedHome: hold.identity.normalizedHome,
             runId: hold.identity.runId,
             onStop: () => requestStop(),
+            inspectLive: () => {
+              const skills = booted?.ctx.get('skillLifecycle')?.health()
+              return {
+                safeMode: Boolean(booted?.diagnostics.safeMode || runtimeContext?.safeMode),
+                recoveryRequired: Boolean(booted?.diagnostics.recoveryRequired || runtimeContext?.profileCompositionError),
+                persistence: booted?.diagnostics.persistence,
+                ...(skills ? { skills } : {}),
+              }
+            },
           },
         })
       } catch (error) {
@@ -631,12 +722,12 @@ export async function runProductCli(
       writerStillActive = true
       const bound = web
       detach = attachWebUiBroadcast(booted.ctx, () => bound.notify())
-      await hooks.afterWebUiBound?.(bound)
       if (!hold.publishControlEndpoint(bound.url)) {
         throw new Error('failed to publish loopback control endpoint')
       }
       writeLastStatus(layout, { ...snapshot, webUi: bound.url })
       writePidFile(layout)
+      await hooks.afterWebUiBound?.(bound)
       io.log(`TARS-NG is running.\nWeb UI: ${bound.url}\nHome: ${layout.root}`)
       await stopped
       if (!await shutdownWriter()) {

@@ -28,7 +28,7 @@ export interface OperatorStatus {
     readonly active: readonly string[]
     readonly disabled: readonly string[]
     readonly failed: readonly string[]
-    readonly catalog: 'ok' | 'empty' | 'degraded'
+    readonly catalog: 'ok' | 'empty' | 'degraded' | 'withheld'
     readonly recoveryRequired?: boolean
     readonly catalogDetail?: string
   }

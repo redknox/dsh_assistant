@@ -225,7 +225,7 @@ export interface MissionControlView {
   readonly approvals: readonly ApprovalCard[]
   readonly skills?: readonly SkillProjection[]
   readonly skillCatalog?: {
-    readonly state: 'ok' | 'empty' | 'degraded'
+    readonly state: 'ok' | 'empty' | 'degraded' | 'withheld'
     readonly failed: readonly string[]
     readonly recoveryRequired: boolean
     readonly detail?: string
@@ -454,7 +454,7 @@ export interface WorkspaceSnapshotInput {
   readonly approvalOrigins?: Readonly<Record<string, string>>
   readonly skills?: readonly SkillProjection[]
   readonly skillCatalog?: {
-    readonly state: 'ok' | 'empty' | 'degraded'
+    readonly state: 'ok' | 'empty' | 'degraded' | 'withheld'
     readonly failed: readonly string[]
     readonly recoveryRequired: boolean
     readonly detail?: string
