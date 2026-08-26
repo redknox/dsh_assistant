@@ -1,6 +1,6 @@
 # DSH-native Skill lifecycle
 
-Status: **in progress**. The host lifecycle is Implemented in this repository; packaged human soak and issue #94 close-out are not complete.
+Status: **in progress**. The host lifecycle is Implemented in this repository; a packaged human soak is recorded in [skill-lifecycle-soak.md](./skill-lifecycle-soak.md) and is **not accepted**. Issue #94 stays open.
 
 A Skill is declarative instruction plus bounded resources. It cannot create a tool, grant permission, execute code, or replace policy. Missing executable capability still goes through Capability Resolution and the governed extension lifecycle.
 

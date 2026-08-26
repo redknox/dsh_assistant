@@ -1,0 +1,77 @@
+# Skill lifecycle packaged human soak record
+
+Status: **recorded, not accepted**. Issue #94 stays open until this soak is accepted. Do not close #94, merge as “Verified”, bump the product version, or claim v0.4.0 Skill lifecycle complete from this file.
+
+This is not `test/packaging.test.ts` and not `test/skill-lifecycle.test.ts`. Those remain scripted coverage.
+
+Do not paste credentials, tokens, home paths, candidate source dumps, or instruction bodies into this file.
+
+## Identity
+
+| Field | Value |
+| --- | --- |
+| Date | 2026-08-26 |
+| Commit | `3db11daa258fa4fe1c268ba9db3fc96ce913c54d` |
+| Package | `dsh-assistant@0.3.0` packed tarball `dsh-assistant-0.3.0.tgz` |
+| Tarball SHA-256 | `77c53ed33e4bb41fac76db96fb1f85cbc883e808aabf49c601c7a4c98babf42f` |
+| Install | `npm install --omit=dev` of that tarball into a clean prefix |
+| Home | isolated temp Home (`TARS_NG_HOME`); daily `127.0.0.1:8787` Home was not used or stopped |
+| Web UI | packed `dist/web` on loopback port **8799** (`TARS_NG_UI_PORT`) |
+| Profile identity | `v1:f151980e5483a185518db82be340a1d4b2ae06441fe3c73f2c8f3236761e5b81` |
+| LLM | `deepseek-official` / `deepseek-v4-flash` (credential present by name only) |
+| Fixtures | `TARS_NG_ALLOW_FIXTURES` unset |
+
+## Checklist
+
+| #94 step | Result |
+| --- | --- |
+| Start with no user Skills; ambient Skills not discovered | Packed `doctor` / first start: `skills: catalog=empty candidates=0 active=(none)`. WUI Skills Center: “No Skills in this Profile catalog.” |
+| Ask TARS-NG to draft a harmless Skill | Conversation: `plan_skill` → `create_skill_candidate` → inspect/list/read. Activity: `Skill weekly-review@1.0.0 draft`. |
+| Inspect and validate | `validate_skill` then `seal_skill`. Activity: `validate`, `seal`. |
+| Independent Review + exact approval | `request_skill_review` then `request_skill_approval`. WUI Skills Center **APPROVE** / **CONFIRM APPROVE**. Lifecycle `approved` while catalog stayed `empty`. |
+| Unavailable before activation | `skillCatalog.state=empty`; no composer chip until activate. |
+| Activate from WUI; invoke in a topic conversation | **ACTIVATE** / **CONFIRM ACTIVATE**. Catalog `ok`, chip `weekly-review`. New conversation + chip “Use the weekly-review skill.” Activity: `COMPLETED skill`, then `recall_memory` / `retrieve_knowledge` only (no calendar/mail/shell). |
+| Restart and invoke again | `tars-ng stop` of the soak Home only; daily 8787 stayed up. Restart `doctor`: `catalog=ok active=weekly-review@1.0.0`. New conversation after a fresh UI cookie; invoke posted again. |
+| v2 with a visible instruction change | Fork `weekly-review@1.0.1`. Digest `f8e0841b69cf8dfecfdffd63e90e7816fad0f25de4d7dd23628001d9b7f05c88`. Fingerprint `afc2565c2de1a05379d31708ef4bf702fce6d0a841070c61076e2f3295c28e40`. Approve + activate. `1.0.0` became `disabled`; catalog `ok` on `1.0.1`. |
+| Disable, reactivate, uninstall, rollback | Disable `1.0.1` → catalog `empty`. Reactivate restored `1.0.0` active. Uninstall exact `weekly-review@1.0.0` → `uninstalled`, catalog `empty`. Rollback restored `1.0.0` active, catalog `ok`. |
+| Import one equivalent local third-party Skill from outside the package | Same name/version as sealed `1.0.0` → `import-duplicate-conflict`. Outside copy bumped to `2.0.0` only: `tars-ng skill import-local` → `weekly-review@2.0.0` `provenance.kind=third-party` `lifecycle=imported` `nextAction=validate`. |
+| One malformed/symlink bundle rejection | Symlink `SKILL.md` → `skill-boundary: symlink rejected: SKILL.md` (exit 1). Catalog unchanged. |
+| Safe Mode: user/third-party Skills withheld | Bound Home start with shipped `profiles/assistant` removed: live WUI `systemState=SAFE_MODE`, `runtimeContext.safeMode=true`. Skills remain inspectable in the Center; capability list had no Skill-tool chip. CLI `doctor` still printed `safe-mode: false` (see limitations). Profile restored before leaving the soak prefix. |
+
+### Bounded Skill ids
+
+| Id | Digest (sha256) | Notes |
+| --- | --- | --- |
+| `weekly-review@1.0.0` | `351f49a1f41e3f5cfa07b03db6920982bf39bbd0939a380050269c522835e8c4` | Assistant-authored v1; later uninstalled then rollback-active |
+| `weekly-review@1.0.1` | `f8e0841b69cf8dfecfdffd63e90e7816fad0f25de4d7dd23628001d9b7f05c88` | v2 fork; instruction change (first-line marker in the live body, not copied here) |
+| `weekly-review@2.0.0` | (imported, unsealed) | Operator CLI third-party equivalent |
+
+## Commands used (no secrets)
+
+```sh
+npm run build
+npm pack
+npm install --omit=dev --prefix <clean-prefix> ./dsh-assistant-0.3.0.tgz
+TARS_NG_HOME=<isolated-home> TARS_NG_UI_PORT=8799 tars-ng doctor --home <isolated-home> --workspace <ws> --session-root <sessions>
+tars-ng start --once --home <isolated-home> --workspace <ws> --session-root <sessions>
+tars-ng skill import-local <outside-dir> --home <isolated-home>
+tars-ng start --home <isolated-home> --workspace <ws> --session-root <sessions>
+tars-ng stop --home <isolated-home>
+```
+
+Trusted WUI actions used `POST /api/skill` with `confirm: true` and exact id/name/version/digest/generation (and approval fingerprint when approving).
+
+## Limitations
+
+- Operator XDG env had Calendar token **present**; soak prompts forbade calendar/mail/filesystem/network tools. The invoke path observed `skill` + memory + knowledge only.
+- After restart, a stale WUI cookie shows `Web UI session is untrusted; reload the page.` Reload is required. One post-restart soak process was stopped (product `lifecycle stop`); the soak Home was started again. Daily 8787 was not that stop target.
+- Global Activity does not isolate per-conversation `COMPLETED skill` rows; post-restart invoke is recorded by new session id + message, not a unique activity id.
+- `reactivate` after disabling `1.0.1` bound the disabled `1.0.0` row first (name-based). Uninstall/rollback were still exercised on exact ids.
+- Same-name same-version third-party import is refused (`import-duplicate-conflict`). Equivalent import used version `2.0.0`.
+- CLI `doctor` `safe-mode:` can disagree with live WUI `SAFE_MODE` when the assistant Profile patch is missing. Live withhold evidence is the WUI view, not that doctor line.
+- `start --once` with a missing Profile still printed `safe-mode: false` and `catalog=ok`; full `start` was required to observe Safe Mode.
+- This record does not accept #94. No tag, no version bump.
+
+## Outcome
+
+Packaged human soak **executed and recorded** against PR head `3db11da`. Acceptance remains a human decision on #94.
