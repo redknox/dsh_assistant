@@ -22,6 +22,7 @@ import type {
   RollbackPlan,
   ApprovalRecord,
   ApprovalSummary,
+  InspectSummary,
   EligibilityDenial,
   EligibilityResult,
   ExtensionActivation,
@@ -177,9 +178,13 @@ export class GovernanceService implements ExtensionGovernance, ExtensionActivati
     return this.approvals.get(candidateId)
   }
 
-  inspectSummary(candidateId: string): ApprovalSummary {
+  inspectSummary(candidateId: string): InspectSummary {
     const { record, diff } = this.candidateView(candidateId)
-    return approvalSummary(record, diff)
+    return {
+      ...approvalSummary(record, diff),
+      lifecycle: record.lifecycle,
+      sealed: record.sealed,
+    }
   }
 
   eligibility(candidateId: string): EligibilityResult {

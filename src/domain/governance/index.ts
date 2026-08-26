@@ -10,6 +10,7 @@ export type {
   ApprovalFingerprintInput,
   ApprovalRecord,
   ApprovalSummary,
+  InspectSummary,
   EligibilityDenial,
   EligibilityResult,
   ExtensionActivation,

@@ -83,7 +83,14 @@ export async function runSelfExtensionCli(argv: string[], hooks: SelfExtensionCl
         return 0
       }
       if (command === 'inspect') {
-        console.log(JSON.stringify(ctx.extensionGovernance.inspectSummary(String(rest[0])), null, 2))
+        const candidateId = String(rest[0])
+        const record = ctx.candidateWorkspace.get(candidateId)
+        const summary = ctx.extensionGovernance.inspectSummary(candidateId)
+        console.log(JSON.stringify({
+          ...summary,
+          lifecycle: record.lifecycle,
+          sealed: record.sealed,
+        }, null, 2))
         return 0
       }
       if (command === 'diff') {

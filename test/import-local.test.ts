@@ -279,6 +279,8 @@ describe('local third-party import', () => {
     const summary = setup.root.service.inspectSummary(imported.candidateId)
     assert.equal(summary.owner, 'third-party/text-reverse')
     assert.equal(summary.candidateVersion, '1.0.0')
+    assert.equal(summary.lifecycle, 'developing')
+    assert.equal(summary.sealed, false)
     assert.equal(summary.digest, '')
     assert.equal(summary.validationPassed, false)
     assert.equal('fingerprint' in summary, false)
@@ -286,6 +288,27 @@ describe('local third-party import', () => {
     assert.equal(setup.root.service.inspectApproval(imported.candidateId), undefined)
     assert.throws(() => setup.root.service.requestApproval(imported.candidateId), /not-sealed|not-validated|review-required/)
     assert.equal(setup.root.service.inspectApproval(imported.candidateId), undefined)
+  })
+
+  it('inspects imported validate-then-seal states without a fingerprint', () => {
+    const setup = isolatedImport()
+    const imported = importLocalExtension(importArgs(setup, FIXTURE))
+    const report = setup.workspace.validate(imported.candidateId)
+    assert.equal(report.passed, true, JSON.stringify(report.stages.filter((item) => item.status !== 'passed' && item.status !== 'not-applicable')))
+    const afterValidate = setup.root.service.inspectSummary(imported.candidateId)
+    assert.equal(afterValidate.lifecycle, 'validated')
+    assert.equal(afterValidate.validationPassed, true)
+    assert.equal(afterValidate.sealed, false)
+    assert.ok((afterValidate.digest ?? '').length > 0)
+    assert.equal('fingerprint' in afterValidate, false)
+    assert.throws(() => setup.root.service.requestApproval(imported.candidateId), /not-sealed/)
+    const sealed = setup.workspace.seal(imported.candidateId)
+    const afterSeal = setup.root.service.inspectSummary(sealed.id)
+    assert.equal(afterSeal.sealed, true)
+    assert.equal(afterSeal.validationPassed, true)
+    assert.equal('fingerprint' in afterSeal, false)
+    assert.throws(() => setup.root.service.requestApproval(sealed.id), /review-required/)
+    assert.equal(setup.root.service.inspectApproval(sealed.id), undefined)
   })
 
   it('validates, reviews, approves, and activates only in the isolated runner', async () => {
@@ -455,7 +478,15 @@ describe('import-local CLI inspect', () => {
       logs.length = 0
       const inspectImported = await runSelfExtensionCli(['inspect', 'third-party--text-reverse@1.0.0'])
       assert.equal(inspectImported, 0, errors.join('\n'))
-      const importedSummary = JSON.parse(logs.join('\n')) as { digest?: string; validationPassed?: boolean; fingerprint?: string }
+      const importedSummary = JSON.parse(logs.join('\n')) as {
+        digest?: string
+        validationPassed?: boolean
+        fingerprint?: string
+        lifecycle?: string
+        sealed?: boolean
+      }
+      assert.equal(importedSummary.lifecycle, 'developing')
+      assert.equal(importedSummary.sealed, false)
       assert.equal(importedSummary.digest, '')
       assert.equal(importedSummary.validationPassed, false)
       assert.equal(importedSummary.fingerprint, undefined)
@@ -466,6 +497,46 @@ describe('import-local CLI inspect', () => {
       assert.equal(requestImported, 1)
       assert.match(errors.join('\n'), /not-sealed|not-validated|review-required/)
       assert.doesNotMatch(errors.join('\n'), /at |Error: candidate digest|\/Users\/|src\/plugin/)
+
+      logs.length = 0
+      errors.length = 0
+      const inspectValidated = await runSelfExtensionCli(['inspect', 'third-party--text-reverse@1.0.0'], {
+        boot: async () => {
+          const control = await bootAssistantControl({ home })
+          const report = control.ctx.candidateValidation.validate('third-party--text-reverse@1.0.0')
+          assert.equal(report.passed, true)
+          return control
+        },
+      })
+      assert.equal(inspectValidated, 0, errors.join('\n'))
+      const validatedSummary = JSON.parse(logs.join('\n')) as { validationPassed?: boolean; sealed?: boolean; fingerprint?: string }
+      assert.equal(validatedSummary.validationPassed, true)
+      assert.equal(validatedSummary.sealed, false)
+      assert.equal(validatedSummary.fingerprint, undefined)
+      logs.length = 0
+      errors.length = 0
+      const requestValidated = await runSelfExtensionCli(['request-approval', 'third-party--text-reverse@1.0.0'])
+      assert.equal(requestValidated, 1)
+      assert.match(errors.join('\n'), /not-sealed/)
+
+      logs.length = 0
+      errors.length = 0
+      const inspectSealed = await runSelfExtensionCli(['inspect', 'third-party--text-reverse@1.0.0'], {
+        boot: async () => {
+          const control = await bootAssistantControl({ home })
+          control.ctx.candidateWorkspace.seal('third-party--text-reverse@1.0.0')
+          return control
+        },
+      })
+      assert.equal(inspectSealed, 0, errors.join('\n'))
+      const sealedSummary = JSON.parse(logs.join('\n')) as { sealed?: boolean; fingerprint?: string }
+      assert.equal(sealedSummary.sealed, true)
+      assert.equal(sealedSummary.fingerprint, undefined)
+      logs.length = 0
+      errors.length = 0
+      const requestSealed = await runSelfExtensionCli(['request-approval', 'third-party--text-reverse@1.0.0'])
+      assert.equal(requestSealed, 1)
+      assert.match(errors.join('\n'), /review-required/)
 
       const generatedId = 'generated--inspect-pending@0.1.0'
       logs.length = 0
@@ -494,8 +565,17 @@ describe('import-local CLI inspect', () => {
         },
       })
       assert.equal(inspectGenerated, 0, errors.join('\n'))
-      const generatedSummary = JSON.parse(logs.join('\n')) as { owner?: string; digest?: string; validationPassed?: boolean; fingerprint?: string }
+      const generatedSummary = JSON.parse(logs.join('\n')) as {
+        owner?: string
+        digest?: string
+        validationPassed?: boolean
+        fingerprint?: string
+        lifecycle?: string
+        sealed?: boolean
+      }
       assert.equal(generatedSummary.owner, 'generated/inspect-pending')
+      assert.equal(generatedSummary.lifecycle, 'planned')
+      assert.equal(generatedSummary.sealed, false)
       assert.equal(generatedSummary.digest, '')
       assert.equal(generatedSummary.validationPassed, false)
       assert.equal(generatedSummary.fingerprint, undefined)

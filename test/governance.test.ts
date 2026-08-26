@@ -126,12 +126,41 @@ describe('extension governance and recovery', () => {
     const summary = governance.inspectSummary(candidate.id)
     assert.equal(summary.owner, 'generated/matter-home')
     assert.equal(summary.candidateVersion, '0.1.0')
+    assert.equal(summary.lifecycle, 'planned')
+    assert.equal(summary.sealed, false)
     assert.equal(summary.digest, '')
     assert.equal(summary.validationPassed, false)
     assert.equal('fingerprint' in summary, false)
     assert.equal(governance.inspectApproval(candidate.id), undefined)
     assert.throws(() => governance.requestApproval(candidate.id), GovernanceContractError)
     assert.equal(governance.inspectApproval(candidate.id), undefined)
+  })
+
+  it('inspects validated and sealed generated candidates without a fingerprint', () => {
+    const { workspace, governance } = seeded()
+    const candidate = workspace.create({
+      review: review({ kind: 'new-plugin', capability: 'matter.light.set', need: 'matter', target: undefined }),
+      owner: 'generated/matter-home',
+      version: '0.1.0',
+      manifest: { capabilities: ['matter.light.set'], permissions: [], runtimeSeams: [], tools: [] },
+    })
+    workspace.writeFile(candidate.id, 'src/ok.ts', 'export const value: string = "ok"\n')
+    const validated = workspace.validate(candidate.id)
+    assert.equal(validated.passed, true)
+    const afterValidate = governance.inspectSummary(candidate.id)
+    assert.equal(afterValidate.lifecycle, 'validated')
+    assert.equal(afterValidate.validationPassed, true)
+    assert.equal(afterValidate.sealed, false)
+    assert.equal('fingerprint' in afterValidate, false)
+    assert.throws(() => governance.requestApproval(candidate.id), GovernanceContractError)
+    const sealed = workspace.seal(candidate.id)
+    const afterSeal = governance.inspectSummary(sealed.id)
+    assert.equal(afterSeal.sealed, true)
+    assert.ok(afterSeal.digest.length > 0)
+    assert.equal(afterSeal.validationPassed, true)
+    assert.equal('fingerprint' in afterSeal, false)
+    assert.throws(() => governance.requestApproval(sealed.id), GovernanceContractError)
+    assert.equal(governance.inspectApproval(sealed.id), undefined)
   })
 
   it('A. denies activation without approval', async () => {
