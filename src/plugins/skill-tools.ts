@@ -11,13 +11,18 @@ function textOutput() {
   }
 }
 
+export const SKILL_INSPECT_TOOLS = ['inspect_skill'] as const
+
 export const SKILL_WORKBENCH_TOOLS = [
   'plan_skill',
   'create_skill_candidate',
   'inspect_skill',
+  'list_skill_files',
+  'read_skill_file',
+  'write_skill_file',
   'validate_skill',
   'seal_skill',
-  'review_skill',
+  'request_skill_review',
   'request_skill_approval',
 ] as const
 
@@ -26,7 +31,27 @@ function bounded(error: unknown): string {
   return JSON.stringify({ error: message.split(/\r?\n/, 1)[0] })
 }
 
-export function registerSkillTools(ctx: Context, skills: SkillService): void {
+export function registerSkillTools(
+  ctx: Context,
+  skills: SkillService,
+  options: { readonly inspectOnly?: boolean } = {},
+): void {
+  ctx.tools.register(defineTool({
+    name: 'inspect_skill',
+    description: 'Inspect a Skill candidate lifecycle without computing an approval fingerprint.',
+    parameters: { candidateId: { type: 'string', required: true } },
+    output: textOutput(),
+    async execute(args) {
+      try {
+        return JSON.stringify(skills.inspect(String(args.candidateId ?? '')))
+      } catch (error) {
+        return bounded(error)
+      }
+    },
+  }))
+
+  if (options.inspectOnly) return
+
   ctx.tools.register(defineTool({
     name: 'plan_skill',
     description: 'Plan an inactive Skill candidate. Does not approve or activate.',
@@ -59,13 +84,51 @@ export function registerSkillTools(ctx: Context, skills: SkillService): void {
     },
   }))
   ctx.tools.register(defineTool({
-    name: 'inspect_skill',
-    description: 'Inspect a Skill candidate lifecycle without computing an approval fingerprint.',
+    name: 'list_skill_files',
+    description: 'List allowlisted files in an inactive Skill candidate.',
     parameters: { candidateId: { type: 'string', required: true } },
     output: textOutput(),
     async execute(args) {
       try {
-        return JSON.stringify(skills.inspect(String(args.candidateId ?? '')))
+        return JSON.stringify({ files: skills.listFiles(String(args.candidateId ?? '')) })
+      } catch (error) {
+        return bounded(error)
+      }
+    },
+  }))
+  ctx.tools.register(defineTool({
+    name: 'read_skill_file',
+    description: 'Read one allowlisted Skill candidate file.',
+    parameters: {
+      candidateId: { type: 'string', required: true },
+      path: { type: 'string', required: true },
+    },
+    output: textOutput(),
+    async execute(args) {
+      try {
+        return skills.readFile(String(args.candidateId ?? ''), String(args.path ?? ''))
+      } catch (error) {
+        return bounded(error)
+      }
+    },
+  }))
+  ctx.tools.register(defineTool({
+    name: 'write_skill_file',
+    description: 'Write one allowlisted Skill candidate file. A sealed edit creates a new revision.',
+    parameters: {
+      candidateId: { type: 'string', required: true },
+      path: { type: 'string', required: true },
+      content: { type: 'string', required: true },
+    },
+    output: textOutput(),
+    async execute(args) {
+      try {
+        const record = skills.writeFile(
+          String(args.candidateId ?? ''),
+          String(args.path ?? ''),
+          String(args.content ?? ''),
+        )
+        return JSON.stringify({ id: record.id, lifecycle: record.lifecycle, sealed: record.sealed, digest: record.digest })
       } catch (error) {
         return bounded(error)
       }
@@ -100,14 +163,20 @@ export function registerSkillTools(ctx: Context, skills: SkillService): void {
     },
   }))
   ctx.tools.register(defineTool({
-    name: 'review_skill',
-    description: 'Request Independent Review of a sealed Skill candidate.',
+    name: 'request_skill_review',
+    description: 'Submit a sealed Skill candidate to Independent Review. Does not self-certify review.',
     parameters: { candidateId: { type: 'string', required: true } },
     output: textOutput(),
     async execute(args) {
       try {
-        const record = skills.review(String(args.candidateId ?? ''))
-        return JSON.stringify({ id: record.id, lifecycle: record.lifecycle, reviewComplete: record.reviewComplete })
+        const { record, report } = skills.requestReview(String(args.candidateId ?? ''), ctx.independentReview)
+        return JSON.stringify({
+          id: record.id,
+          lifecycle: record.lifecycle,
+          reviewComplete: record.reviewComplete,
+          reviewState: report.state,
+          approvalStatus: report.approvalStatus,
+        })
       } catch (error) {
         return bounded(error)
       }
@@ -120,7 +189,7 @@ export function registerSkillTools(ctx: Context, skills: SkillService): void {
     output: textOutput(),
     async execute(args) {
       try {
-        return JSON.stringify(skills.requestApproval(String(args.candidateId ?? '')))
+        return JSON.stringify(skills.requestApproval(String(args.candidateId ?? ''), ctx.independentReview))
       } catch (error) {
         return bounded(error)
       }

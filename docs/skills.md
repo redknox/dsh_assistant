@@ -8,8 +8,9 @@ Approval of a Skill means: allow this exact instruction bundle into the active c
 
 | Actor | May |
 | --- | --- |
-| Assistant | plan, create, edit, validate, seal, request Independent Review, request approval |
-| Human / operator CLI / WUI | exact approval, activation, disable, reactivate, uninstall, rollback, local import |
+| Assistant | plan, create, edit, validate, seal, submit Independent Review, request approval |
+| Human / Recovery Root | exact approval, activation, disable, reactivate, uninstall, rollback |
+| Operator CLI | local import plus the Recovery Root actions above |
 | DSH `ctx.skills` | discover and load the active materialized catalog |
 
 There is no model-facing or browser path picker. Marketplace, URL, npm, and GitHub install are out of scope.
@@ -28,9 +29,11 @@ The filesystem provider reads only `$TARS_NG_HOME/self-extension/skills/<profile
 
 ```sh
 tars-ng skill import-local <directory>
+tars-ng skill approve <id> <fingerprint>
+tars-ng skill activate <id>
 ```
 
-Import publishes an inactive `third-party/import` candidate. Validate → seal → Independent Review → exact approval → separate activation remain distinct.
+Import publishes an inactive `third-party/import` candidate. Validate → seal → Independent Review (`ctx.independentReview`) → exact Recovery Root approval → separate activation remain distinct. Model tools cannot approve or activate.
 
 ## Scope
 

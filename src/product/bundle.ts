@@ -62,7 +62,10 @@ export async function apply(ctx: Context, config: AssistantBundleConfig = {}) {
     ...config.workbench,
     inspectOnly: config.safeMode === true,
   })
-  await ctx.plugin(skillPlugin, config.skills)
+  await ctx.plugin(skillPlugin, {
+    ...config.skills,
+    inspectOnly: config.safeMode === true,
+  })
   if (config.safeMode) return
   await ctx.plugin(memoryPlugin, config.memory)
   await ctx.plugin(knowledgePlugin, config.knowledge)
@@ -82,6 +85,7 @@ export const SAFE_MODE_TOOL_NAMES = [
   'inspect_candidate',
   'inspect_candidate_review',
   'inspect_validation_diagnostics',
+  'inspect_skill',
 ] as const
 
 export const PRODUCT_TOOL_NAMES = [

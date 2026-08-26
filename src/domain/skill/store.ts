@@ -71,6 +71,14 @@ export function activeDir(layout: SkillStoreLayout, name: string): string {
   return path.join(layout.active, name)
 }
 
+export function outgoingDir(layout: SkillStoreLayout, name: string): string {
+  return path.join(layout.history, `outgoing-${name}`)
+}
+
+export function incomingDir(layout: SkillStoreLayout, name: string): string {
+  return stagingDir(layout, `incoming-${name}`)
+}
+
 export function encodeSkillId(id: string): string {
   return id.replace('@', '--')
 }
@@ -84,9 +92,49 @@ export function publishSkillFiles(dest: string, files: Readonly<Record<string, s
 }
 
 export function atomicPublishDirectory(staging: string, finalDir: string): void {
-  if (existsSync(finalDir)) rmSync(finalDir, { recursive: true, force: true })
   mkdirSync(path.dirname(finalDir), { recursive: true })
-  renameSync(staging, finalDir)
+  if (!existsSync(finalDir)) {
+    renameSync(staging, finalDir)
+    return
+  }
+  throw new SkillContractError('skill-txn', 'refusing to replace an existing skill directory in place')
+}
+
+export function replaceActiveDirectory(input: {
+  readonly incoming: string
+  readonly dest: string
+  readonly outgoing: string
+  readonly interrupt?: 'after-outgoing' | 'after-incoming'
+}): { readonly outgoingKept: boolean } {
+  discardDir(input.outgoing)
+  mkdirSync(path.dirname(input.dest), { recursive: true })
+  let outgoingKept = false
+  if (existsSync(input.dest)) {
+    renameSync(input.dest, input.outgoing)
+    outgoingKept = true
+    if (input.interrupt === 'after-outgoing') throw new SkillContractError('skill-interrupt', 'after-outgoing')
+  }
+  try {
+    renameSync(input.incoming, input.dest)
+    if (input.interrupt === 'after-incoming') throw new SkillContractError('skill-interrupt', 'after-incoming')
+    return { outgoingKept }
+  } catch (error) {
+    if (outgoingKept && !existsSync(input.dest) && existsSync(input.outgoing)) {
+      renameSync(input.outgoing, input.dest)
+    }
+    throw error
+  }
+}
+
+export function retireActiveDirectory(dest: string, outgoing: string, interrupt?: 'after-outgoing'): void {
+  discardDir(outgoing)
+  if (!existsSync(dest)) return
+  renameSync(dest, outgoing)
+  if (interrupt === 'after-outgoing') throw new SkillContractError('skill-interrupt', 'after-outgoing')
+}
+
+export function restoreRetiredDirectory(dest: string, outgoing: string): void {
+  if (!existsSync(dest) && existsSync(outgoing)) renameSync(outgoing, dest)
 }
 
 export function discardDir(target: string): void {
@@ -103,4 +151,19 @@ export function upsertRecord(index: SkillIndex, record: SkillRecord): SkillIndex
 export function listActiveSkillNames(layout: SkillStoreLayout): string[] {
   if (!existsSync(layout.active)) return []
   return readdirSync(layout.active).filter((name) => statSync(path.join(layout.active, name)).isDirectory()).sort()
+}
+
+export function listInterruptedSkillNames(layout: SkillStoreLayout): string[] {
+  const names = new Set(listActiveSkillNames(layout))
+  if (existsSync(layout.history)) {
+    for (const entry of readdirSync(layout.history)) {
+      if (entry.startsWith('outgoing-')) names.add(entry.slice('outgoing-'.length))
+    }
+  }
+  if (existsSync(layout.staging)) {
+    for (const entry of readdirSync(layout.staging)) {
+      if (entry.startsWith('incoming-')) names.add(entry.replace(/^incoming-/, ''))
+    }
+  }
+  return [...names].sort()
 }

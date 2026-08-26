@@ -71,6 +71,7 @@ function usage(): string {
     import-local <directory>   trusted operator only; no model or browser path
   skill <subcommand>
     import-local <directory>   trusted operator only; inactive third-party Skill candidate
+    approve <id> <fingerprint> | activate <id> | disable <name> | uninstall <name> | rollback
 
 TARS-NG home defaults to $TARS_NG_HOME, then $DSH_ASSISTANT_HOME, then ~/.local/share/tars-ng.
 Runtime context precedence: CLI → environment → $TARS_NG_HOME/config/product.json → defaults (profile=assistant, workspace=$HOME/workspace, sessions=$HOME/sessions, session-id=main).
@@ -316,13 +317,8 @@ export async function runProductCli(
     return code
   }
   if (parsed.command === 'skill') {
-    const [action, directory] = parsed.rest
-    if (action !== 'import-local') {
-      io.error('skill import-local <directory>')
-      return 1
-    }
-    const { importLocalSkill } = await import('../runtime/skill-cli-import.js')
-    return importLocalSkill(String(directory ?? ''), parsed.home)
+    const { runSkillCli } = await import('../runtime/skill-cli-import.js')
+    return runSkillCli([...parsed.rest], parsed.home)
   }
   const envFiles = loadEnvFiles(layout)
   const userConfig = readProductUserConfig(layout)

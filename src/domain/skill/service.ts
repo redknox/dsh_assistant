@@ -1,20 +1,33 @@
-import { createHash } from 'node:crypto'
+import { createHash, randomUUID } from 'node:crypto'
 import { existsSync, readFileSync } from 'node:fs'
 import path from 'node:path'
 import { Context } from '@deepseek-ai/cordis'
 import SkillRegistry, { renderSkillContent } from '@deepseek-ai/dsh-skill'
 import * as skillFilesystem from '@deepseek-ai/dsh-skill-filesystem'
+import { TrustedAuthorityCredential } from '../governance/types.js'
+import { REVIEW_POLICY_VERSION, type IndependentReview, type ReviewPackage, type ReviewReport } from '../review/types.js'
 import { SkillAuthorityError, SkillContractError } from './errors.js'
-import { digestSkillFiles, inspectSkillDirectory, parseSkillMarkdown, skillId, STRICT_SEMVER } from './bundle.js'
+import {
+  applyHostSkillLimits,
+  digestSkillFiles,
+  readAllowlistedSkillFiles,
+  skillId,
+  STRICT_SEMVER,
+} from './bundle.js'
 import {
   activeDir,
   atomicPublishDirectory,
   candidateDir,
   discardDir,
   ensureSkillStore,
-  listActiveSkillNames,
+  incomingDir,
+  listInterruptedSkillNames,
+  outgoingDir,
   publishSkillFiles,
   readSkillIndex,
+  replaceActiveDirectory,
+  restoreRetiredDirectory,
+  retireActiveDirectory,
   skillStoreLayout,
   stagingDir,
   upsertRecord,
@@ -22,23 +35,36 @@ import {
   type SkillStoreLayout,
 } from './store.js'
 import type {
+  SkillApprovalRecord,
   SkillImportResult,
   SkillInspectSummary,
+  SkillInvocationPolicy,
   SkillLifecycle,
   SkillProvenance,
   SkillRecord,
 } from './types.js'
 
 const DEFAULT_VERSION = '1.0.0'
+const DEFAULT_INVOCATION: SkillInvocationPolicy = { modelInvocable: true, userInvocable: true }
+
+export type SkillInterrupt = 'after-outgoing' | 'after-incoming' | 'after-index'
 
 export class SkillService {
   readonly layout: SkillStoreLayout
+  interruptAfter?: SkillInterrupt
   private invalidate?: () => void
+  private rootId?: symbol
 
   constructor(homeRoot: string, profile: string, invalidate?: () => void) {
     this.layout = skillStoreLayout(homeRoot, profile)
     this.invalidate = invalidate
     ensureSkillStore(this.layout)
+    this.recoverInterrupted()
+    this.preflightActiveCatalog()
+  }
+
+  bindRoot(rootId: symbol): void {
+    this.rootId = rootId
   }
 
   attachInvalidation(invalidate: () => void): void {
@@ -75,29 +101,42 @@ export class SkillService {
     }
   }
 
+  listFiles(id: string): readonly string[] {
+    return Object.keys(this.readCandidateFiles(id)).sort()
+  }
+
+  readFile(id: string, relativePath: string): string {
+    const content = this.readCandidateFiles(id)[relativePath]
+    if (content === undefined) throw new SkillContractError('skill-boundary', `unknown skill file: ${relativePath}`)
+    return content
+  }
+
   create(input: { readonly name: string; readonly description: string; readonly body: string; readonly whenToUse?: string }): SkillRecord {
+    applyHostSkillLimits({ name: input.name, description: input.description, content: input.body })
     const version = nextVersion(this.layout, input.name)
-    const files = {
-      'SKILL.md': skillMarkdown(input.name, input.description, input.body, input.whenToUse),
-    }
     return this.publishCandidate({
       name: input.name,
       version,
-      files,
+      files: { 'SKILL.md': skillMarkdown(input.name, input.description, input.body, input.whenToUse) },
       provenance: { kind: 'assistant-authored', origin: 'assistant' },
       lifecycle: 'drafted',
+      invocation: DEFAULT_INVOCATION,
+      description: input.description,
+      whenToUse: input.whenToUse,
     })
   }
 
-  importLocal(sourceDir: string): SkillImportResult {
-    const inspected = inspectSkillDirectory(sourceDir, {
-      version: hostVersionHint(sourceDir) ?? DEFAULT_VERSION,
-      provenance: { kind: 'third-party', origin: 'import' },
-    })
-    const id = skillId(inspected.name, inspected.version)
+  async importLocal(sourceDir: string): Promise<SkillImportResult> {
+    const files = readAllowlistedSkillFiles(sourceDir)
+    const loaded = await loadThroughDshCatalog(sourceDir)
+    applyHostSkillLimits(loaded)
+    const version = hostVersionHint(sourceDir) ?? DEFAULT_VERSION
+    if (!STRICT_SEMVER.test(version)) throw new SkillContractError('skill-version', `invalid skill version: ${version}`)
+    const plannedDigest = digestSkillFiles(files)
+    const id = skillId(loaded.name, version)
     const existing = readSkillIndex(this.layout).records.find((item) => item.id === id)
     if (existing) {
-      if (existing.digest === inspected.plannedDigest) {
+      if (existing.digest === plannedDigest) {
         return {
           status: 'duplicate',
           candidateId: existing.id,
@@ -112,11 +151,14 @@ export class SkillService {
       throw new SkillContractError('import-duplicate-conflict', `same name/version already imported with different bytes: ${id}`)
     }
     const record = this.publishCandidate({
-      name: inspected.name,
-      version: inspected.version,
-      files: inspected.files,
+      name: loaded.name,
+      version,
+      files,
       provenance: { kind: 'third-party', origin: 'import' },
       lifecycle: 'imported',
+      invocation: loaded.invocation,
+      description: loaded.description,
+      whenToUse: loaded.whenToUse,
     })
     return {
       status: 'imported',
@@ -132,38 +174,55 @@ export class SkillService {
 
   writeFile(id: string, relativePath: string, content: string): SkillRecord {
     const record = this.get(id)
-    if (record.sealed) throw new SkillContractError('skill-sealed', 'editing a sealed skill creates a new revision')
     if (record.lifecycle === 'active') throw new SkillAuthorityError('active skills are not writable')
-    const root = candidateDir(this.layout, id)
-    const current = readBundleFiles(root)
+    const current = this.readCandidateFiles(id)
     current[relativePath] = content
-    if (relativePath === 'SKILL.md') parseSkillMarkdown(content)
-    publishSkillFiles(root, current)
+    if (relativePath === 'SKILL.md') applyHostSkillLimits({
+      name: record.name,
+      description: record.description,
+      content,
+    })
+    if (record.sealed) {
+      const version = nextVersion(this.layout, record.name)
+      return this.publishCandidate({
+        name: record.name,
+        version,
+        files: current,
+        provenance: record.provenance,
+        lifecycle: 'drafted',
+        invocation: record.invocation,
+        description: record.description,
+        whenToUse: record.whenToUse,
+        baseVersion: record.version,
+      })
+    }
+    publishSkillFiles(candidateDir(this.layout, id), current)
     return this.update(id, (item) => ({
       ...item,
       digest: digestSkillFiles(current),
       resources: Object.keys(current).filter((name) => name !== 'SKILL.md').sort(),
-      description: parseSkillMarkdown(current['SKILL.md'] ?? '').description,
     }))
   }
 
   async validate(id: string): Promise<SkillRecord> {
     const record = this.get(id)
-    const loaded = await loadThroughDshProvider(candidateDir(this.layout, id), record.name)
+    const loaded = await loadThroughDshCatalog(candidateDir(this.layout, id))
     if (loaded.name !== record.name) throw new SkillContractError('skill-name', 'DSH parser name does not match host identity')
+    applyHostSkillLimits(loaded)
     return this.update(id, (item) => ({
       ...item,
       lifecycle: 'validated',
       validationPassed: true,
       description: loaded.description,
       whenToUse: loaded.whenToUse,
+      invocation: loaded.invocation,
     }))
   }
 
   seal(id: string): SkillRecord {
     const record = this.get(id)
     if (!record.validationPassed) throw new SkillContractError('not-validated', 'skill must be validated before seal')
-    const digest = digestSkillFiles(readBundleFiles(candidateDir(this.layout, id)))
+    const digest = digestSkillFiles(this.readCandidateFiles(id))
     return this.update(id, (item) => ({
       ...item,
       lifecycle: 'sealed',
@@ -172,17 +231,27 @@ export class SkillService {
     }))
   }
 
-  review(id: string): SkillRecord {
+  requestReview(id: string, review: IndependentReview): { readonly record: SkillRecord; readonly report: ReviewReport } {
     const record = this.get(id)
     if (!record.sealed) throw new SkillContractError('not-sealed', 'skill must be sealed before independent review')
-    return this.update(id, (item) => ({ ...item, lifecycle: 'review-complete', reviewComplete: true }))
+    if (!record.validationPassed) throw new SkillContractError('not-validated', 'skill must be validated before independent review')
+    const report = review.review(skillReviewPackage(record))
+    const complete = report.state === 'review-complete' && report.digest === record.digest
+    const updated = this.update(id, (item) => ({
+      ...item,
+      lifecycle: complete ? 'review-complete' : item.lifecycle,
+      reviewComplete: complete,
+    }))
+    return { record: updated, report }
   }
 
-  requestApproval(id: string): { readonly fingerprint: string; readonly record: SkillRecord } {
+  requestApproval(id: string, review: IndependentReview): { readonly fingerprint: string; readonly record: SkillRecord } {
     const record = this.get(id)
     if (!record.sealed) throw new SkillContractError('not-sealed', 'skill must be sealed before approval can be requested')
     if (!record.validationPassed) throw new SkillContractError('not-validated', 'skill must be validated before approval can be requested')
-    if (!record.reviewComplete) throw new SkillContractError('review-required', 'independent review is required before approval can be requested')
+    if (review.status({ id: record.id, digest: record.digest }) !== 'review-complete') {
+      throw new SkillContractError('review-required', 'independent review is required before approval can be requested')
+    }
     const fingerprint = fingerprintOf(record)
     const updated = this.update(id, (item) => ({
       ...item,
@@ -193,19 +262,37 @@ export class SkillService {
     return { fingerprint, record: updated }
   }
 
-  approve(id: string, fingerprint: string): SkillRecord {
+  approve(id: string, fingerprint: string, credential: TrustedAuthorityCredential): SkillRecord {
+    this.assertTrusted(credential)
     const record = this.get(id)
     const expected = fingerprintOf(record)
     if (fingerprint !== expected) throw new SkillContractError('digest-mismatch', 'approval fingerprint does not match the exact skill revision')
-    return this.update(id, (item) => ({
-      ...item,
-      lifecycle: 'approved',
-      approvalDecision: 'approved-for-exact-diff',
+    const approval: SkillApprovalRecord = {
+      id: randomUUID(),
+      skillId: record.id,
+      fingerprint: expected,
+      decision: 'approved-for-exact-diff',
+      authority: credential.authority,
+      createdAt: new Date().toISOString(),
+      digest: record.digest,
+      resources: record.resources,
+    }
+    const next = {
+      ...record,
+      lifecycle: 'approved' as SkillLifecycle,
+      approvalDecision: 'approved-for-exact-diff' as const,
       approvalFingerprint: expected,
-    }))
+    }
+    const index = readSkillIndex(this.layout)
+    writeSkillIndex(this.layout, {
+      ...upsertRecord(index, next),
+      approvals: [...(index.approvals ?? []), approval],
+    })
+    return next
   }
 
-  activate(id: string): SkillRecord {
+  activate(id: string, credential: TrustedAuthorityCredential): SkillRecord {
+    this.assertTrusted(credential)
     const record = this.get(id)
     if (record.approvalDecision !== 'approved-for-exact-diff') {
       throw new SkillContractError('approval-required', 'skill approval does not activate; human activation is required')
@@ -213,83 +300,97 @@ export class SkillService {
     if (fingerprintOf(record) !== record.approvalFingerprint) {
       throw new SkillContractError('digest-mismatch', 'stale skill approval cannot activate')
     }
-    const source = candidateDir(this.layout, id)
-    const files = readBundleFiles(source)
+    const files = this.readCandidateFiles(id)
     if (digestSkillFiles(files) !== record.digest) {
       throw new SkillContractError('digest-mismatch', 'skill candidate bytes no longer match the sealed digest')
     }
     const previous = readSkillIndex(this.layout)
     const dest = activeDir(this.layout, record.name)
-    const staging = stagingDir(this.layout, `active-${record.id}`)
+    const incoming = incomingDir(this.layout, record.name)
+    const outgoing = outgoingDir(this.layout, record.name)
     try {
-      discardDir(staging)
-      publishSkillFiles(staging, files)
-      atomicPublishDirectory(staging, dest)
+      discardDir(incoming)
+      publishSkillFiles(incoming, files)
+      replaceActiveDirectory({
+        incoming,
+        dest,
+        outgoing,
+        interrupt: this.interruptAfter === 'after-outgoing' || this.interruptAfter === 'after-incoming'
+          ? this.interruptAfter
+          : undefined,
+      })
     } catch (error) {
-      discardDir(staging)
+      if (error instanceof SkillContractError && error.code === 'skill-interrupt') throw error
+      discardDir(incoming)
+      restoreRetiredDirectory(dest, outgoing)
       throw error
     }
-    const next = this.update(id, (item) => ({ ...item, lifecycle: 'active' as SkillLifecycle }))
-    const index = readSkillIndex(this.layout)
-    const superseded = index.records.map((item) => (
-      item.name === record.name && item.id !== record.id && item.lifecycle === 'active'
-        ? { ...item, lifecycle: 'disabled' as SkillLifecycle }
-        : item
-    ))
-    writeSkillIndex(this.layout, {
-      ...index,
-      records: superseded.some((item) => item.id === next.id) ? superseded : [...superseded, next],
-      active: { ...index.active, [record.name]: record.version },
+    const next = { ...record, lifecycle: 'active' as SkillLifecycle }
+    const committed = {
+      ...previous,
+      records: previous.records.map((item) => (
+        item.id === next.id
+          ? next
+          : item.name === record.name && item.lifecycle === 'active'
+            ? { ...item, lifecycle: 'disabled' as SkillLifecycle }
+            : item
+      )),
+      active: { ...previous.active, [record.name]: record.version },
       lastActive: previous.active[record.name] !== undefined
         ? { name: record.name, version: previous.active[record.name]! }
-        : index.lastActive,
-    })
+        : previous.lastActive,
+    }
+    if (!committed.records.some((item) => item.id === next.id)) committed.records = [...committed.records, next]
+    try {
+      if (this.interruptAfter === 'after-index') throw new SkillContractError('skill-interrupt', 'after-index')
+      writeSkillIndex(this.layout, committed)
+    } catch (error) {
+      if (!(error instanceof SkillContractError && error.code === 'skill-interrupt')) {
+        restoreRetiredDirectory(dest, outgoing)
+      }
+      throw error
+    }
+    discardDir(outgoing)
     this.invalidate?.()
     return this.get(id)
   }
 
-  disable(name: string): void {
+  disable(name: string, credential: TrustedAuthorityCredential): void {
+    this.assertTrusted(credential)
     const index = readSkillIndex(this.layout)
     const version = index.active[name]
     if (version === undefined) throw new SkillContractError('unknown-skill', `no active skill: ${name}`)
     const record = this.get(skillId(name, version))
     if (record.provenance.kind === 'system') throw new SkillAuthorityError('system skills cannot be uninstalled')
-    discardDir(activeDir(this.layout, name))
-    const { [name]: _removed, ...active } = index.active
-    writeSkillIndex(this.layout, {
-      ...index,
-      active,
-      lastActive: { name, version },
-      records: index.records.map((item) => item.id === record.id ? { ...item, lifecycle: 'disabled' } : item),
-    })
-    this.invalidate?.()
+    this.retireActive(name, version, 'disabled')
   }
 
-  uninstall(name: string, acknowledgedDependents: readonly string[] = []): void {
+  uninstall(name: string, credential: TrustedAuthorityCredential, acknowledgedDependents: readonly string[] = []): void {
+    this.assertTrusted(credential)
     const index = readSkillIndex(this.layout)
     const version = index.active[name] ?? index.records.find((item) => item.name === name)?.version
     if (version === undefined) throw new SkillContractError('unknown-skill', `unknown skill: ${name}`)
     const record = this.get(skillId(name, version))
     if (record.provenance.kind === 'system') throw new SkillAuthorityError('system skills cannot be uninstalled')
-    if (record.dependents.length > 0 && !sameSet(record.dependents, acknowledgedDependents)) {
-      throw new SkillContractError('dependents', `hard dependents must be acknowledged: ${record.dependents.join(', ')}`)
+    const dependents = this.dependentsOf(name)
+    if (dependents.length > 0 && !sameSet(dependents, acknowledgedDependents)) {
+      throw new SkillContractError('dependents', `hard dependents must be acknowledged: ${dependents.join(', ')}`)
     }
-    discardDir(activeDir(this.layout, name))
-    const { [name]: _removed, ...active } = index.active
-    writeSkillIndex(this.layout, {
-      ...index,
-      active,
-      lastActive: { name, version },
-      records: index.records.map((item) => item.name === name && item.lifecycle === 'active' ? { ...item, lifecycle: 'uninstalled' } : item),
-    })
-    this.invalidate?.()
+    if (index.active[name] !== undefined) this.retireActive(name, version, 'uninstalled')
+    else {
+      writeSkillIndex(this.layout, {
+        ...index,
+        records: index.records.map((item) => item.name === name ? { ...item, lifecycle: 'uninstalled' } : item),
+      })
+    }
   }
 
-  reactivate(name: string, version: string): SkillRecord {
-    return this.activate(skillId(name, version))
+  reactivate(name: string, version: string, credential: TrustedAuthorityCredential): SkillRecord {
+    return this.activate(skillId(name, version), credential)
   }
 
-  rollback(): SkillRecord | undefined {
+  rollback(credential: TrustedAuthorityCredential): SkillRecord | undefined {
+    this.assertTrusted(credential)
     const index = readSkillIndex(this.layout)
     const prior = index.lastActive
     if (prior === undefined) throw new SkillContractError('no-rollback', 'no prior active skill revision')
@@ -297,7 +398,11 @@ export class SkillService {
     if (record.approvalDecision !== 'approved-for-exact-diff') {
       throw new SkillContractError('approval-required', 'rollback target is not an approved skill revision')
     }
-    return this.activate(record.id)
+    return this.activate(record.id, credential)
+  }
+
+  approvals(): readonly SkillApprovalRecord[] {
+    return readSkillIndex(this.layout).approvals ?? []
   }
 
   activeRoot(): string {
@@ -305,7 +410,117 @@ export class SkillService {
   }
 
   catalogNames(): string[] {
-    return listActiveSkillNames(this.layout)
+    return Object.keys(readSkillIndex(this.layout).active).sort()
+  }
+
+  health(): {
+    readonly candidates: number
+    readonly active: readonly string[]
+    readonly disabled: readonly string[]
+    readonly failed: readonly string[]
+  } {
+    const records = this.list()
+    return {
+      candidates: records.filter((item) => item.lifecycle !== 'active' && item.lifecycle !== 'uninstalled').length,
+      active: records.filter((item) => item.lifecycle === 'active').map((item) => item.id),
+      disabled: records.filter((item) => item.lifecycle === 'disabled').map((item) => item.id),
+      failed: [],
+    }
+  }
+
+  private retireActive(name: string, version: string, lifecycle: 'disabled' | 'uninstalled'): void {
+    const dest = activeDir(this.layout, name)
+    const outgoing = outgoingDir(this.layout, name)
+    const index = readSkillIndex(this.layout)
+    try {
+      retireActiveDirectory(dest, outgoing, this.interruptAfter === 'after-outgoing' ? 'after-outgoing' : undefined)
+    } catch (error) {
+      restoreRetiredDirectory(dest, outgoing)
+      throw error
+    }
+    const { [name]: _removed, ...active } = index.active
+    const committed = {
+      ...index,
+      active,
+      lastActive: { name, version },
+      records: index.records.map((item) => (
+        item.name === name && (item.lifecycle === 'active' || item.id === skillId(name, version))
+          ? { ...item, lifecycle }
+          : item
+      )),
+    }
+    try {
+      if (this.interruptAfter === 'after-index') throw new SkillContractError('skill-interrupt', 'after-index')
+      writeSkillIndex(this.layout, committed)
+    } catch (error) {
+      restoreRetiredDirectory(dest, outgoing)
+      throw error
+    }
+    discardDir(outgoing)
+    this.invalidate?.()
+  }
+
+  private recoverInterrupted(): void {
+    for (const name of listInterruptedSkillNames(this.layout)) {
+      const dest = activeDir(this.layout, name)
+      const outgoing = outgoingDir(this.layout, name)
+      const incoming = incomingDir(this.layout, name)
+      const index = readSkillIndex(this.layout)
+      if (!existsSync(dest) && existsSync(outgoing)) restoreRetiredDirectory(dest, outgoing)
+      if (existsSync(dest) && existsSync(incoming)) discardDir(incoming)
+      if (existsSync(dest) && existsSync(outgoing)) {
+        const version = index.active[name]
+        const record = version === undefined ? undefined : index.records.find((item) => item.id === skillId(name, version))
+        if (record !== undefined && digestSkillFiles(readAllowlistedSkillFiles(dest)) !== record.digest) {
+          discardDir(dest)
+          restoreRetiredDirectory(dest, outgoing)
+        } else {
+          discardDir(outgoing)
+        }
+      }
+      if (existsSync(dest) && index.active[name] === undefined) {
+        discardDir(dest)
+      }
+    }
+  }
+
+  private preflightActiveCatalog(): void {
+    const index = readSkillIndex(this.layout)
+    for (const [name, version] of Object.entries(index.active)) {
+      const record = index.records.find((item) => item.id === skillId(name, version))
+      if (record === undefined) {
+        throw new SkillContractError('skill-integrity', `active skill ${name} is missing a committed record`)
+      }
+      if (record.approvalDecision !== 'approved-for-exact-diff' || record.approvalFingerprint !== fingerprintOf(record)) {
+        throw new SkillContractError('skill-integrity', `active skill ${name} is missing committed authority`)
+      }
+      const dest = activeDir(this.layout, name)
+      if (!existsSync(dest)) {
+        throw new SkillContractError('skill-integrity', `active skill artifact is missing: ${name}`)
+      }
+      if (digestSkillFiles(readAllowlistedSkillFiles(dest)) !== record.digest) {
+        throw new SkillContractError('skill-integrity', `active skill artifact digest mismatch: ${name}`)
+      }
+    }
+  }
+
+  private dependentsOf(name: string): string[] {
+    const index = readSkillIndex(this.layout)
+    const deps: string[] = []
+    for (const item of index.records) {
+      if (item.name === name || item.lifecycle === 'uninstalled') continue
+      try {
+        const files = readAllowlistedSkillFiles(candidateDir(this.layout, item.id))
+        if (Object.values(files).some((text) => text.includes(name))) deps.push(item.id)
+      } catch {
+        continue
+      }
+    }
+    return deps
+  }
+
+  private readCandidateFiles(id: string): Record<string, string> {
+    return readAllowlistedSkillFiles(candidateDir(this.layout, this.get(id).id))
   }
 
   private publishCandidate(input: {
@@ -314,11 +529,14 @@ export class SkillService {
     readonly files: Readonly<Record<string, string>>
     readonly provenance: SkillProvenance
     readonly lifecycle: SkillLifecycle
+    readonly invocation: SkillInvocationPolicy
+    readonly description: string
+    readonly whenToUse?: string
+    readonly baseVersion?: string
   }): SkillRecord {
     const id = skillId(input.name, input.version)
     const index = readSkillIndex(this.layout)
     const activeVersion = index.active[input.name]
-    const parsed = parseSkillMarkdown(input.files['SKILL.md'] ?? '')
     const record: SkillRecord = {
       id,
       name: input.name,
@@ -327,15 +545,15 @@ export class SkillService {
       provenance: input.provenance,
       profile: this.layout.profile,
       lifecycle: input.lifecycle,
-      invocation: parsed.invocation,
+      invocation: input.invocation,
       sealed: false,
       validationPassed: false,
       reviewComplete: false,
-      baseVersion: activeVersion !== undefined && activeVersion !== input.version ? activeVersion : undefined,
+      baseVersion: input.baseVersion ?? (activeVersion !== undefined && activeVersion !== input.version ? activeVersion : undefined),
       resources: Object.keys(input.files).filter((name) => name !== 'SKILL.md').sort(),
-      description: parsed.description,
-      whenToUse: parsed.whenToUse,
-      dependents: [],
+      description: input.description,
+      whenToUse: input.whenToUse,
+      dependents: this.dependentsOf(input.name),
     }
     const staging = stagingDir(this.layout, id)
     const finalDir = candidateDir(this.layout, id)
@@ -359,6 +577,16 @@ export class SkillService {
     const next = map(current)
     writeSkillIndex(this.layout, upsertRecord(index, next))
     return next
+  }
+
+  private assertTrusted(credential: TrustedAuthorityCredential): void {
+    if (
+      this.rootId === undefined
+      || !(credential instanceof TrustedAuthorityCredential)
+      || !credential.issuedBy(this.rootId)
+    ) {
+      throw new SkillAuthorityError('skill authority requires a credential issued by the recovery root')
+    }
   }
 }
 
@@ -395,20 +623,38 @@ function skillMarkdown(name: string, description: string, body: string, whenToUs
   return `---\nname: ${name}\ndescription: ${description}\n${extra}---\n${body.endsWith('\n') ? body : `${body}\n`}`
 }
 
-function readBundleFiles(root: string): Record<string, string> {
-  return inspectSkillDirectory(root, { version: DEFAULT_VERSION, provenance: { kind: 'third-party', origin: 'import' } }).files
-}
-
 function sameSet(left: readonly string[], right: readonly string[]): boolean {
   return left.length === right.length && left.every((item) => right.includes(item))
 }
 
-export async function loadThroughDshProvider(skillDir: string, name: string): Promise<{
+export function skillReviewPackage(record: SkillRecord): ReviewPackage {
+  return {
+    policyVersion: REVIEW_POLICY_VERSION,
+    candidate: {
+      id: record.id,
+      owner: `skill/${record.name}`,
+      version: record.version,
+      digest: record.digest,
+      sealed: record.sealed,
+    },
+    riskClass: 'R0',
+    validationPassed: record.validationPassed,
+    validationStages: [{ name: 'dsh-skill-parse', status: record.validationPassed ? 'passed' : 'failed' }],
+    permissionDiff: { added: [] },
+    effectDiff: { kind: 'skill-instruction', resources: record.resources },
+    generated: record.provenance.kind !== 'system',
+    priorFindings: [],
+  }
+}
+
+export async function loadThroughDshCatalog(skillDir: string): Promise<{
   readonly name: string
   readonly description: string
   readonly whenToUse?: string
   readonly content: string
   readonly rendered: string
+  readonly invocation: SkillInvocationPolicy
+  readonly metadata?: Readonly<Record<string, unknown>>
 }> {
   const ctx = new Context()
   await ctx.plugin(SkillRegistry)
@@ -419,16 +665,38 @@ export async function loadThroughDshProvider(skillDir: string, name: string): Pr
     customSkillDirs: [skillDir],
   })
   try {
-    const skill = await ctx.skills.get(name, { cwd: skillDir })
-    if (skill === undefined) throw new SkillContractError('not-validated', `DSH skill provider could not load ${name}`)
+    const listed = await ctx.skills.list({ cwd: skillDir })
+    if (listed.length !== 1) {
+      throw new SkillContractError('not-validated', 'DSH skill provider could not load exactly one skill from the bundle')
+    }
+    const skill = await ctx.skills.get(listed[0]!.name, { cwd: skillDir })
+    if (skill === undefined) throw new SkillContractError('not-validated', `DSH skill provider could not load ${listed[0]!.name}`)
     return {
       name: skill.name,
       description: skill.description,
       whenToUse: skill.whenToUse,
       content: skill.content,
       rendered: renderSkillContent(skill),
+      invocation: {
+        modelInvocable: skill.invocation?.modelInvocable !== false,
+        userInvocable: skill.invocation?.userInvocable !== false,
+      },
+      metadata: skill.metadata,
     }
   } finally {
     await ctx.fiber.dispose()
   }
 }
+
+export async function loadThroughDshProvider(skillDir: string, name: string): Promise<{
+  readonly name: string
+  readonly description: string
+  readonly whenToUse?: string
+  readonly content: string
+  readonly rendered: string
+}> {
+  const loaded = await loadThroughDshCatalog(skillDir)
+  if (loaded.name !== name) throw new SkillContractError('skill-name', 'DSH parser name does not match host identity')
+  return loaded
+}
+

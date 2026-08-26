@@ -54,12 +54,27 @@ export interface SkillRecord extends SkillIdentity {
   readonly dependents: readonly string[]
 }
 
+export interface SkillApprovalRecord {
+  readonly id: string
+  readonly skillId: string
+  readonly fingerprint: string
+  readonly decision: 'approved-for-exact-diff'
+  readonly authority: {
+    readonly kind: 'human-control'
+    readonly source: 'application-ui' | 'recovery-root' | 'operator-cli'
+  }
+  readonly createdAt: string
+  readonly digest: string
+  readonly resources: readonly string[]
+}
+
 export interface SkillIndex {
   readonly schemaVersion: typeof SKILL_SCHEMA_VERSION
   readonly profile: string
   readonly records: readonly SkillRecord[]
   readonly active: Record<string, string>
   readonly lastActive?: { readonly name: string; readonly version: string }
+  readonly approvals?: readonly SkillApprovalRecord[]
 }
 
 export interface SkillInspectSummary {
