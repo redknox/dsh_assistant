@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { mkdirSync, mkdtempSync, symlinkSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { describe, it } from 'node:test'
@@ -34,9 +34,10 @@ function parse(result: { isError: boolean; value?: unknown }) {
 }
 
 function isolatedImport() {
+  const area = mkdtempSync(path.join(tmpdir(), 'dsh-import-'))
   const registry = new RegistryService(new InMemoryRegistryPersistence())
   bootstrapCoreInventory((input) => registry.register(input))
-  const workspace = new CandidateService(registry, mkdtempSync(path.join(tmpdir(), 'dsh-import-')))
+  const workspace = new CandidateService(registry, area)
   const independent = new ReviewService(undefined, (id) => workspace.get(id), { hostLineage: true })
   const root = new RecoveryRoot(registry, workspace, undefined, { independentReview: independent })
   const workbench = new WorkbenchService(
@@ -47,7 +48,32 @@ function isolatedImport() {
     root.service,
     { registry },
   )
-  return { registry, workspace, workbench, root, independent }
+  return { area, registry, workspace, workbench, root, independent }
+}
+
+function importArgs(setup: ReturnType<typeof isolatedImport>, sourceDir: string) {
+  return { sourceDir, workspace: setup.workspace, workbench: setup.workbench, registry: setup.registry }
+}
+
+async function governAndActivate(
+  ctx: Awaited<ReturnType<typeof bootAssistantControl>>['ctx'],
+  recoveryRoot: Awaited<ReturnType<typeof bootAssistantControl>>['recoveryRoot'],
+  candidateId: string,
+): Promise<void> {
+  const report = ctx.candidateValidation.validate(candidateId)
+  assert.equal(report.passed, true, JSON.stringify(report.stages.filter((item) => item.status !== 'passed' && item.status !== 'not-applicable')))
+  ctx.candidateWorkbench.seal(candidateId)
+  const reviewed = ctx.candidateWorkbench.review(candidateId)
+  assert.equal(reviewed.state, 'review-complete')
+  const requested = ctx.extensionGovernance.requestApproval(candidateId)
+  const human = recoveryRoot.issueAuthority({ kind: 'human-control', source: 'operator-cli' })
+  recoveryRoot.recordApproval(human, {
+    candidateId,
+    fingerprint: String(requested.fingerprint),
+    decision: 'approved-for-exact-diff',
+  })
+  const activated = await recoveryRoot.activate(candidateId, human)
+  assert.equal(activated.state, 'active', activated.lastFailure?.diagnostics)
 }
 
 function writeBundle(dir: string, overrides: { version?: string; extra?: Record<string, unknown>; plugin?: string } = {}) {
@@ -81,11 +107,7 @@ describe('local third-party import', () => {
   it('imports a valid local v1 bundle as an inactive third-party candidate', () => {
     const setup = isolatedImport()
     const before = setup.registry.list({ status: 'active' }).map((item) => `${item.owner}@${item.version}`).sort()
-    const imported = importLocalExtension({
-      sourceDir: FIXTURE,
-      workspace: setup.workspace,
-      workbench: setup.workbench,
-    })
+    const imported = importLocalExtension(importArgs(setup, FIXTURE))
     assert.equal(imported.status, 'imported')
     assert.equal(imported.owner, 'third-party/text-reverse')
     assert.equal(imported.version, '1.0.0')
@@ -94,6 +116,7 @@ describe('local third-party import', () => {
     assert.equal(imported.nextAction, 'validate')
     const record = setup.workspace.get(imported.candidateId)
     assert.equal(record.lifecycle, 'developing')
+    assert.equal(record.baseVersion, undefined)
     assert.equal(record.manifest.runtimeContractVersion, 'generated-extension-api/v1')
     assert.equal(setup.registry.get(record.owner, record.version), undefined)
     assert.deepEqual(
@@ -114,7 +137,7 @@ describe('local third-party import', () => {
     const dir = writeBundle(mkdtempSync(path.join(tmpdir(), 'claim-')), {
       extra: { provenance: 'dsh-official', owner: 'managed/calendar' },
     })
-    const imported = importLocalExtension({ sourceDir: dir, workspace: setup.workspace, workbench: setup.workbench })
+    const imported = importLocalExtension(importArgs(setup, dir))
     const record = setup.workspace.get(imported.candidateId)
     assert.deepEqual(record.provenance, { kind: 'third-party', origin: 'import' })
     assert.equal(record.owner, 'third-party/text-reverse')
@@ -123,7 +146,7 @@ describe('local third-party import', () => {
   it('copies bytes so later source mutation does not change the candidate', () => {
     const setup = isolatedImport()
     const dir = writeBundle(mkdtempSync(path.join(tmpdir(), 'mutate-')))
-    const imported = importLocalExtension({ sourceDir: dir, workspace: setup.workspace, workbench: setup.workbench })
+    const imported = importLocalExtension(importArgs(setup, dir))
     const before = setup.workspace.readFile(imported.candidateId, 'src/plugin.js')
     writeFileSync(path.join(dir, 'src', 'plugin.js'), 'export function apply() { throw new Error("mutated") }\n')
     assert.equal(setup.workspace.readFile(imported.candidateId, 'src/plugin.js'), before)
@@ -131,15 +154,15 @@ describe('local third-party import', () => {
 
   it('treats exact re-import as duplicate and rejects same owner/version with different bytes', () => {
     const setup = isolatedImport()
-    const first = importLocalExtension({ sourceDir: FIXTURE, workspace: setup.workspace, workbench: setup.workbench })
-    const again = importLocalExtension({ sourceDir: FIXTURE, workspace: setup.workspace, workbench: setup.workbench })
+    const first = importLocalExtension(importArgs(setup, FIXTURE))
+    const again = importLocalExtension(importArgs(setup, FIXTURE))
     assert.equal(again.status, 'duplicate')
     assert.equal(again.candidateId, first.candidateId)
     const other = writeBundle(mkdtempSync(path.join(tmpdir(), 'conflict-')), {
       plugin: 'export function apply(ctx) { ctx.effect(() => {}) }\n',
     })
     assert.throws(
-      () => importLocalExtension({ sourceDir: other, workspace: setup.workspace, workbench: setup.workbench }),
+      () => importLocalExtension(importArgs(setup, other)),
       /different bytes/,
     )
     assert.equal(setup.workspace.list().length, 1)
@@ -153,17 +176,43 @@ describe('local third-party import', () => {
       },
     }
     assert.throws(
-      () => importLocalExtension({ sourceDir: FIXTURE, workspace: setup.workspace, workbench }),
+      () => importLocalExtension({ ...importArgs(setup, FIXTURE), workbench }),
       ImportLocalError,
     )
     assert.deepEqual(setup.workspace.list(), [])
+  })
+
+  it('does not inherit leftover files after a mid-write import failure', () => {
+    const setup = isolatedImport()
+    const first = writeBundle(mkdtempSync(path.join(tmpdir(), 'partial-')))
+    writeFileSync(path.join(first, 'src', 'leftover.js'), 'export const leftover = true\n')
+    assert.throws(
+      () => importLocalExtension({
+        ...importArgs(setup, first),
+        inject: { failAfterWriting: 'src/leftover.js' },
+      }),
+      /injected failure/,
+    )
+    const dest = path.join(setup.area, 'third-party--text-reverse@1.0.0')
+    assert.equal(existsSync(dest), false)
+    assert.equal(existsSync(path.join(setup.area, '.import-staging', 'third-party--text-reverse@1.0.0')), false)
+    assert.deepEqual(setup.workspace.list(), [])
+
+    const retry = writeBundle(mkdtempSync(path.join(tmpdir(), 'retry-')))
+    const imported = importLocalExtension(importArgs(setup, retry))
+    assert.equal(imported.status, 'imported')
+    assert.equal(setup.workspace.listFiles(imported.candidateId).includes('src/leftover.js'), false)
+    assert.deepEqual(
+      setup.workspace.listFiles(imported.candidateId).filter((item) => item.startsWith('src/')),
+      ['src/plugin.js'],
+    )
   })
 
   it('rejects traversal, symlink, unexpected files, scripts, and every dependency class', () => {
     const setup = isolatedImport()
     const reject = (dir: string, pattern: RegExp) => {
       assert.throws(
-        () => importLocalExtension({ sourceDir: dir, workspace: setup.workspace, workbench: setup.workbench }),
+        () => importLocalExtension(importArgs(setup, dir)),
         pattern,
       )
     }
@@ -211,6 +260,7 @@ describe('local third-party import', () => {
         sourceDir: FIXTURE,
         workspace: ctx.candidateWorkspace,
         workbench: ctx.candidateWorkbench,
+        registry: ctx.capabilityRegistry,
       })
       assert.throws(
         () => ctx.candidateWorkbench.writeFile(imported.candidateId, 'src/plugin.js', 'nope\n'),
@@ -230,6 +280,7 @@ describe('local third-party import', () => {
         sourceDir: FIXTURE,
         workspace: ctx.candidateWorkspace,
         workbench: ctx.candidateWorkbench,
+        registry: ctx.capabilityRegistry,
       })
       assert.equal(ctx.tools.get('text_reverse'), undefined)
       const view = projectMissionControl(gatherWorkspaceSnapshot({ ctx, sessionId: 'import-b' }))
@@ -266,28 +317,85 @@ describe('local third-party import', () => {
     }
   })
 
-  it('imports a newer version as an upgrade candidate with a visible diff', () => {
-    const setup = isolatedImport()
-    importLocalExtension({ sourceDir: FIXTURE, workspace: setup.workspace, workbench: setup.workbench })
-    const v2 = writeBundle(mkdtempSync(path.join(tmpdir(), 'v2-')), {
-      version: '1.0.1',
-      plugin: `export function apply(ctx) {
-  const dispose = ctx.tools.register({
+  it('binds an upgrade candidate to the active version and rolls back to it', async () => {
+    const { ctx, recoveryRoot } = await bootAssistantControl({ home: mkdtempSync(path.join(tmpdir(), 'tars-ng-import-upgrade-')) })
+    try {
+      const first = importLocalExtension({
+        sourceDir: FIXTURE,
+        workspace: ctx.candidateWorkspace,
+        workbench: ctx.candidateWorkbench,
+        registry: ctx.capabilityRegistry,
+      })
+      await governAndActivate(ctx, recoveryRoot, first.candidateId)
+      assert.equal(ctx.capabilityRegistry.get('third-party/text-reverse', '1.0.0')?.status, 'active')
+
+      const v2 = writeBundle(mkdtempSync(path.join(tmpdir(), 'v2-')), {
+        version: '1.0.1',
+        extra: { tarsNg: { capability: 'text.reverse', tools: ['text_reverse', 'text_mark'] } },
+        plugin: `export function apply(ctx) {
+  const disposeReverse = ctx.tools.register({
     name: 'text_reverse',
-    description: 'Reverse text and mark v2',
+    description: 'Reverse text',
     parameters: { text: { type: 'string', required: true } },
     output: { schema: { type: 'string' }, render(_a, v) { return [{ type: 'text', text: String(v) }] } },
-    async execute(args) { return \`v2:\${String(args.text ?? '').split('').reverse().join('')}\` },
+    async execute(args) { return String(args.text ?? '').split('').reverse().join('') },
   })
-  ctx.effect(() => dispose)
+  const disposeMark = ctx.tools.register({
+    name: 'text_mark',
+    description: 'Mark text as v2',
+    parameters: { text: { type: 'string', required: true } },
+    output: { schema: { type: 'string' }, render(_a, v) { return [{ type: 'text', text: String(v) }] } },
+    async execute(args) { return \`v2:\${String(args.text ?? '')}\` },
+  })
+  ctx.effect(() => { disposeReverse(); disposeMark() })
 }
 `,
-    })
-    const imported = importLocalExtension({ sourceDir: v2, workspace: setup.workspace, workbench: setup.workbench })
-    assert.equal(imported.version, '1.0.1')
-    assert.equal(setup.workspace.list().length, 2)
-    const diff = setup.workspace.diff(imported.candidateId)
-    assert.equal(diff.candidateVersion, '1.0.1')
+      })
+      const upgrade = importLocalExtension({
+        sourceDir: v2,
+        workspace: ctx.candidateWorkspace,
+        workbench: ctx.candidateWorkbench,
+        registry: ctx.capabilityRegistry,
+      })
+      const record = ctx.candidateWorkspace.get(upgrade.candidateId)
+      assert.equal(record.version, '1.0.1')
+      assert.equal(record.baseVersion, '1.0.0')
+      assert.equal(record.manifest.baseVersion, '1.0.0')
+      const diff = ctx.candidateWorkspace.diff(upgrade.candidateId)
+      assert.equal(diff.baseVersion, '1.0.0')
+      assert.deepEqual(diff.capabilities.added, [])
+      assert.deepEqual(diff.tools.added, ['text_mark'])
+      assert.deepEqual(diff.tools.removed, [])
+
+      const report = ctx.candidateValidation.validate(upgrade.candidateId)
+      assert.equal(report.passed, true, JSON.stringify(report.stages.filter((item) => item.status !== 'passed' && item.status !== 'not-applicable')))
+      ctx.candidateWorkbench.seal(upgrade.candidateId)
+      ctx.candidateWorkbench.review(upgrade.candidateId)
+      const requested = ctx.extensionGovernance.requestApproval(upgrade.candidateId)
+      const summary = ctx.extensionGovernance.inspectSummary(upgrade.candidateId)
+      assert.equal(summary.currentVersion, '1.0.0')
+      assert.equal(summary.candidateVersion, '1.0.1')
+      assert.deepEqual(summary.capabilities.added, [])
+      assert.deepEqual(summary.tools.added, ['text_mark'])
+      const human = recoveryRoot.issueAuthority({ kind: 'human-control', source: 'operator-cli' })
+      recoveryRoot.recordApproval(human, {
+        candidateId: upgrade.candidateId,
+        fingerprint: String(requested.fingerprint),
+        decision: 'approved-for-exact-diff',
+      })
+      const activated = await recoveryRoot.activate(upgrade.candidateId, human)
+      assert.equal(activated.state, 'active', activated.lastFailure?.diagnostics)
+      assert.equal(ctx.capabilityRegistry.get('third-party/text-reverse', '1.0.0')?.status, 'disabled')
+      assert.equal(ctx.capabilityRegistry.get('third-party/text-reverse', '1.0.1')?.status, 'active')
+      const view = projectMissionControl(gatherWorkspaceSnapshot({ ctx, sessionId: 'import-upgrade' }))
+      assert.equal(view.extensions.find((item) => item.candidateId === first.candidateId)?.lifecycle, 'SUPERSEDED')
+      const rolled = await recoveryRoot.rollback(human)
+      assert.equal(rolled.state, 'rolled-back')
+      assert.equal(ctx.capabilityRegistry.get('third-party/text-reverse', '1.0.0')?.status, 'active')
+      assert.equal(ctx.capabilityRegistry.get('third-party/text-reverse', '1.0.1')?.status, 'disabled')
+    } finally {
+      await ctx.fiber.dispose()
+    }
   })
 
   it('rejects third-party registry records that are not origin import', () => {

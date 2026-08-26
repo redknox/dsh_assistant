@@ -121,6 +121,7 @@ export async function runSelfExtensionCli(argv: string[], hooks: SelfExtensionCl
             sourceDir: String(rest[0] ?? ''),
             workspace: ctx.candidateWorkspace,
             workbench: ctx.candidateWorkbench,
+            registry: ctx.capabilityRegistry,
           })
           console.log(JSON.stringify(imported, null, 2))
           return 0

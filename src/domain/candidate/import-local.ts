@@ -14,7 +14,7 @@ import {
 import { contractDigestExtras, digestFiles } from './digest.js'
 import { ImportLocalError } from './errors.js'
 import { listSourceFiles } from './files.js'
-import type { ResolutionReview } from '../resolution/types.js'
+import type { RegistryReadModel, ResolutionReview } from '../resolution/types.js'
 import type { CandidateRecord, CandidateWorkspace } from './types.js'
 
 const STRICT_SEMVER = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/
@@ -47,8 +47,13 @@ export function importLocalExtension(input: {
   readonly sourceDir: string
   readonly workspace: CandidateWorkspace
   readonly workbench: Pick<CandidateWorkbench, 'adoptImported'>
+  readonly registry: Pick<RegistryReadModel, 'list'>
+  readonly inject?: { readonly failAfterWriting: string }
 }): ImportLocalResult {
-  const inspected = inspectLocalBundle(input.sourceDir)
+  const preview = inspectLocalBundle(input.sourceDir)
+  const active = input.registry.list({ owner: preview.owner, status: 'active' })[0]
+  const baseVersion = active !== undefined && active.version !== preview.version ? active.version : undefined
+  const inspected = inspectLocalBundle(input.sourceDir, baseVersion)
   const existing = input.workspace.list().find((item) => (
     item.owner === inspected.owner && item.version === inspected.version
   ))
@@ -74,6 +79,7 @@ export function importLocalExtension(input: {
       review: inspected.review,
       owner: inspected.owner,
       version: inspected.version,
+      baseVersion,
       provenance: { kind: 'third-party', origin: 'import' },
       manifest: {
         capabilities: [inspected.capability],
@@ -83,6 +89,13 @@ export function importLocalExtension(input: {
         effects: { remoteSideEffect: 'none' },
       },
       files: inspected.files,
+      onAfterWriteFile: input.inject === undefined
+        ? undefined
+        : (relativePath) => {
+          if (relativePath === input.inject?.failAfterWriting) {
+            throw new ImportLocalError('import-interrupted', `injected failure after writing ${relativePath}`)
+          }
+        },
     })
     input.workbench.adoptImported(created.id)
     return resultOf(input.workspace.get(created.id), 'imported')
@@ -126,7 +139,7 @@ interface InspectedBundle {
   readonly review: ResolutionReview
 }
 
-function inspectLocalBundle(sourceDir: string): InspectedBundle {
+function inspectLocalBundle(sourceDir: string, baseVersion?: string): InspectedBundle {
   if (typeof sourceDir !== 'string' || sourceDir.trim() === '') {
     throw new ImportLocalError('import-boundary', 'import-local requires one source directory')
   }
@@ -200,13 +213,13 @@ function inspectLocalBundle(sourceDir: string): InspectedBundle {
       domainOwners: [],
       conflicts: [],
     },
-    target: { owner },
+    target: { owner, ...(baseVersion === undefined ? {} : { version: baseVersion }) },
   }
   const plannedManifest = normalizeManifest(
     review,
     owner,
     version,
-    undefined,
+    baseVersion,
     { kind: 'third-party', origin: 'import' },
     {
       capabilities: [capability],
