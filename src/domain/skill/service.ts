@@ -205,6 +205,9 @@ export class SkillService {
 
   writeFile(id: string, relativePath: string, content: string): SkillRecord {
     const record = this.get(id)
+    if (record.provenance.kind === 'system') {
+      throw new SkillAuthorityError('system skills cannot be edited by the assistant workbench')
+    }
     const current = this.readCandidateFiles(id)
     current[relativePath] = content
     if (relativePath === 'SKILL.md') applyHostSkillLimits({
@@ -217,7 +220,7 @@ export class SkillService {
         name: record.name,
         version: nextVersion(this.layout, record.name),
         files: current,
-        provenance: record.provenance.kind === 'system' ? record.provenance : { kind: 'assistant-authored', origin: 'assistant' },
+        provenance: { kind: 'assistant-authored', origin: 'assistant' },
         lifecycle: 'drafted',
         invocation: record.invocation,
         description: record.description,
@@ -446,13 +449,14 @@ export class SkillService {
     return this.get(id)
   }
 
-  disable(name: string, credential: TrustedAuthorityCredential): void {
+  disable(name: string, credential: TrustedAuthorityCredential, acknowledgedDependents: readonly string[] = []): void {
     this.assertTrusted(credential)
     const index = readSkillIndex(this.layout)
     const version = index.active[name]
     if (version === undefined) throw new SkillContractError('unknown-skill', `no active skill: ${name}`)
     const record = this.get(skillId(name, version))
     if (record.provenance.kind === 'system') throw new SkillAuthorityError('system skills cannot be disabled or uninstalled')
+    this.assertAcknowledgedDependents(record, acknowledgedDependents)
     this.retireActive(name, version, 'disabled')
   }
 
@@ -460,10 +464,7 @@ export class SkillService {
     this.assertTrusted(credential)
     const record = this.get(id)
     if (record.provenance.kind === 'system') throw new SkillAuthorityError('system skills cannot be disabled or uninstalled')
-    const dependents = this.dependentsOf(record.name, record.version)
-    if (dependents.length > 0 && !sameSet(dependents, acknowledgedDependents)) {
-      throw new SkillContractError('dependents', `hard dependents must be acknowledged: ${dependents.join(', ')}`)
-    }
+    this.assertAcknowledgedDependents(record, acknowledgedDependents)
     const index = readSkillIndex(this.layout)
     if (index.active[record.name] === record.version) {
       this.retireActive(record.name, record.version, 'uninstalled')
@@ -609,6 +610,9 @@ export class SkillService {
 
   declareDependencies(id: string, dependsOn: readonly SkillDependency[]): SkillRecord {
     const record = this.get(id)
+    if (record.provenance.kind === 'system') {
+      throw new SkillAuthorityError('system skills cannot be edited by the assistant workbench')
+    }
     const parsed = parseDependsOn(dependsOn)
     if (record.sealed || record.lifecycle === 'active') {
       return this.publishCandidate({
@@ -627,10 +631,17 @@ export class SkillService {
     return this.update(id, (item) => ({ ...item, dependsOn: parsed }))
   }
 
+  private assertAcknowledgedDependents(record: SkillRecord, acknowledgedDependents: readonly string[]): void {
+    const dependents = this.dependentsOf(record.name, record.version)
+    if (dependents.length > 0 && !sameSet(dependents, acknowledgedDependents)) {
+      throw new SkillContractError('dependents', `hard dependents must be acknowledged: ${dependents.join(', ')}`)
+    }
+  }
+
   private dependentsOf(name: string, version: string): string[] {
     return readSkillIndex(this.layout).records
       .filter((item) => (
-        item.lifecycle !== 'uninstalled'
+        item.lifecycle === 'active'
         && (item.dependsOn ?? []).some((dep) => dep.name === name && dep.version === version)
       ))
       .map((item) => item.id)

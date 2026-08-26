@@ -2890,6 +2890,41 @@ export function apply(ctx) {
         body: 'This skill needs the exact weekly-review revision.',
         dependsOn: [{ name: 'weekly-review', version: '1.0.0' }],
       })
+      await ctx.skillLifecycle.validate(dependent.id)
+      ctx.skillLifecycle.seal(dependent.id)
+      ctx.skillLifecycle.requestReview(dependent.id)
+      ctx.skillLifecycle.requestApproval(dependent.id)
+      const pendingDep = await fetch(`${url}/api/view`).then((res) => res.json()) as { view: MissionControlView }
+      const depSkill = pendingDep.view.skills?.find((item) => item.id === dependent.id)
+      assert.equal((await fetch(`${url}/api/skill`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({
+          action: 'approve',
+          confirm: true,
+          id: depSkill?.id,
+          name: depSkill?.name,
+          version: depSkill?.version,
+          digest: depSkill?.digest,
+          fingerprint: depSkill?.approvalFingerprint,
+          generation: depSkill?.generation,
+        }),
+      })).status, 200)
+      const approvedDep = await fetch(`${url}/api/view`).then((res) => res.json()) as { view: MissionControlView }
+      const readyDep = approvedDep.view.skills?.find((item) => item.id === dependent.id)
+      assert.equal((await fetch(`${url}/api/skill`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({
+          action: 'activate',
+          confirm: true,
+          id: readyDep?.id,
+          name: readyDep?.name,
+          version: readyDep?.version,
+          digest: readyDep?.digest,
+          generation: readyDep?.generation,
+        }),
+      })).status, 200)
       const listed = await fetch(`${url}/api/view`).then((res) => res.json()) as { view: MissionControlView }
       const active = listed.view.skills?.find((item) => item.id === imported.candidateId)
       const blocked = await fetch(`${url}/api/skill`, {

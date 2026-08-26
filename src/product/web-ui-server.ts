@@ -723,11 +723,9 @@ export function startWebUiServer(options: WebUiServerOptions): Promise<WebUiServ
             options.recoveryRoot.rejectSkill(bound.skill.id, bound.skill.approvalFingerprint ?? '', human)
           } else if (action === 'activate') {
             options.recoveryRoot.activateSkill(bound.skill.id, human)
-          } else if (action === 'disable') {
-            options.recoveryRoot.disableSkill(bound.skill.name, human)
           } else if (action === 'reactivate') {
             options.recoveryRoot.reactivateSkill(bound.skill.name, bound.skill.version, human)
-          } else if (action === 'uninstall') {
+          } else if (action === 'disable' || action === 'uninstall') {
             const dependents = bound.skill.dependents
             if (dependents.length > 0 && body.acknowledgeDependents !== true) {
               sendJson(res, 409, {
@@ -744,7 +742,9 @@ export function startWebUiServer(options: WebUiServerOptions): Promise<WebUiServ
               sendJson(res, 409, { error: 'stale-dependents', dependents, view, webUi: url })
               return
             }
-            options.recoveryRoot.uninstallSkill(bound.skill.id, human, body.acknowledgeDependents === true ? acknowledged : [])
+            const ack = body.acknowledgeDependents === true ? acknowledged : []
+            if (action === 'disable') options.recoveryRoot.disableSkill(bound.skill.name, human, ack)
+            else options.recoveryRoot.uninstallSkill(bound.skill.id, human, ack)
           } else if (action === 'rollback') {
             options.recoveryRoot.rollbackSkill(human)
           } else {

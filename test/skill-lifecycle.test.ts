@@ -36,6 +36,17 @@ async function authorApproved(service: SkillService, source = FIXTURE) {
   return { imported, requested }
 }
 
+async function trustActivate(service: SkillService, id: string, human: ReturnType<typeof humanCred>) {
+  if (!service.get(id).validationPassed) await service.validate(id)
+  if (!service.get(id).sealed) service.seal(id)
+  if (!service.get(id).reviewComplete) service.requestReview(id)
+  if (service.get(id).approvalDecision !== 'approved-for-exact-diff') {
+    const { fingerprint } = service.requestApproval(id)
+    service.approve(id, fingerprint, human)
+  }
+  if (service.get(id).lifecycle !== 'active') service.activate(id, human)
+}
+
 describe('skill lifecycle', () => {
   it('imports a local bundle as an inactive third-party candidate', async () => {
     const service = new SkillService(home(), 'assistant')
@@ -350,12 +361,14 @@ describe('skill lifecycle', () => {
     again.bindRoot(rootId)
     const second = await authorApproved(again)
     again.approve(second.imported.candidateId, second.requested.fingerprint, human)
+    await trustActivate(again, second.imported.candidateId, human)
     const dependent = again.create({
       name: 'needs-weekly',
       description: 'Host-declared hard dependent of weekly-review.',
       body: 'This skill needs the exact weekly-review revision.',
       dependsOn: [{ name: 'weekly-review', version: '1.0.0' }],
     })
+    await trustActivate(again, dependent.id, human)
     assert.throws(() => again.uninstall(second.imported.candidateId, human), /hard dependents/)
     assert.throws(() => again.uninstall(second.imported.candidateId, human, [prose.id]), /hard dependents/)
     again.uninstall(second.imported.candidateId, human, [dependent.id])
@@ -394,7 +407,10 @@ describe('skill lifecycle', () => {
     service.activate(drafted.id, human)
     assert.throws(() => service.disable('system-brief', human), /cannot be disabled or uninstalled/)
     assert.throws(() => service.uninstall(drafted.id, human), /cannot be disabled or uninstalled/)
+    assert.throws(() => service.writeFile(drafted.id, 'SKILL.md', '---\nname: system-brief\ndescription: Host-owned system briefing skill.\n---\nmutated system body here\n'), /cannot be edited/)
+    assert.throws(() => service.declareDependencies(drafted.id, []), /cannot be edited/)
     assert.equal(service.get(drafted.id).lifecycle, 'active')
+    assert.equal(service.get(drafted.id).provenance.kind, 'system')
   })
 
   it('diffs v1 to v2 without leaking instruction body', async () => {
@@ -544,5 +560,71 @@ describe('skill lifecycle', () => {
     writeFileSync(path.join(extra, 'SKILL.md'), '---\nname: weekly-review\ndescription: Guide a weekly review.\n---\nUse existing tools.\n')
     writeFileSync(path.join(extra, 'tars-ng.skill.json'), '{"schemaVersion":1,"version":"1.0.0","marketplace":true}\n')
     await assert.rejects(() => service.importLocal(extra), /unknown host descriptor field/)
+  })
+
+  it('blocks disable for active dependents and ignores drafted dependents', async () => {
+    const isolated = home()
+    const service = new SkillService(isolated, 'assistant')
+    const rootId = Symbol('recovery-root')
+    service.bindRoot(rootId)
+    const human = humanCred(rootId)
+    const { imported, requested } = await authorApproved(service)
+    service.approve(imported.candidateId, requested.fingerprint, human)
+    service.activate(imported.candidateId, human)
+    const draft = service.create({
+      name: 'draft-dep',
+      description: 'Drafted dependent must not be a runtime hard dependent.',
+      body: 'This drafted skill mentions a dependency without being active.',
+      dependsOn: [{ name: 'weekly-review', version: '1.0.0' }],
+    })
+    assert.deepEqual(service.inspect(imported.candidateId).dependents, [])
+    service.disable('weekly-review', human)
+    assert.equal(service.get(imported.candidateId).lifecycle, 'disabled')
+    await trustActivate(service, imported.candidateId, human)
+    const activeDep = service.create({
+      name: 'active-dep',
+      description: 'Active dependent of weekly-review.',
+      body: 'This active skill needs the exact weekly-review revision.',
+      dependsOn: [{ name: 'weekly-review', version: '1.0.0' }],
+    })
+    await trustActivate(service, activeDep.id, human)
+    assert.deepEqual(service.inspect(imported.candidateId).dependents, [activeDep.id])
+    assert.throws(() => service.disable('weekly-review', human), /hard dependents/)
+    assert.throws(() => service.disable('weekly-review', human, [draft.id]), /hard dependents/)
+    service.disable('weekly-review', human, [activeDep.id])
+    assert.equal(service.get(imported.candidateId).lifecycle, 'disabled')
+  })
+
+  it('preserves uninstalled sealed revisions across backup and restore', async () => {
+    const isolated = home()
+    const ready = await bootAssistantControl({ home: isolated })
+    try {
+      const imported = await new SkillService(isolated, 'assistant').importLocal(FIXTURE)
+      await ready.ctx.skillLifecycle.validate(imported.candidateId)
+      ready.ctx.skillLifecycle.seal(imported.candidateId)
+      ready.ctx.skillLifecycle.requestReview(imported.candidateId)
+      const requested = ready.ctx.skillLifecycle.requestApproval(imported.candidateId)
+      const human = ready.recoveryRoot.issueAuthority({ kind: 'human-control', source: 'operator-cli' })
+      ready.recoveryRoot.approveSkill(imported.candidateId, requested.fingerprint, human)
+      ready.recoveryRoot.activateSkill(imported.candidateId, human)
+      ready.recoveryRoot.uninstallSkill(imported.candidateId, human)
+      assert.equal(ready.ctx.skillLifecycle.get(imported.candidateId).lifecycle, 'uninstalled')
+      const dest = mkdtempSync(path.join(tmpdir(), 'skill-hist-bak-'))
+      backupSelfExtension(isolated, dest)
+      const backed = JSON.parse(readFileSync(path.join(dest, 'skills', 'assistant', 'index.json'), 'utf8')) as { records: { id: string; lifecycle: string }[] }
+      assert.equal(backed.records.find((item) => item.id === imported.candidateId)?.lifecycle, 'uninstalled')
+      const restoredHome = home()
+      const empty = await bootAssistantControl({ home: restoredHome })
+      try {
+        restoreSelfExtension(dest, restoredHome)
+      } finally {
+        await empty.ctx.fiber.dispose()
+      }
+      const restored = new SkillService(restoredHome, 'assistant')
+      assert.equal(restored.get(imported.candidateId).lifecycle, 'uninstalled')
+      assert.equal(restored.inspect(imported.candidateId).sealed, true)
+    } finally {
+      await ready.ctx.fiber.dispose()
+    }
   })
 })

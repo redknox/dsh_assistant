@@ -807,6 +807,9 @@ function SkillsCenter(props: {
                 {' '}({skill.revisionDiff.instructionBeforeChars}→{skill.revisionDiff.instructionAfterChars} chars)
                 {skill.revisionDiff.resources.added.length ? ` · resources +${skill.revisionDiff.resources.added.join(',')}` : ''}
                 {skill.revisionDiff.resources.removed.length ? ` · resources -${skill.revisionDiff.resources.removed.join(',')}` : ''}
+                {` · invocation ${skill.revisionDiff.invocation.before.modelInvocable ? 'model' : 'no-model'}/${skill.revisionDiff.invocation.before.userInvocable ? 'user' : 'no-user'}→${skill.revisionDiff.invocation.after.modelInvocable ? 'model' : 'no-model'}/${skill.revisionDiff.invocation.after.userInvocable ? 'user' : 'no-user'}`}
+                {skill.revisionDiff.dependsOn.added.length ? ` · depends +${skill.revisionDiff.dependsOn.added.join(',')}` : ''}
+                {skill.revisionDiff.dependsOn.removed.length ? ` · depends -${skill.revisionDiff.dependsOn.removed.join(',')}` : ''}
               </div>
             ) : null}
             {skill.resolutionHandoff ? (
@@ -842,7 +845,8 @@ function SkillsCenter(props: {
               ) : null}
               {skill.lifecycle === 'active' && !skill.system ? (
                 <button type="button" className="button button--secondary" data-skill-action="disable" disabled={props.locked} onClick={() => props.onSkillAction('disable', skill)}>
-                  {props.armedSkill === `disable:${skill.id}` ? 'CONFIRM DISABLE' : 'DISABLE'}
+                  {props.skillDependents?.id === skill.id ? 'CONFIRM DEPENDENTS'
+                    : props.armedSkill === `disable:${skill.id}` ? 'CONFIRM DISABLE' : 'DISABLE'}
                 </button>
               ) : null}
               {!skill.system && skill.lifecycle !== 'uninstalled' ? (
@@ -1365,21 +1369,32 @@ export function App() {
         setDraft((current) => current.trim() === '' ? `Use the ${skill.name} skill.` : `${current.trim()} ${skill.name}`)
       }}
       onSkillAction={(action, skill) => {
-        if (action === 'uninstall') {
-          if (skill === undefined) {
-            setConfirmingSkill(undefined)
-            setSkillDependents(undefined)
-            return
-          }
-          if (confirmingSkill !== skill.id) {
-            setConfirmingSkill(skill.id)
-            setSkillDependents(undefined)
-            return
+        if (action === 'uninstall' || action === 'disable') {
+          if (action === 'uninstall') {
+            if (skill === undefined) {
+              setConfirmingSkill(undefined)
+              setSkillDependents(undefined)
+              return
+            }
+            if (confirmingSkill !== skill.id) {
+              setConfirmingSkill(skill.id)
+              setSkillDependents(undefined)
+              return
+            }
+          } else {
+            if (skill === undefined) return
+            const key = `disable:${skill.id}`
+            if (armedSkill !== key && skillDependents?.id !== skill.id) {
+              setArmedSkill(key)
+              setSkillDependents(undefined)
+              return
+            }
+            setArmedSkill(undefined)
           }
           void act(async () => {
             try {
               const next = await runSkillAction({
-                action: 'uninstall',
+                action,
                 skill,
                 confirm: true,
                 acknowledgeDependents: skillDependents?.id === skill.id,
@@ -1390,15 +1405,16 @@ export function App() {
               return next
             } catch (caught) {
               const error = caught as Error & { code?: string; dependents?: readonly string[] }
-              if (error.code === 'dependents-required' && error.dependents) {
+              if (error.code === 'dependents-required' && error.dependents && skill) {
                 setSkillDependents({ id: skill.id, dependents: error.dependents })
+                if (action === 'disable') setArmedSkill(`disable:${skill.id}`)
               }
               throw caught
             }
           })
           return
         }
-        if (action === 'approve' || action === 'reject' || action === 'activate' || action === 'disable' || action === 'reactivate' || action === 'rollback') {
+        if (action === 'approve' || action === 'reject' || action === 'activate' || action === 'reactivate' || action === 'rollback') {
           const key = action === 'rollback' ? 'rollback' : `${action}:${skill?.id ?? ''}`
           if (armedSkill !== key) {
             setArmedSkill(key)

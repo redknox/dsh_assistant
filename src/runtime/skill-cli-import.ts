@@ -69,7 +69,7 @@ export async function runSkillCli(argv: readonly string[], home?: string): Promi
         return 0
       }
       if (action === 'disable') {
-        control.recoveryRoot.disableSkill(String(rest[0]), human)
+        control.recoveryRoot.disableSkill(String(rest[0]), human, rest.slice(1))
         console.log(`disabled ${rest[0]}`)
         return 0
       }

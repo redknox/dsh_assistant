@@ -218,7 +218,11 @@ function copySkillAuthorityFromBackup(source: string, staging: string): void {
 
 function copyDurableSkillProfile(layout: ReturnType<typeof skillStoreLayout>, dest: string): void {
   const index = readSkillIndex(layout)
-  const records = durableSkillRecords(index)
+  const sealed = durableSkillRecords(index)
+  const tombs = index.records
+    .filter((item) => item.lifecycle === 'uninstalled' && !item.sealed)
+    .map(skillAuditTombstone)
+  const records = [...sealed, ...tombs]
   const durableIds = new Set(records.map((item) => item.id))
   const active: Record<string, string> = {}
   for (const [name, version] of Object.entries(index.active)) {
@@ -243,7 +247,7 @@ function copyDurableSkillProfile(layout: ReturnType<typeof skillStoreLayout>, de
   mkdirSync(path.join(dest, 'candidates'), { recursive: true })
   mkdirSync(path.join(dest, 'active'), { recursive: true })
   writeJsonAtomic(path.join(dest, 'index.json'), slim)
-  for (const record of records) {
+  for (const record of sealed) {
     const from = path.join(layout.candidates, encodeSkillId(record.id))
     if (!existsSync(from)) throw new PersistenceIntegrityError(`missing-skill-candidate:${record.id}`)
     if (digestSkillFiles(readAllowlistedSkillFiles(from)) !== record.digest) {
@@ -263,6 +267,14 @@ function copyDurableSkillProfile(layout: ReturnType<typeof skillStoreLayout>, de
   verifyCopiedSkillProfile(path.dirname(dest), layout.profile)
 }
 
+function skillAuditTombstone(record: SkillRecord): SkillRecord {
+  return {
+    ...record,
+    description: `uninstalled ${record.name}@${record.version}`,
+    resources: [],
+  }
+}
+
 function durableSkillRecords(index: SkillIndex): SkillRecord[] {
   return index.records.filter((item) => item.sealed && (
     item.lifecycle === 'sealed'
@@ -271,6 +283,7 @@ function durableSkillRecords(index: SkillIndex): SkillRecord[] {
     || item.lifecycle === 'approved'
     || item.lifecycle === 'active'
     || item.lifecycle === 'disabled'
+    || item.lifecycle === 'uninstalled'
   ))
 }
 
@@ -293,7 +306,8 @@ function verifyCopiedSkillProfile(skillsRoot: string, profile: string): void {
   }
   const index = readSkillIndex(layout)
   const durable = durableSkillRecords(index)
-  if (durable.length !== index.records.length) {
+  const leftovers = index.records.filter((item) => !durable.some((row) => row.id === item.id))
+  if (leftovers.some((item) => item.lifecycle !== 'uninstalled' || item.sealed)) {
     throw new PersistenceIntegrityError('skill-backup-contains-unsealed')
   }
   if (existsSync(layout.candidates)) {
