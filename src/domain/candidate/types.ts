@@ -25,6 +25,7 @@ export const ALLOWED_VALIDATION_TASKS = [
   'manifest.validate',
   'package.inspect',
   'runtime.contract',
+  'source.contract',
   'source.boundary',
   'typecheck',
   'tests',

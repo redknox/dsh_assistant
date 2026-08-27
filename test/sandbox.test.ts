@@ -397,7 +397,7 @@ describe('operator sandbox root', () => {
           services: [],
           providers: [],
           entryPoints: ['src/plugin.js'],
-          permissions: ['local.sandbox.files.read', 'host.sandbox.files.write', 'host.fs.read'],
+          permissions: [],
         },
       })
       ctx.candidateWorkspace.writeFile(created.id, 'package.json', `${JSON.stringify({ name: 'dsh-generated-sandbox-escape', type: 'module', main: 'src/plugin.js' }, null, 2)}\n`)

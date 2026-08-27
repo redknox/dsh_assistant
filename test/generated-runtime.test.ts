@@ -1,11 +1,12 @@
 import assert from 'node:assert/strict'
 import { createServer } from 'node:http'
-import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { describe, it } from 'node:test'
 import { CallId } from '@deepseek-ai/dsh-llm'
-import { listGeneratedRuntimePids, resolveChildMain } from '../src/adapters/activation/generated-runner.js'
+import { IsolatedGeneratedRunner, listGeneratedRuntimePids, resolveChildMain } from '../src/adapters/activation/generated-runner.js'
+import { GENERATED_EXTENSION_API_V1 } from '../src/domain/workbench/authoring-contract.js'
 import { GENERATED_MAX_MESSAGE_BYTES, generatedRuntimeDiagnosis } from '../src/domain/generated-runtime/index.js'
 import type { ExtensionProvenance } from '../src/domain/registry/index.js'
 import type { ResolutionKind, ResolutionReview } from '../src/domain/resolution/index.js'
@@ -254,6 +255,35 @@ describe('isolated generated-extension runtime', () => {
       assert.match(String(result.value), /not allowed|EACCES|EPERM|ERR_ACCESS_DENIED|permission|denied/i)
     } finally {
       await ctx.fiber.dispose()
+    }
+  })
+
+  it('rejects non-cleanup ctx.effect calls even if candidate validation is bypassed', async () => {
+    const root = mkdtempSync(path.join(tmpdir(), 'tars-ng-bad-effect-'))
+    mkdirSync(path.join(root, 'src'))
+    writeFileSync(path.join(root, 'package.json'), `${JSON.stringify({ type: 'module' })}\n`)
+    writeFileSync(path.join(root, 'src/plugin.js'), `export function apply(ctx) {
+  ctx.tools.register({ name: 'bad_effect', parameters: {}, async execute() { return 'no' } })
+  ctx.effect({ type: 'process.exec', command: 'ssh' })
+}
+`)
+    const runner = new IsolatedGeneratedRunner({
+      candidateId: 'generated--bad-effect@0.1.0',
+      workspaceRoot: root,
+      entryPoints: ['src/plugin.js'],
+      owner: 'generated/bad-effect',
+      tools: ['bad_effect'],
+      permissions: [],
+      runtimeContractVersion: GENERATED_EXTENSION_API_V1,
+    })
+    try {
+      const started = await runner.start()
+      assert.equal(started.ok, false)
+      assert.match(started.diagnostics ?? '', /ctx\.effect.*cleanup function/)
+    } finally {
+      runner.kill()
+      await runner.waitForExit()
+      rmSync(root, { recursive: true, force: true })
     }
   })
 

@@ -705,6 +705,118 @@ describe('candidate workbench', () => {
     }
   })
 
+  it('rejects manifest permissions that cannot reach Registry activation', () => {
+    const setup = isolatedWorkbench()
+    const plan = setup.workbench.rememberPlan(setup.review)
+
+    assert.throws(() => setup.workbench.create({
+      planId: plan.planId,
+      manifest: {
+        capabilities: ['r0.workbench.ping'],
+        permissions: ['network.connect:redpica.top:22'],
+      },
+    }), /malformed permission/)
+    assert.equal(setup.workspace.list().length, 0)
+  })
+
+  it('fails validation for a restored candidate with Registry-invalid permissions', () => {
+    const setup = isolatedWorkbench()
+    const id = draftIsolated(setup)
+    const record = setup.workspace.get(id)
+    const restored = new CandidateService(setup.registry, path.dirname(record.workspaceRoot), {
+      restore: [{
+        ...record,
+        manifest: {
+          ...record.manifest,
+          permissions: ['network.connect:redpica.top:22'],
+        },
+      }],
+    })
+
+    const report = restored.validate(id)
+    assert.equal(report.passed, false)
+    assert.equal(report.stages.find((item) => item.name === 'manifest.validate')?.status, 'failed')
+    assert.match(report.stages.find((item) => item.name === 'manifest.validate')?.summary ?? '', /malformed permission/)
+  })
+
+  it('rejects generated Broker permissions the host does not expose', () => {
+    const setup = isolatedWorkbench()
+    const plan = setup.workbench.rememberPlan(setup.review)
+
+    assert.throws(() => setup.workbench.create({
+      planId: plan.planId,
+      manifest: {
+        capabilities: ['r0.workbench.ping'],
+        permissions: ['host.ssh.exec'],
+      },
+    }), /unsupported generated Broker permission/)
+    assert.equal(setup.workspace.list().length, 0)
+  })
+
+  it('rejects unsupported Broker permissions when a generated Manifest is updated', () => {
+    const setup = isolatedWorkbench()
+    const created = setup.workbench.create({
+      planId: setup.workbench.rememberPlan(setup.review).planId,
+      manifest: { capabilities: ['r0.workbench.ping'] },
+    })
+
+    assert.throws(() => setup.workbench.setManifest(created.id, {
+      permissions: ['host.ssh.exec'],
+    }), /unsupported generated Broker permission/)
+    assert.deepEqual(setup.workspace.get(created.id).manifest.permissions, [])
+  })
+
+  it('fails validation for a restored candidate that requests an unavailable Broker operation', () => {
+    const setup = isolatedWorkbench()
+    const id = draftIsolated(setup)
+    const record = setup.workspace.get(id)
+    const restored = new CandidateService(setup.registry, path.dirname(record.workspaceRoot), {
+      restore: [{
+        ...record,
+        manifest: {
+          ...record.manifest,
+          permissions: ['host.ssh.exec'],
+        },
+      }],
+    })
+
+    const report = restored.validate(id)
+    assert.equal(report.passed, false)
+    assert.equal(report.stages.find((item) => item.name === 'runtime.contract')?.status, 'failed')
+    assert.match(report.stages.find((item) => item.name === 'runtime.contract')?.summary ?? '', /unsupported generated Broker permission/)
+  })
+
+  it('fails validation when generated code treats ctx.effect as an I/O operation', () => {
+    const setup = isolatedWorkbench()
+    const id = draftIsolated(setup)
+    setup.workbench.writeFile(id, 'src/plugin.js', `export function apply(ctx) {
+  ctx.effect({ type: 'process.exec', command: 'ssh' })
+}
+`)
+
+    const validated = setup.workbench.validate(id)
+    assert.equal(validated.validation?.passed, false)
+    assert.equal(validated.validation?.failed.includes('source.contract'), true)
+    assert.match(
+      setup.workspace.get(id).validation?.stages.find((item) => item.name === 'source.contract')?.summary ?? '',
+      /cleanup callback/,
+    )
+  })
+
+  it('exposes the cleanup-only ctx.effect signature to candidate authors', async () => {
+    const { ctx } = await bootAssistantControl()
+    try {
+      const contract = parse(await tool(ctx, 'inspect_authoring_contract', {}))
+      assert.equal(
+        (contract.ctxSemantics as { effect?: string }).effect,
+        'cleanup registration only: effect(dispose: () => void): () => void',
+      )
+      assert.deepEqual(contract.brokerOps, ['host.text.echo'])
+    } finally {
+      await ctx.fiber.dispose()
+    }
+  })
+
   it('patches allowlisted manifest fields without wiping omitted governance declarations', async () => {
     const { ctx } = await bootAssistantControl()
     try {
@@ -723,7 +835,7 @@ describe('candidate workbench', () => {
       stampContract(ctx.candidateWorkspace, id)
       parse(await tool(ctx, 'set_candidate_manifest', {
         candidateId: id,
-        permissions: ['local.fake.suite'],
+        permissions: ['host.text.echo'],
         runtimeSeams: ['integrations.calendar'],
         services: ['calendar'],
         providers: ['google-calendar'],
@@ -920,7 +1032,7 @@ describe('candidate workbench', () => {
       assert.equal(bad.isError, true)
       const contract = parse(await tool(ctx, 'inspect_authoring_contract', {}))
       assert.equal(contract.id, GENERATED_EXTENSION_API_V1)
-      assert.deepEqual(contract.brokerOps, [])
+      assert.deepEqual(contract.brokerOps, ['host.text.echo'])
       const plan = parse(await tool(ctx, 'plan_capability_change', {
         capability: 'text.slugify',
         need: 'lowercase URL-safe slug',

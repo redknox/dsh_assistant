@@ -715,6 +715,47 @@ export function startWebUiServer(options: WebUiServerOptions): Promise<WebUiServ
         }
         return
       }
+      if (req.method === 'POST' && requestUrl.pathname === '/api/activation/abandon') {
+        const body = JSON.parse(await readBody(req)) as {
+          id?: unknown
+          candidateId?: unknown
+          digest?: unknown
+          fingerprint?: unknown
+          confirm?: unknown
+        }
+        if (body.confirm !== true) {
+          sendJson(res, 409, { error: 'confirmation-required' })
+          return
+        }
+        if (mutationInFlight() !== undefined) {
+          sendJson(res, 409, { error: `${mutationInFlight()}-in-flight`, view: snapshot(), webUi: url })
+          return
+        }
+        const bound = bindActivation(body, snapshot().activations)
+        if ('error' in bound) {
+          sendJson(res, bound.error === 'malformed' ? 400 : 409, { error: bound.error })
+          return
+        }
+        if (bound.card.status !== 'ACTIVATION_FAILED') {
+          sendJson(res, 409, { error: 'stale-activation' })
+          return
+        }
+        const human = options.recoveryRoot.issueAuthority({ kind: 'human-control', source: 'application-ui' })
+        try {
+          options.recoveryRoot.abandonFailedActivation(bound.card.candidateId, bound.card.fingerprint, human)
+          sendJson(res, 200, envelope())
+          broadcast()
+        } catch (error) {
+          sendJson(res, 409, {
+            error: 'abandon-activation-denied',
+            diagnostics: boundActivationDiagnostics(error instanceof Error ? error.message : 'abandon failed'),
+            view: snapshot(),
+            webUi: url,
+          })
+          broadcast()
+        }
+        return
+      }
       if (req.method === 'POST' && requestUrl.pathname === '/api/skill') {
         const body = JSON.parse(await readBody(req)) as {
           action?: unknown

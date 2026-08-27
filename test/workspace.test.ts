@@ -883,7 +883,7 @@ describe('TARS-NG mission-control workspace', () => {
         version: '0.1.0',
         manifest: {
           capabilities: ['calendar.read', 'calendar.freebusy'],
-          permissions: ['local.fake.suite'],
+          permissions: ['host.text.echo'],
           secrets: ['google.calendar.oauth'],
           effects: {
             filesystem: [],

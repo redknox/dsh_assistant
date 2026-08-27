@@ -122,6 +122,21 @@ export async function activateCandidate(card: ActivationCard, confirm: boolean):
   }))
 }
 
+export async function abandonCandidateActivation(card: ActivationCard, confirm: boolean): Promise<UiEnvelope> {
+  return parseEnvelope(await fetch('/api/activation/abandon', {
+    ...include,
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({
+      id: card.id,
+      candidateId: card.candidateId,
+      digest: card.digest,
+      fingerprint: card.fingerprint,
+      confirm,
+    }),
+  }))
+}
+
 export async function uninstallPlugin(plugin: UserPluginView, confirm: boolean): Promise<UiEnvelope> {
   return parseEnvelope(await fetch('/api/uninstall', {
     ...include,
@@ -180,15 +195,6 @@ export function workTone(kind: WorkObjectKind): string {
   if (kind === 'failure' || kind === 'warning') return 'alert'
   if (kind === 'recovery') return 'recovery'
   return 'message'
-}
-
-export function formatMarkdownLite(text: string): string {
-  return text
-    .replaceAll('&', '&amp;')
-    .replaceAll('<', '&lt;')
-    .replaceAll('>', '&gt;')
-    .replaceAll(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
-    .replaceAll(/`([^`]+)`/g, '<code>$1</code>')
 }
 
 export function approvalLabel(card: ApprovalCard): string {

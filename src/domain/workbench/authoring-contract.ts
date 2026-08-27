@@ -1,3 +1,5 @@
+import { GENERATED_BROKER_OPS } from '../generated-runtime/broker.js'
+
 export const GENERATED_EXTENSION_API_V1 = 'generated-extension-api/v1'
 export const AUTHORING_CONTRACT_STAMP = 'generated-extension-api.json'
 
@@ -13,6 +15,10 @@ export interface AuthoringContractV1 {
     readonly signature: 'apply(ctx)'
   }
   readonly allowedCtx: readonly string[]
+  readonly ctxSemantics: {
+    readonly effect: 'cleanup registration only: effect(dispose: () => void): () => void'
+    readonly brokerRequest: 'request(capability: brokerOps[number], args: object): Promise<unknown>'
+  }
   readonly brokerOps: readonly string[]
   readonly forbiddenHostApis: readonly string[]
   readonly packageRules: {
@@ -51,7 +57,11 @@ export function authoringContractV1(): AuthoringContractV1 {
       'ctx.effect',
       'ctx.broker.request',
     ],
-    brokerOps: [],
+    ctxSemantics: {
+      effect: 'cleanup registration only: effect(dispose: () => void): () => void',
+      brokerRequest: 'request(capability: brokerOps[number], args: object): Promise<unknown>',
+    },
+    brokerOps: [...GENERATED_BROKER_OPS],
     forbiddenHostApis: [
       'ctx.get',
       'ctx.plugin',

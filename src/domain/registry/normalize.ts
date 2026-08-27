@@ -65,6 +65,10 @@ function parseToken(raw: string, label: string): string {
   return raw
 }
 
+export function parsePermission(raw: string): string {
+  return parseToken(raw, 'permission')
+}
+
 function parseName(raw: string, label: string): string {
   if (typeof raw !== 'string' || !NAME.test(raw)) {
     throw new RegistryContractError(`malformed ${label}: ${JSON.stringify(raw)}`)
@@ -82,7 +86,7 @@ function parseEnum<T extends string>(raw: unknown, allowed: readonly T[], label:
 export function parseCapabilityClaim(raw: CapabilityClaim): CapabilityClaim {
   return {
     id: parseCapabilityId(raw.id),
-    permissions: Object.freeze(raw.permissions.map((item) => parseToken(item, 'permission'))),
+    permissions: Object.freeze(raw.permissions.map(parsePermission)),
   }
 }
 
@@ -122,7 +126,7 @@ export function normalizeRegisterInput(input: RegistryRegisterInput): RegistryRe
     evidence: parseEnum(input.evidence, EVIDENCE_LEVELS, 'evidence'),
     approval: 'unreviewed',
     capabilities,
-    permissions: Object.freeze((input.permissions ?? []).map((item) => parseToken(item, 'permission'))),
+    permissions: Object.freeze((input.permissions ?? []).map(parsePermission)),
     runtimeSeams: Object.freeze(input.runtimeSeams.map((item) => parseToken(item, 'runtime seam'))),
     provider: input.provider === undefined ? undefined : parseToken(input.provider, 'provider'),
     tools: Object.freeze((input.tools ?? []).map((item) => parseName(item, 'tool'))),

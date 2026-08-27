@@ -1,11 +1,19 @@
 import type { GeneratedBrokerRequest } from './types.js'
 
 const HOST_TEXT_ECHO = 'host.text.echo'
+export const GENERATED_BROKER_OPS = [HOST_TEXT_ECHO] as const
 
 export class GeneratedBrokerError extends Error {
   constructor(message: string) {
     super(message)
     this.name = 'GeneratedBrokerError'
+  }
+}
+
+export function assertGeneratedBrokerPermissions(permissions: readonly string[]): void {
+  const unsupported = permissions.find((permission) => !(GENERATED_BROKER_OPS as readonly string[]).includes(permission))
+  if (unsupported !== undefined) {
+    throw new GeneratedBrokerError(`unsupported generated Broker permission: ${unsupported}`)
   }
 }
 

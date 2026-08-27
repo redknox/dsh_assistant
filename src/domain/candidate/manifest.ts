@@ -1,4 +1,4 @@
-import { parseCapabilityId, parseOwnerId, parseVersion } from '../registry/normalize.js'
+import { parseCapabilityId, parseOwnerId, parsePermission, parseVersion } from '../registry/normalize.js'
 import type { ExtensionProvenance } from '../registry/types.js'
 import type { ResolutionKind, ResolutionReview } from '../resolution/types.js'
 import { CandidateContractError } from './errors.js'
@@ -56,6 +56,8 @@ export function normalizeManifest(
 ): CandidateManifest {
   assertChangeReview(review)
   const effects = input.effects ?? {}
+  const permissions = (input.permissions ?? []).map(parsePermission)
+  const runtimeContractVersion = resolveRuntimeContractVersion(provenance.kind, input.runtimeContractVersion)
   return {
     owner: parseOwnerId(owner),
     version: parseVersion(version),
@@ -65,7 +67,7 @@ export function normalizeManifest(
     resolutionCapability: parseCapabilityId(review.capability),
     resolutionNeed: review.need,
     capabilities: (input.capabilities ?? []).map((item) => parseCapabilityId(item)),
-    permissions: [...(input.permissions ?? [])],
+    permissions,
     runtimeSeams: [...(input.runtimeSeams ?? [])],
     tools: [...(input.tools ?? [])],
     services: [...(input.services ?? [])],
@@ -87,7 +89,7 @@ export function normalizeManifest(
       script: task.script,
     })),
     riskModel: input.riskModel,
-    runtimeContractVersion: resolveRuntimeContractVersion(provenance.kind, input.runtimeContractVersion),
+    runtimeContractVersion,
     pluginDependencies: normalizePluginDependencies(input.pluginDependencies),
   }
 }

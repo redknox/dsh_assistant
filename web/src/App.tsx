@@ -1,11 +1,13 @@
 import React, { useEffect, useMemo, useState, type FormEvent } from 'react'
+import ReactMarkdown from 'react-markdown'
+import remarkGfm from 'remark-gfm'
 import type { ActivationCard, ApprovalCard, MissionControlView, RollbackCard, SkillProjection, UserCapabilityStatus, UserPluginView, WorkObjectKind, WorkbenchProjection } from '../../src/domain/workspace/types'
 import {
+  abandonCandidateActivation,
   activateCandidate,
   decideApproval,
   establishSession,
   fetchView,
-  formatMarkdownLite,
   openViewStream,
   recoveryActionId,
   rollbackSystemState,
@@ -17,6 +19,25 @@ import {
   type UiEnvelope,
 } from './api'
 import { Glyph } from './icons'
+
+function MarkdownMessage(props: { readonly text: string }) {
+  return (
+    <ReactMarkdown
+      remarkPlugins={[remarkGfm]}
+      skipHtml
+      components={{
+        table({ node: _node, ...tableProps }) {
+          return <div className="markdown-table-scroll"><table {...tableProps} /></div>
+        },
+        a({ node: _node, ...linkProps }) {
+          return <a {...linkProps} target="_blank" rel="noreferrer noopener" />
+        },
+      }}
+    >
+      {props.text}
+    </ReactMarkdown>
+  )
+}
 
 function isPendingApproval(status: string): boolean {
   return status === 'pending' || status === 'approval-requested' || status === 'unreviewed'
@@ -57,17 +78,66 @@ function activityModifier(kind: string): string {
   return ''
 }
 
-type WorkspacePane = 'today' | 'extensions' | 'conversations'
+type WorkspacePane = 'today' | 'extensions' | 'memory'
+type CompactSurface = 'conversation' | 'navigation' | 'operations'
+type ShuttlePrototypeVariant = 'A' | 'B' | 'C'
+
+const SHUTTLE_PROTOTYPE_VARIANTS: readonly { readonly id: ShuttlePrototypeVariant; readonly name: string }[] = [
+  { id: 'A', name: 'Forward Flight Deck' },
+  { id: 'B', name: 'Aft Payload Station' },
+  { id: 'C', name: 'Overhead Systems' },
+]
+
+function shuttlePrototypeFromLocation(): { readonly enabled: boolean; readonly variant: ShuttlePrototypeVariant } {
+  const params = new URLSearchParams(globalThis.location?.search ?? '')
+  const candidate = params.get('variant')
+  return {
+    enabled: params.get('prototype') === 'shuttle',
+    variant: candidate === 'B' || candidate === 'C' ? candidate : 'A',
+  }
+}
+
+// PROTOTYPE — Three Shuttle flight-deck layouts on the existing app route, switchable via ?prototype=shuttle&variant=.
+function ShuttlePrototypeSwitcher(props: {
+  readonly variant: ShuttlePrototypeVariant
+  readonly onChange: (variant: ShuttlePrototypeVariant) => void
+}) {
+  const currentIndex = SHUTTLE_PROTOTYPE_VARIANTS.findIndex((item) => item.id === props.variant)
+  const cycle = (direction: -1 | 1) => {
+    const nextIndex = (currentIndex + direction + SHUTTLE_PROTOTYPE_VARIANTS.length) % SHUTTLE_PROTOTYPE_VARIANTS.length
+    props.onChange(SHUTTLE_PROTOTYPE_VARIANTS[nextIndex]!.id)
+  }
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      const target = event.target as HTMLElement | null
+      if (target?.matches('input, textarea, [contenteditable="true"]')) return
+      if (event.key === 'ArrowLeft') {
+        event.preventDefault()
+        cycle(-1)
+      }
+      if (event.key === 'ArrowRight') {
+        event.preventDefault()
+        cycle(1)
+      }
+    }
+    globalThis.addEventListener?.('keydown', onKeyDown)
+    return () => globalThis.removeEventListener?.('keydown', onKeyDown)
+  })
+  const current = SHUTTLE_PROTOTYPE_VARIANTS[currentIndex]!
+  return (
+    <div className="prototype-switcher" role="group" aria-label="Shuttle prototype variants">
+      <button type="button" aria-label="Previous prototype variant" onClick={() => cycle(-1)}>←</button>
+      <span><strong>{current.id}</strong> — {current.name}</span>
+      <button type="button" aria-label="Next prototype variant" onClick={() => cycle(1)}>→</button>
+    </div>
+  )
+}
 
 function paneFromHash(): WorkspacePane {
   if (globalThis.location?.hash === '#extensions') return 'extensions'
-  if (globalThis.location?.hash === '#conversations') return 'conversations'
+  if (globalThis.location?.hash === '#conversations') return 'memory'
+  if (globalThis.location?.hash === '#memory') return 'memory'
   return 'today'
-}
-
-function previewText(text: string, limit = 72): string {
-  const compact = text.replace(/\s+/g, ' ').trim()
-  return compact.length > limit ? `${compact.slice(0, limit - 1)}…` : compact
 }
 
 function PlateRivets() {
@@ -117,26 +187,23 @@ function WorkspaceNavigation(props: {
   readonly view: MissionControlView
   readonly pane: WorkspacePane
   readonly onNavigate: (pane: WorkspacePane) => void
-  readonly confirmingSession?: string
+  readonly onOpenOperations: () => void
   readonly onCreateConversation?: () => void
   readonly onSwitchConversation?: (id: string) => void
-  readonly onRenameConversation?: (id: string, title: string) => void
-  readonly onArchiveConversation?: (id: string) => void
-  readonly onRestoreConversation?: (id: string) => void
-  readonly onAskDeleteConversation?: (id: string) => void
-  readonly onConfirmDeleteConversation?: (id: string) => void
 }) {
-  const recentMemory = props.view.memory.slice(0, 8)
-  const recentKnowledge = props.view.knowledge.slice(0, 4)
-  const current = [...props.view.conversation].reverse().find((item) => isUserMessage(item.kind))
-    ?? props.view.conversation[0]
+  const recentSessions = (props.view.sessions?.sessions ?? [])
+    .filter((item) => item.lifecycle === 'active')
+    .slice()
+    .sort((left, right) => right.lastActivityAt.localeCompare(left.lastActivityAt))
+    .slice(0, 4)
   return (
     <aside className="nav-panel instrument-panel" aria-label="Workspace navigation">
       <div className="panel-code">
         <span>NAV 01</span>
         <span>LOCAL / PRIMARY</span>
       </div>
-      <nav className="primary-nav" aria-label="Primary">
+      <div className="nav-group-label">WORKSPACE</div>
+      <nav className="primary-nav" aria-label="Workspace">
         <button
           type="button"
           className={`nav-item${props.pane === 'today' ? ' nav-item--active' : ''}`}
@@ -144,23 +211,45 @@ function WorkspaceNavigation(props: {
           aria-current={props.pane === 'today' ? 'page' : undefined}
           onClick={() => props.onNavigate('today')}
         >
-          <Glyph name="today" /><span>TODAY</span>
-        </button>
-        <button
-          type="button"
-          className={`nav-item${props.pane === 'conversations' ? ' nav-item--active' : ''}`}
-          data-nav="conversations"
-          aria-current={props.pane === 'conversations' ? 'page' : undefined}
-          onClick={() => props.onNavigate('conversations')}
-        >
-          <Glyph name="conversations" /><span>CONVERSATIONS</span>
+          <span className="control-lamp" aria-hidden="true" /><Glyph name="today" /><span>TODAY</span>
         </button>
         <span className="nav-item nav-item--idle" aria-disabled="true" title="Calendar management is not available in this soak">
-          <Glyph name="calendar" /><span>CALENDAR</span>
+          <span className="control-lamp" aria-hidden="true" /><Glyph name="calendar" /><span>CALENDAR</span>
         </span>
-        <a className="nav-item" href="#memory">
-          <Glyph name="memory" /><span>MEMORY</span>
-        </a>
+        <button
+          type="button"
+          className={`nav-item${props.pane === 'memory' ? ' nav-item--active' : ''}`}
+          data-nav="memory"
+          aria-current={props.pane === 'memory' ? 'page' : undefined}
+          onClick={() => props.onNavigate('memory')}
+        >
+          <span className="control-lamp" aria-hidden="true" /><Glyph name="memory" /><span>MEMORY</span>
+        </button>
+      </nav>
+      <section className="nav-conversations" aria-labelledby="recent-conversations-title">
+        <div className="nav-section-heading">
+          <span id="recent-conversations-title">RECENT CONVERSATIONS</span>
+          <button type="button" aria-label="New conversation" title="New conversation" onClick={() => props.onCreateConversation?.()}>+</button>
+        </div>
+        <div className="conversation-shortcuts">
+          {recentSessions.length === 0 ? <p className="nav-empty">No conversations yet</p> : recentSessions.map((item) => (
+            <button
+              key={item.id}
+              type="button"
+              className={`conversation-shortcut${item.current ? ' conversation-shortcut--current' : ''}`}
+              data-session-id={item.id}
+              onClick={() => props.onSwitchConversation?.(item.id)}
+            >
+              <span className="control-lamp" aria-hidden="true" />
+              <span>{item.title}</span>
+              <small>{item.preview || 'No preview yet'}</small>
+            </button>
+          ))}
+        </div>
+        <button type="button" className="view-all-conversations" onClick={() => props.onNavigate('memory')}>View all in Memory <span aria-hidden="true">→</span></button>
+      </section>
+      <div className="nav-group-label nav-group-label--system">SYSTEM</div>
+      <nav className="secondary-nav" aria-label="System">
         <button
           type="button"
           className={`nav-item${props.pane === 'extensions' ? ' nav-item--active' : ''}`}
@@ -168,77 +257,12 @@ function WorkspaceNavigation(props: {
           aria-current={props.pane === 'extensions' ? 'page' : undefined}
           onClick={() => props.onNavigate('extensions')}
         >
-          <Glyph name="capabilities" /><span>EXTENSIONS</span>
+          <span className="control-lamp" aria-hidden="true" /><Glyph name="capabilities" /><span>EXTENSIONS</span>
         </button>
-        <a className="nav-item" href="#capabilities">
-          <Glyph name="capabilities" /><span>CAPABILITIES</span>
-        </a>
+        <button type="button" className="nav-item" data-nav="capabilities" onClick={props.onOpenOperations}>
+          <span className="control-lamp" aria-hidden="true" /><Glyph name="capabilities" /><span>CAPABILITIES</span>
+        </button>
       </nav>
-      {props.view.sessions ? (
-        <section className="recent" aria-labelledby="conversations-title">
-          <div className="section-label" id="conversations-title"><span>LOG 02</span><span>CONVERSATIONS</span></div>
-          <button type="button" className="button button--secondary" data-conversation-action="create" onClick={() => props.onCreateConversation?.()}>New conversation</button>
-          {(props.pane === 'conversations' ? props.view.sessions.sessions : props.view.sessions.sessions.filter((item) => item.lifecycle === 'active'))
-            .slice()
-            .sort((left, right) => right.lastActivityAt.localeCompare(left.lastActivityAt))
-            .map((item) => (
-              <div key={item.id} className={`conversation-link${item.current ? ' conversation-link--current' : ''}`} data-session-id={item.id}>
-                <button type="button" className="conversation-title" onClick={() => props.onSwitchConversation?.(item.id)}>
-                  {item.title}{item.lifecycle === 'archived' ? ' (archived)' : ''}
-                </button>
-                <span className="conversation-preview">{item.preview ?? item.id}</span>
-                <span className="conversation-actions">
-                  <button
-                    type="button"
-                    className="button button--secondary"
-                    data-conversation-action="rename"
-                    onClick={() => {
-                      const next = globalThis.prompt?.('Rename conversation', item.title)
-                      if (next && next.trim() !== '' && next !== item.title) props.onRenameConversation?.(item.id, next.trim())
-                    }}
-                  >
-                    Rename
-                  </button>
-                  {item.lifecycle === 'active' ? (
-                    <button type="button" className="button button--secondary" onClick={() => props.onArchiveConversation?.(item.id)}>Archive</button>
-                  ) : (
-                    <button type="button" className="button button--secondary" onClick={() => props.onRestoreConversation?.(item.id)}>Restore</button>
-                  )}
-                  {props.confirmingSession === item.id ? (
-                    <button type="button" className="button button--fault" onClick={() => props.onConfirmDeleteConversation?.(item.id)}>Confirm delete</button>
-                  ) : (
-                    <button type="button" className="button button--secondary" onClick={() => props.onAskDeleteConversation?.(item.id)}>Delete</button>
-                  )}
-                </span>
-              </div>
-            ))}
-          {props.view.sessions.health !== 'ok' ? <p className="recent-empty">Catalog {props.view.sessions.health}</p> : null}
-        </section>
-      ) : null}
-      <section className="recent" id="memory" aria-labelledby="recent-title">
-        <div className="section-label" id="recent-title"><span>LOG 02</span><span>RECENT</span></div>
-        {current ? (
-          <div className="conversation-link conversation-link--current">
-            <span className="conversation-title">{props.view.objective?.text ?? 'Current conversation'}</span>
-            <span className="conversation-preview">{previewText(current.text)}</span>
-          </div>
-        ) : null}
-        {recentMemory.map((item) => (
-          <div className="conversation-link" key={item.id}>
-            <span className="conversation-title">{item.topicKey}</span>
-            <span className="conversation-preview">{item.statement}</span>
-          </div>
-        ))}
-        {recentKnowledge.map((item) => (
-          <div className="conversation-link" key={item.sourceUri}>
-            <span className="conversation-title">{item.title ?? item.sourceUri}</span>
-            <span className="conversation-preview">{item.excerpt ?? item.sourceUri}</span>
-          </div>
-        ))}
-        {!current && recentMemory.length === 0 && recentKnowledge.length === 0 ? (
-          <p className="recent-empty">No local memory yet</p>
-        ) : null}
-      </section>
       <div className="panel-coordinates" aria-label="Local runtime marker">
         <span>SYS 03</span>
         <span>127.0.0.1</span>
@@ -296,7 +320,9 @@ function ActivationCardView(props: {
   readonly card: ActivationCard
   readonly locked: boolean
   readonly armed: boolean
+  readonly abandonArmed: boolean
   readonly onActivate: (card: ActivationCard) => void
+  readonly onAbandon: (card: ActivationCard) => void
   readonly onDefer: (card: ActivationCard) => void
 }) {
   const { card } = props
@@ -334,6 +360,11 @@ function ActivationCardView(props: {
       {actionable ? (
         <div className="approval-actions">
           <button type="button" className="button button--secondary" data-activation-action="defer" disabled={props.locked} onClick={() => props.onDefer(card)}>NOT NOW</button>
+          {card.status === 'ACTIVATION_FAILED' ? (
+            <button type="button" className="button button--fault" data-activation-action="abandon" disabled={props.locked} onClick={() => props.onAbandon(card)}>
+              {props.abandonArmed ? 'CONFIRM ABANDON' : 'ABANDON'}
+            </button>
+          ) : null}
           <button
             type="button"
             className="button button--approval"
@@ -456,7 +487,9 @@ function ConversationWorkspace(props: {
   readonly onReject: (card: ApprovalCard) => void
   readonly activations: readonly ActivationCard[]
   readonly armedActivation?: string
+  readonly armedAbandonment?: string
   readonly onActivate: (card: ActivationCard) => void
+  readonly onAbandonActivation: (card: ActivationCard) => void
   readonly onDefer: (card: ActivationCard) => void
   readonly rollback?: RollbackCard
   readonly deferredRollback?: boolean
@@ -466,9 +499,31 @@ function ConversationWorkspace(props: {
   readonly onPickSkill?: (skill: SkillProjection) => void
 }) {
   const locked = !props.connected
+  const sendDisabled = props.sending || locked || props.draft.trim() === ''
+  const empty = props.view.conversation.length === 0
+    && props.view.approvals.filter((card) => isPendingApproval(card.status)).length === 0
+    && props.activations.length === 0
+    && props.rollback === undefined
   return (
     <main className="conversation-panel" id="today">
       <div className="conversation-scroll">
+        {empty ? (
+          <section className="conversation-empty" aria-labelledby="conversation-empty-title">
+            <div className="empty-mark" aria-hidden="true"><Glyph name="hex" /><span>T</span></div>
+            <p className="empty-kicker">LOCAL ASSISTANT · READY</p>
+            <h1 id="conversation-empty-title">What are we working on?</h1>
+            <p className="empty-copy">Start with a question, a decision, or a concrete outcome. TARS-NG keeps the work inside this local workspace.</p>
+            <div className="empty-prompts" aria-label="Suggested prompts">
+              {[
+                'Help me understand this project',
+                'Review the latest changes',
+                'Plan the next product milestone',
+              ].map((prompt) => (
+                <button key={prompt} type="button" onClick={() => props.onDraft(prompt)} disabled={locked}>{prompt}</button>
+              ))}
+            </div>
+          </section>
+        ) : null}
         {props.view.conversation.map((item, index) => {
           const user = isUserMessage(item.kind)
           const alert = item.kind === 'warning' || item.kind === 'failure'
@@ -484,7 +539,7 @@ function ConversationWorkspace(props: {
                 <div className="message-meta">
                   <span>{user ? 'YOU' : props.view.identity}</span>
                 </div>
-                <div className="message-body" dangerouslySetInnerHTML={{ __html: formatMarkdownLite(item.text) }} />
+                <div className="message-body"><MarkdownMessage text={item.text} /></div>
               </div>
             </article>
           )
@@ -498,7 +553,9 @@ function ConversationWorkspace(props: {
             card={card}
             locked={locked}
             armed={props.armedActivation === card.id}
+            abandonArmed={props.armedAbandonment === card.id}
             onActivate={props.onActivate}
+            onAbandon={props.onAbandonActivation}
             onDefer={props.onDefer}
           />
         ))}
@@ -538,6 +595,11 @@ function ConversationWorkspace(props: {
             placeholder="Message TARS-NG…"
             value={props.draft}
             onChange={(event) => props.onDraft(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key !== 'Enter' || event.shiftKey || event.nativeEvent.isComposing) return
+              event.preventDefault()
+              if (!sendDisabled) props.onSend()
+            }}
           />
           <button
             className="icon-button"
@@ -547,18 +609,128 @@ function ConversationWorkspace(props: {
             disabled
           >
             <Glyph name="attach" />
+            <span className="composer-button-label">ATTACH</span>
+            <small>INOP</small>
           </button>
           <button
             className="send-button"
             type="submit"
             aria-label="Send message"
-            disabled={props.sending || locked || props.draft.trim() === ''}
+            disabled={sendDisabled}
           >
             <Glyph name="send" />
-            <span className="sr-only">{props.sending ? 'SENDING' : 'SEND'}</span>
+            <span className="composer-button-label">{props.sending ? 'SENDING' : 'SEND'}</span>
           </button>
         </form>
         {props.error ? <p className="error" role="alert">{props.error}</p> : null}
+      </div>
+    </main>
+  )
+}
+
+function formatMemoryDate(value: string): string {
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return 'Unknown activity'
+  return new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric', year: 'numeric' }).format(date)
+}
+
+function MemoryWorkspace(props: {
+  readonly view: MissionControlView
+  readonly confirmingSession?: string
+  readonly onCreateConversation?: () => void
+  readonly onOpenConversation?: (id: string) => void
+  readonly onRenameConversation?: (id: string, title: string) => void
+  readonly onArchiveConversation?: (id: string) => void
+  readonly onRestoreConversation?: (id: string) => void
+  readonly onAskDeleteConversation?: (id: string) => void
+  readonly onConfirmDeleteConversation?: (id: string) => void
+}) {
+  const sessions = (props.view.sessions?.sessions ?? [])
+    .slice()
+    .sort((left, right) => right.lastActivityAt.localeCompare(left.lastActivityAt))
+  return (
+    <main className="conversation-panel memory-panel" id="memory" data-workspace-pane="memory">
+      <div className="memory-scroll">
+        <header className="workspace-heading">
+          <div>
+            <p className="workspace-kicker">PERSONAL CONTEXT</p>
+            <h1>Memory</h1>
+            <p>Conversation history, remembered facts, and local knowledge are related—but they are not the same thing.</p>
+          </div>
+          <dl className="memory-summary" aria-label="Memory summary">
+            <div><dt>Conversations</dt><dd>{sessions.length}</dd></div>
+            <div><dt>Remembered facts</dt><dd>{props.view.memory.length}</dd></div>
+            <div><dt>Knowledge sources</dt><dd>{props.view.knowledge.length}</dd></div>
+          </dl>
+        </header>
+
+        <section className="memory-section" aria-labelledby="memory-conversations-title">
+          <div className="memory-section-heading">
+            <div><p>SESSION HISTORY</p><h2 id="memory-conversations-title">Conversations</h2></div>
+            <button type="button" className="memory-primary-action" onClick={() => props.onCreateConversation?.()}>New conversation</button>
+          </div>
+          <div className="memory-card-grid" data-memory-cards="conversations">
+            {sessions.length === 0 ? <p className="memory-empty">No conversations yet.</p> : sessions.map((session) => (
+              <article key={session.id} className={`memory-card conversation-card${session.current ? ' conversation-card--current' : ''}`} data-session-id={session.id}>
+                <div className="memory-card-topline">
+                  <span className={`memory-badge${session.current ? ' memory-badge--current' : ''}`}>{session.current ? 'Current' : session.lifecycle}</span>
+                  <span>{formatMemoryDate(session.lastActivityAt)}</span>
+                </div>
+                <h3>{session.title}</h3>
+                <p>{session.preview || 'No conversation preview yet.'}</p>
+                <div className="memory-card-actions">
+                  {session.lifecycle === 'archived' ? (
+                    <button type="button" onClick={() => props.onRestoreConversation?.(session.id)}>Restore</button>
+                  ) : (
+                    <button type="button" className="memory-card-open" onClick={() => props.onOpenConversation?.(session.id)}>{session.current ? 'Continue' : 'Open'}</button>
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const next = globalThis.prompt?.('Rename conversation', session.title)
+                      if (next && next.trim() !== '' && next !== session.title) props.onRenameConversation?.(session.id, next.trim())
+                    }}
+                  >
+                    Rename
+                  </button>
+                  {session.lifecycle === 'active' ? <button type="button" onClick={() => props.onArchiveConversation?.(session.id)}>Archive</button> : null}
+                  {props.confirmingSession === session.id ? (
+                    <button type="button" className="memory-card-danger" onClick={() => props.onConfirmDeleteConversation?.(session.id)}>Confirm delete</button>
+                  ) : (
+                    <button type="button" onClick={() => props.onAskDeleteConversation?.(session.id)}>Delete</button>
+                  )}
+                </div>
+              </article>
+            ))}
+          </div>
+        </section>
+
+        <section className="memory-section" aria-labelledby="remembered-facts-title">
+          <div className="memory-section-heading"><div><p>DURABLE MEMORY</p><h2 id="remembered-facts-title">Remembered facts</h2></div></div>
+          <div className="memory-card-grid" data-memory-cards="facts">
+            {props.view.memory.length === 0 ? <p className="memory-empty">Nothing has been committed to long-term memory yet.</p> : props.view.memory.map((item) => (
+              <article key={item.id} className="memory-card fact-card">
+                <div className="memory-card-topline"><span className="memory-badge">{item.topicKey}</span><span>{item.status}</span></div>
+                <p>{item.statement}</p>
+                <small>Origin · {item.origin}</small>
+              </article>
+            ))}
+          </div>
+        </section>
+
+        <section className="memory-section" aria-labelledby="knowledge-sources-title">
+          <div className="memory-section-heading"><div><p>LOCAL REFERENCES</p><h2 id="knowledge-sources-title">Knowledge sources</h2></div></div>
+          <div className="memory-card-grid" data-memory-cards="knowledge">
+            {props.view.knowledge.length === 0 ? <p className="memory-empty">No local knowledge sources are indexed.</p> : props.view.knowledge.map((item) => (
+              <article key={item.sourceUri} className="memory-card knowledge-card">
+                <div className="memory-card-topline"><span className="memory-badge">Source</span></div>
+                <h3>{item.title ?? 'Untitled source'}</h3>
+                <p>{item.excerpt ?? item.sourceUri}</p>
+                <small>{item.sourceUri}</small>
+              </article>
+            ))}
+          </div>
+        </section>
       </div>
     </main>
   )
@@ -645,10 +817,12 @@ function ExtensionsWorkspace(props: {
   readonly inspecting?: string
   readonly confirmingPlugin?: string
   readonly armedActivation?: string
+  readonly armedAbandonment?: string
   readonly onInspect: (id: string) => void
   readonly onApprove: (card: ApprovalCard) => void
   readonly onReject: (card: ApprovalCard) => void
   readonly onActivate?: (card: ActivationCard) => void
+  readonly onAbandonActivation?: (card: ActivationCard) => void
   readonly onAskUninstall?: (plugin: UserPluginView) => void
   readonly onCancelUninstall?: () => void
   readonly onConfirmUninstall?: (plugin: UserPluginView) => void
@@ -729,17 +903,30 @@ function ExtensionsWorkspace(props: {
                       </>
                     ) : null}
                     {canActivate && card ? (
-                      <button
-                        type="button"
-                        className="button button--approval"
-                        data-extension-action={item.lifecycle === 'DISABLED_REACTIVATABLE' ? 'reactivate' : item.lifecycle === 'ACTIVATION_FAILED' ? 'retry' : 'activate'}
-                        disabled={props.locked}
-                        onClick={() => props.onActivate?.(card)}
-                      >
-                        {props.armedActivation === card.id
-                          ? (item.lifecycle === 'DISABLED_REACTIVATABLE' ? 'CONFIRM REACTIVATE' : item.lifecycle === 'ACTIVATION_FAILED' ? 'CONFIRM RETRY' : 'CONFIRM ACTIVATE')
-                          : (item.lifecycle === 'DISABLED_REACTIVATABLE' ? 'REACTIVATE' : item.lifecycle === 'ACTIVATION_FAILED' ? 'RETRY' : 'ACTIVATE')}
-                      </button>
+                      <>
+                        {item.lifecycle === 'ACTIVATION_FAILED' ? (
+                          <button
+                            type="button"
+                            className="button button--fault"
+                            data-extension-action="abandon"
+                            disabled={props.locked}
+                            onClick={() => props.onAbandonActivation?.(card)}
+                          >
+                            {props.armedAbandonment === card.id ? 'CONFIRM ABANDON' : 'ABANDON'}
+                          </button>
+                        ) : null}
+                        <button
+                          type="button"
+                          className="button button--approval"
+                          data-extension-action={item.lifecycle === 'DISABLED_REACTIVATABLE' ? 'reactivate' : item.lifecycle === 'ACTIVATION_FAILED' ? 'retry' : 'activate'}
+                          disabled={props.locked}
+                          onClick={() => props.onActivate?.(card)}
+                        >
+                          {props.armedActivation === card.id
+                            ? (item.lifecycle === 'DISABLED_REACTIVATABLE' ? 'CONFIRM REACTIVATE' : item.lifecycle === 'ACTIVATION_FAILED' ? 'CONFIRM RETRY' : 'CONFIRM ACTIVATE')
+                            : (item.lifecycle === 'DISABLED_REACTIVATABLE' ? 'REACTIVATE' : item.lifecycle === 'ACTIVATION_FAILED' ? 'RETRY' : 'ACTIVATE')}
+                        </button>
+                      </>
                     ) : null}
                     {item.lifecycle === 'ACTIVE' && plugin ? (
                       <PluginRow
@@ -901,49 +1088,39 @@ function OperationsPanel(props: {
   readonly onConfirmUninstall?: (plugin: UserPluginView) => void
   readonly onOpenExtensions?: () => void
 }) {
+  const activeCapabilities = props.view.capabilities.filter((item) => item.status === 'active').length
+  const governedCapabilities = props.view.capabilities.filter((item) => item.status === 'approval-required').length
+  const unavailableCapabilities = props.view.capabilities.length - activeCapabilities - governedCapabilities
+  const recentActivity = props.view.activity.slice(-3).reverse()
+  const degradation = props.view.controlStrip.degradation
+  const pendingApprovals = props.view.controlStrip.pendingApprovals
   return (
     <aside className="ops-panel instrument-panel" id="activity" aria-label="Operational state">
-      <div className="panel-code"><span>OPS 04</span><span>AUTHORITATIVE</span></div>
-      <section className="activity-section" aria-labelledby="activity-title">
-        <h2 id="activity-title">ACTIVITY</h2>
-        <ol className="activity-list">
-          {props.view.activity.map((item) => (
-            <li key={item.id} className={`activity-item${activityModifier(item.kind)}`} data-activity={item.kind}>
-              <span className="activity-node">{item.kind === 'APPROVAL_REQUIRED' ? <Glyph name="warn" /> : null}</span>
-              <span>{item.kind.replaceAll('_', ' ')}</span>
-              <span className="activity-summary">{item.summary}</span>
-            </li>
-          ))}
-        </ol>
+      <div className="panel-code"><span>OPS 04</span><span>LIVE STATUS</span></div>
+      <section className="ops-overview" aria-labelledby="ops-overview-title">
+        <div className="ops-section-heading">
+          <h2 id="ops-overview-title">OPERATIONS</h2>
+          <span className={`status-lamp status-lamp--${lampModifier(props.view.systemState, props.locked !== true)}`} aria-hidden="true" />
+        </div>
+        <strong className="ops-mode">{props.view.systemState.replaceAll('_', ' ')}</strong>
+        <p className="ops-detail">{props.locked ? 'CONTROL LINK OFFLINE' : degradation ?? 'ALL CORE SYSTEMS NOMINAL'}</p>
+        <div className="ops-counters" aria-label="Operational counters">
+          <span><small>APPROVALS</small><strong className={pendingApprovals > 0 ? 'amber' : undefined}>{pendingApprovals}</strong></span>
+          <span><small>JOBS</small><strong>{props.view.controlStrip.backgroundJobs}</strong></span>
+        </div>
+        {pendingApprovals > 0 ? <p className="ops-alert"><Glyph name="warn" /> HUMAN DECISION REQUIRED</p> : null}
       </section>
       <WorkbenchPanel candidates={props.view.candidates ?? []} />
-      <section className="capability-section" id="actions" aria-labelledby="actions-title">
-        <h2 id="actions-title">ACTIONS</h2>
-        <ul className="workbench-list" data-actions-history="true">
-          {(props.view.approvalResolutions ?? []).length === 0 ? (
-            <li className="workbench-item">No resolved approvals yet.</li>
-          ) : (props.view.approvalResolutions ?? []).map((item) => (
-            <li
-              key={item.confirmationId}
-              className="workbench-item"
-              data-approval-resolution={item.confirmationId}
-              data-approval-outcome={item.outcome}
-            >
-              <div className="workbench-identity">{item.capability ?? 'action'}.{item.operation ?? item.decision}</div>
-              <div className="workbench-meta">{item.decision} · {item.outcome}</div>
-            </li>
-          ))}
-        </ul>
-      </section>
-      <section className="capability-section" aria-labelledby="extensions-ops-title">
-        <h2 id="extensions-ops-title">EXTENSIONS</h2>
-        <p className="workbench-meta">{(props.view.extensions ?? []).length} generated/user revision{(props.view.extensions ?? []).length === 1 ? '' : 's'}</p>
-        <button type="button" className="button button--secondary" data-open-extensions="true" onClick={() => props.onOpenExtensions?.()}>
-          Open Extensions
-        </button>
-      </section>
       <section className="capability-section" id="capabilities" aria-labelledby="capability-title">
-        <h2 id="capability-title">CAPABILITY STATUS</h2>
+        <div className="ops-section-heading capability-heading">
+          <h2 id="capability-title">CAPABILITIES</h2>
+          <span>{props.view.capabilities.length} CHANNELS</span>
+        </div>
+        <div className="capability-summary" aria-label="Capability summary">
+          <span data-capability-state="active"><strong>{activeCapabilities}</strong> ACTIVE</span>
+          <span data-capability-state="governed"><strong>{governedCapabilities}</strong> GOVERNED</span>
+          <span data-capability-state="unavailable"><strong>{unavailableCapabilities}</strong> INOP</span>
+        </div>
         <dl className="capability-list">
           {(props.view.plugins ?? []).map((plugin) => (
             <PluginRow
@@ -963,12 +1140,49 @@ function OperationsPanel(props: {
                 <span className="capability-action">{item.action}</span>
               </dt>
               <dd data-status={item.status} data-capability-state={capabilitySignal(item.status)}>
-                {item.status.replaceAll('-', ' ').toUpperCase()}
+                {item.status === 'approval-required' ? 'APPROVAL'
+                  : item.status === 'safe-mode-disabled' ? 'SAFE OFF'
+                    : item.status === 'unavailable' ? 'INOP' : 'ACTIVE'}
               </dd>
             </div>
           ))}
         </dl>
       </section>
+      <section className="activity-section activity-section--recent" aria-labelledby="activity-title">
+        <div className="ops-section-heading">
+          <h2 id="activity-title">RECENT EVENTS</h2>
+          <span>LAST {recentActivity.length}</span>
+        </div>
+        {recentActivity.length === 0 ? <p className="ops-empty">NO RECENT EVENTS</p> : (
+          <ol className="activity-list">
+            {recentActivity.map((item) => (
+              <li key={item.id} className={`activity-item${activityModifier(item.kind)}`} data-activity={item.kind}>
+                <span className="activity-node">{item.kind === 'APPROVAL_REQUIRED' ? <Glyph name="warn" /> : null}</span>
+                <span>{item.kind.replaceAll('_', ' ')}</span>
+                <span className="activity-summary">{item.summary}</span>
+              </li>
+            ))}
+          </ol>
+        )}
+        {(props.view.approvalResolutions ?? []).length > 0 ? (
+          <ul className="ops-decisions" data-actions-history="true" aria-label="Recent human decisions">
+            {(props.view.approvalResolutions ?? []).slice(-3).reverse().map((item) => (
+              <li
+                key={item.confirmationId}
+                data-approval-resolution={item.confirmationId}
+                data-approval-outcome={item.outcome}
+              >
+                <span>{item.capability ?? 'action'}.{item.operation ?? item.decision}</span>
+                <strong>{item.decision.toUpperCase()}</strong>
+              </li>
+            ))}
+          </ul>
+        ) : null}
+      </section>
+      <div className="ops-footer">
+        <span><strong>{(props.view.extensions ?? []).length}</strong> USER EXTENSIONS</span>
+        <button type="button" className="button button--secondary" data-open-extensions="true" onClick={() => props.onOpenExtensions?.()}>OPEN</button>
+      </div>
     </aside>
   )
 }
@@ -1105,9 +1319,11 @@ export function MissionControlScreen(props: {
   readonly onApprove: (card: ApprovalCard) => void
   readonly onReject: (card: ApprovalCard) => void
   readonly onActivate?: (card: ActivationCard) => void
+  readonly onAbandonActivation?: (card: ActivationCard) => void
   readonly onDeferActivation?: (card: ActivationCard) => void
   readonly deferredActivations?: readonly string[]
   readonly armedActivation?: string
+  readonly armedAbandonment?: string
   readonly pane?: WorkspacePane
   readonly onNavigate?: (pane: WorkspacePane) => void
   readonly confirmingSession?: string
@@ -1141,9 +1357,29 @@ export function MissionControlScreen(props: {
   const safe = view.systemState === 'SAFE_MODE' || view.systemState === 'RECOVERY'
   const locked = !props.connected
   const pane = props.pane ?? 'today'
+  const [compactSurface, setCompactSurface] = useState<CompactSurface>('conversation')
+  const initialPrototype = shuttlePrototypeFromLocation()
+  const [prototypeVariant, setPrototypeVariant] = useState<ShuttlePrototypeVariant>(initialPrototype.variant)
+  const selectPrototypeVariant = (next: ShuttlePrototypeVariant) => {
+    setPrototypeVariant(next)
+    if (!globalThis.location) return
+    const url = new URL(globalThis.location.href)
+    url.searchParams.set('prototype', 'shuttle')
+    url.searchParams.set('variant', next)
+    globalThis.history?.replaceState(null, '', url)
+  }
+  const navigate = (next: WorkspacePane) => {
+    props.onNavigate?.(next)
+    setCompactSurface('conversation')
+  }
+  const openOperations = () => {
+    setCompactSurface('operations')
+    globalThis.setTimeout(() => globalThis.document?.getElementById('capabilities')?.scrollIntoView({ block: 'start' }), 0)
+  }
   return (
-    <div className="chassis">
+    <div className="chassis" data-shuttle-variant={initialPrototype.enabled ? prototypeVariant : undefined}>
     <div className="console" data-system-state={view.systemState} data-connected={props.connected ? 'yes' : 'no'}>
+      {initialPrototype.enabled ? <div className="shuttle-prototype-plaque" aria-hidden="true">OV-103 · CREW INTERFACE STUDY · PROTOTYPE</div> : null}
       <SystemHeader
         identity={view.identity}
         systemState={view.systemState}
@@ -1168,19 +1404,25 @@ export function MissionControlScreen(props: {
           onRecovery={props.onRecovery}
         />
       ) : null}
-      <div className="workspace-grid">
+      <nav className="compact-workspace-nav" aria-label="Compact workspace">
+        <button type="button" className={compactSurface === 'navigation' ? 'is-active' : ''} aria-pressed={compactSurface === 'navigation'} onClick={() => setCompactSurface('navigation')}>
+          <span className="control-lamp" aria-hidden="true" /><Glyph name="conversations" /><span>Navigate</span>
+        </button>
+        <button type="button" className={compactSurface === 'conversation' ? 'is-active' : ''} aria-pressed={compactSurface === 'conversation'} onClick={() => setCompactSurface('conversation')}>
+          <span className="control-lamp" aria-hidden="true" /><Glyph name="today" /><span>Workspace</span>
+        </button>
+        <button type="button" className={compactSurface === 'operations' ? 'is-active' : ''} aria-pressed={compactSurface === 'operations'} onClick={() => setCompactSurface('operations')}>
+          <span className="control-lamp" aria-hidden="true" /><Glyph name="capabilities" /><span>Status</span>
+        </button>
+      </nav>
+      <div className="workspace-grid" data-compact-surface={compactSurface}>
         <WorkspaceNavigation
           view={view}
           pane={pane}
-          onNavigate={props.onNavigate ?? (() => {})}
-          confirmingSession={props.confirmingSession}
+          onNavigate={navigate}
+          onOpenOperations={openOperations}
           onCreateConversation={props.onCreateConversation}
           onSwitchConversation={props.onSwitchConversation}
-          onRenameConversation={props.onRenameConversation}
-          onArchiveConversation={props.onArchiveConversation}
-          onRestoreConversation={props.onRestoreConversation}
-          onAskDeleteConversation={props.onAskDeleteConversation}
-          onConfirmDeleteConversation={props.onConfirmDeleteConversation}
         />
         {pane === 'extensions' ? (
           <ExtensionsWorkspace
@@ -1189,10 +1431,12 @@ export function MissionControlScreen(props: {
             inspecting={props.inspectingExtension}
             confirmingPlugin={props.confirmingPlugin}
             armedActivation={props.armedActivation}
+            armedAbandonment={props.armedAbandonment}
             onInspect={props.onInspectExtension ?? (() => {})}
             onApprove={props.onApprove}
             onReject={props.onReject}
             onActivate={props.onActivate}
+            onAbandonActivation={props.onAbandonActivation}
             onAskUninstall={props.onAskUninstall}
             onCancelUninstall={props.onCancelUninstall}
             onConfirmUninstall={props.onConfirmUninstall}
@@ -1200,6 +1444,21 @@ export function MissionControlScreen(props: {
             armedSkill={props.armedSkill}
             skillDependents={props.skillDependents}
             onSkillAction={props.onSkillAction}
+          />
+        ) : pane === 'memory' ? (
+          <MemoryWorkspace
+            view={view}
+            confirmingSession={props.confirmingSession}
+            onCreateConversation={props.onCreateConversation}
+            onOpenConversation={(id) => {
+              props.onSwitchConversation?.(id)
+              navigate('today')
+            }}
+            onRenameConversation={props.onRenameConversation}
+            onArchiveConversation={props.onArchiveConversation}
+            onRestoreConversation={props.onRestoreConversation}
+            onAskDeleteConversation={props.onAskDeleteConversation}
+            onConfirmDeleteConversation={props.onConfirmDeleteConversation}
           />
         ) : (
         <ConversationWorkspace
@@ -1214,7 +1473,9 @@ export function MissionControlScreen(props: {
           onReject={props.onReject}
           activations={(view.activations ?? []).filter((card) => !(props.deferredActivations ?? []).includes(card.id))}
           armedActivation={props.armedActivation}
+          armedAbandonment={props.armedAbandonment}
           onActivate={props.onActivate ?? (() => {})}
+          onAbandonActivation={props.onAbandonActivation ?? (() => {})}
           onDefer={props.onDeferActivation ?? (() => {})}
           onPickSkill={props.onPickSkill}
           rollback={view.rollback}
@@ -1231,11 +1492,12 @@ export function MissionControlScreen(props: {
           onAskUninstall={props.onAskUninstall}
           onCancelUninstall={props.onCancelUninstall}
           onConfirmUninstall={props.onConfirmUninstall}
-          onOpenExtensions={() => props.onNavigate?.('extensions')}
+          onOpenExtensions={() => navigate('extensions')}
         />
       </div>
       <ControlStripView view={view} connected={props.connected} />
     </div>
+    {initialPrototype.enabled ? <ShuttlePrototypeSwitcher variant={prototypeVariant} onChange={selectPrototypeVariant} /> : null}
     </div>
   )
 }
@@ -1248,6 +1510,7 @@ export function App() {
   const [error, setError] = useState<string>()
   const [armedRecovery, setArmedRecovery] = useState<string>()
   const [armedActivation, setArmedActivation] = useState<string>()
+  const [armedAbandonment, setArmedAbandonment] = useState<string>()
   const [deferredActivations, setDeferredActivations] = useState<string[]>([])
   const [confirmingPlugin, setConfirmingPlugin] = useState<string>()
   const [deferredRollback, setDeferredRollback] = useState(false)
@@ -1275,7 +1538,7 @@ export function App() {
   const navigate = (next: WorkspacePane) => {
     setPane(next)
     if (globalThis.location) {
-      globalThis.location.hash = next === 'extensions' ? 'extensions' : next === 'conversations' ? 'conversations' : 'today'
+      globalThis.location.hash = next
     }
   }
 
@@ -1354,16 +1617,27 @@ export function App() {
       onReject={(card) => { void act(() => decideApproval(card, 'deny')) }}
       deferredActivations={deferredActivations}
       armedActivation={armedActivation}
+      armedAbandonment={armedAbandonment}
       onDeferActivation={(card) => {
         setDeferredActivations((current) => current.includes(card.id) ? current : [...current, card.id])
       }}
       onActivate={(card) => {
         if (armedActivation !== card.id) {
+          setArmedAbandonment(undefined)
           setArmedActivation(card.id)
           return
         }
         setArmedActivation(undefined)
         void act(() => activateCandidate(card, true))
+      }}
+      onAbandonActivation={(card) => {
+        if (armedAbandonment !== card.id) {
+          setArmedActivation(undefined)
+          setArmedAbandonment(card.id)
+          return
+        }
+        setArmedAbandonment(undefined)
+        void act(() => abandonCandidateActivation(card, true))
       }}
       pane={pane}
       onNavigate={navigate}

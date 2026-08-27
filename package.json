@@ -13,7 +13,7 @@
     },
     "./package.json": "./package.json"
   },
-    "files": [
+  "files": [
     "dist",
     "cordis.patch.yml",
     "profiles/assistant",
@@ -24,7 +24,10 @@
   },
   "tarsNg": {
     "dsh": "0.1.0-rc.8",
-    "home": ["TARS_NG_HOME", "DSH_ASSISTANT_HOME"]
+    "home": [
+      "TARS_NG_HOME",
+      "DSH_ASSISTANT_HOME"
+    ]
   },
   "dsh": {
     "bundle": {
@@ -51,10 +54,10 @@
     "@deepseek-ai/dsh-agent": "0.1.0-rc.8",
     "@deepseek-ai/dsh-agent-default-model": "0.1.0-rc.8",
     "@deepseek-ai/dsh-agent-loop": "0.1.0-rc.8",
-    "@deepseek-ai/dsh-app-boot": "0.1.0-rc.8",
     "@deepseek-ai/dsh-anonymous-user-id": "0.1.0-rc.8",
-    "@deepseek-ai/dsh-base": "0.1.0-rc.8",
+    "@deepseek-ai/dsh-app-boot": "0.1.0-rc.8",
     "@deepseek-ai/dsh-attachment": "0.1.0-rc.8",
+    "@deepseek-ai/dsh-base": "0.1.0-rc.8",
     "@deepseek-ai/dsh-brand": "0.1.0-rc.8",
     "@deepseek-ai/dsh-credentials": "0.1.0-rc.8",
     "@deepseek-ai/dsh-home-paths": "0.1.0-rc.8",
@@ -66,16 +69,19 @@
     "@deepseek-ai/dsh-llm-deepseek": "0.1.0-rc.8",
     "@deepseek-ai/dsh-scope": "0.1.0-rc.8",
     "@deepseek-ai/dsh-session": "0.1.0-rc.8",
-    "@deepseek-ai/dsh-skill": "0.1.0-rc.8",
-    "@deepseek-ai/dsh-skill-filesystem": "0.1.0-rc.8",
-    "@deepseek-ai/dsh-tool-skill": "0.1.0-rc.8",
     "@deepseek-ai/dsh-session-persistence": "0.1.0-rc.8",
     "@deepseek-ai/dsh-session-persistence-jsonl": "0.1.0-rc.8",
     "@deepseek-ai/dsh-settings": "0.1.0-rc.8",
+    "@deepseek-ai/dsh-skill": "0.1.0-rc.8",
+    "@deepseek-ai/dsh-skill-filesystem": "0.1.0-rc.8",
     "@deepseek-ai/dsh-system-prompt": "0.1.0-rc.8",
     "@deepseek-ai/dsh-timeout": "0.1.0-rc.8",
+    "@deepseek-ai/dsh-tool-skill": "0.1.0-rc.8",
     "@deepseek-ai/dsh-tools": "0.1.0-rc.8",
-    "@deepseek-ai/dsh-typert-protocol": "0.1.0-rc.8"
+    "@deepseek-ai/dsh-typert-protocol": "0.1.0-rc.8",
+    "@fontsource/zcool-qingke-huangyou": "^5.3.0",
+    "react-markdown": "^10.1.0",
+    "remark-gfm": "^4.0.1"
   },
   "devDependencies": {
     "@types/node": "^24.3.0",

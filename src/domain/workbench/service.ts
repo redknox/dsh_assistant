@@ -4,6 +4,8 @@ import path from 'node:path'
 import { contractDigestExtras } from '../candidate/digest.js'
 import { defaultProvenance } from '../candidate/manifest.js'
 import { isImportedThirdParty } from '../generated-runtime/trust.js'
+import { assertGeneratedBrokerPermissions } from '../generated-runtime/broker.js'
+import { parsePermission } from '../registry/normalize.js'
 import { resolveInsideRoot } from '../candidate/paths.js'
 import { SealedCandidateError } from '../candidate/errors.js'
 import type { CandidateManifest, CandidateManifestInput, CandidateRecord, CandidateValidation, CandidateWorkspace } from '../candidate/types.js'
@@ -112,12 +114,16 @@ export class WorkbenchService implements CandidateWorkbench {
       throw new WorkbenchContractError(`resolution kind ${plan.review.kind} does not create a candidate workspace`)
     }
     const identity = identityFromReview(plan.review)
+    const provenance = defaultProvenance(plan.review, identity.owner)
+    if (provenance.kind === 'generated') {
+      assertGeneratedBrokerPermissions((input.manifest?.permissions ?? []).map(parsePermission))
+    }
     const record = this.workspace.create({
       review: plan.review,
       owner: identity.owner,
       version: identity.version,
       baseVersion: identity.baseVersion,
-      provenance: defaultProvenance(plan.review, identity.owner),
+      provenance,
       manifest: { ...input.manifest, runtimeContractVersion: '' },
     })
     this.bindings.set(record.id, { planId: plan.id })
@@ -349,6 +355,10 @@ export class WorkbenchService implements CandidateWorkbench {
     const record = this.workspace.get(candidateId)
     assertImportedReadOnly(record)
     const current = record.manifest
+    if (record.provenance.kind === 'generated') {
+      const permissions = (manifest.permissions ?? current.permissions).map(parsePermission)
+      assertGeneratedBrokerPermissions(permissions)
+    }
     this.workspace.setManifest(candidateId, mergeManifestPatch(current, manifest))
     this.flush()
     return this.inspect(candidateId)

@@ -51,6 +51,9 @@ function shimContext() {
       },
     },
     effect(dispose: () => void) {
+      if (typeof dispose !== 'function') {
+        throw new TypeError('ctx.effect accepts a cleanup function only')
+      }
       return dispose
     },
     broker: {

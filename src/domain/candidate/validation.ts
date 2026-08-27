@@ -7,6 +7,8 @@ import { detectOsNetworkSandbox } from './os-sandbox.js'
 import { runRestrictedCandidateTests, runnerUnavailable } from './restricted-runner.js'
 import { evaluateActivationCompatibility } from '../activation-compatibility/index.js'
 import { evaluateReliability, reliabilitySummary } from '../reliability/index.js'
+import { normalizeRegisterInput } from '../registry/normalize.js'
+import { assertGeneratedBrokerPermissions } from '../generated-runtime/broker.js'
 import type { OwnerExecutionFacts } from '../activation-compatibility/index.js'
 import type { CandidateRecord, ValidationReport, ValidationStageResult, ValidationStageStatus } from './types.js'
 import { ALLOWED_VALIDATION_TASKS } from './types.js'
@@ -130,6 +132,15 @@ function inspectRuntimeContract(record: CandidateRecord): ValidationStageResult 
         { diagnostics: 'unsupported-or-missing-contract-version' },
       )
     }
+    try {
+      assertGeneratedBrokerPermissions(record.manifest.permissions)
+    } catch (error) {
+      return stage(
+        'runtime.contract',
+        'failed',
+        error instanceof Error ? error.message : 'Generated Broker permissions are unsupported.',
+      )
+    }
     return stage('runtime.contract', 'passed', 'Host authoring contract generated-extension-api/v1.')
   }
   if (version !== undefined && version !== 'generated-extension-api/v1') {
@@ -138,6 +149,32 @@ function inspectRuntimeContract(record: CandidateRecord): ValidationStageResult 
     })
   }
   return stage('runtime.contract', 'not-applicable', 'Host authoring contract is not required for this provenance.')
+}
+
+function inspectManifest(record: CandidateRecord): ValidationStageResult {
+  try {
+    normalizeRegisterInput({
+      owner: record.owner,
+      version: record.version,
+      provenance: record.provenance,
+      status: 'candidate',
+      evidence: 'Verified',
+      capabilities: record.manifest.capabilities.map((id) => ({ id, permissions: [] })),
+      permissions: record.manifest.permissions,
+      runtimeSeams: record.manifest.runtimeSeams,
+      tools: record.manifest.tools,
+      services: record.manifest.services,
+      providers: record.manifest.providers,
+      pluginDependencies: record.manifest.pluginDependencies,
+    })
+    return stage('manifest.validate', 'passed', `Manifest for ${record.owner}@${record.version} is well-formed.`)
+  } catch (error) {
+    return stage(
+      'manifest.validate',
+      'failed',
+      error instanceof Error ? error.message : 'Manifest is not compatible with the Registry contract.',
+    )
+  }
 }
 
 function inspectBoundary(root: string, files: readonly string[]): ValidationStageResult {
@@ -153,6 +190,34 @@ function inspectBoundary(root: string, files: readonly string[]): ValidationStag
   return hits.length === 0
     ? stage('source.boundary', 'passed', 'No DSH package-internal src imports.')
     : stage('source.boundary', 'failed', 'Candidate sources import DSH package internals.', { diagnostics: hits.join(', ') })
+}
+
+function inspectGeneratedSourceContract(record: CandidateRecord, root: string, files: readonly string[]): ValidationStageResult {
+  if (record.manifest.runtimeContractVersion !== 'generated-extension-api/v1') {
+    return stage('source.contract', 'not-applicable', 'Generated source contract is not required for this provenance.')
+  }
+  const invalid: string[] = []
+  const sources = files.filter((file) => file.endsWith('.ts') || file.endsWith('.js'))
+  const effectCall = /\bctx\s*\.\s*effect\s*\(/g
+  const inlineCleanup = /^(?:\(\s*\)\s*=>|function\s*\(\s*\))/
+  for (const file of sources) {
+    const text = readFileSync(path.join(root, file), 'utf8')
+    for (const match of text.matchAll(effectCall)) {
+      const argument = text.slice((match.index ?? 0) + match[0].length).trimStart()
+      if (!inlineCleanup.test(argument)) {
+        invalid.push(file)
+        break
+      }
+    }
+  }
+  return invalid.length === 0
+    ? stage('source.contract', 'passed', 'Generated ctx.effect calls use inline cleanup callbacks.')
+    : stage(
+      'source.contract',
+      'failed',
+      'generated-extension-api/v1 ctx.effect accepts only an inline cleanup callback.',
+      { diagnostics: [...new Set(invalid)].join(', ') },
+    )
 }
 
 function inspectBundle(root: string): ValidationStageResult {
@@ -252,7 +317,7 @@ export function runValidation(record: CandidateRecord, activeOwner?: OwnerExecut
       { diagnostics: blocked.join(', ') },
     ))
   }
-  stages.push(stage('manifest.validate', 'passed', `Manifest for ${record.owner}@${record.version} is well-formed.`))
+  stages.push(inspectManifest(record))
   const reliability = evaluateReliability(record.manifest)
   stages.push(stage(
     'reliability.gate',
@@ -266,6 +331,7 @@ export function runValidation(record: CandidateRecord, activeOwner?: OwnerExecut
   ))
   stages.push(inspectRuntimeContract(record))
   stages.push(inspectActivationCompatibility(record, activeOwner))
+  stages.push(inspectGeneratedSourceContract(record, record.workspaceRoot, files))
   stages.push(inspectBoundary(record.workspaceRoot, files))
   stages.push(runTypecheck(record.workspaceRoot, files))
   stages.push(runTests(record.workspaceRoot, files))
