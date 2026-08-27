@@ -31,6 +31,11 @@ import {
   requireSkillDependents,
 } from './skillInteraction'
 import { type WorkspacePane } from './WorkspaceNavigation'
+import {
+  EMPTY_WORKSPACE_INTERACTION,
+  transitionWorkspaceInteraction,
+  type WorkspaceInteractionEvent,
+} from './workspaceInteraction'
 import { workspacePaneFromHash, workspacePaneHash } from './workspaceRoute'
 
 export { MissionControlScreen } from './MissionControlScreen'
@@ -42,10 +47,8 @@ export function App() {
   const [draft, setDraft] = useState('')
   const [error, setError] = useState<string>()
   const [governanceInteraction, setGovernanceInteraction] = useState(EMPTY_GOVERNANCE_INTERACTION)
-  const [confirmingPlugin, setConfirmingPlugin] = useState<string>()
   const [pane, setPane] = useState<WorkspacePane>(() => workspacePaneFromHash(globalThis.location?.hash))
-  const [confirmingSession, setConfirmingSession] = useState<string>()
-  const [inspectingExtension, setInspectingExtension] = useState<string>()
+  const [workspaceInteraction, setWorkspaceInteraction] = useState(EMPTY_WORKSPACE_INTERACTION)
   const [skillInteraction, setSkillInteraction] = useState(EMPTY_SKILL_INTERACTION)
   const [acknowledgement, setAcknowledgement] = useState<{ readonly text: string }>()
 
@@ -122,6 +125,19 @@ export function App() {
     revision: envelope?.view.sessions?.revision ?? 0,
   })
 
+  const interactWithWorkspace = (event: WorkspaceInteractionEvent) => {
+    const requested = transitionWorkspaceInteraction(workspaceInteraction, event)
+    setWorkspaceInteraction(requested.state)
+    if (requested.command?.action === 'delete-conversation') {
+      const { id } = requested.command
+      void act(() => runConversation('delete', { ...catalogRef(), id, confirm: true }))
+    }
+    if (requested.command?.action === 'uninstall-plugin') {
+      const { plugin } = requested.command
+      void act(() => uninstallPlugin(plugin, true))
+    }
+  }
+
   const empty = useMemo(() => view, [view])
   if (!empty) {
     return <p className="loading">Connecting to local TARS-NG…</p>
@@ -167,19 +183,16 @@ export function App() {
       }}
       pane={pane}
       onNavigate={navigate}
-      confirmingSession={confirmingSession}
+      confirmingSession={workspaceInteraction.confirmingSession}
       onCreateConversation={() => { void act(() => runConversation('create', catalogRef())) }}
       onSwitchConversation={(id) => { void act(() => runConversation('switch', { ...catalogRef(), id })) }}
       onRenameConversation={(id, title) => { void act(() => runConversation('rename', { ...catalogRef(), id, title })) }}
       onArchiveConversation={(id) => { void act(() => runConversation('archive', { ...catalogRef(), id })) }}
       onRestoreConversation={(id) => { void act(() => runConversation('restore', { ...catalogRef(), id })) }}
-      onAskDeleteConversation={(id) => { setConfirmingSession(id) }}
-      onConfirmDeleteConversation={(id) => {
-        setConfirmingSession(undefined)
-        void act(() => runConversation('delete', { ...catalogRef(), id, confirm: true }))
-      }}
-      inspectingExtension={inspectingExtension}
-      onInspectExtension={(id) => { setInspectingExtension((current) => current === id ? undefined : id) }}
+      onAskDeleteConversation={(id) => { interactWithWorkspace({ action: 'ask-conversation-delete', id }) }}
+      onConfirmDeleteConversation={(id) => { interactWithWorkspace({ action: 'confirm-conversation-delete', id }) }}
+      inspectingExtension={workspaceInteraction.inspectingExtension}
+      onInspectExtension={(id) => { interactWithWorkspace({ action: 'inspect-extension', id }) }}
       confirmingSkill={skillInteraction.confirmingSkill}
       armedSkill={skillInteraction.armedSkill}
       skillDependents={skillInteraction.dependents
@@ -230,13 +243,10 @@ export function App() {
           rollback: empty.skillRollback,
         }))
       }}
-      confirmingPlugin={confirmingPlugin}
-      onAskUninstall={(plugin) => { setConfirmingPlugin(plugin.id) }}
-      onCancelUninstall={() => { setConfirmingPlugin(undefined) }}
-      onConfirmUninstall={(plugin) => {
-        setConfirmingPlugin(undefined)
-        void act(() => uninstallPlugin(plugin, true))
-      }}
+      confirmingPlugin={workspaceInteraction.confirmingPlugin?.id}
+      onAskUninstall={(plugin) => { interactWithWorkspace({ action: 'ask-plugin-uninstall', plugin }) }}
+      onCancelUninstall={() => { interactWithWorkspace({ action: 'cancel-plugin-uninstall' }) }}
+      onConfirmUninstall={(plugin) => { interactWithWorkspace({ action: 'confirm-plugin-uninstall', id: plugin.id }) }}
       deferredRollback={governanceInteraction.deferredRollback}
       armedRollback={governanceInteraction.armedRollback}
       onDeferRollback={() => {
