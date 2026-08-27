@@ -1,18 +1,14 @@
-import React, { useEffect, useMemo, useState } from 'react'
+import React, { useEffect, useState } from 'react'
 import {
   abandonCandidateActivation,
   activateCandidate,
   decideApproval,
-  establishSession,
-  fetchView,
-  openViewStream,
   rollbackSystemState,
   runConversation,
   runRecovery,
   runSkillAction,
   sendMessage,
   uninstallPlugin,
-  type UiEnvelope,
 } from './api'
 import {
   deferActivation,
@@ -31,6 +27,7 @@ import {
   requireSkillDependents,
 } from './skillInteraction'
 import { type WorkspacePane } from './WorkspaceNavigation'
+import { useMissionControlRuntime } from './useMissionControlRuntime'
 import {
   EMPTY_WORKSPACE_INTERACTION,
   transitionWorkspaceInteraction,
@@ -41,28 +38,19 @@ import { workspacePaneFromHash, workspacePaneHash } from './workspaceRoute'
 export { MissionControlScreen } from './MissionControlScreen'
 
 export function App() {
-  const [envelope, setEnvelope] = useState<UiEnvelope | undefined>()
-  const [connected, setConnected] = useState(false)
+  const runtime = useMissionControlRuntime()
   const [sending, setSending] = useState(false)
   const [draft, setDraft] = useState('')
-  const [error, setError] = useState<string>()
   const [governanceInteraction, setGovernanceInteraction] = useState(EMPTY_GOVERNANCE_INTERACTION)
   const [pane, setPane] = useState<WorkspacePane>(() => workspacePaneFromHash(globalThis.location?.hash))
   const [workspaceInteraction, setWorkspaceInteraction] = useState(EMPTY_WORKSPACE_INTERACTION)
   const [skillInteraction, setSkillInteraction] = useState(EMPTY_SKILL_INTERACTION)
-  const [acknowledgement, setAcknowledgement] = useState<{ readonly text: string }>()
 
   useEffect(() => {
     const sync = () => { setPane(workspacePaneFromHash(globalThis.location?.hash)) }
     globalThis.addEventListener?.('hashchange', sync)
     return () => globalThis.removeEventListener?.('hashchange', sync)
   }, [])
-
-  useEffect(() => {
-    if (!acknowledgement) return
-    const timer = globalThis.setTimeout(() => setAcknowledgement(undefined), 4000)
-    return () => globalThis.clearTimeout(timer)
-  }, [acknowledgement])
 
   const navigate = (next: WorkspacePane) => {
     setPane(next)
@@ -71,58 +59,25 @@ export function App() {
     }
   }
 
-  useEffect(() => {
-    let closed = false
-    let stop = () => {}
-    void (async () => {
-      try {
-        await establishSession()
-        if (closed) return
-        const next = await fetchView()
-        if (!closed) setEnvelope(next)
-      } catch (caught: unknown) {
-        if (!closed) setError(caught instanceof Error ? caught.message : 'unable to load workspace')
-      }
-      if (closed) return
-      stop = openViewStream((next) => setEnvelope(next), setConnected)
-    })()
-    return () => {
-      closed = true
-      stop()
-    }
-  }, [])
-
-  const view = envelope?.view
+  const view = runtime.view
   const onSend = async () => {
     if (sending || draft.trim() === '') return
     setSending(true)
-    setError(undefined)
     try {
-      const sessionId = view?.runtimeContext?.sessionId ?? view?.sessions?.currentSessionId
-      if (!sessionId) throw new Error('current session is unknown')
-      setEnvelope(await sendMessage(draft.trim(), sessionId))
-      setDraft('')
-    } catch (caught) {
-      setError(caught instanceof Error ? caught.message : 'send failed')
+      const next = await runtime.perform(() => {
+        const sessionId = view?.runtimeContext?.sessionId ?? view?.sessions?.currentSessionId
+        if (!sessionId) throw new Error('current session is unknown')
+        return sendMessage(draft.trim(), sessionId)
+      }, 'send failed')
+      if (next) setDraft('')
     } finally {
       setSending(false)
     }
   }
 
-  const act = async (run: () => Promise<UiEnvelope>) => {
-    setError(undefined)
-    try {
-      const next = await run()
-      setEnvelope(next)
-      if (next.acknowledgement) setAcknowledgement(next.acknowledgement)
-    } catch (caught) {
-      setError(caught instanceof Error ? caught.message : 'action failed')
-    }
-  }
-
   const catalogRef = () => ({
-    sessionId: envelope?.view.runtimeContext?.sessionId ?? envelope?.view.sessions?.currentSessionId ?? 'main',
-    revision: envelope?.view.sessions?.revision ?? 0,
+    sessionId: view?.runtimeContext?.sessionId ?? view?.sessions?.currentSessionId ?? 'main',
+    revision: view?.sessions?.revision ?? 0,
   })
 
   const interactWithWorkspace = (event: WorkspaceInteractionEvent) => {
@@ -130,33 +85,32 @@ export function App() {
     setWorkspaceInteraction(requested.state)
     if (requested.command?.action === 'delete-conversation') {
       const { id } = requested.command
-      void act(() => runConversation('delete', { ...catalogRef(), id, confirm: true }))
+      void runtime.perform(() => runConversation('delete', { ...catalogRef(), id, confirm: true }))
     }
     if (requested.command?.action === 'uninstall-plugin') {
       const { plugin } = requested.command
-      void act(() => uninstallPlugin(plugin, true))
+      void runtime.perform(() => uninstallPlugin(plugin, true))
     }
   }
 
-  const empty = useMemo(() => view, [view])
-  if (!empty) {
+  if (!view) {
     return <p className="loading">Connecting to local TARS-NG…</p>
   }
 
   return (
     <MissionControlScreen
-      view={empty}
-      connected={connected}
+      view={view}
+      connected={runtime.connected}
       sending={sending}
-      error={error}
+      error={runtime.error}
       draft={draft}
       armedRecovery={governanceInteraction.armedRecovery}
       onDraft={setDraft}
       onSend={() => { void onSend() }}
-      acknowledgement={acknowledgement}
-      onDismissAcknowledgement={() => setAcknowledgement(undefined)}
-      onApprove={(card) => { void act(() => decideApproval(card, 'approve')) }}
-      onReject={(card) => { void act(() => decideApproval(card, 'deny')) }}
+      acknowledgement={runtime.acknowledgement}
+      onDismissAcknowledgement={runtime.dismissAcknowledgement}
+      onApprove={(card) => { void runtime.perform(() => decideApproval(card, 'approve')) }}
+      onReject={(card) => { void runtime.perform(() => decideApproval(card, 'deny')) }}
       deferredActivations={governanceInteraction.deferredActivations}
       armedActivation={governanceInteraction.armedActivation}
       armedAbandonment={governanceInteraction.armedAbandonment}
@@ -169,7 +123,7 @@ export function App() {
         const command = requested.command
         if (command?.action === 'activate') {
           const target = command.card
-          void act(() => activateCandidate(target, true))
+          void runtime.perform(() => activateCandidate(target, true))
         }
       }}
       onAbandonActivation={(card) => {
@@ -178,17 +132,17 @@ export function App() {
         const command = requested.command
         if (command?.action === 'abandon-activation') {
           const target = command.card
-          void act(() => abandonCandidateActivation(target, true))
+          void runtime.perform(() => abandonCandidateActivation(target, true))
         }
       }}
       pane={pane}
       onNavigate={navigate}
       confirmingSession={workspaceInteraction.confirmingSession}
-      onCreateConversation={() => { void act(() => runConversation('create', catalogRef())) }}
-      onSwitchConversation={(id) => { void act(() => runConversation('switch', { ...catalogRef(), id })) }}
-      onRenameConversation={(id, title) => { void act(() => runConversation('rename', { ...catalogRef(), id, title })) }}
-      onArchiveConversation={(id) => { void act(() => runConversation('archive', { ...catalogRef(), id })) }}
-      onRestoreConversation={(id) => { void act(() => runConversation('restore', { ...catalogRef(), id })) }}
+      onCreateConversation={() => { void runtime.perform(() => runConversation('create', catalogRef())) }}
+      onSwitchConversation={(id) => { void runtime.perform(() => runConversation('switch', { ...catalogRef(), id })) }}
+      onRenameConversation={(id, title) => { void runtime.perform(() => runConversation('rename', { ...catalogRef(), id, title })) }}
+      onArchiveConversation={(id) => { void runtime.perform(() => runConversation('archive', { ...catalogRef(), id })) }}
+      onRestoreConversation={(id) => { void runtime.perform(() => runConversation('restore', { ...catalogRef(), id })) }}
       onAskDeleteConversation={(id) => { interactWithWorkspace({ action: 'ask-conversation-delete', id }) }}
       onConfirmDeleteConversation={(id) => { interactWithWorkspace({ action: 'confirm-conversation-delete', id }) }}
       inspectingExtension={workspaceInteraction.inspectingExtension}
@@ -210,7 +164,7 @@ export function App() {
           if (!command.skill) return
           const destructiveAction = command.action
           const target = command.skill
-          void act(async () => {
+          void runtime.perform(async () => {
             try {
               const next = await runSkillAction({
                 action: destructiveAction,
@@ -236,11 +190,11 @@ export function App() {
           })
           return
         }
-        void act(() => runSkillAction({
+        void runtime.perform(() => runSkillAction({
           action: command.action,
           skill: command.skill,
           confirm: true,
-          rollback: empty.skillRollback,
+          rollback: view.skillRollback,
         }))
       }}
       confirmingPlugin={workspaceInteraction.confirmingPlugin?.id}
@@ -258,7 +212,7 @@ export function App() {
         const command = requested.command
         if (command?.action === 'rollback-system') {
           const target = command.card
-          void act(() => rollbackSystemState(target, true))
+          void runtime.perform(() => rollbackSystemState(target, true))
         }
       }}
       onRecovery={(action) => {
@@ -267,7 +221,7 @@ export function App() {
         const command = requested.command
         if (command?.action === 'recover') {
           const recovery = command.recovery
-          void act(() => runRecovery(recovery, true))
+          void runtime.perform(() => runRecovery(recovery, true))
         }
       }}
     />
