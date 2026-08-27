@@ -665,6 +665,41 @@ describe('extension governance and recovery', () => {
     assert.equal(root.inspect().lifecycleBusy, undefined)
   })
 
+  it('I3e2. disable reports disable-in-flight and excludes uninstall', async () => {
+    const { workspace, governance, root, human } = seeded()
+    const active = ready(workspace, { owner: 'generated/text-slugify', version: '0.1.0', capabilities: ['text.slugify'] })
+    const idle = ready(workspace, { owner: 'generated/other-idle', version: '0.1.0', capabilities: ['other.idle'] })
+    for (const candidate of [active, idle]) {
+      root.recordApproval(human, {
+        candidateId: candidate.id,
+        fingerprint: governance.requestApproval(candidate.id).fingerprint,
+        decision: 'approved-for-exact-diff',
+      })
+    }
+    await root.activate(active.id, human)
+    let release!: () => void
+    governance.holdDisable = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    const pending = root.disable(human, 'generated/text-slugify', '0.1.0')
+    for (let i = 0; i < 50 && root.inspect().lifecycleBusy !== 'disable'; i += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 10))
+    }
+    assert.equal(root.inspect().lifecycleBusy, 'disable')
+    await assert.rejects(() => root.activate(idle.id, human), (error: unknown) => {
+      assert.ok(error instanceof ActivationDeniedError)
+      assert.ok(error.denials.some((item) => item.reason === 'disable-in-flight'))
+      return true
+    })
+    await assert.rejects(() => root.uninstall(human, 'generated/text-slugify', '0.1.0'), /disable-in-flight/)
+    await assert.rejects(() => root.rollback(human), /disable-in-flight/)
+    await assert.rejects(() => root.enterSafeMode(human), /disable-in-flight/)
+    await assert.rejects(() => root.disable(human, 'generated/text-slugify', '0.1.0'), /disable-in-flight/)
+    release()
+    await pending
+    assert.equal(root.inspect().lifecycleBusy, undefined)
+  })
+
   it('I3f. Safe Mode keeps the recovery lock until generated unload settles', async () => {
     const { workspace, governance, root, human, runtime } = seeded()
     const active = ready(workspace, { owner: 'generated/text-slugify', version: '0.1.0', capabilities: ['text.slugify'] })

@@ -34,7 +34,7 @@ import type {
 import { TrustedAuthorityCredential as AuthorityCredential } from './types.js'
 
 export type ActivationInterrupt = 'activation-pending' | 'prepare' | 'registry-commit' | 'commit' | 'rollback-pending' | 'rollback-registry-commit' | 'uninstall-registry-commit' | 'uninstall-commit'
-export type LifecycleMutation = 'activation' | 'uninstall' | 'recovery'
+export type LifecycleMutation = 'activation' | 'uninstall' | 'disable' | 'recovery'
 
 export interface GovernanceHydrate {
   readonly approvals: readonly ApprovalRecord[]
@@ -89,6 +89,7 @@ export class GovernanceService implements ExtensionGovernance, ExtensionActivati
   failRollbackRestore = false
   holdActivation?: Promise<void>
   holdUninstall?: Promise<void>
+  holdDisable?: Promise<void>
   holdSafeMode?: Promise<void>
   holdRollback?: Promise<void>
   private mutation: 'idle' | LifecycleMutation = 'idle'
@@ -407,13 +408,14 @@ export class GovernanceService implements ExtensionGovernance, ExtensionActivati
 
   async disable(credential: TrustedAuthorityCredential, owner: string, version: string): Promise<ActivationStatus> {
     this.assertCredential(credential)
-    this.assertMutationIdle('uninstall')
+    this.assertMutationIdle('disable')
     const record = this.registry.get(owner, version)
     if (record === undefined) throw new GovernanceContractError(`unknown record: ${owner}@${version}`)
     const candidate = this.workspace.list().find((item) => item.owner === owner && item.version === version)
-    this.mutation = 'uninstall'
+    this.mutation = 'disable'
     const prior = this.current
     const priorLkg = this.lastKnownGood
+    if (this.holdDisable) await this.holdDisable
     try {
       if (candidate !== undefined) await this.runtime.unloadGenerated(candidate.id)
       this.beginAuthorityCommit?.()
@@ -541,6 +543,7 @@ export class GovernanceService implements ExtensionGovernance, ExtensionActivati
     const denial = { reason: `${busy}-in-flight`, detail: 'another trusted lifecycle mutation is in progress' }
     if (kind === 'activation') throw new ActivationDeniedError([denial])
     if (kind === 'uninstall') throw new UninstallDeniedError([denial])
+    if (kind === 'disable') throw new GovernanceContractError(denial.reason)
     throw new GovernanceContractError(denial.reason)
   }
 

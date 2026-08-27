@@ -423,7 +423,7 @@ export interface WorkspaceSnapshotInput {
     readonly mounted?: readonly string[]
     readonly pendingCandidateId?: string
     readonly lastFailureCandidateId?: string
-    readonly lifecycleBusy?: 'activation' | 'uninstall' | 'recovery'
+    readonly lifecycleBusy?: 'activation' | 'uninstall' | 'disable' | 'recovery'
     readonly current?: ActivationSnapshotView
     readonly rollbackTarget?: ActivationSnapshotView
     readonly lastKnownGood?: ActivationSnapshotView

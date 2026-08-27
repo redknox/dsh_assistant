@@ -289,7 +289,7 @@ export function startWebUiServer(options: WebUiServerOptions): Promise<WebUiServ
   let uninstallBusy = false
   let recoveryBusy = false
 
-  const mutationInFlight = (): 'activation' | 'uninstall' | 'recovery' | undefined => {
+  const mutationInFlight = (): 'activation' | 'uninstall' | 'disable' | 'recovery' | undefined => {
     if (uninstallBusy) return 'uninstall'
     if (activationBusy) return 'activation'
     if (recoveryBusy) return 'recovery'
