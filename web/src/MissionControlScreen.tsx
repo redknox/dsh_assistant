@@ -7,55 +7,80 @@ import { MemoryWorkspace } from './MemoryWorkspace'
 import { ControlStripView, OperationsPanel } from './OperationalStatus'
 import { RecoveryPanel, SystemHeader } from './SystemStatus'
 import { WorkspaceNavigation, type WorkspacePane } from './WorkspaceNavigation'
+import type { ConversationControl } from './useConversationControl'
+import type { GovernanceControl } from './useGovernanceControl'
+import type { MissionControlRuntime } from './useMissionControlRuntime'
+import type { SkillControl } from './useSkillControl'
+import type { WorkspaceControl } from './useWorkspaceControl'
 
 type CompactSurface = 'conversation' | 'navigation' | 'operations'
 
-export function MissionControlScreen(props: {
+export interface MissionControlScreenProps {
   readonly view: MissionControlView
-  readonly connected: boolean
-  readonly sending: boolean
-  readonly error?: string
-  readonly draft: string
-  readonly armedRecovery?: string
-  readonly onDraft: (value: string) => void
-  readonly onSend: () => void
-  readonly onApprove: (card: ApprovalCard) => void
-  readonly onReject: (card: ApprovalCard) => void
-  readonly onActivate?: (card: ActivationCard) => void
-  readonly onAbandonActivation?: (card: ActivationCard) => void
-  readonly onDeferActivation?: (card: ActivationCard) => void
-  readonly deferredActivations?: readonly string[]
-  readonly armedActivation?: string
-  readonly armedAbandonment?: string
-  readonly pane?: WorkspacePane
-  readonly onNavigate?: (pane: WorkspacePane) => void
-  readonly confirmingSession?: string
-  readonly onCreateConversation?: () => void
-  readonly onSwitchConversation?: (id: string) => void
-  readonly onRenameConversation?: (id: string, title: string) => void
-  readonly onArchiveConversation?: (id: string) => void
-  readonly onRestoreConversation?: (id: string) => void
-  readonly onAskDeleteConversation?: (id: string) => void
-  readonly onConfirmDeleteConversation?: (id: string) => void
-  readonly inspectingExtension?: string
-  readonly onInspectExtension?: (id: string) => void
-  readonly confirmingPlugin?: string
-  readonly onAskUninstall?: (plugin: UserPluginView) => void
-  readonly onCancelUninstall?: () => void
-  readonly onConfirmUninstall?: (plugin: UserPluginView) => void
-  readonly deferredRollback?: boolean
-  readonly armedRollback?: boolean
-  readonly onAskRollback?: (card: RollbackCard) => void
-  readonly onDeferRollback?: (card: RollbackCard) => void
-  readonly onRecovery: (action: 'diagnostics' | 'rollback' | 'exit-safe-mode') => void
-  readonly acknowledgement?: { readonly text: string }
-  readonly onDismissAcknowledgement?: () => void
-  readonly confirmingSkill?: string
-  readonly armedSkill?: string
-  readonly skillDependents?: { readonly id: string; readonly dependents: readonly string[] }
-  readonly onSkillAction?: (action: 'approve' | 'reject' | 'activate' | 'disable' | 'reactivate' | 'uninstall' | 'rollback', skill?: SkillProjection) => void
-  readonly onPickSkill?: (skill: SkillProjection) => void
-}) {
+  readonly runtime: Pick<MissionControlRuntime, 'connected' | 'error' | 'acknowledgement' | 'dismissAcknowledgement'>
+  readonly conversation: ConversationControl
+  readonly governance: GovernanceControl
+  readonly workspace: WorkspaceControl
+  readonly skill: SkillControl
+  readonly navigation: {
+    readonly pane: WorkspacePane
+    readonly navigate: (pane: WorkspacePane) => void
+  }
+}
+
+function projectScreenControls(input: MissionControlScreenProps) {
+  return {
+    view: input.view,
+    connected: input.runtime.connected,
+    error: input.runtime.error,
+    acknowledgement: input.runtime.acknowledgement,
+    onDismissAcknowledgement: input.runtime.dismissAcknowledgement,
+    sending: input.conversation.sending,
+    draft: input.conversation.draft,
+    onDraft: (value: string) => input.conversation.dispatch({ action: 'draft', value }),
+    onSend: () => input.conversation.dispatch({ action: 'send' }),
+    onCreateConversation: () => input.conversation.dispatch({ action: 'create' }),
+    onSwitchConversation: (id: string) => input.conversation.dispatch({ action: 'switch', id }),
+    onRenameConversation: (id: string, title: string) => input.conversation.dispatch({ action: 'rename', id, title }),
+    onArchiveConversation: (id: string) => input.conversation.dispatch({ action: 'archive', id }),
+    onRestoreConversation: (id: string) => input.conversation.dispatch({ action: 'restore', id }),
+    onPickSkill: (skill: SkillProjection) => input.conversation.dispatch({ action: 'suggest-skill', name: skill.name }),
+    armedRecovery: input.governance.state.armedRecovery,
+    deferredActivations: input.governance.state.deferredActivations,
+    armedActivation: input.governance.state.armedActivation,
+    armedAbandonment: input.governance.state.armedAbandonment,
+    deferredRollback: input.governance.state.deferredRollback,
+    armedRollback: input.governance.state.armedRollback,
+    onApprove: (card: ApprovalCard) => input.governance.dispatch({ action: 'approve', card }),
+    onReject: (card: ApprovalCard) => input.governance.dispatch({ action: 'reject', card }),
+    onActivate: (card: ActivationCard) => input.governance.dispatch({ action: 'activate', card }),
+    onAbandonActivation: (card: ActivationCard) => input.governance.dispatch({ action: 'abandon-activation', card }),
+    onDeferActivation: (card: ActivationCard) => input.governance.dispatch({ action: 'defer-activation', card }),
+    onAskRollback: (card: RollbackCard) => input.governance.dispatch({ action: 'rollback', card }),
+    onDeferRollback: () => input.governance.dispatch({ action: 'defer-rollback' }),
+    onRecovery: (recovery: 'diagnostics' | 'rollback' | 'exit-safe-mode') => input.governance.dispatch({ action: 'recover', recovery }),
+    pane: input.navigation.pane,
+    onNavigate: input.navigation.navigate,
+    confirmingSession: input.workspace.state.confirmingSession,
+    inspectingExtension: input.workspace.state.inspectingExtension,
+    confirmingPlugin: input.workspace.state.confirmingPlugin?.id,
+    onAskDeleteConversation: (id: string) => input.workspace.dispatch({ action: 'ask-conversation-delete', id }),
+    onConfirmDeleteConversation: (id: string) => input.workspace.dispatch({ action: 'confirm-conversation-delete', id }),
+    onInspectExtension: (id: string) => input.workspace.dispatch({ action: 'inspect-extension', id }),
+    onAskUninstall: (plugin: UserPluginView) => input.workspace.dispatch({ action: 'ask-plugin-uninstall', plugin }),
+    onCancelUninstall: () => input.workspace.dispatch({ action: 'cancel-plugin-uninstall' }),
+    onConfirmUninstall: (plugin: UserPluginView) => input.workspace.dispatch({ action: 'confirm-plugin-uninstall', id: plugin.id }),
+    confirmingSkill: input.skill.state.confirmingSkill,
+    armedSkill: input.skill.state.armedSkill,
+    skillDependents: input.skill.state.dependents
+      ? { id: input.skill.state.dependents.id, dependents: input.skill.state.dependents.values }
+      : undefined,
+    onSkillAction: input.skill.dispatch,
+  }
+}
+
+export function MissionControlScreen(input: MissionControlScreenProps) {
+  const props = projectScreenControls(input)
   const { view } = props
   const safe = view.systemState === 'SAFE_MODE' || view.systemState === 'RECOVERY'
   const locked = !props.connected

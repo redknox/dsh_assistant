@@ -26,7 +26,7 @@ import { catalogBindingOf, SessionCatalog } from '../src/product/session-catalog
 import { LiveSessionHost } from '../src/product/session-lifecycle.js'
 import { attachWebUiBroadcast, startWebUiServer } from '../src/product/web-ui-server.js'
 import type { MissionControlView } from '../src/domain/workspace/types.js'
-import { MissionControlScreen } from '../web/src/App.tsx'
+import { MissionControlScreen } from './helpers/mission-control-screen.js'
 
 function fixtureView(overrides: Partial<MissionControlView> = {}): MissionControlView {
   return {
