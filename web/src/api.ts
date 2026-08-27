@@ -200,10 +200,3 @@ export function workTone(kind: WorkObjectKind): string {
 export function approvalLabel(card: ApprovalCard): string {
   return `${card.title} · ${card.status}`
 }
-
-export function recoveryActionId(label: string): 'diagnostics' | 'rollback' | 'exit-safe-mode' | undefined {
-  if (label === 'Diagnostics') return 'diagnostics'
-  if (label === 'Rollback') return 'rollback'
-  if (label === 'Exit Safe Mode') return 'exit-safe-mode'
-  return undefined
-}

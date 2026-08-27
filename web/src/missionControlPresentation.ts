@@ -1,5 +1,14 @@
 import type { MissionControlView } from '../../src/domain/workspace/types'
 
+export type RecoveryAction = 'diagnostics' | 'rollback' | 'exit-safe-mode'
+
+export function recoveryActionId(label: string): RecoveryAction | undefined {
+  if (label === 'Diagnostics') return 'diagnostics'
+  if (label === 'Rollback') return 'rollback'
+  if (label === 'Exit Safe Mode') return 'exit-safe-mode'
+  return undefined
+}
+
 export function isPendingApproval(status: string): boolean {
   return status === 'pending' || status === 'approval-requested' || status === 'unreviewed'
 }

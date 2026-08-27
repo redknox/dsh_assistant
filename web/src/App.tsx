@@ -7,7 +7,6 @@ import {
   establishSession,
   fetchView,
   openViewStream,
-  recoveryActionId,
   rollbackSystemState,
   runConversation,
   runRecovery,
@@ -16,6 +15,7 @@ import {
   uninstallPlugin,
   type UiEnvelope,
 } from './api'
+import { recoveryActionId } from './missionControlPresentation'
 import { Glyph } from './icons'
 import { ConversationWorkspace } from './ConversationWorkspace'
 import { ExtensionsWorkspace } from './ExtensionsWorkspace'
@@ -38,6 +38,7 @@ import {
   requestRecovery,
   requestSystemRollback,
 } from './governanceInteraction'
+import { workspacePaneFromHash, workspacePaneHash } from './workspaceRoute'
 
 function lampModifier(state: MissionControlView['systemState'], connected: boolean): string {
   if (!connected) return 'offline'
@@ -51,13 +52,6 @@ function lampModifier(state: MissionControlView['systemState'], connected: boole
 }
 
 type CompactSurface = 'conversation' | 'navigation' | 'operations'
-
-function paneFromHash(): WorkspacePane {
-  if (globalThis.location?.hash === '#extensions') return 'extensions'
-  if (globalThis.location?.hash === '#conversations') return 'memory'
-  if (globalThis.location?.hash === '#memory') return 'memory'
-  return 'today'
-}
 
 function SystemHeader(props: {
   readonly identity: string
@@ -338,14 +332,14 @@ export function App() {
   const [error, setError] = useState<string>()
   const [governanceInteraction, setGovernanceInteraction] = useState(EMPTY_GOVERNANCE_INTERACTION)
   const [confirmingPlugin, setConfirmingPlugin] = useState<string>()
-  const [pane, setPane] = useState<WorkspacePane>(paneFromHash)
+  const [pane, setPane] = useState<WorkspacePane>(() => workspacePaneFromHash(globalThis.location?.hash))
   const [confirmingSession, setConfirmingSession] = useState<string>()
   const [inspectingExtension, setInspectingExtension] = useState<string>()
   const [skillInteraction, setSkillInteraction] = useState(EMPTY_SKILL_INTERACTION)
   const [acknowledgement, setAcknowledgement] = useState<{ readonly text: string }>()
 
   useEffect(() => {
-    const sync = () => { setPane(paneFromHash()) }
+    const sync = () => { setPane(workspacePaneFromHash(globalThis.location?.hash)) }
     globalThis.addEventListener?.('hashchange', sync)
     return () => globalThis.removeEventListener?.('hashchange', sync)
   }, [])
@@ -359,7 +353,7 @@ export function App() {
   const navigate = (next: WorkspacePane) => {
     setPane(next)
     if (globalThis.location) {
-      globalThis.location.hash = next
+      globalThis.location.hash = workspacePaneHash(next)
     }
   }
 
