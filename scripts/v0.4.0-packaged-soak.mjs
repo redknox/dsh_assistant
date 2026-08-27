@@ -1,11 +1,13 @@
 #!/usr/bin/env node
 /**
  * Isolated v0.4.0 packaged cross-slice soak. Does not touch 127.0.0.1:8787.
+ * Fail-closed: every Issue #96 step is asserted; any failure exits non-zero.
+ * Default run is credential-free (offline placeholder key only; no operator env copy, no /api/message).
  * Writes evidence JSON; never prints secret values.
  */
 import { spawn, spawnSync } from 'node:child_process'
 import {
-  chmodSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync,
+  appendFileSync, chmodSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync,
 } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
@@ -30,6 +32,27 @@ function redact(text) {
   return String(text ?? '')
     .replace(/sk-[A-Za-z0-9]+/g, 'sk-REDACTED')
     .replace(/ya29\.[A-Za-z0-9._-]+/g, 'ya29.REDACTED')
+}
+
+function expect(ok, message) {
+  if (ok) return
+  evidence.errors.push(message)
+}
+
+const SESSION_MARKER = 'marker-session-B-only'
+const OFFLINE_KEY = 'sk-offline-not-a-live-key'
+
+function writeLocalSessionMarker(sessionId) {
+  const line = `${JSON.stringify({ type: 'user', text: SESSION_MARKER, source: 'packaged-soak-local' })}\n`
+  const files = [
+    join(sessionRoot, `${sessionId}.jsonl`),
+    join(home, 'sessions', `${sessionId}.jsonl`),
+    join(home, 'state', 'sessions', `${sessionId}.jsonl`),
+  ]
+  for (const file of files) {
+    mkdirSync(dirname(file), { recursive: true })
+    appendFileSync(file, line)
+  }
 }
 
 async function loadProduct(pkgRoot) {
@@ -108,19 +131,28 @@ const env = {
 delete env.TARS_NG_ALLOW_FIXTURES
 delete env.DEEPSEEK_API_KEY
 
+try {
 const missingDoctor = sh(bin, ['doctor', '--home', home, '--workspace', workspace, '--session-root', sessionRoot], { env })
 evidence.doctorMissingKey = redact(missingDoctor.stdout).split('\n').slice(0, 40)
+expect(/TARS-NG 0\.4\.0/.test(missingDoctor.stdout), 'doctor must project TARS-NG 0.4.0')
+expect(/DEEPSEEK_API_KEY: missing/.test(missingDoctor.stdout), 'isolated doctor must report missing DEEPSEEK_API_KEY')
+expect(!existsSync(join(home, 'config', 'env')), 'must not copy operator ~/.config/tars-ng/env')
 
-const xdg = `${process.env.HOME}/.config/tars-ng/env`
-if (existsSync(xdg)) {
-  cpSync(xdg, join(home, 'config', 'env'))
-  chmodSync(join(home, 'config', 'env'), 0o600)
-}
+const failedOnce = sh(bin, ['start', '--once', '--home', home, '--workspace', workspace, '--session-root', sessionRoot], { env, allowFail: true })
+expect(failedOnce.status !== 0, 'start --once without a key must fail')
+expect(/LLM not configured\/unavailable|missing DEEPSEEK_API_KEY/.test(`${failedOnce.stdout}\n${failedOnce.stderr}`), 'start without a key must name the missing credential')
+
+writeFileSync(join(home, 'config', 'env'), `DEEPSEEK_API_KEY=${OFFLINE_KEY}\n`, { mode: 0o600 })
+chmodSync(join(home, 'config', 'env'), 0o600)
 const withKeyDoctor = sh(bin, ['doctor', '--home', home, '--workspace', workspace, '--session-root', sessionRoot], { env })
 evidence.doctorConfigured = redact(withKeyDoctor.stdout).split('\n').filter((l) => !/token|key/i.test(l) || /present|missing/.test(l)).slice(0, 50)
+expect(/DEEPSEEK_API_KEY: present/.test(withKeyDoctor.stdout), 'offline placeholder key must be diagnosed present')
+expect(!withKeyDoctor.stdout.includes(OFFLINE_KEY), 'doctor must not print the placeholder key value')
 
 const once = sh(bin, ['start', '--once', '--home', home, '--workspace', workspace, '--session-root', sessionRoot], { env })
 evidence.startOnce = redact(once.stdout).split('\n').slice(0, 20)
+expect(/TARS-NG 0\.4\.0/.test(once.stdout), 'start --once must project 0.4.0')
+expect(!/Web UI:/.test(once.stdout), 'start --once must not start the Web UI')
 
 const product = await loadProduct(pkgRoot)
 
@@ -137,6 +169,7 @@ try {
     sessionId: rc?.sessionId,
     identity: view1.view.identity,
   }
+  expect(/assistant/i.test(String(rc?.profile ?? '')), 'bound Profile must be assistant')
   const rev = view1.view.sessions?.revision ?? 0
   const current = view1.view.sessions?.currentId ?? view1.view.runtimeContext?.sessionId
   const created = await fetch(`${runtime.url}/api/conversations`, {
@@ -158,12 +191,8 @@ try {
   })
   const created2Body = await created2.json()
   const topicB = created2Body.view.sessions?.sessions?.find((s) => s.title === 'Topic-B')
-  await fetch(`${runtime.url}/api/message`, {
-    method: 'POST',
-    headers,
-    body: JSON.stringify({ text: 'marker-session-B-only', sessionId: created2Body.view.runtimeContext.sessionId }),
-  })
-  await new Promise((r) => setTimeout(r, 4000))
+  expect(Boolean(topicA?.id && topicB?.id), 'WUI must create Topic-A and Topic-B')
+  writeLocalSessionMarker(topicB.id)
   const switched = await fetch(`${runtime.url}/api/conversations`, {
     method: 'POST',
     headers,
@@ -189,6 +218,13 @@ try {
     webUi: view1.webUi,
     dtoFromView: true,
   }
+  expect(created.status === 200, 'Topic-A create must be HTTP 200')
+  expect(evidence.steps[2].afterSwitch === topicA.id, 'switch must select Topic-A')
+  expect(evidence.steps[3].identity === 'TARS-NG', 'WUI identity must be TARS-NG')
+  for (const key of ['profile', 'profileIdentity', 'workspaceLabel', 'workspaceIdentity', 'sessionId', 'sessionPersistence', 'safeMode', 'sources']) {
+    expect(evidence.steps[3].runtimeContextKeys.includes(key), `runtimeContext must include ${key}`)
+  }
+  expect(String(evidence.steps[3].webUi ?? '').includes('127.0.0.1:8803') || String(evidence.steps[3].webUi ?? '').startsWith('http://127.0.0.1:'), 'WUI must be loopback')
 } finally {
   stop(bin, env, home)
   runtime.child.kill('SIGTERM')
@@ -201,8 +237,10 @@ try {
   evidence.steps[2].afterRestartSession = after.view.runtimeContext?.sessionId
   evidence.steps[2].afterRestartTitles = (after.view.sessions?.sessions ?? []).map((s) => ({ id: s.id, title: s.title }))
   const conv = JSON.stringify(after.view.conversation ?? [])
-  evidence.steps[2].sessionBBleedIntoCurrent = conv.includes('marker-session-B-only')
+  evidence.steps[2].sessionBBleedIntoCurrent = conv.includes(SESSION_MARKER)
     && after.view.runtimeContext?.sessionId === evidence.steps[2].topicA
+  expect(after.view.runtimeContext?.sessionId === evidence.steps[2].topicA, 'restart must keep Topic-A current')
+  expect(evidence.steps[2].sessionBBleedIntoCurrent === false, 'Topic-B marker must not bleed into Topic-A')
 } finally {
   stop(bin, env, home)
   runtime.child.kill('SIGTERM')
@@ -229,6 +267,9 @@ evidence.steps[4] = { import: JSON.parse(imported.stdout) }
     const requested = control.ctx.extensionGovernance.requestApproval(id)
     evidence.steps[4].fingerprint = requested.fingerprint
     evidence.steps[4].lifecycleAfterReview = control.ctx.candidateWorkspace.get(id).lifecycle
+    expect(evidence.steps[4].validatePassed === true, 'plugin validation must pass')
+    expect(evidence.steps[4].reviewState === 'review-complete', 'Independent Review must be review-complete')
+    expect(typeof evidence.steps[4].fingerprint === 'string' && evidence.steps[4].fingerprint.length === 64, 'approve fingerprint must be a 64-char digest')
   } finally {
     await control.ctx.fiber.dispose()
   }
@@ -236,7 +277,8 @@ evidence.steps[4] = { import: JSON.parse(imported.stdout) }
 
 const approved = sh(bin, ['self-extension', 'approve', evidence.steps[4].import.candidateId, evidence.steps[4].fingerprint], { env })
 evidence.steps[4].approve = JSON.parse(approved.stdout)
-evidence.steps[4].approveIsNotActivate = true
+evidence.steps[4].approveIsNotActivate = evidence.steps[4].approve.decision === 'approved-for-exact-diff'
+expect(evidence.steps[4].approveIsNotActivate, 'approve must record approved-for-exact-diff and not activate')
 
 runtime = await waitUrl(bin, env, home)
 try {
@@ -247,6 +289,9 @@ try {
     conversationHasApproveText: JSON.stringify(v.view.conversation ?? []).includes('approved-for-exact-diff'),
     acknowledgementSeparate: true,
   }
+  expect(ext?.lifecycle === 'APPROVED_NOT_ACTIVE', 'WUI after approve must be APPROVED_NOT_ACTIVE')
+  expect(ext?.mounted === false, 'WUI after approve must have mounted=false')
+  expect(evidence.steps[11].conversationHasApproveText === false, 'approve text must not persist in chat tails')
 } finally {
   stop(bin, env, home)
   runtime.child.kill('SIGTERM')
@@ -254,6 +299,7 @@ try {
 
 const activated = sh(bin, ['self-extension', 'activate', evidence.steps[4].import.candidateId], { env })
 evidence.steps[4].activate = { state: JSON.parse(activated.stdout).state }
+expect(evidence.steps[4].activate.state === 'active', 'plugin activate must reach state=active')
 
 {
   const { bootAssistantControl, gatherWorkspaceSnapshot, projectMissionControl } = product
@@ -278,6 +324,12 @@ evidence.steps[4].activate = { state: JSON.parse(activated.stdout).state }
       lifecycle: row?.lifecycle,
       mounted: row?.mounted,
     }
+    expect(evidence.steps[5].used === true && evidence.steps[5].value === 'cba', 'text_reverse must reverse abc → cba')
+    expect(evidence.steps[5].afterDisable.registry === 'disabled', 'disable must set registry disabled')
+    expect(evidence.steps[5].afterDisable.toolPresent === false, 'disable must unmount text_reverse')
+    expect(evidence.steps[5].afterDisable.pluginsActive === false, 'disable must drop the active plugin card')
+    expect(evidence.steps[5].afterDisable.lifecycle === 'DISABLED_REACTIVATABLE', 'disable lifecycle must be DISABLED_REACTIVATABLE')
+    expect(evidence.steps[5].afterDisable.mounted === false, 'disable must record mounted=false')
   } finally {
     await control.ctx.fiber.dispose()
   }
@@ -296,6 +348,10 @@ evidence.steps[4].activate = { state: JSON.parse(activated.stdout).state }
       lifecycle: row?.lifecycle,
       mounted: row?.mounted,
     }
+    expect(evidence.steps[5].afterRestart.registry === 'disabled', 'restart must keep registry disabled')
+    expect(evidence.steps[5].afterRestart.toolPresent === false, 'restart must keep text_reverse absent')
+    expect(evidence.steps[5].afterRestart.mounted === false, 'restart must keep mounted=false')
+    expect(evidence.steps[5].afterRestart.lifecycle === 'DISABLED_REACTIVATABLE', 'restart lifecycle must stay DISABLED_REACTIVATABLE')
   } finally {
     await restarted.ctx.fiber.dispose()
   }
@@ -310,6 +366,9 @@ try {
     mounted: ext?.mounted,
     pluginsActive: (v.view.plugins ?? []).some((p) => p.owner === 'third-party/text-reverse'),
   }
+  expect(evidence.steps[5].wuiDisabled.lifecycle === 'DISABLED_REACTIVATABLE', 'packed WUI after disable must be DISABLED_REACTIVATABLE')
+  expect(evidence.steps[5].wuiDisabled.mounted === false, 'packed WUI after disable must have mounted=false')
+  expect(evidence.steps[5].wuiDisabled.pluginsActive === false, 'packed WUI after disable must drop the active plugin card')
 } finally {
   stop(bin, env, home)
   runtime.child.kill('SIGTERM')
@@ -333,6 +392,8 @@ evidence.steps[6] = { import: JSON.parse(skillImported.stdout) }
     const requested = control.ctx.skillLifecycle.requestApproval(id)
     evidence.steps[6].fingerprint = requested.fingerprint
     evidence.steps[6].digest = control.ctx.skillLifecycle.get(id).digest
+    expect(evidence.steps[6].review === 'review-complete', 'Skill Independent Review must be review-complete')
+    expect(typeof evidence.steps[6].fingerprint === 'string' && evidence.steps[6].fingerprint.length === 64, 'Skill approval fingerprint must be a 64-char digest')
   } finally {
     await control.ctx.fiber.dispose()
   }
@@ -370,6 +431,12 @@ sh(bin, ['skill', 'activate', evidence.steps[6].import.candidateId], { env })
       recallRecordCount: Array.isArray(recalledBody.records) ? recalledBody.records.length : undefined,
       skillDidNotAddPluginTools: control.ctx.tools.get('text_reverse') === undefined,
     }
+    expect(evidence.steps[6].dshNative.loadedName === 'weekly-review', 'DSH must load weekly-review')
+    expect(evidence.steps[6].dshNative.catalogNames.includes('weekly-review'), 'DSH catalog must list weekly-review')
+    expect(evidence.steps[6].dshNative.skillToolPresent === true, 'host skill tool must be present')
+    expect(evidence.steps[6].dshNative.recallOk === true, 'recall_memory must succeed')
+    expect(evidence.steps[6].dshNative.recallRecordCount === 0, 'recall_memory records must be 0')
+    expect(evidence.steps[6].dshNative.skillDidNotAddPluginTools === true, 'Skill must not add plugin tools')
   } finally {
     await control.ctx.fiber.dispose()
   }
@@ -386,6 +453,11 @@ try {
     activityHasSecret: /sk-|ya29\./.test(activity),
     doctorHasPathDump: /\/dsh_assistant\/src\//.test(JSON.stringify(v)),
   }
+  expect(skill?.lifecycle === 'active', 'WUI Skill v1 must be active')
+  expect(v.view.skillCatalog?.state === 'ok', 'Skill catalog must be ok after activate')
+  expect(evidence.steps[12].activityHasCoT === false, 'Activity must not include chain-of-thought')
+  expect(evidence.steps[12].activityHasSecret === false, 'Activity must not include secret prefixes')
+  expect(evidence.steps[12].doctorHasPathDump === false, 'WUI view must not dump repo src/ paths')
 } finally {
   stop(bin, env, home)
   runtime.child.kill('SIGTERM')
@@ -426,6 +498,7 @@ try {
   const v = await fetch(`${runtime.url}/api/view`).then((r) => r.json())
   const active = (v.view.skills ?? []).filter((s) => s.lifecycle === 'active')
   evidence.steps[7].afterRestartActive = active.map((s) => ({ id: s.id, version: s.version, digest: s.digest }))
+  expect(evidence.steps[7].afterRestartActive.some((s) => s.id === 'weekly-review@1.0.1' && s.digest === evidence.steps[7].digest), 'restart must keep weekly-review@1.0.1')
 } finally {
   stop(bin, env, home)
   runtime.child.kill('SIGTERM')
@@ -443,6 +516,10 @@ try {
     doctorSafe: redact(doctor.stdout).split('\n').filter((l) => /safe|skill|catalog/i.test(l)).slice(0, 12),
     recoveryPresent: Boolean(v.view.recovery || v.view.actions?.some?.((a) => /safe|recover/i.test(JSON.stringify(a)))),
   }
+  expect(evidence.steps[8].wuiSafe === 'SAFE_MODE', 'WUI must report SAFE_MODE')
+  expect(evidence.steps[8].skillCatalog?.state === 'withheld', 'Safe Mode catalog must be withheld')
+  expect(evidence.steps[8].doctorSafe.some((l) => /safe-mode: true/.test(l)), 'doctor must report safe-mode: true')
+  expect(evidence.steps[8].doctorSafe.some((l) => /catalog=withheld/.test(l)), 'doctor must report catalog=withheld')
 } finally {
   stop(bin, env, home)
   runtime.child.kill('SIGTERM')
@@ -452,11 +529,14 @@ const exited = sh(bin, ['self-extension', 'safe-mode', 'exit'], { env })
 evidence.steps[9] = { exit: JSON.parse(exited.stdout) }
 const doctorAfterExit = sh(bin, ['doctor', '--home', home], { env })
 evidence.steps[9].doctor = redact(doctorAfterExit.stdout).split('\n').filter((l) => /safe|skill|catalog/i.test(l)).slice(0, 12)
+expect(evidence.steps[9].exit.safeMode === false, 'safe-mode exit must clear Safe Mode')
+expect(evidence.steps[9].doctor.some((l) => /catalog=ok(?:\s+candidates=\d+)?\s+active=weekly-review@1\.0\.1/.test(l)), 'after recover doctor must show catalog=ok and active=weekly-review@1.0.1')
 
 const backup = join(root, 'backup')
 mkdirSync(backup)
 sh(bin, ['self-extension', 'backup', backup], { env })
 evidence.steps[10] = { backupOk: existsSync(join(backup, 'authority.json')) || existsSync(join(backup, 'authority')) }
+expect(evidence.steps[10].backupOk === true, 'self-extension backup must write Recovery Root artifacts')
 
 {
   const { bootAssistantControl } = product
@@ -485,8 +565,10 @@ evidence.steps[10] = { backupOk: existsSync(join(backup, 'authority.json')) || e
       restoreError = error?.name || error?.constructor?.name || 'Error'
     }
     evidence.steps[10].tampered = tampered
-    evidence.steps[10].tamperRejected = restoreError !== null
+    evidence.steps[10].tamperRejected = restoreError === 'PersistenceIntegrityError'
     evidence.steps[10].tamperError = restoreError
+    expect(tampered === true, 'soak must tamper a backed-up plugin.js')
+    expect(restoreError === 'PersistenceIntegrityError', 'tampered restore must throw PersistenceIntegrityError')
   } finally {
     await control.ctx.fiber.dispose()
   }
@@ -504,6 +586,7 @@ mkdirSync(destGood)
     const human = control.recoveryRoot.issueAuthority({ kind: 'human-control', source: 'operator-cli' })
     control.recoveryRoot.restore(human, goodBackup)
     evidence.steps[10].goodRestore = true
+    expect(evidence.steps[10].goodRestore === true, 'untampered restore into a second empty Home must succeed')
   } finally {
     await control.ctx.fiber.dispose()
   }
@@ -519,6 +602,14 @@ evidence.identity = {
   packedHasSrc: existsSync(join(pkgRoot, 'src')),
   packedHasWebSrc: existsSync(join(pkgRoot, 'web')),
   layout: 'isolated prefix/home/workspace/sessions port 8803',
+}
+expect(evidence.identity.installedVersion === '0.4.0', 'installed package version must be 0.4.0')
+expect(evidence.identity.packedHasSrc === false, 'packed install must not include src/')
+expect(evidence.identity.packedHasWebSrc === false, 'packed install must not include web/ source')
+expect(evidence.identity.helpMentionsTars === true, 'installed tars-ng --help must mention tars-ng')
+expect(evidence.steps[7].doctorBeforeRestart.some((l) => /catalog=ok(?:\s+candidates=\d+)?\s+active=weekly-review@1\.0\.1/.test(l)), 'doctor before restart must show catalog=ok and active=weekly-review@1.0.1')
+} catch (error) {
+  evidence.errors.push(String(error?.stack ?? error).slice(0, 2000))
 }
 
 writeFileSync(join(root, 'evidence.json'), JSON.stringify(evidence, null, 2))
