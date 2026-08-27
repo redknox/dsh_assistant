@@ -7,6 +7,7 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { describe, it } from 'node:test'
 import { readProductVersion } from '../src/product/compatibility.js'
+import { OPERATOR_STATUS_SCHEMA_VERSION } from '../src/domain/self-extension/status.js'
 import { runProductCli } from '../src/product/cli.js'
 import { ensureProductHome } from '../src/product/home.js'
 import {
@@ -686,8 +687,22 @@ describe('TARS-NG Home runtime lease', () => {
         // because `npm test` runs before `npm run build`.
         const health = await fetch(`${match[1]}/api/runtime-health`)
         assert.equal(health.status, 200)
-        const body = await health.json() as { pid?: number }
+        const body = await health.json() as { pid?: number; normalizedHome?: unknown; operator?: unknown; skills?: unknown }
         assert.equal(typeof body.pid, 'number')
+        assert.equal(body.normalizedHome, undefined)
+        assert.equal(body.operator, undefined)
+        assert.equal(body.skills, undefined)
+        const identity = readRuntimeIdentity(ensureProductHome(home))
+        assert.ok(identity)
+        const trustedHealth = await fetch(`${match[1]}/api/runtime-health`, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ runId: identity.runId }),
+        })
+        assert.equal(trustedHealth.status, 200)
+        const trustedBody = await trustedHealth.json() as { operator?: { schemaVersion?: number }; skills?: unknown }
+        assert.equal(trustedBody.operator?.schemaVersion, OPERATOR_STATUS_SCHEMA_VERSION)
+        assert.notEqual(trustedBody.skills, undefined)
       } finally {
         for (const child of [first, second]) {
           if (child.exitCode === null) child.kill('SIGTERM')

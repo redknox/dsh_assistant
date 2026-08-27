@@ -481,13 +481,14 @@ export function startWebUiServer(options: WebUiServerOptions): Promise<WebUiServ
             return
           }
         }
-        sendJson(res, 200, {
+        const publicHealth = {
           pid: control.pid,
           startedAt: control.startedAt,
           productVersion: control.productVersion,
-          normalizedHome: control.normalizedHome,
-          ...(control.inspectLive ? control.inspectLive() : {}),
-        })
+        }
+        sendJson(res, 200, req.method === 'POST'
+          ? { ...publicHealth, normalizedHome: control.normalizedHome, ...(control.inspectLive ? control.inspectLive() : {}) }
+          : publicHealth)
         return
       }
       if (req.method === 'POST' && requestUrl.pathname === '/api/runtime-stop') {

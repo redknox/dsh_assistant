@@ -1,5 +1,5 @@
 import { existsSync, unlinkSync, writeFileSync } from 'node:fs'
-import { formatOperatorStatus, operatorStatus, type OperatorStatus } from '../domain/self-extension/status.js'
+import { formatOperatorStatus, operatorStatus, parseOperatorSkills, parseOperatorStatus, type OperatorStatus } from '../domain/self-extension/status.js'
 import { runSelfExtensionCli } from '../runtime/self-extension-cli.js'
 import { bootAssistantControl, createAssistantAgent, type AssistantControl } from '../runtime/boot.js'
 import { inspectCompatibility } from './compatibility.js'
@@ -261,12 +261,14 @@ function lastStatusSnapshot(last: unknown): {
 } {
   if (last === null || typeof last !== 'object') return {}
   const row = last as Record<string, unknown>
+  const operator = parseOperatorStatus(row.operator)
+  const skills = parseOperatorSkills(row.skills)
   return {
     ...(typeof row.safeMode === 'boolean' ? { safeMode: row.safeMode } : {}),
     ...(typeof row.recoveryRequired === 'boolean' ? { recoveryRequired: row.recoveryRequired } : {}),
     ...(typeof row.persistence === 'string' ? { persistence: row.persistence } : {}),
-    ...(row.operator !== null && typeof row.operator === 'object' ? { operator: row.operator as OperatorStatus } : {}),
-    ...(row.skills !== null && typeof row.skills === 'object' ? { skills: row.skills as OperatorStatus['skills'] } : {}),
+    ...(operator ? { operator } : {}),
+    ...(skills ? { skills } : {}),
   }
 }
 
@@ -291,15 +293,17 @@ async function readLiveRuntimeDoctor(identity: RuntimeIdentity): Promise<{
       recoveryRequired?: unknown
       persistence?: unknown
       operator?: unknown
-      skills?: OperatorStatus['skills']
+      skills?: unknown
     }
     if (typeof body.safeMode !== 'boolean') return undefined
+    const operator = parseOperatorStatus(body.operator)
+    const skills = parseOperatorSkills(body.skills)
     return {
       safeMode: body.safeMode,
       recoveryRequired: body.recoveryRequired === true,
       ...(typeof body.persistence === 'string' ? { persistence: body.persistence } : {}),
-      ...(body.operator !== null && typeof body.operator === 'object' ? { operator: body.operator as OperatorStatus } : {}),
-      ...(body.skills ? { skills: body.skills } : {}),
+      ...(operator ? { operator } : {}),
+      ...(skills ? { skills } : {}),
     }
   } catch {
     return undefined
