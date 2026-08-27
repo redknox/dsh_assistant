@@ -405,14 +405,46 @@ export class GovernanceService implements ExtensionGovernance, ExtensionActivati
     }
   }
 
-  disable(credential: TrustedAuthorityCredential, owner: string, version: string): void {
+  async disable(credential: TrustedAuthorityCredential, owner: string, version: string): Promise<ActivationStatus> {
     this.assertCredential(credential)
-    this.assertMutationIdle('recovery')
-    this.mutation = 'recovery'
+    this.assertMutationIdle('uninstall')
+    const record = this.registry.get(owner, version)
+    if (record === undefined) throw new GovernanceContractError(`unknown record: ${owner}@${version}`)
+    const candidate = this.workspace.list().find((item) => item.owner === owner && item.version === version)
+    this.mutation = 'uninstall'
+    const prior = this.current
+    const priorLkg = this.lastKnownGood
     try {
+      if (candidate !== undefined) await this.runtime.unloadGenerated(candidate.id)
+      this.beginAuthorityCommit?.()
       this.registry.transitionStatus(owner, version, 'disabled')
       this.current = this.captureSnapshot()
       this.flush()
+      this.finishAuthorityCommit?.()
+      return this.status()
+    } catch (error) {
+      if (error instanceof SimulatedCrashError) throw error
+      if (this.registry.get(owner, version)?.status !== 'active') {
+        try {
+          this.registry.transitionStatus(owner, version, 'active')
+        } catch {
+          this.safeMode = true
+          this.state = 'safe-mode'
+        }
+      }
+      if (prior !== undefined) {
+        try {
+          await this.runtime.restore(prior)
+        } catch {
+          this.safeMode = true
+          this.state = 'safe-mode'
+        }
+      }
+      this.current = prior
+      this.lastKnownGood = priorLkg
+      this.flush()
+      this.finishAuthorityCommit?.()
+      throw error
     } finally {
       this.mutation = 'idle'
     }

@@ -354,7 +354,7 @@ describe('Self-Extension durable restart', () => {
     const { first, created, human } = await prepareCandidate(home)
     try {
       await first.recoveryRoot.activate(created.id, human)
-      first.recoveryRoot.disable(human, 'generated/restart-probe', '0.1.0')
+      await first.recoveryRoot.disable(human, 'generated/restart-probe', '0.1.0')
     } finally {
       await first.ctx.fiber.dispose()
     }

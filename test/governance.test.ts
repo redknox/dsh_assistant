@@ -452,6 +452,24 @@ describe('extension governance and recovery', () => {
     assert.equal(root.inspect().lastKnownGood?.owners.some((item) => item.owner === 'generated/text-slugify'), false)
   })
 
+  it('trusted disable unmounts the live candidate and records mounted=false', async () => {
+    const { registry, workspace, governance, root, human, runtime } = seeded()
+    const base = ready(workspace, {
+      owner: 'generated/text-slugify',
+      version: '0.1.0',
+      capabilities: ['text.slugify'],
+    })
+    const fingerprint = governance.requestApproval(base.id).fingerprint
+    root.recordApproval(human, { candidateId: base.id, fingerprint, decision: 'approved-for-exact-diff' })
+    await root.activate(base.id, human)
+    assert.ok(runtime.mounted().includes(base.id))
+    const after = await root.disable(human, 'generated/text-slugify', '0.1.0')
+    assert.equal(registry.get('generated/text-slugify', '0.1.0')?.status, 'disabled')
+    assert.equal(runtime.mounted().includes(base.id), false)
+    assert.equal(after.current?.mounted.includes(base.id), false)
+    assert.equal(workspace.get(base.id).sealed, true)
+  })
+
   it('I3g. eligible disabled revision reactivates the exact sealed record', async () => {
     const { registry, workspace, governance, root, human, runtime } = seeded()
     const base = ready(workspace, {
@@ -641,7 +659,7 @@ describe('extension governance and recovery', () => {
     assert.equal(root.inspect().lifecycleBusy, 'uninstall')
     await assert.rejects(() => root.rollback(human), /uninstall-in-flight/)
     await assert.rejects(() => root.enterSafeMode(human), /uninstall-in-flight/)
-    assert.throws(() => root.disable(human, 'generated/text-slugify', '0.1.0'), /uninstall-in-flight/)
+    await assert.rejects(() => root.disable(human, 'generated/text-slugify', '0.1.0'), /uninstall-in-flight/)
     release()
     await pending
     assert.equal(root.inspect().lifecycleBusy, undefined)

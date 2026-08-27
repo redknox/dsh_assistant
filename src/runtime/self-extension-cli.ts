@@ -119,8 +119,7 @@ export async function runSelfExtensionCli(argv: string[], hooks: SelfExtensionCl
         return 0
       }
       if (command === 'disable') {
-        recoveryRoot.disable(human, String(rest[0]), String(rest[1]))
-        console.log(`disabled ${rest[0]}@${rest[1]}`)
+        console.log(JSON.stringify(await recoveryRoot.disable(human, String(rest[0]), String(rest[1])), null, 2))
         return 0
       }
       if (command === 'import-local') {
