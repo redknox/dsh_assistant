@@ -2,32 +2,28 @@ import { createReadStream, existsSync, statSync } from 'node:fs'
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { GovernanceContractError, RollbackDeniedError, UninstallDeniedError } from '../domain/governance/errors.js'
 import { SkillContractError } from '../domain/skill/errors.js'
-import { SimulatedCrashError } from '../domain/governance/service.js'
 import type { RecoveryRoot } from '../domain/governance/root.js'
 import { acknowledgementOf } from '../domain/workspace/approvals.js'
-import { boundActivationDiagnostics } from '../domain/workspace/failure.js'
 import { redactText } from '../domain/workspace/redact.js'
 import { AssistantControlSurface } from '../ui/controller.js'
-import type { MissionControlView, RollbackCard, SkillProjection, UserPluginView } from '../domain/workspace/types.js'
+import type { MissionControlView, SkillProjection } from '../domain/workspace/types.js'
 import { PRODUCT_UI_SESSION_ID } from './constants.js'
 import type { LiveSessionHost } from './session-lifecycle.js'
 import {
   assertSafePayload,
   createUiSessionToken,
-  DESTRUCTIVE_RECOVERY_ACTIONS,
   originAllowed,
   resolveWebUiListen,
   sessionCookieHeader,
   sessionMatches,
-  SUPPORTED_RECOVERY_ACTIONS,
   type WebUiListenOptions,
 } from './web-ui-protocol.js'
 import { handleRuntimeControlRequest, type WebUiRuntimeControl } from './web-ui-runtime-control.js'
 import { handleWebUiConversationRequest } from './web-ui-conversations.js'
 import { handleWebUiApprovalRequest } from './web-ui-approvals.js'
 import { handleWebUiActivationRequest } from './web-ui-activations.js'
+import { handleWebUiGovernanceLifecycleRequest } from './web-ui-governance-lifecycle.js'
 import { WebUiGovernanceMutations } from './web-ui-governance-mutations.js'
 
 export type { WebUiRuntimeControl } from './web-ui-runtime-control.js'
@@ -150,138 +146,6 @@ export function startWebUiServer(options: WebUiServerOptions): Promise<WebUiServ
 
   const mutations = new WebUiGovernanceMutations(() => options.recoveryRoot.inspect())
 
-  const handleRecovery = async (action: string, confirm: boolean) => {
-    if (!(SUPPORTED_RECOVERY_ACTIONS as readonly string[]).includes(action)) {
-      return { status: 409 as const, body: { error: 'unsupported', action } }
-    }
-    if ((DESTRUCTIVE_RECOVERY_ACTIONS as readonly string[]).includes(action) && confirm !== true) {
-      return { status: 409 as const, body: { error: 'confirmation-required', action } }
-    }
-    if (action === 'diagnostics') {
-      const inspected = options.recoveryRoot.inspect()
-      const boot = options.diagnostics && typeof options.diagnostics === 'object'
-        ? options.diagnostics as { persistence?: unknown; reasons?: unknown }
-        : {}
-      const parts: string[] = []
-      if (typeof boot.persistence === 'string') parts.push(`persistence ${boot.persistence}`)
-      if (Array.isArray(boot.reasons)) {
-        for (const reason of boot.reasons.slice(0, 4)) {
-          if (typeof reason === 'string' && reason.trim() !== '') parts.push(reason.trim().slice(0, 200))
-        }
-      }
-      const live = snapshot()
-      if (live.runtimeContext?.profileCompositionError) {
-        parts.push(`profile-composition ${live.runtimeContext.profileCompositionError.slice(0, 200)}`)
-      }
-      parts.push(inspected.safeMode ? 'safe-mode true' : 'safe-mode false')
-      return {
-        status: 200 as const,
-        body: {
-          action,
-          diagnostics: options.diagnostics ?? { activation: inspected },
-          acknowledgement: { text: redactText(parts.join(' · ') || 'Diagnostics available.') },
-        },
-      }
-    }
-    const busy = mutations.inFlight()
-    if (busy !== undefined) {
-      return { status: 409 as const, body: { error: `${busy}-in-flight`, action } }
-    }
-    if (action === 'rollback') {
-      const inspected = options.recoveryRoot.inspect()
-      if (!inspected.safeMode && !inspected.recoveryRequired) {
-        return { status: 409 as const, body: { error: 'ready-state-rollback', action } }
-      }
-      const human = options.recoveryRoot.issueAuthority({ kind: 'human-control', source: 'application-ui' })
-      try {
-        return await mutations.run('recovery', async () => ({
-          status: 200 as const,
-          body: { action, result: await options.recoveryRoot.rollback(human) },
-        }))
-      } catch (error) {
-        if (error instanceof RollbackDeniedError) {
-          return { status: 409 as const, body: { error: 'rollback-denied', denials: error.denials, action } }
-        }
-        if (error instanceof GovernanceContractError && /in-flight$/.test(error.message)) {
-          return { status: 409 as const, body: { error: error.message, action } }
-        }
-        throw error
-      }
-    }
-    const status = options.recoveryRoot.inspect()
-    const live = snapshot()
-    if (action === 'exit-safe-mode' && (
-      live.runtimeContext?.profileCompositionError !== undefined
-      || (
-        live.runtimeContext?.safeMode === true
-        && !status.safeMode
-        && !status.recoveryRequired
-      )
-    )) {
-      return {
-        status: 409 as const,
-        body: {
-          error: 'profile-composition-recovery',
-          action: 'exit-safe-mode',
-          detail: 'Exit Safe Mode cannot repair a broken Profile. Restore profiles/assistant and restart TARS-NG.',
-        },
-      }
-    }
-    if (status.recoveryRequired) {
-      return {
-        status: 409 as const,
-        body: {
-          error: 'integrity-failure',
-          action: 'exit-safe-mode',
-          detail: 'Exit Safe Mode is refused while recovery is still required. Restore the selected Profile and restart; this button does not repair a broken Profile.',
-        },
-      }
-    }
-    const human = options.recoveryRoot.issueAuthority({ kind: 'human-control', source: 'application-ui' })
-    try {
-      return await mutations.run('recovery', async () => ({
-        status: 200 as const,
-        body: { action, result: options.recoveryRoot.exitSafeMode(human) },
-      }))
-    } catch (error) {
-      if (error instanceof GovernanceContractError && /in-flight$/.test(error.message)) {
-        return { status: 409 as const, body: { error: error.message, action } }
-      }
-      throw error
-    }
-  }
-
-  const bindUninstall = (body: {
-    id?: unknown
-    owner?: unknown
-    version?: unknown
-    candidateId?: unknown
-    digest?: unknown
-    registryGeneration?: unknown
-  }, cards: readonly UserPluginView[]) => {
-    if (typeof body.id !== 'string' || body.id === '') return { error: 'malformed' as const }
-    if (typeof body.owner !== 'string' || body.owner === '') return { error: 'malformed' as const }
-    if (typeof body.version !== 'string' || body.version === '') return { error: 'malformed' as const }
-    if (typeof body.registryGeneration !== 'number' || !Number.isInteger(body.registryGeneration)) {
-      return { error: 'malformed' as const }
-    }
-    const card = cards.find((item) => item.id === body.id)
-    if (!card) return { error: 'unknown-plugin' as const }
-    if (card.owner !== body.owner || card.version !== body.version) return { error: 'stale-plugin' as const }
-    if (card.registryGeneration !== body.registryGeneration) return { error: 'stale-registry' as const }
-    if (card.candidateId !== undefined) {
-      if (typeof body.candidateId !== 'string' || body.candidateId !== card.candidateId) {
-        return { error: 'stale-candidate' as const }
-      }
-    }
-    if (card.digest !== undefined) {
-      if (typeof body.digest !== 'string' || body.digest !== card.digest) {
-        return { error: 'stale-digest' as const }
-      }
-    }
-    return { card }
-  }
-
   const bindSkillAction = (body: {
     action?: unknown
     id?: unknown
@@ -334,28 +198,6 @@ export function startWebUiServer(options: WebUiServerOptions): Promise<WebUiServ
   const sameStringSet = (left: readonly string[], right: readonly string[]) => (
     left.length === right.length && left.every((item) => right.includes(item))
   )
-
-  const bindRollback = (body: {
-    id?: unknown
-    fingerprint?: unknown
-    currentGeneration?: unknown
-    targetGeneration?: unknown
-  }, card: RollbackCard | undefined) => {
-    if (typeof body.id !== 'string' || body.id === '') return { error: 'malformed' as const }
-    if (typeof body.fingerprint !== 'string' || body.fingerprint === '') return { error: 'malformed' as const }
-    if (typeof body.currentGeneration !== 'number' || !Number.isInteger(body.currentGeneration)) {
-      return { error: 'malformed' as const }
-    }
-    if (typeof body.targetGeneration !== 'number' || !Number.isInteger(body.targetGeneration)) {
-      return { error: 'malformed' as const }
-    }
-    if (card === undefined) return { error: 'unknown-rollback' as const }
-    if (card.id !== body.id) return { error: 'stale-rollback' as const }
-    if (card.fingerprint !== body.fingerprint) return { error: 'stale-fingerprint' as const }
-    if (card.currentGeneration !== body.currentGeneration) return { error: 'stale-current' as const }
-    if (card.targetGeneration !== body.targetGeneration) return { error: 'stale-target' as const }
-    return { card }
-  }
 
   const serveAsset = (reqPath: string, res: ServerResponse, setSession: boolean) => {
     const relative = reqPath === '/' ? 'index.html' : reqPath.replace(/^\//, '')
@@ -566,132 +408,33 @@ export function startWebUiServer(options: WebUiServerOptions): Promise<WebUiServ
         }
         return
       }
-      if (req.method === 'POST' && requestUrl.pathname === '/api/uninstall') {
-        const body = JSON.parse(await readBody(req)) as {
-          id?: unknown
-          owner?: unknown
-          version?: unknown
-          candidateId?: unknown
-          digest?: unknown
-          registryGeneration?: unknown
-          confirm?: unknown
-          acknowledgeDependents?: unknown
-        }
-        if (body.confirm !== true) {
-          sendJson(res, 409, { error: 'confirmation-required' })
-          return
-        }
-        const busy = mutations.inFlight()
-        if (busy !== undefined) {
-          sendJson(res, 409, { error: `${busy}-in-flight`, view: snapshot(), webUi: url })
-          return
-        }
-        const bound = bindUninstall(body, snapshot().plugins)
-        if ('error' in bound) {
-          sendJson(res, bound.error === 'malformed' ? 400 : 409, { error: bound.error })
-          return
-        }
-        const human = options.recoveryRoot.issueAuthority({ kind: 'human-control', source: 'application-ui' })
-        try {
-          await mutations.run('uninstall', () => options.recoveryRoot.uninstall(human, bound.card.owner, bound.card.version, {
-            acknowledgeDependents: body.acknowledgeDependents === true,
-          }))
-          sendJson(res, 200, envelope())
-          broadcast()
-        } catch (error) {
-          if (error instanceof UninstallDeniedError) {
-            sendJson(res, 409, { error: 'uninstall-denied', denials: error.denials, view: snapshot(), webUi: url })
-            broadcast()
-            return
-          }
-          const message = error instanceof Error ? error.message : 'uninstall failed'
-          sendJson(res, 409, {
-            error: 'uninstall-failed',
-            diagnostics: boundActivationDiagnostics(message),
-            view: snapshot(),
-            webUi: url,
-          })
-          broadcast()
-        }
-        return
-      }
-      if (req.method === 'POST' && requestUrl.pathname === '/api/rollback') {
-        const body = JSON.parse(await readBody(req)) as {
-          id?: unknown
-          fingerprint?: unknown
-          currentGeneration?: unknown
-          targetGeneration?: unknown
-          confirm?: unknown
-        }
-        if (body.confirm !== true) {
-          sendJson(res, 409, { error: 'confirmation-required' })
-          return
-        }
-        const busy = mutations.inFlight()
-        if (busy !== undefined) {
-          sendJson(res, 409, { error: `${busy}-in-flight`, view: snapshot(), webUi: url })
-          return
-        }
-        const bound = bindRollback(body, snapshot().rollback)
-        if ('error' in bound) {
-          sendJson(res, bound.error === 'malformed' ? 400 : 409, { error: bound.error })
-          return
-        }
-        const human = options.recoveryRoot.issueAuthority({ kind: 'human-control', source: 'application-ui' })
-        try {
-          const status = await mutations.run('recovery', () => options.recoveryRoot.rollback(human))
-          if (status.state === 'activation-failed' || status.safeMode) {
-            sendJson(res, 409, {
-              error: 'rollback-failed',
-              diagnostics: status.lastFailure?.diagnostics
-                ? boundActivationDiagnostics(status.lastFailure.diagnostics)
-                : 'rollback failed',
-              recoveryRequired: status.recoveryRequired,
-              safeMode: status.safeMode,
-              view: snapshot(),
-              webUi: url,
-            })
-            broadcast()
-            return
-          }
-          sendJson(res, 200, envelope())
-          broadcast()
-        } catch (error) {
-          if (error instanceof RollbackDeniedError) {
-            sendJson(res, 409, { error: 'rollback-denied', denials: error.denials, view: snapshot(), webUi: url })
-            broadcast()
-            return
-          }
-          if (error instanceof SimulatedCrashError) {
-            sendJson(res, 409, {
-              error: 'rollback-interrupted',
-              diagnostics: boundActivationDiagnostics(error.message),
-              view: snapshot(),
-              webUi: url,
-            })
-            broadcast()
-            return
-          }
-          const message = error instanceof Error ? error.message : 'rollback failed'
-          sendJson(res, 409, {
-            error: 'rollback-failed',
-            diagnostics: boundActivationDiagnostics(message),
-            view: snapshot(),
-            webUi: url,
-          })
-          broadcast()
-        }
-        return
-      }
-      if (req.method === 'POST' && requestUrl.pathname === '/api/recovery') {
-        const body = JSON.parse(await readBody(req)) as { action?: unknown; confirm?: unknown }
-        if (typeof body.action !== 'string') {
-          sendJson(res, 400, { error: 'malformed' })
-          return
-        }
-        const result = await handleRecovery(body.action, body.confirm === true)
-        sendJson(res, result.status, { ...result.body, view: snapshot(), webUi: url })
-        broadcast()
+      const governanceLifecycle = await handleWebUiGovernanceLifecycleRequest({
+        method: req.method,
+        pathname: requestUrl.pathname,
+        readJson: async () => JSON.parse(await readBody(req)) as unknown,
+      }, {
+        authority: {
+          inspect: () => options.recoveryRoot.inspect(),
+          uninstall: (owner, version, acknowledgeDependents) => {
+            const human = options.recoveryRoot.issueAuthority({ kind: 'human-control', source: 'application-ui' })
+            return options.recoveryRoot.uninstall(human, owner, version, { acknowledgeDependents })
+          },
+          rollback: () => {
+            const human = options.recoveryRoot.issueAuthority({ kind: 'human-control', source: 'application-ui' })
+            return options.recoveryRoot.rollback(human)
+          },
+          exitSafeMode: () => {
+            const human = options.recoveryRoot.issueAuthority({ kind: 'human-control', source: 'application-ui' })
+            return options.recoveryRoot.exitSafeMode(human)
+          },
+        },
+        mutations,
+        diagnostics: options.diagnostics,
+        project: envelope,
+      })
+      if (governanceLifecycle) {
+        sendJson(res, governanceLifecycle.status, governanceLifecycle.body)
+        if (governanceLifecycle.broadcast) broadcast()
         return
       }
       if (req.method === 'GET' && !requestUrl.pathname.startsWith('/api/')) {
