@@ -1,5 +1,5 @@
-import React, { useEffect, useMemo, useState, type FormEvent } from 'react'
-import type { ActivationCard, ApprovalCard, MissionControlView, RollbackCard, SkillProjection, UserCapabilityStatus, UserPluginView, WorkObjectKind, WorkbenchProjection } from '../../src/domain/workspace/types'
+import React, { useEffect, useMemo, useState } from 'react'
+import type { ActivationCard, ApprovalCard, MissionControlView, RollbackCard, SkillProjection, UserCapabilityStatus, UserPluginView, WorkbenchProjection } from '../../src/domain/workspace/types'
 import {
   abandonCandidateActivation,
   activateCandidate,
@@ -17,23 +17,10 @@ import {
   type UiEnvelope,
 } from './api'
 import { Glyph } from './icons'
-import { MarkdownMessage } from './MarkdownMessage'
+import { ConversationWorkspace } from './ConversationWorkspace'
 import { MemoryWorkspace } from './MemoryWorkspace'
+import { formatDiff, isPendingApproval, skillInvocationSurfaceOpen } from './missionControlPresentation'
 import { WorkspaceNavigation, type WorkspacePane } from './WorkspaceNavigation'
-
-function isPendingApproval(status: string): boolean {
-  return status === 'pending' || status === 'approval-requested' || status === 'unreviewed'
-}
-
-function isUserMessage(kind: WorkObjectKind): boolean {
-  return kind === 'user-message'
-}
-
-function skillInvocationSurfaceOpen(view: MissionControlView): boolean {
-  if (view.systemState === 'SAFE_MODE' || view.runtimeContext?.safeMode === true) return false
-  const state = view.skillCatalog?.state
-  return state === undefined || state === 'ok' || state === 'empty'
-}
 
 function lampModifier(state: MissionControlView['systemState'], connected: boolean): string {
   if (!connected) return 'offline'
@@ -112,117 +99,6 @@ function SystemHeader(props: {
   )
 }
 
-function ApprovalCardView(props: {
-  readonly card: ApprovalCard
-  readonly locked: boolean
-  readonly onApprove: (card: ApprovalCard) => void
-  readonly onReject: (card: ApprovalCard) => void
-}) {
-  const { card } = props
-  const pending = isPendingApproval(card.status)
-  return (
-    <article
-      className="approval-card"
-      data-approval-id={card.id}
-      data-kind={card.kind}
-      data-fingerprint={card.fingerprint}
-      data-candidate-id={card.candidateId ?? ''}
-      aria-labelledby={`approval-title-${card.id}`}
-    >
-      <header className="approval-header">
-        <Glyph name="calendar" className="glyph approval-symbol" />
-        <h2 id={`approval-title-${card.id}`}>{card.title}</h2>
-      </header>
-      <dl className="approval-facts">
-        <div><dt>TARGET</dt><dd>Target {card.target}</dd></div>
-        <div><dt>AUTHORITY</dt><dd>{card.authorityChange}</dd></div>
-        <div><dt>FINGERPRINT</dt><dd>Fingerprint {card.fingerprint}</dd></div>
-        {card.candidateId ? <div><dt>CANDIDATE</dt><dd>{card.candidateId}</dd></div> : null}
-        {card.digest ? <div><dt>DIGEST</dt><dd>{card.digest}</dd></div> : null}
-        {card.details.map((line) => (
-          <div key={line}><dt>DETAIL</dt><dd>{line}</dd></div>
-        ))}
-      </dl>
-      <div className="effect-line">
-        <Glyph name="info" className="glyph effect-icon" />
-        <span><strong>EFFECT</strong> External side effect: {card.sideEffect}</span>
-      </div>
-      {pending ? (
-        <div className="approval-actions">
-          <button type="button" className="button button--secondary" data-approval-action="reject" disabled={props.locked} onClick={() => props.onReject(card)}>REJECT</button>
-          <button type="button" className="button button--approval" data-approval-action="approve" disabled={props.locked} onClick={() => props.onApprove(card)}>APPROVE</button>
-        </div>
-      ) : <p className="approval-status">Status {card.status}</p>}
-    </article>
-  )
-}
-
-function ActivationCardView(props: {
-  readonly card: ActivationCard
-  readonly locked: boolean
-  readonly armed: boolean
-  readonly abandonArmed: boolean
-  readonly onActivate: (card: ActivationCard) => void
-  readonly onAbandon: (card: ActivationCard) => void
-  readonly onDefer: (card: ActivationCard) => void
-}) {
-  const { card } = props
-  const actionable = (card.status === 'APPROVED_NOT_ACTIVE' || card.status === 'DISABLED_REACTIVATABLE' || card.status === 'ACTIVATION_FAILED') && card.eligibilityOk
-  return (
-    <article
-      className="approval-card"
-      data-activation-id={card.id}
-      data-kind={card.kind}
-      data-fingerprint={card.fingerprint}
-      data-candidate-id={card.candidateId}
-      data-digest={card.digest}
-      data-activation-status={card.status}
-      aria-labelledby={`activation-title-${card.id}`}
-    >
-      <header className="approval-header">
-        <Glyph name="shield" className="glyph approval-symbol" />
-        <h2 id={`activation-title-${card.id}`}>{card.title}</h2>
-      </header>
-      <dl className="approval-facts">
-        <div><dt>OWNER</dt><dd>{card.owner}@{card.version}</dd></div>
-        <div><dt>CANDIDATE</dt><dd>{card.candidateId}</dd></div>
-        <div><dt>DIGEST</dt><dd>{card.digest}</dd></div>
-        <div><dt>FINGERPRINT</dt><dd>{card.fingerprint}</dd></div>
-        {card.runtimeContractVersion ? <div><dt>CONTRACT</dt><dd>{card.runtimeContractVersion}</dd></div> : null}
-        <div><dt>RUNTIME</dt><dd>Isolated runner only</dd></div>
-        <div><dt>STATUS</dt><dd>{card.status}</dd></div>
-        <div><dt>CAPABILITIES</dt><dd>{formatDiff(card.capabilitiesAdded, card.capabilitiesRemoved, card.capabilitiesChanged)}</dd></div>
-        <div><dt>TOOLS</dt><dd>{formatDiff(card.toolsAdded, card.toolsRemoved, card.toolsChanged)}</dd></div>
-        <div><dt>PERMISSIONS</dt><dd>{formatDiff(card.permissionsAdded, card.permissionsRemoved, card.permissionsChanged)}</dd></div>
-        {card.details.map((line) => (
-          <div key={line}><dt>DETAIL</dt><dd>{line}</dd></div>
-        ))}
-      </dl>
-      {actionable ? (
-        <div className="approval-actions">
-          <button type="button" className="button button--secondary" data-activation-action="defer" disabled={props.locked} onClick={() => props.onDefer(card)}>NOT NOW</button>
-          {card.status === 'ACTIVATION_FAILED' ? (
-            <button type="button" className="button button--fault" data-activation-action="abandon" disabled={props.locked} onClick={() => props.onAbandon(card)}>
-              {props.abandonArmed ? 'CONFIRM ABANDON' : 'ABANDON'}
-            </button>
-          ) : null}
-          <button
-            type="button"
-            className="button button--approval"
-            data-activation-action="activate"
-            disabled={props.locked}
-            onClick={() => props.onActivate(card)}
-          >
-            {props.armed
-              ? (card.status === 'DISABLED_REACTIVATABLE' ? 'CONFIRM REACTIVATE' : card.status === 'ACTIVATION_FAILED' ? 'CONFIRM RETRY' : 'CONFIRM ACTIVATE')
-              : (card.status === 'DISABLED_REACTIVATABLE' ? 'REACTIVATE' : card.status === 'ACTIVATION_FAILED' ? 'RETRY' : 'ACTIVATE')}
-          </button>
-        </div>
-      ) : <p className="approval-status">Status {card.status}</p>}
-    </article>
-  )
-}
-
 function RecoveryPanel(props: {
   readonly systemState: MissionControlView['systemState']
   readonly recovery: NonNullable<MissionControlView['recovery']>
@@ -262,210 +138,6 @@ function RecoveryPanel(props: {
         })}
       </div>
     </section>
-  )
-}
-
-function RollbackCardView(props: {
-  readonly card: RollbackCard
-  readonly locked: boolean
-  readonly deferred: boolean
-  readonly armed: boolean
-  readonly onAsk: (card: RollbackCard) => void
-  readonly onDefer: (card: RollbackCard) => void
-}) {
-  const { card } = props
-  if (props.deferred) return null
-  return (
-    <article
-      className="approval-card"
-      data-rollback-id={card.id}
-      data-kind={card.kind}
-      data-fingerprint={card.fingerprint}
-      data-current-generation={card.currentGeneration}
-      data-target-generation={card.targetGeneration}
-      aria-labelledby={`rollback-title-${card.id}`}
-    >
-      <header className="approval-header">
-        <Glyph name="shield" className="glyph approval-symbol" />
-        <h2 id={`rollback-title-${card.id}`}>{card.title}</h2>
-      </header>
-      <dl className="approval-facts">
-        <div><dt>CURRENT</dt><dd>generation {card.currentGeneration}</dd></div>
-        <div><dt>TARGET</dt><dd>generation {card.targetGeneration}</dd></div>
-        <div><dt>FINGERPRINT</dt><dd>{card.fingerprint}</dd></div>
-        <div><dt>WHY</dt><dd>{card.reason}</dd></div>
-        <div><dt>OWNERS</dt><dd>{card.ownerChanges.map((item) => `${item.change} ${item.owner}${item.from ? ` ${item.from}` : ''}${item.to ? `→${item.to}` : ''}`).join('; ') || 'none'}</dd></div>
-        <div><dt>CAPABILITIES</dt><dd>added {card.capabilitiesAdded.join(', ') || 'none'}; removed {card.capabilitiesRemoved.join(', ') || 'none'}</dd></div>
-        <div><dt>TOOLS</dt><dd>added {card.toolsAdded.join(', ') || 'none'}; removed {card.toolsRemoved.join(', ') || 'none'}</dd></div>
-        <div><dt>MOUNTS</dt><dd>added {card.mountsAdded.length}; removed {card.mountsRemoved.length}</dd></div>
-        <div><dt>RECOVERY REQUIRED</dt><dd>{card.recoveryRequired ? 'yes' : 'no'}</dd></div>
-        <div><dt>WARNING</dt><dd>This is a system-state rollback, not a single-plugin uninstall. Candidate, approval, review, and audit history are retained.</dd></div>
-      </dl>
-      {props.armed ? (
-        <div className="approval-actions">
-          <button type="button" className="button button--secondary" data-rollback-action="cancel" disabled={props.locked} onClick={() => props.onDefer(card)}>Not now</button>
-          <button type="button" className="button button--fault" data-rollback-action="confirm" disabled={props.locked} onClick={() => props.onAsk(card)}>Confirm Rollback system state</button>
-        </div>
-      ) : (
-        <div className="approval-actions">
-          <button type="button" className="button button--secondary" data-rollback-action="defer" disabled={props.locked} onClick={() => props.onDefer(card)}>Not now</button>
-          <button type="button" className="button button--approval" data-rollback-action="ask" disabled={props.locked} onClick={() => props.onAsk(card)}>Rollback system state</button>
-        </div>
-      )}
-    </article>
-  )
-}
-
-function ConversationWorkspace(props: {
-  readonly view: MissionControlView
-  readonly connected: boolean
-  readonly sending: boolean
-  readonly draft: string
-  readonly error?: string
-  readonly onDraft: (value: string) => void
-  readonly onSend: () => void
-  readonly onApprove: (card: ApprovalCard) => void
-  readonly onReject: (card: ApprovalCard) => void
-  readonly activations: readonly ActivationCard[]
-  readonly armedActivation?: string
-  readonly armedAbandonment?: string
-  readonly onActivate: (card: ActivationCard) => void
-  readonly onAbandonActivation: (card: ActivationCard) => void
-  readonly onDefer: (card: ActivationCard) => void
-  readonly rollback?: RollbackCard
-  readonly deferredRollback?: boolean
-  readonly armedRollback?: boolean
-  readonly onAskRollback?: (card: RollbackCard) => void
-  readonly onDeferRollback?: (card: RollbackCard) => void
-  readonly onPickSkill?: (skill: SkillProjection) => void
-}) {
-  const locked = !props.connected
-  const sendDisabled = props.sending || locked || props.draft.trim() === ''
-  const empty = props.view.conversation.length === 0
-    && props.view.approvals.filter((card) => isPendingApproval(card.status)).length === 0
-    && props.activations.length === 0
-    && props.rollback === undefined
-  return (
-    <main className="conversation-panel" id="today">
-      <div className="conversation-scroll">
-        {empty ? (
-          <section className="conversation-empty" aria-labelledby="conversation-empty-title">
-            <div className="empty-mark" aria-hidden="true"><Glyph name="hex" /><span>T</span></div>
-            <p className="empty-kicker">LOCAL ASSISTANT · READY</p>
-            <h1 id="conversation-empty-title">What are we working on?</h1>
-            <p className="empty-copy">Start with a question, a decision, or a concrete outcome. TARS-NG keeps the work inside this local workspace.</p>
-            <div className="empty-prompts" aria-label="Suggested prompts">
-              {[
-                'Help me understand this project',
-                'Review the latest changes',
-                'Plan the next product milestone',
-              ].map((prompt) => (
-                <button key={prompt} type="button" onClick={() => props.onDraft(prompt)} disabled={locked}>{prompt}</button>
-              ))}
-            </div>
-          </section>
-        ) : null}
-        {props.view.conversation.map((item, index) => {
-          const user = isUserMessage(item.kind)
-          const alert = item.kind === 'warning' || item.kind === 'failure'
-          return (
-            <article key={`${item.kind}-${index}`} className={`message${user ? ' message--user' : ' message--assistant'}${alert ? ' message--alert' : ''}`} data-kind={item.kind}>
-              {user ? null : (
-                <div className="assistant-mark" aria-hidden="true">
-                  <Glyph name="hex" />
-                  <span>T</span>
-                </div>
-              )}
-              <div>
-                <div className="message-meta">
-                  <span>{user ? 'YOU' : props.view.identity}</span>
-                </div>
-                <div className="message-body"><MarkdownMessage text={item.text} /></div>
-              </div>
-            </article>
-          )
-        })}
-        {props.view.approvals.filter((card) => isPendingApproval(card.status)).map((card) => (
-          <ApprovalCardView key={card.id} card={card} locked={locked} onApprove={props.onApprove} onReject={props.onReject} />
-        ))}
-        {props.activations.map((card) => (
-          <ActivationCardView
-            key={`act-${card.id}`}
-            card={card}
-            locked={locked}
-            armed={props.armedActivation === card.id}
-            abandonArmed={props.armedAbandonment === card.id}
-            onActivate={props.onActivate}
-            onAbandon={props.onAbandonActivation}
-            onDefer={props.onDefer}
-          />
-        ))}
-        {props.rollback ? (
-          <RollbackCardView
-            card={props.rollback}
-            locked={locked}
-            deferred={props.deferredRollback === true}
-            armed={props.armedRollback === true}
-            onAsk={props.onAskRollback ?? (() => {})}
-            onDefer={props.onDeferRollback ?? (() => {})}
-          />
-        ) : null}
-      </div>
-      <div>
-        {skillInvocationSurfaceOpen(props.view) && (props.view.skills ?? []).some((skill) => skill.userInvocable && skill.lifecycle === 'active') ? (
-          <div className="composer-chips" data-skill-chips="true">
-            {(props.view.skills ?? []).filter((skill) => skill.userInvocable && skill.lifecycle === 'active').map((skill) => (
-              <button
-                key={skill.id}
-                type="button"
-                className="button button--secondary"
-                data-skill-chip={skill.name}
-                disabled={locked}
-                onClick={() => props.onPickSkill?.(skill)}
-              >
-                {skill.name}
-              </button>
-            ))}
-          </div>
-        ) : null}
-        <form className="composer" aria-label="Send a message" onSubmit={(event: FormEvent) => { event.preventDefault(); props.onSend() }}>
-          <label className="sr-only" htmlFor="message">Message TARS-NG</label>
-          <textarea
-            id="message"
-            rows={2}
-            placeholder="Message TARS-NG…"
-            value={props.draft}
-            onChange={(event) => props.onDraft(event.target.value)}
-            onKeyDown={(event) => {
-              if (event.key !== 'Enter' || event.shiftKey || event.nativeEvent.isComposing) return
-              event.preventDefault()
-              if (!sendDisabled) props.onSend()
-            }}
-          />
-          <button
-            className="icon-button"
-            type="button"
-            aria-label="Attach file"
-            title="Attachments are not available in this soak"
-            disabled
-          >
-            <Glyph name="attach" />
-            <span className="composer-button-label">ATTACH</span>
-            <small>INOP</small>
-          </button>
-          <button
-            className="send-button"
-            type="submit"
-            aria-label="Send message"
-            disabled={sendDisabled}
-          >
-            <Glyph name="send" />
-            <span className="composer-button-label">{props.sending ? 'SENDING' : 'SEND'}</span>
-          </button>
-        </form>
-        {props.error ? <p className="error" role="alert">{props.error}</p> : null}
-      </div>
-    </main>
   )
 }
 
@@ -920,13 +592,6 @@ function OperationsPanel(props: {
   )
 }
 
-function formatDiff(added: readonly string[], removed: readonly string[], changed: readonly string[] = []): string {
-  const plus = added.map((item) => `+${item}`).join(' ')
-  const minus = removed.map((item) => `-${item}`).join(' ')
-  const tilde = changed.map((item) => `~${item}`).join(' ')
-  return [plus, minus, tilde].filter((item) => item !== '').join(' ') || 'none'
-}
-
 function WorkbenchPanel(props: { readonly candidates: readonly WorkbenchProjection[] }) {
   if (props.candidates.length === 0) return null
   return (
@@ -1189,26 +854,30 @@ export function MissionControlScreen(props: {
         ) : (
         <ConversationWorkspace
           view={view}
-          connected={props.connected}
-          sending={props.sending}
-          draft={props.draft}
-          error={props.error}
-          onDraft={props.onDraft}
-          onSend={props.onSend}
-          onApprove={props.onApprove}
-          onReject={props.onReject}
-          activations={(view.activations ?? []).filter((card) => !(props.deferredActivations ?? []).includes(card.id))}
-          armedActivation={props.armedActivation}
-          armedAbandonment={props.armedAbandonment}
-          onActivate={props.onActivate ?? (() => {})}
-          onAbandonActivation={props.onAbandonActivation ?? (() => {})}
-          onDefer={props.onDeferActivation ?? (() => {})}
-          onPickSkill={props.onPickSkill}
-          rollback={view.rollback}
-          deferredRollback={props.deferredRollback}
-          armedRollback={props.armedRollback}
-          onAskRollback={props.onAskRollback}
-          onDeferRollback={props.onDeferRollback}
+          state={{
+            connected: props.connected,
+            sending: props.sending,
+            draft: props.draft,
+            error: props.error,
+            activations: (view.activations ?? []).filter((card) => !(props.deferredActivations ?? []).includes(card.id)),
+            armedActivation: props.armedActivation,
+            armedAbandonment: props.armedAbandonment,
+            rollback: view.rollback,
+            deferredRollback: props.deferredRollback,
+            armedRollback: props.armedRollback,
+          }}
+          actions={{
+            draft: props.onDraft,
+            send: props.onSend,
+            approve: props.onApprove,
+            reject: props.onReject,
+            activate: props.onActivate ?? (() => {}),
+            abandonActivation: props.onAbandonActivation ?? (() => {}),
+            deferActivation: props.onDeferActivation ?? (() => {}),
+            pickSkill: props.onPickSkill,
+            askRollback: props.onAskRollback,
+            deferRollback: props.onDeferRollback,
+          }}
         />
         )}
         <OperationsPanel
