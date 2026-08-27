@@ -7,7 +7,7 @@
  */
 import { spawn, spawnSync } from 'node:child_process'
 import {
-  chmodSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync,
+  chmodSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSync,
 } from 'node:fs'
 import { createRequire } from 'node:module'
 import { tmpdir } from 'node:os'
@@ -16,6 +16,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url'
 import { createHash } from 'node:crypto'
 
 const REPO = join(dirname(fileURLToPath(import.meta.url)), '..')
+const OPERATOR_HOME = process.env.HOME
 const PORT = process.env.TARS_NG_UI_PORT || '8803'
 const evidence = { steps: {}, errors: [] }
 const PROFILE_IDENTITY = 'v1:f151980e5483a185518db82be340a1d4b2ae06441fe3c73f2c8f3236761e5b81'
@@ -64,12 +65,26 @@ function scrubInheritedCredentials() {
 
 scrubInheritedCredentials()
 
+function platformEnv() {
+  const out = {}
+  for (const name of ['PATH', 'TMPDIR', 'TMP', 'TEMP', 'LANG', 'LC_ALL', 'LC_CTYPE', 'LC_MESSAGES', 'TZ']) {
+    if (process.env[name]) out[name] = process.env[name]
+  }
+  return out
+}
+
+let isolatedChildEnv = () => ({ ...platformEnv() })
+
 function sh(cmd, args, opts = {}) {
-  const r = spawnSync(cmd, args, { encoding: 'utf8', ...opts })
+  const r = spawnSync(cmd, args, {
+    encoding: 'utf8',
+    ...opts,
+    env: { ...isolatedChildEnv(), ...(opts.env ?? {}) },
+  })
   if (r.status !== 0 && opts.allowFail !== true) {
-    const err = `${cmd} ${args.join(' ')}\n${r.stderr || r.stdout}`
+    const err = `${cmd} ${args.join(' ')} (status=${r.status})\n${r.stderr || r.stdout}`
     evidence.errors.push(err.slice(0, 2000))
-    throw new Error(err.slice(0, 500))
+    throw new Error(err.slice(0, 800))
   }
   return r
 }
@@ -94,21 +109,57 @@ function assertForbiddenEnvAbsent(where, bag) {
     }
     expect(value === undefined || value === '' || (name === 'DEEPSEEK_API_KEY' && value === OFFLINE_KEY), `${where} must not inherit ${name}`)
   }
+  expect(bag.HOME === undefined || bag.HOME === userHome, `${where} HOME must be the isolated user Home`)
+  expect(bag.HOME !== OPERATOR_HOME, `${where} HOME must not be the operator login Home`)
+}
+
+function workspaceIdentityOf(dir) {
+  return createHash('sha256').update(realpathSync(dir)).digest('hex').slice(0, 16)
+}
+
+function assertCatalogMembers(view, topicA, topicB, when) {
+  const active = (view.sessions?.sessions ?? []).filter((s) => s.archived !== true)
+  const ids = new Set(active.map((s) => s.id))
+  expect(ids.has('main'), `${when}: catalog must include main`)
+  expect(ids.has(topicA.id), `${when}: catalog must include Topic-A`)
+  expect(ids.has(topicB.id), `${when}: catalog must include Topic-B`)
+  expect(active.length === 3, `${when}: catalog must have exactly three active sessions`)
+  expect(active.find((s) => s.id === topicA.id)?.title === 'Topic-A', `${when}: Topic-A title must match`)
+  expect(active.find((s) => s.id === topicB.id)?.title === 'Topic-B', `${when}: Topic-B title must match`)
+}
+
+function normalizeSessionEvents(events) {
+  return JSON.stringify((events ?? []).map((event) => ({ type: event.type, data: event.data })))
+}
+
+function equalTails(left, right) {
+  return JSON.stringify(left) === JSON.stringify(right)
 }
 
 function conversationHas(view, text) {
   return JSON.stringify(view?.conversation ?? []).includes(text)
 }
 
-function assertBoundedPayload(label, value) {
+let v2InstructionBody = ''
+
+function assertBoundedPayload(label, value, { allowIsolatedHome = false } = {}) {
   const text = typeof value === 'string' ? value : JSON.stringify(value)
   expect(!text.includes(OFFLINE_KEY), `${label} must not print the placeholder key`)
   expect(!/sk-[A-Za-z0-9]{8,}/.test(text), `${label} must not include secret prefixes`)
   expect(!/ya29\./.test(text), `${label} must not include OAuth token prefixes`)
   expect(!/chain-of-thought|hidden.?reason/i.test(text), `${label} must not include chain-of-thought`)
-  expect(!/\/dsh_assistant\/src\//.test(text), `${label} must not dump repo src/ paths`)
-  expect(!/\/Users\//.test(text), `${label} must not dump operator host paths`)
-  expect(!/v2-marker/.test(text), `${label} must not include Skill instruction body`)
+  expect(!text.includes(join(REPO, 'src')), `${label} must not dump repo src/ paths`)
+  expect(!text.includes(REPO), `${label} must not dump the repository path`)
+  expect(!text.includes(OPERATOR_HOME), `${label} must not dump the operator Home`)
+  if (!allowIsolatedHome) {
+    expect(!text.includes(home), `${label} must not dump the isolated Home path`)
+    expect(!text.includes(workspace), `${label} must not dump the isolated Workspace path`)
+    expect(!text.includes(userHome), `${label} must not dump the isolated user Home path`)
+  }
+  if (v2InstructionBody) {
+    expect(!text.includes(v2InstructionBody), `${label} must not include the v1.0.1 Skill instruction body`)
+    expect(!text.includes('v2-marker'), `${label} must not include the v1.0.1 Skill instruction marker`)
+  }
 }
 
 async function loadProduct(pkgRoot) {
@@ -142,6 +193,35 @@ async function writeSessionMarkerThroughProduct(pkgRoot, product, sessionId) {
     await control.ctx.sessions.flush(handle.agent.session)
     await handle.dispose()
     return context
+  } finally {
+    await control.ctx.fiber.dispose()
+  }
+}
+
+async function readSessionTails(pkgRoot, product, sessionIds) {
+  const { ensureProductHome } = await import(pathToFileURL(join(pkgRoot, 'dist/product/home.js')).href)
+  const { resolveRuntimeContext } = await import(pathToFileURL(join(pkgRoot, 'dist/product/runtime-context.js')).href)
+  const layout = ensureProductHome(home)
+  const context = resolveRuntimeContext(layout, {
+    workspace,
+    sessionRoot,
+    sessionId: sessionIds[0],
+  }, undefined, { allowFixtures: false })
+  const control = await product.bootAssistantControl({
+    home,
+    sessionRoot: context.sessionPersistenceDir,
+    sessionId: sessionIds[0],
+    workspace: context.workspace.value,
+    allowFixtures: false,
+  })
+  try {
+    const tails = {}
+    for (const sessionId of sessionIds) {
+      const handle = await product.createAssistantAgent(control.ctx, sessionId, undefined, context.workspace.value)
+      tails[sessionId] = normalizeSessionEvents(handle.agent.session.events)
+      await handle.dispose()
+    }
+    return tails
   } finally {
     await control.ctx.fiber.dispose()
   }
@@ -190,10 +270,49 @@ mkdirSync(packDir)
 mkdirSync(join(home, 'config'), { recursive: true })
 
 const userHome = join(root, 'user')
+const isolatedNpmrc = join(userHome, '.npmrc')
+const isolatedGlobalNpmrc = join(userHome, '.npmrc-global')
+const isolatedNpmCache = join(userHome, '.cache', 'npm')
 mkdirSync(join(userHome, '.config', 'tars-ng'), { recursive: true })
 mkdirSync(join(userHome, '.local', 'share'), { recursive: true })
+mkdirSync(isolatedNpmCache, { recursive: true })
+writeFileSync(isolatedNpmrc, '')
+writeFileSync(isolatedGlobalNpmrc, '')
 
-assertForbiddenEnvAbsent('runner process.env before build', process.env)
+isolatedChildEnv = () => ({
+  ...platformEnv(),
+  HOME: userHome,
+  XDG_CONFIG_HOME: join(userHome, '.config'),
+  XDG_CACHE_HOME: join(userHome, '.cache'),
+  XDG_DATA_HOME: join(userHome, '.local', 'share'),
+  npm_config_userconfig: isolatedNpmrc,
+  npm_config_globalconfig: isolatedGlobalNpmrc,
+  npm_config_cache: isolatedNpmCache,
+  npm_config_fund: 'false',
+  npm_config_audit: 'false',
+  TARS_NG_HOME: home,
+  DSH_ASSISTANT_HOME: home,
+  TARS_NG_UI_HOST: '127.0.0.1',
+  TARS_NG_UI_PORT: PORT,
+})
+
+function applyProcessAllowlist() {
+  const allowed = isolatedChildEnv()
+  for (const name of Object.keys(process.env)) {
+    if (!(name in allowed)) delete process.env[name]
+  }
+  Object.assign(process.env, allowed)
+}
+
+applyProcessAllowlist()
+assertForbiddenEnvAbsent('runner process.env before first subprocess', process.env)
+
+const npmUserconfig = sh('npm', ['config', 'get', 'userconfig']).stdout.trim().split('\n').at(-1).trim()
+const npmCache = sh('npm', ['config', 'get', 'cache']).stdout.trim().split('\n').at(-1).trim()
+expect(npmUserconfig === isolatedNpmrc || (existsSync(npmUserconfig) && realpathSync(npmUserconfig) === realpathSync(isolatedNpmrc)), 'npm userconfig must be the isolated empty npmrc')
+expect(npmCache === isolatedNpmCache || npmCache.startsWith(userHome), 'npm cache must be inside the isolated user Home')
+expect(!String(npmUserconfig).startsWith(`${OPERATOR_HOME}/`), 'npm userconfig must not resolve under the operator Home')
+expect(readFileSync(isolatedNpmrc, 'utf8').trim() === '', 'isolated npmrc must not contain operator registry auth')
 
 sh('npm', ['run', 'build'], { cwd: REPO })
 const dry = sh('npm', ['pack', '--dry-run', '--json'], { cwd: REPO })
@@ -216,30 +335,15 @@ if (packedFileCount === undefined) {
 }
 
 sh('npm', ['init', '-y'], { cwd: prefix })
-sh('npm', ['install', tarball, '--omit=dev'], { cwd: prefix, timeout: 180_000 })
+sh('npm', ['install', tarball, '--omit=dev'], { cwd: prefix, timeout: 360_000 })
 const pkgRoot = join(prefix, 'node_modules', 'dsh-assistant')
 const bin = join(prefix, 'node_modules', '.bin', 'tars-ng')
 const installedVer = JSON.parse(readFileSync(join(pkgRoot, 'package.json'), 'utf8')).version
 
-process.env.HOME = userHome
-process.env.XDG_CONFIG_HOME = join(userHome, '.config')
-process.env.XDG_DATA_HOME = join(userHome, '.local', 'share')
-process.env.TARS_NG_HOME = home
-process.env.DSH_ASSISTANT_HOME = home
-process.env.TARS_NG_UI_HOST = '127.0.0.1'
-process.env.TARS_NG_UI_PORT = PORT
+applyProcessAllowlist()
 assertForbiddenEnvAbsent('runner process.env before product load', process.env)
 
-const env = {
-  ...process.env,
-  HOME: userHome,
-  XDG_CONFIG_HOME: join(userHome, '.config'),
-  XDG_DATA_HOME: join(userHome, '.local', 'share'),
-  TARS_NG_HOME: home,
-  DSH_ASSISTANT_HOME: home,
-  TARS_NG_UI_HOST: '127.0.0.1',
-  TARS_NG_UI_PORT: PORT,
-}
+const env = isolatedChildEnv()
 assertForbiddenEnvAbsent('child env', env)
 
 try {
@@ -292,6 +396,7 @@ try {
   expect(rc?.profile === 'assistant', 'bound Profile must be assistant')
   expect(rc?.profileIdentity === PROFILE_IDENTITY, 'bound Profile identity must match the shipped assistant composition')
   expect(rc?.sources?.workspace === 'cli', 'Workspace source must be cli')
+  expect(rc?.workspaceIdentity === workspaceIdentityOf(workspace), 'Workspace identity must match the explicit Workspace bind')
   expect(rc?.sessionPersistence === 'persistent', 'Session persistence must be persistent')
   expect(typeof rc?.workspaceIdentity === 'string' && rc.workspaceIdentity.length > 0, 'Workspace identity must be present')
   const rev = view1.view.sessions?.revision ?? 0
@@ -324,6 +429,7 @@ try {
     currentAfterCreateB: created2Body.view.runtimeContext?.sessionId,
   }
   expect(evidence.steps[2].currentAfterCreateB === topicB.id, 'creating Topic-B must select Topic-B')
+  assertCatalogMembers(created2Body.view, topicA, topicB, 'after creating Topic-A and Topic-B')
   evidence.steps[3] = {
     identity: created2Body.view.identity,
     runtimeContextKeys: Object.keys(created2Body.view.runtimeContext ?? {}),
@@ -372,7 +478,7 @@ try {
   evidence.steps[2].markerOnAAfterSwitch = conversationHas(switchedBody.view, SESSION_MARKER)
   expect(evidence.steps[2].afterSwitch === topicA.id, 'switch must select Topic-A')
   expect(evidence.steps[2].markerOnAAfterSwitch === false, 'Topic-A must not contain the Topic-B marker after switch')
-  expect(evidence.steps[2].activeAfterSwitch === 3, 'catalog must have three active sessions after create/switch')
+  assertCatalogMembers(switchedBody.view, topicA, topicB, 'after switch to Topic-A')
 } finally {
   stop(bin, env, home)
   runtime.child.kill('SIGTERM')
@@ -387,7 +493,7 @@ try {
   evidence.steps[2].sessionBBleedIntoCurrent = conversationHas(after.view, SESSION_MARKER)
   expect(after.view.runtimeContext?.sessionId === topicA.id, 'restart must keep Topic-A current')
   expect(evidence.steps[2].sessionBBleedIntoCurrent === false, 'Topic-B marker must not bleed into Topic-A after restart')
-  expect(evidence.steps[2].activeAfterRestart === 3, 'catalog must keep three active sessions after restart')
+  assertCatalogMembers(after.view, topicA, topicB, 'after restart')
 } finally {
   stop(bin, env, home)
   runtime.child.kill('SIGTERM')
@@ -422,23 +528,26 @@ evidence.steps[4] = { import: JSON.parse(imported.stdout) }
   }
 }
 
+const sessionIds = ['main', topicA.id, topicB.id]
+const tailsBeforeApprove = await readSessionTails(pkgRoot, product, sessionIds)
 const approved = sh(bin, ['self-extension', 'approve', evidence.steps[4].import.candidateId, evidence.steps[4].fingerprint], { env })
 evidence.steps[4].approve = JSON.parse(approved.stdout)
 evidence.steps[4].approveIsNotActivate = evidence.steps[4].approve.decision === 'approved-for-exact-diff'
 expect(evidence.steps[4].approveIsNotActivate, 'approve must record approved-for-exact-diff and not activate')
+const tailsAfterApprove = await readSessionTails(pkgRoot, product, sessionIds)
+evidence.steps[11] = {
+  beforeApprove: Object.keys(tailsBeforeApprove),
+  tailsUnchangedAfterApprove: equalTails(tailsBeforeApprove, tailsAfterApprove),
+}
+expect(evidence.steps[11].tailsUnchangedAfterApprove === true, 'approval must not append main/Topic-A/Topic-B conversation tails')
 
 runtime = await waitUrl(bin, env, home)
 try {
   const v = await fetch(`${runtime.url}/api/view`).then((r) => r.json())
   const ext = (v.view.extensions ?? []).find((e) => e.candidateId === evidence.steps[4].import.candidateId)
   evidence.steps[4].wuiAfterApprove = { lifecycle: ext?.lifecycle, mounted: ext?.mounted, approved: ext?.approval }
-  evidence.steps[11] = {
-    conversationHasApproveText: conversationHas(v.view, 'approved-for-exact-diff'),
-    conversationHasActivateText: conversationHas(v.view, 'self-extension activate') || conversationHas(v.view, 'state=active'),
-  }
   expect(ext?.lifecycle === 'APPROVED_NOT_ACTIVE', 'WUI after approve must be APPROVED_NOT_ACTIVE')
   expect(ext?.mounted === false, 'WUI after approve must have mounted=false')
-  expect(evidence.steps[11].conversationHasApproveText === false, 'approve text must not persist in chat tails')
 } finally {
   stop(bin, env, home)
   runtime.child.kill('SIGTERM')
@@ -447,6 +556,9 @@ try {
 const activated = sh(bin, ['self-extension', 'activate', evidence.steps[4].import.candidateId], { env })
 evidence.steps[4].activate = { state: JSON.parse(activated.stdout).state }
 expect(evidence.steps[4].activate.state === 'active', 'plugin activate must reach state=active')
+const tailsAfterActivate = await readSessionTails(pkgRoot, product, sessionIds)
+evidence.steps[11].tailsUnchangedAfterActivate = equalTails(tailsAfterApprove, tailsAfterActivate)
+expect(evidence.steps[11].tailsUnchangedAfterActivate === true, 'activation must not append main/Topic-A/Topic-B conversation tails')
 
 {
   const { bootAssistantControl, gatherWorkspaceSnapshot, projectMissionControl } = product
@@ -516,13 +628,6 @@ try {
   expect(evidence.steps[5].wuiDisabled.lifecycle === 'DISABLED_REACTIVATABLE', 'packed WUI after disable must be DISABLED_REACTIVATABLE')
   expect(evidence.steps[5].wuiDisabled.mounted === false, 'packed WUI after disable must have mounted=false')
   expect(evidence.steps[5].wuiDisabled.pluginsActive === false, 'packed WUI after disable must drop the active plugin card')
-  evidence.steps[11].conversationHasActivateText = conversationHas(v.view, 'self-extension activate')
-    || conversationHas(v.view, 'approved-for-exact-diff')
-    || conversationHas(v.view, '"state":"active"')
-  evidence.steps[11].acknowledgementSeparate = evidence.steps[11].conversationHasApproveText === false
-    && evidence.steps[11].conversationHasActivateText === false
-  expect(evidence.steps[11].conversationHasActivateText === false, 'activation results must not persist in chat tails')
-  expect(evidence.steps[11].acknowledgementSeparate === true, 'approval and activation acknowledgements must stay out of conversation')
 } finally {
   stop(bin, env, home)
   runtime.child.kill('SIGTERM')
@@ -603,10 +708,6 @@ try {
   evidence.steps[6].wui = { lifecycle: skill?.lifecycle, userInvocable: skill?.userInvocable, catalog: v.view.skillCatalog }
   expect(skill?.lifecycle === 'active', 'WUI Skill v1 must be active')
   expect(v.view.skillCatalog?.state === 'ok', 'Skill catalog must be ok after activate')
-  assertBoundedPayload('WUI view after Skill v1', v)
-  evidence.steps[12] = {
-    wuiBounded: true,
-  }
 } finally {
   stop(bin, env, home)
   runtime.child.kill('SIGTERM')
@@ -619,6 +720,7 @@ writeFileSync(join(skillV2, 'SKILL.md'), readFileSync(join(skillV2, 'SKILL.md'),
   'Use existing `recall_memory`',
   'v2-marker. Use existing `recall_memory`',
 ))
+v2InstructionBody = readFileSync(join(skillV2, 'SKILL.md'), 'utf8')
 const skill2imp = sh(bin, ['skill', 'import-local', skillV2], { env })
 evidence.steps[7] = { import: JSON.parse(skill2imp.stdout) }
 {
@@ -648,9 +750,32 @@ try {
   const active = (v.view.skills ?? []).filter((s) => s.lifecycle === 'active')
   evidence.steps[7].afterRestartActive = active.map((s) => ({ id: s.id, version: s.version, digest: s.digest }))
   expect(evidence.steps[7].afterRestartActive.some((s) => s.id === 'weekly-review@1.0.1' && s.digest === evidence.steps[7].digest), 'restart must keep weekly-review@1.0.1')
+  assertBoundedPayload('WUI after Skill v1.0.1 restart', v)
+  evidence.steps[12] = { afterV2Restart: true }
 } finally {
   stop(bin, env, home)
   runtime.child.kill('SIGTERM')
+}
+
+const reactivated = sh(bin, ['self-extension', 'activate', evidence.steps[4].import.candidateId], { env })
+evidence.steps[8] = { reactivated: JSON.parse(reactivated.stdout).state }
+expect(evidence.steps[8].reactivated === 'active', 'plugin must reactivate before Safe Mode')
+{
+  const { bootAssistantControl, gatherWorkspaceSnapshot, projectMissionControl } = product
+  const control = await bootAssistantControl({ home })
+  try {
+    const view = projectMissionControl(gatherWorkspaceSnapshot({ ctx: control.ctx, sessionId: 'soak' }))
+    evidence.steps[8].pluginActiveBeforeSafe = {
+      registry: control.ctx.capabilityRegistry.get('third-party/text-reverse', '1.0.0')?.status,
+      toolPresent: Boolean(control.ctx.tools.get('text_reverse')),
+      pluginsActive: (view.plugins ?? []).some((p) => p.owner === 'third-party/text-reverse'),
+    }
+    expect(evidence.steps[8].pluginActiveBeforeSafe.registry === 'active', 'plugin registry must be active before Safe Mode')
+    expect(evidence.steps[8].pluginActiveBeforeSafe.toolPresent === true, 'text_reverse must be present before Safe Mode')
+    expect(evidence.steps[8].pluginActiveBeforeSafe.pluginsActive === true, 'plugin card must be active before Safe Mode')
+  } finally {
+    await control.ctx.fiber.dispose()
+  }
 }
 
 sh(bin, ['self-extension', 'safe-mode', 'enter'], { env })
@@ -675,12 +800,18 @@ try {
   })
   const invokeBody = await invoke.json()
   evidence.steps[8] = {
+    ...evidence.steps[8],
     wuiSafe: v.view.systemState ?? v.view.runtime?.safeMode ?? v.view.safeMode,
     skillCatalog: v.view.skillCatalog ?? (v.view.skillsHealth && v.view.skillsHealth.catalog),
     invocable: (v.view.skills ?? []).filter((s) => s.userInvocable).map((s) => s.id),
     doctorSafe: redact(doctor.stdout).split('\n').filter((l) => /safe|skill|catalog/i.test(l)).slice(0, 12),
     recoveryPresent: Boolean(v.view.recovery?.actions?.length || v.view.rollback),
     invokeDenied: { status: invoke.status, error: invokeBody.error },
+    pluginDuringSafe: {
+      lifecycle: (v.view.extensions ?? []).find((e) => e.candidateId === evidence.steps[4].import.candidateId)?.lifecycle,
+      mounted: (v.view.extensions ?? []).find((e) => e.candidateId === evidence.steps[4].import.candidateId)?.mounted,
+      pluginsActive: (v.view.plugins ?? []).some((p) => p.owner === 'third-party/text-reverse'),
+    },
   }
   expect(evidence.steps[8].wuiSafe === 'SAFE_MODE', 'WUI must report SAFE_MODE')
   expect(evidence.steps[8].skillCatalog?.state === 'withheld', 'Safe Mode catalog must be withheld')
@@ -688,6 +819,9 @@ try {
   expect(evidence.steps[8].doctorSafe.some((l) => /catalog=withheld/.test(l)), 'doctor must report catalog=withheld')
   expect(evidence.steps[8].recoveryPresent === true, 'Safe Mode must keep Recovery/diagnostics visible')
   expect(invoke.status === 409 && invokeBody.error === 'catalog-withheld', 'active Skill must not be invokable while catalog is withheld')
+  expect(evidence.steps[8].pluginDuringSafe.pluginsActive === false, 'Safe Mode must drop the active plugin card')
+  expect(evidence.steps[8].pluginDuringSafe.lifecycle !== 'READY' && evidence.steps[8].pluginDuringSafe.lifecycle !== 'ACTIVE', 'Safe Mode must not present the plugin as active')
+  assertBoundedPayload('WUI during Safe Mode', v)
 } finally {
   stop(bin, env, home)
   runtime.child.kill('SIGTERM')
@@ -698,8 +832,10 @@ try {
   try {
     const listed = await safe.ctx.skills.list({ cwd: home })
     evidence.steps[8].skillToolPresent = Boolean(safe.ctx.tools.get('skill'))
+    evidence.steps[8].pluginToolDuringSafe = Boolean(safe.ctx.tools.get('text_reverse'))
     evidence.steps[8].dshListsWeeklyReview = listed.some((item) => item.name === 'weekly-review')
     expect(evidence.steps[8].skillToolPresent === false, 'Safe Mode must withhold the skill tool')
+    expect(evidence.steps[8].pluginToolDuringSafe === false, 'Safe Mode must withhold the generated plugin tool')
     expect(evidence.steps[8].dshListsWeeklyReview === false, 'Safe Mode DSH catalog must not list weekly-review')
   } finally {
     await safe.ctx.fiber.dispose()
@@ -712,11 +848,44 @@ const doctorAfterExit = sh(bin, ['doctor', '--home', home], { env })
 evidence.steps[9].doctor = redact(doctorAfterExit.stdout).split('\n').filter((l) => /safe|skill|catalog/i.test(l)).slice(0, 12)
 expect(evidence.steps[9].exit.safeMode === false, 'safe-mode exit must clear Safe Mode')
 expect(evidence.steps[9].doctor.some((l) => /catalog=ok(?:\s+candidates=\d+)?\s+active=weekly-review@1\.0\.1/.test(l)), 'after recover doctor must show catalog=ok and active=weekly-review@1.0.1')
+{
+  const { bootAssistantControl, gatherWorkspaceSnapshot, projectMissionControl } = product
+  const control = await bootAssistantControl({ home })
+  try {
+    const view = projectMissionControl(gatherWorkspaceSnapshot({ ctx: control.ctx, sessionId: 'soak' }))
+    const rec = control.ctx.candidateWorkspace.get(evidence.steps[4].import.candidateId)
+    const approval = control.ctx.extensionGovernance.inspectApproval(rec.id)
+    const row = (view.extensions ?? []).find((e) => e.candidateId === rec.id)
+    evidence.steps[9].recoveredPlugin = {
+      registry: control.ctx.capabilityRegistry.get('third-party/text-reverse', '1.0.0')?.status,
+      toolPresent: Boolean(control.ctx.tools.get('text_reverse')),
+      pluginsActive: (view.plugins ?? []).some((p) => p.owner === 'third-party/text-reverse'),
+      lifecycle: row?.lifecycle,
+      mounted: row?.mounted,
+    }
+    evidence.steps[10] = {
+      backedUpPlugin: {
+        id: rec.id,
+        digest: rec.digest,
+        lifecycle: row?.lifecycle,
+        mounted: row?.mounted,
+        registry: control.ctx.capabilityRegistry.get('third-party/text-reverse', '1.0.0')?.status,
+        approval: approval?.decision,
+        fingerprint: approval?.fingerprint,
+      },
+    }
+    expect(evidence.steps[9].recoveredPlugin.registry === 'disabled', 'after Safe Mode exit the plugin must return to last-known-good disabled')
+    expect(evidence.steps[9].recoveredPlugin.toolPresent === false, 'after Safe Mode exit text_reverse must stay absent with last-known-good')
+    expect(evidence.steps[9].recoveredPlugin.pluginsActive === false, 'after Safe Mode exit the plugin card must not be active')
+  } finally {
+    await control.ctx.fiber.dispose()
+  }
+}
 
 const backup = join(root, 'backup')
 mkdirSync(backup)
 sh(bin, ['self-extension', 'backup', backup], { env })
-evidence.steps[10] = { backupOk: existsSync(join(backup, 'authority.json')) || existsSync(join(backup, 'authority')) }
+evidence.steps[10].backupOk = existsSync(join(backup, 'authority.json')) || existsSync(join(backup, 'authority'))
 expect(evidence.steps[10].backupOk === true, 'self-extension backup must write Recovery Root artifacts')
 
 {
@@ -777,13 +946,37 @@ mkdirSync(destGood)
   try {
     const weekly = restored.ctx.skillLifecycle.list().find((s) => s.id === 'weekly-review@1.0.1')
     const plugin = restored.ctx.candidateWorkspace.list().find((c) => c.id === 'third-party--text-reverse@1.0.0')
+    const { gatherWorkspaceSnapshot, projectMissionControl } = product
+    const view = projectMissionControl(gatherWorkspaceSnapshot({ ctx: restored.ctx, sessionId: 'soak' }))
+    const row = (view.extensions ?? []).find((e) => e.candidateId === plugin?.id)
+    const approval = restored.ctx.extensionGovernance.inspectApproval(plugin.id)
     evidence.steps[10].restoredSkill = weekly
       ? { id: weekly.id, version: weekly.version, digest: weekly.digest, lifecycle: weekly.lifecycle }
       : null
-    evidence.steps[10].restoredPlugin = plugin ? { id: plugin.id, lifecycle: plugin.lifecycle } : null
+    evidence.steps[10].restoredPlugin = {
+      id: plugin?.id,
+      digest: plugin?.digest,
+      lifecycle: row?.lifecycle,
+      mounted: row?.mounted,
+      registry: restored.ctx.capabilityRegistry.get('third-party/text-reverse', '1.0.0')?.status,
+      approval: approval?.decision,
+      fingerprint: approval?.fingerprint,
+    }
+    const backed = evidence.steps[10].backedUpPlugin
     expect(weekly?.digest === evidence.steps[7].digest, 'restored Home must keep weekly-review@1.0.1 digest')
     expect(weekly?.lifecycle === 'active', 'restored Skill must remain active')
     expect(plugin?.id === 'third-party--text-reverse@1.0.0', 'restored Home must keep the plugin candidate')
+    expect(evidence.steps[10].restoredPlugin.digest === backed.digest, 'restored plugin digest must match the backup')
+    expect(evidence.steps[10].restoredPlugin.registry === backed.registry, 'restored plugin registry must match the backup')
+    expect(evidence.steps[10].restoredPlugin.approval === backed.approval, 'restored plugin approval must match the backup')
+    expect(evidence.steps[10].restoredPlugin.fingerprint === backed.fingerprint, 'restored plugin fingerprint must match the backup')
+    const disabledLife = (lc) => lc === 'DISABLED_REACTIVATABLE' || lc === 'DISABLED_BLOCKED'
+    expect(
+      backed.registry === 'active'
+        ? evidence.steps[10].restoredPlugin.lifecycle === backed.lifecycle
+        : disabledLife(backed.lifecycle) && disabledLife(evidence.steps[10].restoredPlugin.lifecycle),
+      'restored plugin disabled/active lifecycle must match the backup',
+    )
   } finally {
     await restored.ctx.fiber.dispose()
   }
@@ -791,8 +984,9 @@ mkdirSync(destGood)
 
 const help = sh(bin, ['--help'], { env })
 const status = sh(bin, ['status', '--home', home], { env })
-assertBoundedPayload('doctor after recover', doctorAfterExit.stdout)
-assertBoundedPayload('status', status.stdout)
+assertBoundedPayload('doctor after recover', doctorAfterExit.stdout, { allowIsolatedHome: true })
+assertBoundedPayload('status', status.stdout, { allowIsolatedHome: true })
+evidence.steps[12].finalDoctorStatus = true
 evidence.identity = {
   tarball: tarballName.split('/').at(-1),
   sha256,
