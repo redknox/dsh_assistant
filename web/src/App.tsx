@@ -1,6 +1,4 @@
 import React, { useEffect, useMemo, useState, type FormEvent } from 'react'
-import ReactMarkdown from 'react-markdown'
-import remarkGfm from 'remark-gfm'
 import type { ActivationCard, ApprovalCard, MissionControlView, RollbackCard, SkillProjection, UserCapabilityStatus, UserPluginView, WorkObjectKind, WorkbenchProjection } from '../../src/domain/workspace/types'
 import {
   abandonCandidateActivation,
@@ -19,25 +17,9 @@ import {
   type UiEnvelope,
 } from './api'
 import { Glyph } from './icons'
-
-function MarkdownMessage(props: { readonly text: string }) {
-  return (
-    <ReactMarkdown
-      remarkPlugins={[remarkGfm]}
-      skipHtml
-      components={{
-        table({ node: _node, ...tableProps }) {
-          return <div className="markdown-table-scroll"><table {...tableProps} /></div>
-        },
-        a({ node: _node, ...linkProps }) {
-          return <a {...linkProps} target="_blank" rel="noreferrer noopener" />
-        },
-      }}
-    >
-      {props.text}
-    </ReactMarkdown>
-  )
-}
+import { MarkdownMessage } from './MarkdownMessage'
+import { MemoryWorkspace } from './MemoryWorkspace'
+import { WorkspaceNavigation, type WorkspacePane } from './WorkspaceNavigation'
 
 function isPendingApproval(status: string): boolean {
   return status === 'pending' || status === 'approval-requested' || status === 'unreviewed'
@@ -78,7 +60,6 @@ function activityModifier(kind: string): string {
   return ''
 }
 
-type WorkspacePane = 'today' | 'extensions' | 'memory'
 type CompactSurface = 'conversation' | 'navigation' | 'operations'
 
 function paneFromHash(): WorkspacePane {
@@ -128,94 +109,6 @@ function SystemHeader(props: {
         </p>
       ) : null}
     </header>
-  )
-}
-
-function WorkspaceNavigation(props: {
-  readonly view: MissionControlView
-  readonly pane: WorkspacePane
-  readonly onNavigate: (pane: WorkspacePane) => void
-  readonly onOpenOperations: () => void
-  readonly onCreateConversation?: () => void
-  readonly onSwitchConversation?: (id: string) => void
-}) {
-  const recentSessions = (props.view.sessions?.sessions ?? [])
-    .filter((item) => item.lifecycle === 'active')
-    .slice()
-    .sort((left, right) => right.lastActivityAt.localeCompare(left.lastActivityAt))
-    .slice(0, 4)
-  return (
-    <aside className="nav-panel instrument-panel" aria-label="Workspace navigation">
-      <div className="panel-code">
-        <span>NAV 01</span>
-        <span>LOCAL / PRIMARY</span>
-      </div>
-      <div className="nav-group-label">WORKSPACE</div>
-      <nav className="primary-nav" aria-label="Workspace">
-        <button
-          type="button"
-          className={`nav-item${props.pane === 'today' ? ' nav-item--active' : ''}`}
-          data-nav="today"
-          aria-current={props.pane === 'today' ? 'page' : undefined}
-          onClick={() => props.onNavigate('today')}
-        >
-          <span className="control-lamp" aria-hidden="true" /><Glyph name="today" /><span>TODAY</span>
-        </button>
-        <span className="nav-item nav-item--idle" aria-disabled="true" title="Calendar management is not available in this soak">
-          <span className="control-lamp" aria-hidden="true" /><Glyph name="calendar" /><span>CALENDAR</span>
-        </span>
-        <button
-          type="button"
-          className={`nav-item${props.pane === 'memory' ? ' nav-item--active' : ''}`}
-          data-nav="memory"
-          aria-current={props.pane === 'memory' ? 'page' : undefined}
-          onClick={() => props.onNavigate('memory')}
-        >
-          <span className="control-lamp" aria-hidden="true" /><Glyph name="memory" /><span>MEMORY</span>
-        </button>
-      </nav>
-      <section className="nav-conversations" aria-labelledby="recent-conversations-title">
-        <div className="nav-section-heading">
-          <span id="recent-conversations-title">RECENT CONVERSATIONS</span>
-          <button type="button" aria-label="New conversation" title="New conversation" onClick={() => props.onCreateConversation?.()}>+</button>
-        </div>
-        <div className="conversation-shortcuts">
-          {recentSessions.length === 0 ? <p className="nav-empty">No conversations yet</p> : recentSessions.map((item) => (
-            <button
-              key={item.id}
-              type="button"
-              className={`conversation-shortcut${item.current ? ' conversation-shortcut--current' : ''}`}
-              data-session-id={item.id}
-              onClick={() => props.onSwitchConversation?.(item.id)}
-            >
-              <span className="control-lamp" aria-hidden="true" />
-              <span>{item.title}</span>
-              <small>{item.preview || 'No preview yet'}</small>
-            </button>
-          ))}
-        </div>
-        <button type="button" className="view-all-conversations" onClick={() => props.onNavigate('memory')}>View all in Memory <span aria-hidden="true">→</span></button>
-      </section>
-      <div className="nav-group-label nav-group-label--system">SYSTEM</div>
-      <nav className="secondary-nav" aria-label="System">
-        <button
-          type="button"
-          className={`nav-item${props.pane === 'extensions' ? ' nav-item--active' : ''}`}
-          data-nav="extensions"
-          aria-current={props.pane === 'extensions' ? 'page' : undefined}
-          onClick={() => props.onNavigate('extensions')}
-        >
-          <span className="control-lamp" aria-hidden="true" /><Glyph name="capabilities" /><span>EXTENSIONS</span>
-        </button>
-        <button type="button" className="nav-item" data-nav="capabilities" onClick={props.onOpenOperations}>
-          <span className="control-lamp" aria-hidden="true" /><Glyph name="capabilities" /><span>CAPABILITIES</span>
-        </button>
-      </nav>
-      <div className="panel-coordinates" aria-label="Local runtime marker">
-        <span>SYS 03</span>
-        <span>127.0.0.1</span>
-      </div>
-    </aside>
   )
 }
 
@@ -571,114 +464,6 @@ function ConversationWorkspace(props: {
           </button>
         </form>
         {props.error ? <p className="error" role="alert">{props.error}</p> : null}
-      </div>
-    </main>
-  )
-}
-
-function formatMemoryDate(value: string): string {
-  const date = new Date(value)
-  if (Number.isNaN(date.getTime())) return 'Unknown activity'
-  return new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric', year: 'numeric' }).format(date)
-}
-
-function MemoryWorkspace(props: {
-  readonly view: MissionControlView
-  readonly confirmingSession?: string
-  readonly onCreateConversation?: () => void
-  readonly onOpenConversation?: (id: string) => void
-  readonly onRenameConversation?: (id: string, title: string) => void
-  readonly onArchiveConversation?: (id: string) => void
-  readonly onRestoreConversation?: (id: string) => void
-  readonly onAskDeleteConversation?: (id: string) => void
-  readonly onConfirmDeleteConversation?: (id: string) => void
-}) {
-  const sessions = (props.view.sessions?.sessions ?? [])
-    .slice()
-    .sort((left, right) => right.lastActivityAt.localeCompare(left.lastActivityAt))
-  return (
-    <main className="conversation-panel memory-panel" id="memory" data-workspace-pane="memory">
-      <div className="memory-scroll">
-        <header className="workspace-heading">
-          <div>
-            <p className="workspace-kicker">PERSONAL CONTEXT</p>
-            <h1>Memory</h1>
-            <p>Conversation history, remembered facts, and local knowledge are related—but they are not the same thing.</p>
-          </div>
-          <dl className="memory-summary" aria-label="Memory summary">
-            <div><dt>Conversations</dt><dd>{sessions.length}</dd></div>
-            <div><dt>Remembered facts</dt><dd>{props.view.memory.length}</dd></div>
-            <div><dt>Knowledge sources</dt><dd>{props.view.knowledge.length}</dd></div>
-          </dl>
-        </header>
-
-        <section className="memory-section" aria-labelledby="memory-conversations-title">
-          <div className="memory-section-heading">
-            <div><p>SESSION HISTORY</p><h2 id="memory-conversations-title">Conversations</h2></div>
-            <button type="button" className="memory-primary-action" onClick={() => props.onCreateConversation?.()}>New conversation</button>
-          </div>
-          <div className="memory-card-grid" data-memory-cards="conversations">
-            {sessions.length === 0 ? <p className="memory-empty">No conversations yet.</p> : sessions.map((session) => (
-              <article key={session.id} className={`memory-card conversation-card${session.current ? ' conversation-card--current' : ''}`} data-session-id={session.id}>
-                <div className="memory-card-topline">
-                  <span className={`memory-badge${session.current ? ' memory-badge--current' : ''}`}>{session.current ? 'Current' : session.lifecycle}</span>
-                  <span>{formatMemoryDate(session.lastActivityAt)}</span>
-                </div>
-                <h3>{session.title}</h3>
-                <p>{session.preview || 'No conversation preview yet.'}</p>
-                <div className="memory-card-actions">
-                  {session.lifecycle === 'archived' ? (
-                    <button type="button" onClick={() => props.onRestoreConversation?.(session.id)}>Restore</button>
-                  ) : (
-                    <button type="button" className="memory-card-open" onClick={() => props.onOpenConversation?.(session.id)}>{session.current ? 'Continue' : 'Open'}</button>
-                  )}
-                  <button
-                    type="button"
-                    onClick={() => {
-                      const next = globalThis.prompt?.('Rename conversation', session.title)
-                      if (next && next.trim() !== '' && next !== session.title) props.onRenameConversation?.(session.id, next.trim())
-                    }}
-                  >
-                    Rename
-                  </button>
-                  {session.lifecycle === 'active' ? <button type="button" onClick={() => props.onArchiveConversation?.(session.id)}>Archive</button> : null}
-                  {props.confirmingSession === session.id ? (
-                    <button type="button" className="memory-card-danger" onClick={() => props.onConfirmDeleteConversation?.(session.id)}>Confirm delete</button>
-                  ) : (
-                    <button type="button" onClick={() => props.onAskDeleteConversation?.(session.id)}>Delete</button>
-                  )}
-                </div>
-              </article>
-            ))}
-          </div>
-        </section>
-
-        <section className="memory-section" aria-labelledby="remembered-facts-title">
-          <div className="memory-section-heading"><div><p>DURABLE MEMORY</p><h2 id="remembered-facts-title">Remembered facts</h2></div></div>
-          <div className="memory-card-grid" data-memory-cards="facts">
-            {props.view.memory.length === 0 ? <p className="memory-empty">Nothing has been committed to long-term memory yet.</p> : props.view.memory.map((item) => (
-              <article key={item.id} className="memory-card fact-card">
-                <div className="memory-card-topline"><span className="memory-badge">{item.topicKey}</span><span>{item.status}</span></div>
-                <p>{item.statement}</p>
-                <small>Origin · {item.origin}</small>
-              </article>
-            ))}
-          </div>
-        </section>
-
-        <section className="memory-section" aria-labelledby="knowledge-sources-title">
-          <div className="memory-section-heading"><div><p>LOCAL REFERENCES</p><h2 id="knowledge-sources-title">Knowledge sources</h2></div></div>
-          <div className="memory-card-grid" data-memory-cards="knowledge">
-            {props.view.knowledge.length === 0 ? <p className="memory-empty">No local knowledge sources are indexed.</p> : props.view.knowledge.map((item) => (
-              <article key={item.sourceUri} className="memory-card knowledge-card">
-                <div className="memory-card-topline"><span className="memory-badge">Source</span></div>
-                <h3>{item.title ?? 'Untitled source'}</h3>
-                <p>{item.excerpt ?? item.sourceUri}</p>
-                <small>{item.sourceUri}</small>
-              </article>
-            ))}
-          </div>
-        </section>
       </div>
     </main>
   )
@@ -1356,10 +1141,12 @@ export function MissionControlScreen(props: {
         <WorkspaceNavigation
           view={view}
           pane={pane}
-          onNavigate={navigate}
-          onOpenOperations={openOperations}
-          onCreateConversation={props.onCreateConversation}
-          onSwitchConversation={props.onSwitchConversation}
+          actions={{
+            navigate,
+            openOperations,
+            createConversation: props.onCreateConversation,
+            switchConversation: props.onSwitchConversation,
+          }}
         />
         {pane === 'extensions' ? (
           <ExtensionsWorkspace
@@ -1386,16 +1173,18 @@ export function MissionControlScreen(props: {
           <MemoryWorkspace
             view={view}
             confirmingSession={props.confirmingSession}
-            onCreateConversation={props.onCreateConversation}
-            onOpenConversation={(id) => {
-              props.onSwitchConversation?.(id)
-              navigate('today')
+            actions={{
+              create: props.onCreateConversation,
+              open: (id) => {
+                props.onSwitchConversation?.(id)
+                navigate('today')
+              },
+              rename: props.onRenameConversation,
+              archive: props.onArchiveConversation,
+              restore: props.onRestoreConversation,
+              askDelete: props.onAskDeleteConversation,
+              confirmDelete: props.onConfirmDeleteConversation,
             }}
-            onRenameConversation={props.onRenameConversation}
-            onArchiveConversation={props.onArchiveConversation}
-            onRestoreConversation={props.onRestoreConversation}
-            onAskDeleteConversation={props.onAskDeleteConversation}
-            onConfirmDeleteConversation={props.onConfirmDeleteConversation}
           />
         ) : (
         <ConversationWorkspace
