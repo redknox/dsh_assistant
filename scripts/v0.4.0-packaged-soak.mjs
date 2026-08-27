@@ -21,9 +21,9 @@ const PORT = process.env.TARS_NG_UI_PORT || '8803'
 const evidence = { steps: {}, errors: [] }
 const PROFILE_IDENTITY = 'v1:f151980e5483a185518db82be340a1d4b2ae06441fe3c73f2c8f3236761e5b81'
 const EXPECTED_TARBALL = 'dsh-assistant-0.4.0.tgz'
-const EXPECTED_FILES = 459
-const EXPECTED_BYTES = 966603
-const EXPECTED_SHA256 = 'e7552afd3a6cd1f566b14e12b0f55059eaca360f8ae9e4ecb5961656b05563c1'
+const EXPECTED_FILES = 457
+const EXPECTED_BYTES = 964944
+const EXPECTED_SHA256 = 'acbdcd2f4e79d78ace5c312197abffbf990f68590b96083b71a221ccc4feccff'
 const SESSION_MARKER = 'marker-session-B-only'
 const OFFLINE_KEY = 'sk-offline-not-a-live-key'
 const FORBIDDEN_ENV = [
@@ -314,6 +314,7 @@ expect(npmCache === isolatedNpmCache || npmCache.startsWith(userHome), 'npm cach
 expect(!String(npmUserconfig).startsWith(`${OPERATOR_HOME}/`), 'npm userconfig must not resolve under the operator Home')
 expect(readFileSync(isolatedNpmrc, 'utf8').trim() === '', 'isolated npmrc must not contain operator registry auth')
 
+sh('rm', ['-rf', 'dist'], { cwd: REPO })
 sh('npm', ['run', 'build'], { cwd: REPO })
 const dry = sh('npm', ['pack', '--dry-run', '--json'], { cwd: REPO })
 let packedFileCount
@@ -844,9 +845,12 @@ try {
 
 const exited = sh(bin, ['self-extension', 'safe-mode', 'exit'], { env })
 evidence.steps[9] = { exit: JSON.parse(exited.stdout) }
+const rolled = sh(bin, ['self-extension', 'rollback'], { env })
+evidence.steps[9].rollback = JSON.parse(rolled.stdout)
 const doctorAfterExit = sh(bin, ['doctor', '--home', home], { env })
 evidence.steps[9].doctor = redact(doctorAfterExit.stdout).split('\n').filter((l) => /safe|skill|catalog/i.test(l)).slice(0, 12)
 expect(evidence.steps[9].exit.safeMode === false, 'safe-mode exit must clear Safe Mode')
+expect(evidence.steps[9].rollback.state === 'rolled-back' || evidence.steps[9].rollback.state === 'active', 'rollback must restore state')
 expect(evidence.steps[9].doctor.some((l) => /catalog=ok(?:\s+candidates=\d+)?\s+active=weekly-review@1\.0\.1/.test(l)), 'after recover doctor must show catalog=ok and active=weekly-review@1.0.1')
 {
   const { bootAssistantControl, gatherWorkspaceSnapshot, projectMissionControl } = product
@@ -874,9 +878,9 @@ expect(evidence.steps[9].doctor.some((l) => /catalog=ok(?:\s+candidates=\d+)?\s+
         fingerprint: approval?.fingerprint,
       },
     }
-    expect(evidence.steps[9].recoveredPlugin.registry === 'disabled', 'after Safe Mode exit the plugin must return to last-known-good disabled')
-    expect(evidence.steps[9].recoveredPlugin.toolPresent === false, 'after Safe Mode exit text_reverse must stay absent with last-known-good')
-    expect(evidence.steps[9].recoveredPlugin.pluginsActive === false, 'after Safe Mode exit the plugin card must not be active')
+    expect(evidence.steps[9].recoveredPlugin.registry === 'active', 'after rollback the plugin must return to pre-Safe active')
+    expect(evidence.steps[9].recoveredPlugin.toolPresent === true, 'after rollback text_reverse must be present again')
+    expect(evidence.steps[9].recoveredPlugin.pluginsActive === true, 'after rollback the plugin card must be active')
   } finally {
     await control.ctx.fiber.dispose()
   }
