@@ -700,6 +700,23 @@ describe('extension governance and recovery', () => {
     assert.equal(root.inspect().lifecycleBusy, undefined)
   })
 
+  it('I3e3. rejected holdDisable releases the disable lock', async () => {
+    const { workspace, governance, root, human } = seeded()
+    const active = ready(workspace, { owner: 'generated/text-slugify', version: '0.1.0', capabilities: ['text.slugify'] })
+    root.recordApproval(human, {
+      candidateId: active.id,
+      fingerprint: governance.requestApproval(active.id).fingerprint,
+      decision: 'approved-for-exact-diff',
+    })
+    await root.activate(active.id, human)
+    governance.holdDisable = Promise.reject(new Error('hold rejected'))
+    await assert.rejects(() => root.disable(human, 'generated/text-slugify', '0.1.0'), /hold rejected/)
+    assert.equal(root.inspect().lifecycleBusy, undefined)
+    governance.holdDisable = undefined
+    await root.disable(human, 'generated/text-slugify', '0.1.0')
+    assert.equal(root.inspect().lifecycleBusy, undefined)
+  })
+
   it('I3f. Safe Mode keeps the recovery lock until generated unload settles', async () => {
     const { workspace, governance, root, human, runtime } = seeded()
     const active = ready(workspace, { owner: 'generated/text-slugify', version: '0.1.0', capabilities: ['text.slugify'] })

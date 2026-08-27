@@ -415,8 +415,8 @@ export class GovernanceService implements ExtensionGovernance, ExtensionActivati
     this.mutation = 'disable'
     const prior = this.current
     const priorLkg = this.lastKnownGood
-    if (this.holdDisable) await this.holdDisable
     try {
+      if (this.holdDisable) await this.holdDisable
       if (candidate !== undefined) await this.runtime.unloadGenerated(candidate.id)
       this.beginAuthorityCommit?.()
       this.registry.transitionStatus(owner, version, 'disabled')
