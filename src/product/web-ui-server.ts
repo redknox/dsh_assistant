@@ -12,7 +12,6 @@ import { redactText } from '../domain/workspace/redact.js'
 import { AssistantControlSurface } from '../ui/controller.js'
 import type { ActivationCard, ApprovalCard, MissionControlView, RollbackCard, SkillProjection, UserPluginView } from '../domain/workspace/types.js'
 import { PRODUCT_UI_SESSION_ID } from './constants.js'
-import { SessionCatalogError } from './session-catalog.js'
 import type { LiveSessionHost } from './session-lifecycle.js'
 import {
   assertSafePayload,
@@ -26,6 +25,7 @@ import {
   type WebUiListenOptions,
 } from './web-ui-protocol.js'
 import { handleRuntimeControlRequest, type WebUiRuntimeControl } from './web-ui-runtime-control.js'
+import { handleWebUiConversationRequest } from './web-ui-conversations.js'
 
 export type { WebUiRuntimeControl } from './web-ui-runtime-control.js'
 
@@ -478,88 +478,19 @@ export function startWebUiServer(options: WebUiServerOptions): Promise<WebUiServ
         })
         return
       }
-      if (req.method === 'POST' && requestUrl.pathname === '/api/message') {
-        const body = JSON.parse(await readBody(req)) as { text?: unknown; sessionId?: unknown }
-        if (typeof body.text !== 'string' || body.text.trim() === '' || typeof body.sessionId !== 'string') {
-          sendJson(res, 400, { error: 'malformed' })
-          return
-        }
-        if (body.sessionId !== options.surface.sessionId) {
-          sendJson(res, 409, { error: 'stale-session', detail: 'request targeted a different current session', view: snapshot(), webUi: url })
-          return
-        }
-        try {
-          options.sessionHost?.assertAcceptingMessages()
-        } catch (error) {
-          if (error instanceof SessionCatalogError) {
-            sendJson(res, 409, { error: error.code, detail: error.message, view: snapshot(), webUi: url })
-            return
-          }
-          throw error
-        }
-        options.surface.sendMessage(body.text.trim())
-        options.sessionHost?.touchPreview(body.text.trim())
-        sendJson(res, 202, envelope())
-        broadcast()
-        return
-      }
-      if (req.method === 'POST' && requestUrl.pathname === '/api/conversations') {
-        const host = options.sessionHost
-        if (!host) {
-          sendJson(res, 409, { error: 'unavailable', detail: 'session catalog is unavailable' })
-          return
-        }
-        const body = JSON.parse(await readBody(req)) as {
-          action?: unknown
-          id?: unknown
-          title?: unknown
-          sessionId?: unknown
-          revision?: unknown
-          confirm?: unknown
-        }
-        if (typeof body.action !== 'string' || typeof body.sessionId !== 'string' || typeof body.revision !== 'number') {
-          sendJson(res, 400, { error: 'malformed' })
-          return
-        }
-        try {
-          const expected = { sessionId: body.sessionId, revision: body.revision }
-          let acknowledgement: { text: string } | undefined
-          if (body.action === 'create') {
-            await host.create(typeof body.title === 'string' ? body.title : undefined, expected)
-            acknowledgement = { text: 'Created a new conversation.' }
-          } else if (body.action === 'switch' && typeof body.id === 'string') {
-            await host.switchTo(body.id, expected)
-            acknowledgement = { text: 'Switched conversation.' }
-          } else if (body.action === 'rename' && typeof body.id === 'string' && typeof body.title === 'string') {
-            await host.rename(body.id, body.title, expected)
-            acknowledgement = { text: 'Renamed conversation.' }
-          } else if (body.action === 'archive' && typeof body.id === 'string') {
-            await host.archive(body.id, expected)
-            acknowledgement = { text: 'Archived conversation.' }
-          } else if (body.action === 'restore' && typeof body.id === 'string') {
-            await host.restore(body.id, expected)
-            acknowledgement = { text: 'Restored conversation.' }
-          } else if (body.action === 'delete' && typeof body.id === 'string') {
-            await host.delete(body.id, { ...expected, confirm: body.confirm === true })
-            acknowledgement = { text: 'Deleted conversation.' }
-          } else {
-            sendJson(res, 409, { error: 'unsupported', action: body.action })
-            return
-          }
-          sendJson(res, 200, envelope({ acknowledgement }))
-          broadcast()
-        } catch (error) {
-          if (error instanceof SessionCatalogError) {
-            sendJson(res, error.code === 'not-found' ? 404 : 409, {
-              error: error.code,
-              detail: error.message,
-              view: snapshot(),
-              webUi: url,
-            })
-            return
-          }
-          throw error
-        }
+      const conversation = await handleWebUiConversationRequest({
+        method: req.method,
+        pathname: requestUrl.pathname,
+        readJson: async () => JSON.parse(await readBody(req)) as unknown,
+      }, {
+        currentSessionId: () => options.surface.sessionId,
+        sendMessage: (text) => options.surface.sendMessage(text),
+        ...(options.sessionHost ? { sessionHost: options.sessionHost } : {}),
+        project: (acknowledgement) => envelope(acknowledgement ? { acknowledgement } : {}),
+      })
+      if (conversation) {
+        sendJson(res, conversation.status, conversation.body)
+        if (conversation.broadcast) broadcast()
         return
       }
       if (req.method === 'POST' && (requestUrl.pathname === '/api/approve' || requestUrl.pathname === '/api/deny' || requestUrl.pathname === '/api/cancel')) {
