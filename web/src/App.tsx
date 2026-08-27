@@ -4,10 +4,8 @@ import {
   activateCandidate,
   decideApproval,
   rollbackSystemState,
-  runConversation,
   runRecovery,
   runSkillAction,
-  sendMessage,
   uninstallPlugin,
 } from './api'
 import {
@@ -27,6 +25,7 @@ import {
   requireSkillDependents,
 } from './skillInteraction'
 import { type WorkspacePane } from './WorkspaceNavigation'
+import { useConversationControl } from './useConversationControl'
 import { useMissionControlRuntime } from './useMissionControlRuntime'
 import {
   EMPTY_WORKSPACE_INTERACTION,
@@ -39,8 +38,7 @@ export { MissionControlScreen } from './MissionControlScreen'
 
 export function App() {
   const runtime = useMissionControlRuntime()
-  const [sending, setSending] = useState(false)
-  const [draft, setDraft] = useState('')
+  const conversation = useConversationControl(runtime)
   const [governanceInteraction, setGovernanceInteraction] = useState(EMPTY_GOVERNANCE_INTERACTION)
   const [pane, setPane] = useState<WorkspacePane>(() => workspacePaneFromHash(globalThis.location?.hash))
   const [workspaceInteraction, setWorkspaceInteraction] = useState(EMPTY_WORKSPACE_INTERACTION)
@@ -60,32 +58,13 @@ export function App() {
   }
 
   const view = runtime.view
-  const onSend = async () => {
-    if (sending || draft.trim() === '') return
-    setSending(true)
-    try {
-      const next = await runtime.perform(() => {
-        const sessionId = view?.runtimeContext?.sessionId ?? view?.sessions?.currentSessionId
-        if (!sessionId) throw new Error('current session is unknown')
-        return sendMessage(draft.trim(), sessionId)
-      }, 'send failed')
-      if (next) setDraft('')
-    } finally {
-      setSending(false)
-    }
-  }
-
-  const catalogRef = () => ({
-    sessionId: view?.runtimeContext?.sessionId ?? view?.sessions?.currentSessionId ?? 'main',
-    revision: view?.sessions?.revision ?? 0,
-  })
 
   const interactWithWorkspace = (event: WorkspaceInteractionEvent) => {
     const requested = transitionWorkspaceInteraction(workspaceInteraction, event)
     setWorkspaceInteraction(requested.state)
     if (requested.command?.action === 'delete-conversation') {
       const { id } = requested.command
-      void runtime.perform(() => runConversation('delete', { ...catalogRef(), id, confirm: true }))
+      conversation.dispatch({ action: 'delete', id })
     }
     if (requested.command?.action === 'uninstall-plugin') {
       const { plugin } = requested.command
@@ -101,12 +80,12 @@ export function App() {
     <MissionControlScreen
       view={view}
       connected={runtime.connected}
-      sending={sending}
+      sending={conversation.sending}
       error={runtime.error}
-      draft={draft}
+      draft={conversation.draft}
       armedRecovery={governanceInteraction.armedRecovery}
-      onDraft={setDraft}
-      onSend={() => { void onSend() }}
+      onDraft={(value) => { conversation.dispatch({ action: 'draft', value }) }}
+      onSend={() => { conversation.dispatch({ action: 'send' }) }}
       acknowledgement={runtime.acknowledgement}
       onDismissAcknowledgement={runtime.dismissAcknowledgement}
       onApprove={(card) => { void runtime.perform(() => decideApproval(card, 'approve')) }}
@@ -138,11 +117,11 @@ export function App() {
       pane={pane}
       onNavigate={navigate}
       confirmingSession={workspaceInteraction.confirmingSession}
-      onCreateConversation={() => { void runtime.perform(() => runConversation('create', catalogRef())) }}
-      onSwitchConversation={(id) => { void runtime.perform(() => runConversation('switch', { ...catalogRef(), id })) }}
-      onRenameConversation={(id, title) => { void runtime.perform(() => runConversation('rename', { ...catalogRef(), id, title })) }}
-      onArchiveConversation={(id) => { void runtime.perform(() => runConversation('archive', { ...catalogRef(), id })) }}
-      onRestoreConversation={(id) => { void runtime.perform(() => runConversation('restore', { ...catalogRef(), id })) }}
+      onCreateConversation={() => { conversation.dispatch({ action: 'create' }) }}
+      onSwitchConversation={(id) => { conversation.dispatch({ action: 'switch', id }) }}
+      onRenameConversation={(id, title) => { conversation.dispatch({ action: 'rename', id, title }) }}
+      onArchiveConversation={(id) => { conversation.dispatch({ action: 'archive', id }) }}
+      onRestoreConversation={(id) => { conversation.dispatch({ action: 'restore', id }) }}
       onAskDeleteConversation={(id) => { interactWithWorkspace({ action: 'ask-conversation-delete', id }) }}
       onConfirmDeleteConversation={(id) => { interactWithWorkspace({ action: 'confirm-conversation-delete', id }) }}
       inspectingExtension={workspaceInteraction.inspectingExtension}
@@ -153,7 +132,7 @@ export function App() {
         ? { id: skillInteraction.dependents.id, dependents: skillInteraction.dependents.values }
         : undefined}
       onPickSkill={(skill) => {
-        setDraft((current) => current.trim() === '' ? `Use the ${skill.name} skill.` : `${current.trim()} ${skill.name}`)
+        conversation.dispatch({ action: 'suggest-skill', name: skill.name })
       }}
       onSkillAction={(action, skill) => {
         const requested = requestSkillInteraction(skillInteraction, action, skill)
