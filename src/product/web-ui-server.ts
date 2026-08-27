@@ -2,12 +2,11 @@ import { createReadStream, existsSync, statSync } from 'node:fs'
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { SkillContractError } from '../domain/skill/errors.js'
 import type { RecoveryRoot } from '../domain/governance/root.js'
 import { acknowledgementOf } from '../domain/workspace/approvals.js'
 import { redactText } from '../domain/workspace/redact.js'
 import { AssistantControlSurface } from '../ui/controller.js'
-import type { MissionControlView, SkillProjection } from '../domain/workspace/types.js'
+import type { MissionControlView } from '../domain/workspace/types.js'
 import { PRODUCT_UI_SESSION_ID } from './constants.js'
 import type { LiveSessionHost } from './session-lifecycle.js'
 import {
@@ -25,6 +24,7 @@ import { handleWebUiApprovalRequest } from './web-ui-approvals.js'
 import { handleWebUiActivationRequest } from './web-ui-activations.js'
 import { handleWebUiGovernanceLifecycleRequest } from './web-ui-governance-lifecycle.js'
 import { WebUiGovernanceMutations } from './web-ui-governance-mutations.js'
+import { handleWebUiSkillRequest, type WebUiSkillCommand } from './web-ui-skills.js'
 
 export type { WebUiRuntimeControl } from './web-ui-runtime-control.js'
 
@@ -146,58 +146,25 @@ export function startWebUiServer(options: WebUiServerOptions): Promise<WebUiServ
 
   const mutations = new WebUiGovernanceMutations(() => options.recoveryRoot.inspect())
 
-  const bindSkillAction = (body: {
-    action?: unknown
-    id?: unknown
-    name?: unknown
-    version?: unknown
-    digest?: unknown
-    fingerprint?: unknown
-    generation?: unknown
-  }, view: MissionControlView): { error: string } | { skill: SkillProjection } => {
-    const action = String(body.action ?? '')
-    const allowed = new Set(['approve', 'reject', 'activate', 'disable', 'reactivate', 'uninstall', 'rollback'])
-    if (!allowed.has(action)) return { error: 'malformed' }
-    if (typeof body.generation !== 'number' || !Number.isInteger(body.generation)) return { error: 'malformed' }
-    if (action === 'rollback') {
-      const target = view.skillRollback
-      if (target === undefined) return { error: 'unknown-skill' }
-      if (typeof body.name !== 'string' || body.name !== target.name) return { error: 'stale-skill' }
-      if (typeof body.version !== 'string' || body.version !== target.version) return { error: 'stale-skill' }
-      if (typeof body.digest !== 'string' || body.digest !== target.digest) return { error: 'stale-digest' }
-      if (body.generation !== target.generation) return { error: 'stale-generation' }
-      const skill = (view.skills ?? []).find((item) => item.name === target.name && item.version === target.version)
-      if (skill === undefined) return { error: 'unknown-skill' }
-      return { skill }
+  const executeSkillCommand = (command: WebUiSkillCommand) => {
+    const human = options.recoveryRoot.issueAuthority({ kind: 'human-control', source: 'application-ui' })
+    switch (command.action) {
+      case 'approve':
+        return options.recoveryRoot.approveSkill(command.id, command.fingerprint, human)
+      case 'reject':
+        return options.recoveryRoot.rejectSkill(command.id, command.fingerprint, human)
+      case 'activate':
+        return options.recoveryRoot.activateSkill(command.id, human)
+      case 'reactivate':
+        return options.recoveryRoot.reactivateSkill(command.name, command.version, human)
+      case 'disable':
+        return options.recoveryRoot.disableSkill(command.name, human, command.dependents)
+      case 'uninstall':
+        return options.recoveryRoot.uninstallSkill(command.id, human, command.dependents)
+      case 'rollback':
+        return options.recoveryRoot.rollbackSkill(human)
     }
-    if (typeof body.id !== 'string' || body.id === '') return { error: 'malformed' }
-    const skill = (view.skills ?? []).find((item) => item.id === body.id)
-    if (skill === undefined) return { error: 'unknown-skill' }
-    if (typeof body.name !== 'string' || body.name !== skill.name) return { error: 'stale-skill' }
-    if (typeof body.version !== 'string' || body.version !== skill.version) return { error: 'stale-skill' }
-    if (typeof body.digest !== 'string' || body.digest !== skill.digest) return { error: 'stale-digest' }
-    if (body.generation !== skill.generation) return { error: 'stale-generation' }
-    if (action === 'approve' || action === 'reject') {
-      if (skill.lifecycle !== 'approval-requested') return { error: 'stale-lifecycle' }
-      if (typeof body.fingerprint !== 'string' || body.fingerprint !== skill.approvalFingerprint) return { error: 'stale-fingerprint' }
-    }
-    if (action === 'activate' && skill.lifecycle !== 'approved') return { error: 'stale-lifecycle' }
-    if (action === 'disable' && skill.lifecycle !== 'active') return { error: 'stale-lifecycle' }
-    if (action === 'reactivate' && skill.lifecycle !== 'disabled') return { error: 'stale-lifecycle' }
-    if (action === 'uninstall' && skill.lifecycle === 'uninstalled') return { error: 'stale-lifecycle' }
-    return { skill }
   }
-
-  const withheldSkillCatalogMutation = (action: string, view: MissionControlView): string | undefined => {
-    if (action !== 'activate' && action !== 'reactivate') return undefined
-    if (view.skillCatalog?.state === 'withheld') return 'catalog-withheld'
-    if (view.systemState === 'SAFE_MODE' || view.runtimeContext?.safeMode === true) return 'safe-mode'
-    return undefined
-  }
-
-  const sameStringSet = (left: readonly string[], right: readonly string[]) => (
-    left.length === right.length && left.every((item) => right.includes(item))
-  )
 
   const serveAsset = (reqPath: string, res: ServerResponse, setSession: boolean) => {
     const relative = reqPath === '/' ? 'index.html' : reqPath.replace(/^\//, '')
@@ -331,81 +298,17 @@ export function startWebUiServer(options: WebUiServerOptions): Promise<WebUiServ
         if (activation.broadcast) broadcast()
         return
       }
-      if (req.method === 'POST' && requestUrl.pathname === '/api/skill') {
-        const body = JSON.parse(await readBody(req)) as {
-          action?: unknown
-          id?: unknown
-          name?: unknown
-          version?: unknown
-          digest?: unknown
-          fingerprint?: unknown
-          generation?: unknown
-          confirm?: unknown
-          dependents?: unknown
-          acknowledgeDependents?: unknown
-        }
-        if (body.confirm !== true) {
-          sendJson(res, 409, { error: 'confirmation-required' })
-          return
-        }
-        const action = String(body.action ?? '')
-        const view = snapshot()
-        const withheld = withheldSkillCatalogMutation(action, view)
-        if (withheld !== undefined) {
-          sendJson(res, 409, { error: withheld, view, webUi: url })
-          return
-        }
-        const bound = bindSkillAction(body, view)
-        if ('error' in bound) {
-          sendJson(res, bound.error === 'malformed' ? 400 : 409, { error: bound.error })
-          return
-        }
-        const human = options.recoveryRoot.issueAuthority({ kind: 'human-control', source: 'application-ui' })
-        try {
-          if (action === 'approve') {
-            options.recoveryRoot.approveSkill(bound.skill.id, bound.skill.approvalFingerprint ?? '', human)
-          } else if (action === 'reject') {
-            options.recoveryRoot.rejectSkill(bound.skill.id, bound.skill.approvalFingerprint ?? '', human)
-          } else if (action === 'activate') {
-            options.recoveryRoot.activateSkill(bound.skill.id, human)
-          } else if (action === 'reactivate') {
-            options.recoveryRoot.reactivateSkill(bound.skill.name, bound.skill.version, human)
-          } else if (action === 'disable' || action === 'uninstall') {
-            const dependents = bound.skill.dependents
-            if (dependents.length > 0 && body.acknowledgeDependents !== true) {
-              sendJson(res, 409, {
-                error: 'dependents-required',
-                dependents,
-                detail: `hard dependents must be acknowledged: ${dependents.join(', ')}`,
-                view,
-                webUi: url,
-              })
-              return
-            }
-            const acknowledged = Array.isArray(body.dependents) ? body.dependents.map((item) => String(item)) : []
-            if (body.acknowledgeDependents === true && !sameStringSet(dependents, acknowledged)) {
-              sendJson(res, 409, { error: 'stale-dependents', dependents, view, webUi: url })
-              return
-            }
-            const ack = body.acknowledgeDependents === true ? acknowledged : []
-            if (action === 'disable') options.recoveryRoot.disableSkill(bound.skill.name, human, ack)
-            else options.recoveryRoot.uninstallSkill(bound.skill.id, human, ack)
-          } else if (action === 'rollback') {
-            options.recoveryRoot.rollbackSkill(human)
-          } else {
-            sendJson(res, 400, { error: 'malformed', detail: 'unknown skill action' })
-            return
-          }
-          sendJson(res, 200, envelope({ acknowledgement: { text: `Skill ${action} recorded.` } }))
-          broadcast()
-        } catch (error) {
-          const message = error instanceof Error ? error.message : 'skill action failed'
-          const code = error instanceof SkillContractError
-            && (error.code === 'catalog-degraded' || error.code === 'catalog-sync-failed')
-            ? error.code
-            : 'skill-action-denied'
-          sendJson(res, 409, { error: code, detail: redactText(message), view: snapshot(), webUi: url })
-        }
+      const skill = await handleWebUiSkillRequest({
+        method: req.method,
+        pathname: requestUrl.pathname,
+        readJson: async () => JSON.parse(await readBody(req)) as unknown,
+      }, {
+        authority: { execute: executeSkillCommand },
+        project: (acknowledgement) => envelope(acknowledgement ? { acknowledgement } : {}),
+      })
+      if (skill) {
+        sendJson(res, skill.status, skill.body)
+        if (skill.broadcast) broadcast()
         return
       }
       const governanceLifecycle = await handleWebUiGovernanceLifecycleRequest({
