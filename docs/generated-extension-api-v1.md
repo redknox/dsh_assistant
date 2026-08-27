@@ -14,7 +14,7 @@ Inspect it at runtime with `inspect_authoring_contract`. The version is host aut
 
 - `ctx.tools.register` / `ctx.tools.get`
 - `ctx.effect(setup)` runs a zero-argument setup callback and registers the cleanup function it returns. It is not an I/O, process, filesystem, or network API.
-- `ctx.broker.request(capability, args)` may call only operations listed by the runtime `brokerOps` contract. The current R0 operation is `host.text.echo`; SSH, process, filesystem, and network operations are not available.
+- `ctx.broker.request(capability, args)` may call only operations listed by the runtime `brokerOps` contract. Every operation used by candidate source must also be declared in `candidate.manifest.json` as a `permissions` entry so it is included in the exact-diff review and human approval. The current R0 operation is `host.text.echo`; SSH, process, filesystem, and network operations are not available.
 
 ## Forbidden host APIs
 

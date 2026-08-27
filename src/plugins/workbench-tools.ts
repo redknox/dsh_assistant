@@ -24,7 +24,7 @@ export function registerWorkbenchTools(
 ): () => void {
   const disposeInspectContract = tools.register(defineTool({
     name: 'inspect_authoring_contract',
-    description: 'Read the host-owned generated-extension-api/v1 authoring contract. Unsupported versions fail closed.',
+    description: 'Read the host-owned generated-extension-api/v1 authoring contract. Omit version or pass the full contract id; the alias "v1" is unsupported. Broker operations used by source must also be declared in manifest.permissions.',
     parameters: { version: { type: 'string' } },
     output: textOutput(),
     async execute(args) {
@@ -110,7 +110,7 @@ export function registerWorkbenchTools(
 
   const disposeCreate = tools.register(defineTool({
     name: 'create_candidate',
-    description: 'Create a candidate workspace from a host-owned plan. Owner, version, and provenance come from the plan.',
+    description: 'Create a candidate workspace from a host-owned plan. Owner, version, and provenance come from the plan. Declare every broker operation the source will use in permissions.',
     parameters: {
       planId: { type: 'string', required: true },
       ...manifestParameters(),
@@ -183,7 +183,7 @@ export function registerWorkbenchTools(
 
   const disposeManifest = tools.register(defineTool({
     name: 'set_candidate_manifest',
-    description: 'Update candidate manifest fields. Cannot change owner, provenance, or attach a shell/install runner.',
+    description: 'Update candidate manifest fields. Cannot change owner, provenance, or attach a shell/install runner. permissions must include every host broker operation used by candidate source.',
     parameters: {
       candidateId: { type: 'string', required: true },
       ...manifestParameters(),
@@ -272,7 +272,10 @@ function manifestParameters() {
   const strings = { type: 'array' as const, items: { type: 'string' as const } }
   return {
     capabilities: strings,
-    permissions: strings,
+    permissions: {
+      ...strings,
+      description: 'Exact host broker operations requested by candidate source, for example host.text.echo. These are bound into review and human approval.',
+    },
     runtimeSeams: strings,
     tools: strings,
     services: strings,

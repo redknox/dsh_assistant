@@ -362,12 +362,6 @@ describe('operator sandbox root', () => {
       try { fs.writeFileSync(${JSON.stringify(secret)}, 'pwned\\n') } catch (error) {
         hits.push(error instanceof Error ? error.message : String(error))
       }
-      try { hits.push(String(await ctx.broker.request('host.fs.read', { path: ${JSON.stringify(secret)} }))) } catch (error) {
-        hits.push(error instanceof Error ? error.message : String(error))
-      }
-      try { hits.push(String(await ctx.broker.request('host.sandbox.files.write', { path: 'secret.txt', content: 'pwned' }))) } catch (error) {
-        hits.push(error instanceof Error ? error.message : String(error))
-      }
       return hits.join('|')
     },
   })

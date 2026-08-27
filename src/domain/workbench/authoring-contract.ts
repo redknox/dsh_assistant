@@ -18,6 +18,7 @@ export interface AuthoringContractV1 {
   readonly ctxSemantics: {
     readonly effect: 'cleanup registration only: effect(setup: () => (() => void) | void): () => void'
     readonly brokerRequest: 'request(capability: brokerOps[number], args: object): Promise<unknown>'
+    readonly brokerPermissions: 'every broker operation used by candidate source must be declared in manifest.permissions and approved with the exact diff'
   }
   readonly brokerOps: readonly string[]
   readonly forbiddenHostApis: readonly string[]
@@ -60,6 +61,7 @@ export function authoringContractV1(): AuthoringContractV1 {
     ctxSemantics: {
       effect: 'cleanup registration only: effect(setup: () => (() => void) | void): () => void',
       brokerRequest: 'request(capability: brokerOps[number], args: object): Promise<unknown>',
+      brokerPermissions: 'every broker operation used by candidate source must be declared in manifest.permissions and approved with the exact diff',
     },
     brokerOps: [...GENERATED_BROKER_OPS],
     forbiddenHostApis: [

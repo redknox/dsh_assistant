@@ -197,31 +197,56 @@ function inspectGeneratedSourceContract(record: CandidateRecord, root: string, f
   if (record.manifest.runtimeContractVersion !== 'generated-extension-api/v1') {
     return stage('source.contract', 'not-applicable', 'Generated source contract is not required for this provenance.')
   }
-  const invalid: string[] = []
+  const invalidEffects: string[] = []
+  const undeclaredBrokerPermissions: string[] = []
   const sources = files.filter((file) => /\.(?:js|mjs|cjs)$/.test(file))
   for (const file of sources) {
     const text = readFileSync(path.join(root, file), 'utf8')
     try {
       const source = parse(text, { ecmaVersion: 'latest', sourceType: 'module', allowHashBang: true }) as unknown as SyntaxNode
       walkSyntax(source, (node) => {
-        if (!isCtxEffectCall(node)) return
-        const argument = node.arguments[0]
-        if (node.arguments.length !== 1 || argument === undefined || !CALLBACK_NODE_TYPES.has(argument.type)) {
-          invalid.push(file)
+        if (isCtxEffectCall(node)) {
+          const argument = node.arguments[0]
+          if (node.arguments.length !== 1 || argument === undefined || !CALLBACK_NODE_TYPES.has(argument.type)) {
+            invalidEffects.push(file)
+          }
+        }
+        const brokerRequest = brokerRequestCapability(node)
+        if (brokerRequest === undefined) return
+        if (brokerRequest === null) {
+          if (record.manifest.permissions.length === 0) undeclaredBrokerPermissions.push(`dynamic (${file})`)
+          return
+        }
+        if (!record.manifest.permissions.includes(brokerRequest)) {
+          undeclaredBrokerPermissions.push(`${brokerRequest} (${file})`)
         }
       })
     } catch {
-      invalid.push(file)
+      invalidEffects.push(file)
     }
   }
-  return invalid.length === 0
-    ? stage('source.contract', 'passed', 'Generated ctx.effect calls use callback-shaped setup functions.')
-    : stage(
+  if (invalidEffects.length > 0) {
+    return stage(
       'source.contract',
       'failed',
       'generated-extension-api/v1 ctx.effect accepts only a cleanup setup callback.',
-      { diagnostics: [...new Set(invalid)].join(', ') },
+      { diagnostics: [...new Set(invalidEffects)].join(', ') },
     )
+  }
+  if (undeclaredBrokerPermissions.length > 0) {
+    const operations = [...new Set(undeclaredBrokerPermissions)]
+    return stage(
+      'source.contract',
+      'failed',
+      `Generated source uses undeclared Broker permission ${operations.join(', ')}.`,
+      { diagnostics: 'Add each broker operation used by source to manifest.permissions before validation.' },
+    )
+  }
+  return stage(
+    'source.contract',
+    'passed',
+    'Generated ctx.effect calls and Broker permission declarations match the host contract.',
+  )
 }
 
 interface SyntaxNode {
@@ -263,6 +288,27 @@ function isCtxEffectCall(node: SyntaxNode): node is SyntaxNode & { readonly argu
     && callee.object.name === 'ctx'
     && callee.property.type === 'Identifier'
     && callee.property.name === 'effect'
+}
+
+function brokerRequestCapability(node: SyntaxNode): string | null | undefined {
+  if (node.type !== 'CallExpression' || !Array.isArray(node.arguments) || !isSyntaxNode(node.callee)) return undefined
+  const request = node.callee
+  if (request.type !== 'MemberExpression' || request.computed === true) return undefined
+  if (!isSyntaxNode(request.object) || !isSyntaxNode(request.property)) return undefined
+  const broker = request.object
+  if (broker.type !== 'MemberExpression' || broker.computed === true) return undefined
+  if (!isSyntaxNode(broker.object) || !isSyntaxNode(broker.property)) return undefined
+  const isBrokerRequest = broker.object.type === 'Identifier'
+    && broker.object.name === 'ctx'
+    && broker.property.type === 'Identifier'
+    && broker.property.name === 'broker'
+    && request.property.type === 'Identifier'
+    && request.property.name === 'request'
+  if (!isBrokerRequest) return undefined
+  const capability = node.arguments[0]
+  return capability?.type === 'Literal' && typeof capability.value === 'string'
+    ? capability.value
+    : null
 }
 
 function inspectBundle(root: string): ValidationStageResult {

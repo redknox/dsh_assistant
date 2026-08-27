@@ -786,6 +786,38 @@ describe('candidate workbench', () => {
     assert.match(report.stages.find((item) => item.name === 'runtime.contract')?.summary ?? '', /unsupported generated Broker permission/)
   })
 
+  it('fails validation when generated code uses an undeclared Broker operation', () => {
+    const setup = isolatedWorkbench()
+    const id = draftIsolated(setup)
+    setup.workbench.writeFile(id, 'src/plugin.js', `export function apply(ctx) {
+  ctx.tools.register({
+    name: 'r0_workbench_ping',
+    parameters: { text: { type: 'string' } },
+    output: { schema: { type: 'string' }, render(_args, value) { return [{ type: 'text', text: String(value) }] } },
+    async execute(args) {
+      return ctx.broker.request('host.text.echo', { text: args.text })
+    },
+  })
+}
+`)
+
+    const validated = setup.workbench.validate(id)
+    assert.equal(validated.validation?.passed, false)
+    assert.equal(validated.validation?.failed.includes('source.contract'), true)
+    assert.match(
+      setup.workspace.get(id).validation?.stages.find((item) => item.name === 'source.contract')?.summary ?? '',
+      /undeclared Broker permission host\.text\.echo/,
+    )
+
+    setup.workbench.setManifest(id, { permissions: ['host.text.echo'] })
+    const repaired = setup.workbench.validate(id)
+    assert.equal(repaired.validation?.passed, true)
+    assert.equal(
+      setup.workspace.get(id).validation?.stages.find((item) => item.name === 'source.contract')?.status,
+      'passed',
+    )
+  })
+
   it('fails validation when generated code treats ctx.effect as an I/O operation', () => {
     const setup = isolatedWorkbench()
     const id = draftIsolated(setup)
@@ -826,6 +858,10 @@ describe('candidate workbench', () => {
       assert.equal(
         (contract.ctxSemantics as { effect?: string }).effect,
         'cleanup registration only: effect(setup: () => (() => void) | void): () => void',
+      )
+      assert.match(
+        String((contract.ctxSemantics as { brokerPermissions?: string }).brokerPermissions),
+        /manifest\.permissions.*exact diff/,
       )
       assert.deepEqual(contract.brokerOps, ['host.text.echo'])
     } finally {
