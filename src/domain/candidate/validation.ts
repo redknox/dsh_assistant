@@ -1,6 +1,7 @@
 import { existsSync, readFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import path from 'node:path'
+import { parse } from 'acorn'
 import { contractDigestExtras, digestFiles } from './digest.js'
 import { listSourceFiles } from './files.js'
 import { detectOsNetworkSandbox } from './os-sandbox.js'
@@ -197,27 +198,71 @@ function inspectGeneratedSourceContract(record: CandidateRecord, root: string, f
     return stage('source.contract', 'not-applicable', 'Generated source contract is not required for this provenance.')
   }
   const invalid: string[] = []
-  const sources = files.filter((file) => file.endsWith('.ts') || file.endsWith('.js'))
-  const effectCall = /\bctx\s*\.\s*effect\s*\(/g
-  const inlineCleanup = /^(?:\(\s*\)\s*=>|function\s*\(\s*\))/
+  const sources = files.filter((file) => /\.(?:js|mjs|cjs)$/.test(file))
   for (const file of sources) {
     const text = readFileSync(path.join(root, file), 'utf8')
-    for (const match of text.matchAll(effectCall)) {
-      const argument = text.slice((match.index ?? 0) + match[0].length).trimStart()
-      if (!inlineCleanup.test(argument)) {
-        invalid.push(file)
-        break
-      }
+    try {
+      const source = parse(text, { ecmaVersion: 'latest', sourceType: 'module', allowHashBang: true }) as unknown as SyntaxNode
+      walkSyntax(source, (node) => {
+        if (!isCtxEffectCall(node)) return
+        const argument = node.arguments[0]
+        if (node.arguments.length !== 1 || argument === undefined || !CALLBACK_NODE_TYPES.has(argument.type)) {
+          invalid.push(file)
+        }
+      })
+    } catch {
+      invalid.push(file)
     }
   }
   return invalid.length === 0
-    ? stage('source.contract', 'passed', 'Generated ctx.effect calls use inline cleanup callbacks.')
+    ? stage('source.contract', 'passed', 'Generated ctx.effect calls use callback-shaped setup functions.')
     : stage(
       'source.contract',
       'failed',
-      'generated-extension-api/v1 ctx.effect accepts only an inline cleanup callback.',
+      'generated-extension-api/v1 ctx.effect accepts only a cleanup setup callback.',
       { diagnostics: [...new Set(invalid)].join(', ') },
     )
+}
+
+interface SyntaxNode {
+  readonly type: string
+  readonly [key: string]: unknown
+}
+
+const CALLBACK_NODE_TYPES = new Set([
+  'ArrowFunctionExpression',
+  'FunctionExpression',
+  'Identifier',
+  'MemberExpression',
+])
+
+function isSyntaxNode(value: unknown): value is SyntaxNode {
+  return value !== null && typeof value === 'object' && typeof (value as { type?: unknown }).type === 'string'
+}
+
+function walkSyntax(node: SyntaxNode, visit: (node: SyntaxNode) => void): void {
+  visit(node)
+  for (const [key, value] of Object.entries(node)) {
+    if (key === 'type' || key === 'start' || key === 'end') continue
+    if (isSyntaxNode(value)) {
+      walkSyntax(value, visit)
+      continue
+    }
+    if (Array.isArray(value)) {
+      for (const item of value) if (isSyntaxNode(item)) walkSyntax(item, visit)
+    }
+  }
+}
+
+function isCtxEffectCall(node: SyntaxNode): node is SyntaxNode & { readonly arguments: readonly SyntaxNode[] } {
+  if (node.type !== 'CallExpression' || !Array.isArray(node.arguments) || !isSyntaxNode(node.callee)) return false
+  const callee = node.callee
+  if (callee.type !== 'MemberExpression' || callee.computed === true) return false
+  if (!isSyntaxNode(callee.object) || !isSyntaxNode(callee.property)) return false
+  return callee.object.type === 'Identifier'
+    && callee.object.name === 'ctx'
+    && callee.property.type === 'Identifier'
+    && callee.property.name === 'effect'
 }
 
 function inspectBundle(root: string): ValidationStageResult {

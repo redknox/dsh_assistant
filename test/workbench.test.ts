@@ -799,7 +799,23 @@ describe('candidate workbench', () => {
     assert.equal(validated.validation?.failed.includes('source.contract'), true)
     assert.match(
       setup.workspace.get(id).validation?.stages.find((item) => item.name === 'source.contract')?.summary ?? '',
-      /cleanup callback/,
+      /cleanup setup callback/,
+    )
+  })
+
+  it('accepts a named cleanup setup callback', () => {
+    const setup = isolatedWorkbench()
+    const id = draftIsolated(setup)
+    setup.workbench.writeFile(id, 'src/plugin.js', `export function apply(ctx) {
+  const registerCleanup = () => () => {}
+  ctx.effect(registerCleanup)
+}
+`)
+
+    setup.workbench.validate(id)
+    assert.equal(
+      setup.workspace.get(id).validation?.stages.find((item) => item.name === 'source.contract')?.status,
+      'passed',
     )
   })
 
@@ -809,7 +825,7 @@ describe('candidate workbench', () => {
       const contract = parse(await tool(ctx, 'inspect_authoring_contract', {}))
       assert.equal(
         (contract.ctxSemantics as { effect?: string }).effect,
-        'cleanup registration only: effect(dispose: () => void): () => void',
+        'cleanup registration only: effect(setup: () => (() => void) | void): () => void',
       )
       assert.deepEqual(contract.brokerOps, ['host.text.echo'])
     } finally {

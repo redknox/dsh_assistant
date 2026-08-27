@@ -13,7 +13,7 @@ Inspect it at runtime with `inspect_authoring_contract`. The version is host aut
 ## Allowed `ctx`
 
 - `ctx.tools.register` / `ctx.tools.get`
-- `ctx.effect(dispose)` registers a zero-argument cleanup callback. It is not an I/O, process, filesystem, or network API.
+- `ctx.effect(setup)` runs a zero-argument setup callback and registers the cleanup function it returns. It is not an I/O, process, filesystem, or network API.
 - `ctx.broker.request(capability, args)` may call only operations listed by the runtime `brokerOps` contract. The current R0 operation is `host.text.echo`; SSH, process, filesystem, and network operations are not available.
 
 ## Forbidden host APIs

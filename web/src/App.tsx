@@ -80,58 +80,6 @@ function activityModifier(kind: string): string {
 
 type WorkspacePane = 'today' | 'extensions' | 'memory'
 type CompactSurface = 'conversation' | 'navigation' | 'operations'
-type ShuttlePrototypeVariant = 'A' | 'B' | 'C'
-
-const SHUTTLE_PROTOTYPE_VARIANTS: readonly { readonly id: ShuttlePrototypeVariant; readonly name: string }[] = [
-  { id: 'A', name: 'Forward Flight Deck' },
-  { id: 'B', name: 'Aft Payload Station' },
-  { id: 'C', name: 'Overhead Systems' },
-]
-
-function shuttlePrototypeFromLocation(): { readonly enabled: boolean; readonly variant: ShuttlePrototypeVariant } {
-  const params = new URLSearchParams(globalThis.location?.search ?? '')
-  const candidate = params.get('variant')
-  return {
-    enabled: params.get('prototype') === 'shuttle',
-    variant: candidate === 'B' || candidate === 'C' ? candidate : 'A',
-  }
-}
-
-// PROTOTYPE — Three Shuttle flight-deck layouts on the existing app route, switchable via ?prototype=shuttle&variant=.
-function ShuttlePrototypeSwitcher(props: {
-  readonly variant: ShuttlePrototypeVariant
-  readonly onChange: (variant: ShuttlePrototypeVariant) => void
-}) {
-  const currentIndex = SHUTTLE_PROTOTYPE_VARIANTS.findIndex((item) => item.id === props.variant)
-  const cycle = (direction: -1 | 1) => {
-    const nextIndex = (currentIndex + direction + SHUTTLE_PROTOTYPE_VARIANTS.length) % SHUTTLE_PROTOTYPE_VARIANTS.length
-    props.onChange(SHUTTLE_PROTOTYPE_VARIANTS[nextIndex]!.id)
-  }
-  useEffect(() => {
-    const onKeyDown = (event: KeyboardEvent) => {
-      const target = event.target as HTMLElement | null
-      if (target?.matches('input, textarea, [contenteditable="true"]')) return
-      if (event.key === 'ArrowLeft') {
-        event.preventDefault()
-        cycle(-1)
-      }
-      if (event.key === 'ArrowRight') {
-        event.preventDefault()
-        cycle(1)
-      }
-    }
-    globalThis.addEventListener?.('keydown', onKeyDown)
-    return () => globalThis.removeEventListener?.('keydown', onKeyDown)
-  })
-  const current = SHUTTLE_PROTOTYPE_VARIANTS[currentIndex]!
-  return (
-    <div className="prototype-switcher" role="group" aria-label="Shuttle prototype variants">
-      <button type="button" aria-label="Previous prototype variant" onClick={() => cycle(-1)}>←</button>
-      <span><strong>{current.id}</strong> — {current.name}</span>
-      <button type="button" aria-label="Next prototype variant" onClick={() => cycle(1)}>→</button>
-    </div>
-  )
-}
 
 function paneFromHash(): WorkspacePane {
   if (globalThis.location?.hash === '#extensions') return 'extensions'
@@ -1358,16 +1306,6 @@ export function MissionControlScreen(props: {
   const locked = !props.connected
   const pane = props.pane ?? 'today'
   const [compactSurface, setCompactSurface] = useState<CompactSurface>('conversation')
-  const initialPrototype = shuttlePrototypeFromLocation()
-  const [prototypeVariant, setPrototypeVariant] = useState<ShuttlePrototypeVariant>(initialPrototype.variant)
-  const selectPrototypeVariant = (next: ShuttlePrototypeVariant) => {
-    setPrototypeVariant(next)
-    if (!globalThis.location) return
-    const url = new URL(globalThis.location.href)
-    url.searchParams.set('prototype', 'shuttle')
-    url.searchParams.set('variant', next)
-    globalThis.history?.replaceState(null, '', url)
-  }
   const navigate = (next: WorkspacePane) => {
     props.onNavigate?.(next)
     setCompactSurface('conversation')
@@ -1377,9 +1315,8 @@ export function MissionControlScreen(props: {
     globalThis.setTimeout(() => globalThis.document?.getElementById('capabilities')?.scrollIntoView({ block: 'start' }), 0)
   }
   return (
-    <div className="chassis" data-shuttle-variant={initialPrototype.enabled ? prototypeVariant : undefined}>
+    <div className="chassis" data-shuttle-variant="A">
     <div className="console" data-system-state={view.systemState} data-connected={props.connected ? 'yes' : 'no'}>
-      {initialPrototype.enabled ? <div className="shuttle-prototype-plaque" aria-hidden="true">OV-103 · CREW INTERFACE STUDY · PROTOTYPE</div> : null}
       <SystemHeader
         identity={view.identity}
         systemState={view.systemState}
@@ -1497,7 +1434,6 @@ export function MissionControlScreen(props: {
       </div>
       <ControlStripView view={view} connected={props.connected} />
     </div>
-    {initialPrototype.enabled ? <ShuttlePrototypeSwitcher variant={prototypeVariant} onChange={selectPrototypeVariant} /> : null}
     </div>
   )
 }

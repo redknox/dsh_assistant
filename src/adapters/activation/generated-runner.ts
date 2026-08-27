@@ -191,6 +191,19 @@ export class IsolatedGeneratedRunner {
     }
   }
 
+  async shutdown(): Promise<void> {
+    if (this.child === undefined) return
+    try {
+      const reply = await this.request({ op: 'shutdown' }, GENERATED_CALL_TIMEOUT_MS)
+      if (reply.ok !== true) throw new Error(String(reply.error ?? 'generated cleanup failed'))
+      await this.waitForExit(1_000)
+      if (this.child !== undefined) this.kill()
+    } catch (error) {
+      this.kill()
+      throw error
+    }
+  }
+
   async waitForExit(timeoutMs = 10_000): Promise<void> {
     await Promise.race([
       Promise.all([this.exited, this.fatalSettled]),

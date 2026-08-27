@@ -224,8 +224,7 @@ export class CordisActivationRuntime implements ActivationRuntime {
     const waiting: Array<Promise<void>> = []
     for (const [id, runner] of this.generated) {
       if (snapshot.mounted.includes(id)) continue
-      this.dropGenerated(id, runner)
-      waiting.push(runner.waitForExit())
+      waiting.push(this.dropGenerated(id, runner))
     }
     for (const id of new Set([...this.parkedBy.keys(), ...this.priorOwners.keys()])) {
       if (snapshot.mounted.includes(id)) {
@@ -250,15 +249,13 @@ export class CordisActivationRuntime implements ActivationRuntime {
     if (candidateId !== undefined) {
       const runner = this.generated.get(candidateId)
       if (runner !== undefined) {
-        this.dropGenerated(candidateId, runner)
-        await runner.waitForExit()
+        await this.dropGenerated(candidateId, runner)
       }
       await this.discardParked(candidateId)
       return
     }
     const runners = [...this.generated.entries()]
-    for (const [id, runner] of runners) this.dropGenerated(id, runner)
-    await Promise.all(runners.map(([, runner]) => runner.waitForExit()))
+    await Promise.all(runners.map(([id, runner]) => this.dropGenerated(id, runner)))
     for (const id of [...this.parkedBy.keys()]) await this.discardParked(id)
   }
 
@@ -327,8 +324,8 @@ export class CordisActivationRuntime implements ActivationRuntime {
     }
     this.proxyDisposers.set(candidateId, disposers)
     runner.onFatal = (reason) => {
-      this.dropGenerated(candidateId, runner)
-      return this.isolatedFailure?.({ candidateId, diagnostics: reason })
+      return this.dropGenerated(candidateId, runner, true)
+        .then(() => this.isolatedFailure?.({ candidateId, diagnostics: reason }))
     }
     return { ok: true }
   }
@@ -383,8 +380,8 @@ export class CordisActivationRuntime implements ActivationRuntime {
 
   private attachFatalHandler(candidateId: string, runner: IsolatedGeneratedRunner): void {
     runner.onFatal = (reason) => {
-      this.dropGenerated(candidateId, runner)
-      return this.isolatedFailure?.({ candidateId, diagnostics: reason })
+      return this.dropGenerated(candidateId, runner, true)
+        .then(() => this.isolatedFailure?.({ candidateId, diagnostics: reason }))
     }
   }
 
@@ -427,12 +424,19 @@ export class CordisActivationRuntime implements ActivationRuntime {
     await this.restorePriorOwner(candidateId, this.priorOwners.get(candidateId) ?? [])
   }
 
-  private dropGenerated(candidateId: string, runner: IsolatedGeneratedRunner): void {
+  private async dropGenerated(candidateId: string, runner: IsolatedGeneratedRunner, alreadyExited = false): Promise<void> {
     const disposers = this.proxyDisposers.get(candidateId) ?? []
     this.proxyDisposers.delete(candidateId)
     for (const dispose of disposers) dispose()
     runner.onFatal = undefined
-    runner.kill()
+    if (!alreadyExited) {
+      try {
+        await runner.shutdown()
+      } catch {
+        runner.kill()
+      }
+      await runner.waitForExit()
+    }
     this.generated.delete(candidateId)
     this.baselines.delete(candidateId)
     this.candidateOwners.delete(candidateId)

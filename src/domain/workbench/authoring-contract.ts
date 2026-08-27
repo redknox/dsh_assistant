@@ -16,7 +16,7 @@ export interface AuthoringContractV1 {
   }
   readonly allowedCtx: readonly string[]
   readonly ctxSemantics: {
-    readonly effect: 'cleanup registration only: effect(dispose: () => void): () => void'
+    readonly effect: 'cleanup registration only: effect(setup: () => (() => void) | void): () => void'
     readonly brokerRequest: 'request(capability: brokerOps[number], args: object): Promise<unknown>'
   }
   readonly brokerOps: readonly string[]
@@ -58,7 +58,7 @@ export function authoringContractV1(): AuthoringContractV1 {
       'ctx.broker.request',
     ],
     ctxSemantics: {
-      effect: 'cleanup registration only: effect(dispose: () => void): () => void',
+      effect: 'cleanup registration only: effect(setup: () => (() => void) | void): () => void',
       brokerRequest: 'request(capability: brokerOps[number], args: object): Promise<unknown>',
     },
     brokerOps: [...GENERATED_BROKER_OPS],

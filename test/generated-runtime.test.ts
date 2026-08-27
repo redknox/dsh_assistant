@@ -279,7 +279,36 @@ describe('isolated generated-extension runtime', () => {
     try {
       const started = await runner.start()
       assert.equal(started.ok, false)
-      assert.match(started.diagnostics ?? '', /ctx\.effect.*cleanup function/)
+      assert.match(started.diagnostics ?? '', /ctx\.effect.*cleanup setup function/)
+    } finally {
+      runner.kill()
+      await runner.waitForExit()
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
+
+  it('runs registered cleanup before a graceful generated-runtime shutdown', async () => {
+    const root = mkdtempSync(path.join(tmpdir(), 'tars-ng-effect-cleanup-'))
+    mkdirSync(path.join(root, 'src'))
+    writeFileSync(path.join(root, 'package.json'), `${JSON.stringify({ type: 'module' })}\n`)
+    writeFileSync(path.join(root, 'src/plugin.js'), `export function apply(ctx) {
+  ctx.tools.register({ name: 'cleanup_probe', parameters: {}, async execute() { return 'ok' } })
+  ctx.effect(() => () => { throw new Error('cleanup-probe-ran') })
+}
+`)
+    const runner = new IsolatedGeneratedRunner({
+      candidateId: 'generated--cleanup-probe@0.1.0',
+      workspaceRoot: root,
+      entryPoints: ['src/plugin.js'],
+      owner: 'generated/cleanup-probe',
+      tools: ['cleanup_probe'],
+      permissions: [],
+      runtimeContractVersion: GENERATED_EXTENSION_API_V1,
+    })
+    try {
+      const started = await runner.start()
+      assert.equal(started.ok, true, started.diagnostics)
+      await assert.rejects(() => runner.shutdown(), /cleanup-probe-ran|cleanup failed/)
     } finally {
       runner.kill()
       await runner.waitForExit()

@@ -12,6 +12,7 @@ type Tool = {
 
 const tools = new Map<string, Tool>()
 const pending = new Map<string, { resolve: (value: unknown) => void; reject: (error: Error) => void }>()
+const disposers: Array<() => Promise<unknown> | unknown> = []
 let nextHostId = 1
 
 function send(message: Record<string, unknown>): void {
@@ -50,11 +51,23 @@ function shimContext() {
         return tools.get(name)
       },
     },
-    effect(dispose: () => void) {
-      if (typeof dispose !== 'function') {
-        throw new TypeError('ctx.effect accepts a cleanup function only')
+    effect(setup: () => (() => Promise<unknown> | unknown) | void) {
+      if (typeof setup !== 'function') {
+        throw new TypeError('ctx.effect accepts a cleanup setup function only')
       }
-      return dispose
+      const dispose = setup()
+      if (dispose !== undefined && typeof dispose !== 'function') {
+        throw new TypeError('ctx.effect setup must return a cleanup function or void')
+      }
+      if (dispose !== undefined) disposers.push(dispose)
+      let active = true
+      return async () => {
+        if (!active || dispose === undefined) return
+        active = false
+        const index = disposers.indexOf(dispose)
+        if (index >= 0) disposers.splice(index, 1)
+        await dispose()
+      }
     },
     broker: {
       request: brokerRequest,
@@ -66,6 +79,18 @@ function shimContext() {
       throw new Error('generated extensions cannot mount host plugins')
     },
   }
+}
+
+async function disposeEffects(): Promise<void> {
+  const errors: unknown[] = []
+  for (const dispose of disposers.splice(0).reverse()) {
+    try {
+      await dispose()
+    } catch (error) {
+      errors.push(error)
+    }
+  }
+  if (errors.length > 0) throw new AggregateError(errors, 'generated extension cleanup failed')
 }
 
 async function loadCandidate(): Promise<void> {
@@ -114,8 +139,10 @@ async function handle(message: Record<string, unknown>): Promise<void> {
       return
     }
     if (op === 'shutdown') {
+      await disposeEffects()
       send({ id, ok: true })
-      process.exit(0)
+      setImmediate(() => process.exit(0))
+      return
     }
     throw new Error(`unknown generated protocol op: ${op}`)
   } catch (error) {
