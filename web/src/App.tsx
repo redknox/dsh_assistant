@@ -1,24 +1,9 @@
 import React, { useEffect, useState } from 'react'
-import {
-  abandonCandidateActivation,
-  activateCandidate,
-  decideApproval,
-  rollbackSystemState,
-  runRecovery,
-  uninstallPlugin,
-} from './api'
-import {
-  deferActivation,
-  deferSystemRollback,
-  EMPTY_GOVERNANCE_INTERACTION,
-  requestAbandonment,
-  requestActivation,
-  requestRecovery,
-  requestSystemRollback,
-} from './governanceInteraction'
+import { uninstallPlugin } from './api'
 import { MissionControlScreen } from './MissionControlScreen'
 import { type WorkspacePane } from './WorkspaceNavigation'
 import { useConversationControl } from './useConversationControl'
+import { useGovernanceControl } from './useGovernanceControl'
 import { useMissionControlRuntime } from './useMissionControlRuntime'
 import { useSkillControl } from './useSkillControl'
 import {
@@ -33,8 +18,8 @@ export { MissionControlScreen } from './MissionControlScreen'
 export function App() {
   const runtime = useMissionControlRuntime()
   const conversation = useConversationControl(runtime)
+  const governance = useGovernanceControl(runtime)
   const skillControl = useSkillControl(runtime)
-  const [governanceInteraction, setGovernanceInteraction] = useState(EMPTY_GOVERNANCE_INTERACTION)
   const [pane, setPane] = useState<WorkspacePane>(() => workspacePaneFromHash(globalThis.location?.hash))
   const [workspaceInteraction, setWorkspaceInteraction] = useState(EMPTY_WORKSPACE_INTERACTION)
 
@@ -77,36 +62,24 @@ export function App() {
       sending={conversation.sending}
       error={runtime.error}
       draft={conversation.draft}
-      armedRecovery={governanceInteraction.armedRecovery}
+      armedRecovery={governance.state.armedRecovery}
       onDraft={(value) => { conversation.dispatch({ action: 'draft', value }) }}
       onSend={() => { conversation.dispatch({ action: 'send' }) }}
       acknowledgement={runtime.acknowledgement}
       onDismissAcknowledgement={runtime.dismissAcknowledgement}
-      onApprove={(card) => { void runtime.perform(() => decideApproval(card, 'approve')) }}
-      onReject={(card) => { void runtime.perform(() => decideApproval(card, 'deny')) }}
-      deferredActivations={governanceInteraction.deferredActivations}
-      armedActivation={governanceInteraction.armedActivation}
-      armedAbandonment={governanceInteraction.armedAbandonment}
+      onApprove={(card) => { governance.dispatch({ action: 'approve', card }) }}
+      onReject={(card) => { governance.dispatch({ action: 'reject', card }) }}
+      deferredActivations={governance.state.deferredActivations}
+      armedActivation={governance.state.armedActivation}
+      armedAbandonment={governance.state.armedAbandonment}
       onDeferActivation={(card) => {
-        setGovernanceInteraction((current) => deferActivation(current, card))
+        governance.dispatch({ action: 'defer-activation', card })
       }}
       onActivate={(card) => {
-        const requested = requestActivation(governanceInteraction, card)
-        setGovernanceInteraction(requested.state)
-        const command = requested.command
-        if (command?.action === 'activate') {
-          const target = command.card
-          void runtime.perform(() => activateCandidate(target, true))
-        }
+        governance.dispatch({ action: 'activate', card })
       }}
       onAbandonActivation={(card) => {
-        const requested = requestAbandonment(governanceInteraction, card)
-        setGovernanceInteraction(requested.state)
-        const command = requested.command
-        if (command?.action === 'abandon-activation') {
-          const target = command.card
-          void runtime.perform(() => abandonCandidateActivation(target, true))
-        }
+        governance.dispatch({ action: 'abandon-activation', card })
       }}
       pane={pane}
       onNavigate={navigate}
@@ -135,28 +108,16 @@ export function App() {
       onAskUninstall={(plugin) => { interactWithWorkspace({ action: 'ask-plugin-uninstall', plugin }) }}
       onCancelUninstall={() => { interactWithWorkspace({ action: 'cancel-plugin-uninstall' }) }}
       onConfirmUninstall={(plugin) => { interactWithWorkspace({ action: 'confirm-plugin-uninstall', id: plugin.id }) }}
-      deferredRollback={governanceInteraction.deferredRollback}
-      armedRollback={governanceInteraction.armedRollback}
+      deferredRollback={governance.state.deferredRollback}
+      armedRollback={governance.state.armedRollback}
       onDeferRollback={() => {
-        setGovernanceInteraction((current) => deferSystemRollback(current))
+        governance.dispatch({ action: 'defer-rollback' })
       }}
       onAskRollback={(card) => {
-        const requested = requestSystemRollback(governanceInteraction, card)
-        setGovernanceInteraction(requested.state)
-        const command = requested.command
-        if (command?.action === 'rollback-system') {
-          const target = command.card
-          void runtime.perform(() => rollbackSystemState(target, true))
-        }
+        governance.dispatch({ action: 'rollback', card })
       }}
       onRecovery={(action) => {
-        const requested = requestRecovery(governanceInteraction, action)
-        setGovernanceInteraction(requested.state)
-        const command = requested.command
-        if (command?.action === 'recover') {
-          const recovery = command.recovery
-          void runtime.perform(() => runRecovery(recovery, true))
-        }
+        governance.dispatch({ action: 'recover', recovery: action })
       }}
     />
   )
