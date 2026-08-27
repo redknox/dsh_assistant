@@ -23,6 +23,12 @@ import { PlateRivets } from './Faceplate'
 import { MemoryWorkspace } from './MemoryWorkspace'
 import { ControlStripView, OperationsPanel } from './OperationalStatus'
 import { WorkspaceNavigation, type WorkspacePane } from './WorkspaceNavigation'
+import {
+  completeSkillInteraction,
+  EMPTY_SKILL_INTERACTION,
+  requestSkillInteraction,
+  requireSkillDependents,
+} from './skillInteraction'
 
 function lampModifier(state: MissionControlView['systemState'], connected: boolean): string {
   if (!connected) return 'offline'
@@ -331,9 +337,7 @@ export function App() {
   const [pane, setPane] = useState<WorkspacePane>(paneFromHash)
   const [confirmingSession, setConfirmingSession] = useState<string>()
   const [inspectingExtension, setInspectingExtension] = useState<string>()
-  const [confirmingSkill, setConfirmingSkill] = useState<string>()
-  const [armedSkill, setArmedSkill] = useState<string>()
-  const [skillDependents, setSkillDependents] = useState<{ readonly id: string; readonly dependents: readonly string[] }>()
+  const [skillInteraction, setSkillInteraction] = useState(EMPTY_SKILL_INTERACTION)
   const [acknowledgement, setAcknowledgement] = useState<{ readonly text: string }>()
 
   useEffect(() => {
@@ -467,73 +471,55 @@ export function App() {
       }}
       inspectingExtension={inspectingExtension}
       onInspectExtension={(id) => { setInspectingExtension((current) => current === id ? undefined : id) }}
-      confirmingSkill={confirmingSkill}
-      armedSkill={armedSkill}
-      skillDependents={skillDependents}
+      confirmingSkill={skillInteraction.confirmingSkill}
+      armedSkill={skillInteraction.armedSkill}
+      skillDependents={skillInteraction.dependents
+        ? { id: skillInteraction.dependents.id, dependents: skillInteraction.dependents.values }
+        : undefined}
       onPickSkill={(skill) => {
         setDraft((current) => current.trim() === '' ? `Use the ${skill.name} skill.` : `${current.trim()} ${skill.name}`)
       }}
       onSkillAction={(action, skill) => {
-        if (action === 'uninstall' || action === 'disable') {
-          if (action === 'uninstall') {
-            if (skill === undefined) {
-              setConfirmingSkill(undefined)
-              setSkillDependents(undefined)
-              return
-            }
-            if (confirmingSkill !== skill.id) {
-              setConfirmingSkill(skill.id)
-              setSkillDependents(undefined)
-              return
-            }
-          } else {
-            if (skill === undefined) return
-            const key = `disable:${skill.id}`
-            if (armedSkill !== key && skillDependents?.id !== skill.id) {
-              setArmedSkill(key)
-              setSkillDependents(undefined)
-              return
-            }
-            setArmedSkill(undefined)
-          }
+        const requested = requestSkillInteraction(skillInteraction, action, skill)
+        setSkillInteraction(requested.state)
+        const command = requested.command
+        if (!command) return
+        if (command.action === 'uninstall' || command.action === 'disable') {
+          if (!command.skill) return
+          const destructiveAction = command.action
+          const target = command.skill
           void act(async () => {
             try {
               const next = await runSkillAction({
-                action,
-                skill,
+                action: destructiveAction,
+                skill: target,
                 confirm: true,
-                acknowledgeDependents: skillDependents?.id === skill.id,
-                dependents: skillDependents?.id === skill.id ? skillDependents.dependents : [],
+                acknowledgeDependents: command.acknowledgeDependents,
+                dependents: command.dependents,
               })
-              setConfirmingSkill(undefined)
-              setSkillDependents(undefined)
+              setSkillInteraction((current) => completeSkillInteraction(current))
               return next
             } catch (caught) {
               const error = caught as Error & { code?: string; dependents?: readonly string[] }
-              if (error.code === 'dependents-required' && error.dependents && skill) {
-                setSkillDependents({ id: skill.id, dependents: error.dependents })
-                if (action === 'disable') setArmedSkill(`disable:${skill.id}`)
+              if (error.code === 'dependents-required' && error.dependents) {
+                setSkillInteraction((current) => requireSkillDependents(
+                  current,
+                  destructiveAction,
+                  target,
+                  error.dependents ?? [],
+                ))
               }
               throw caught
             }
           })
           return
         }
-        if (action === 'approve' || action === 'reject' || action === 'activate' || action === 'reactivate' || action === 'rollback') {
-          const key = action === 'rollback' ? 'rollback' : `${action}:${skill?.id ?? ''}`
-          if (armedSkill !== key) {
-            setArmedSkill(key)
-            return
-          }
-          setArmedSkill(undefined)
-          void act(() => runSkillAction({
-            action,
-            skill,
-            confirm: true,
-            rollback: empty.skillRollback,
-          }))
-          return
-        }
+        void act(() => runSkillAction({
+          action: command.action,
+          skill: command.skill,
+          confirm: true,
+          rollback: empty.skillRollback,
+        }))
       }}
       confirmingPlugin={confirmingPlugin}
       onAskUninstall={(plugin) => { setConfirmingPlugin(plugin.id) }}
