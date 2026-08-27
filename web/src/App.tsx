@@ -5,7 +5,6 @@ import {
   decideApproval,
   rollbackSystemState,
   runRecovery,
-  runSkillAction,
   uninstallPlugin,
 } from './api'
 import {
@@ -18,15 +17,10 @@ import {
   requestSystemRollback,
 } from './governanceInteraction'
 import { MissionControlScreen } from './MissionControlScreen'
-import {
-  completeSkillInteraction,
-  EMPTY_SKILL_INTERACTION,
-  requestSkillInteraction,
-  requireSkillDependents,
-} from './skillInteraction'
 import { type WorkspacePane } from './WorkspaceNavigation'
 import { useConversationControl } from './useConversationControl'
 import { useMissionControlRuntime } from './useMissionControlRuntime'
+import { useSkillControl } from './useSkillControl'
 import {
   EMPTY_WORKSPACE_INTERACTION,
   transitionWorkspaceInteraction,
@@ -39,10 +33,10 @@ export { MissionControlScreen } from './MissionControlScreen'
 export function App() {
   const runtime = useMissionControlRuntime()
   const conversation = useConversationControl(runtime)
+  const skillControl = useSkillControl(runtime)
   const [governanceInteraction, setGovernanceInteraction] = useState(EMPTY_GOVERNANCE_INTERACTION)
   const [pane, setPane] = useState<WorkspacePane>(() => workspacePaneFromHash(globalThis.location?.hash))
   const [workspaceInteraction, setWorkspaceInteraction] = useState(EMPTY_WORKSPACE_INTERACTION)
-  const [skillInteraction, setSkillInteraction] = useState(EMPTY_SKILL_INTERACTION)
 
   useEffect(() => {
     const sync = () => { setPane(workspacePaneFromHash(globalThis.location?.hash)) }
@@ -126,55 +120,16 @@ export function App() {
       onConfirmDeleteConversation={(id) => { interactWithWorkspace({ action: 'confirm-conversation-delete', id }) }}
       inspectingExtension={workspaceInteraction.inspectingExtension}
       onInspectExtension={(id) => { interactWithWorkspace({ action: 'inspect-extension', id }) }}
-      confirmingSkill={skillInteraction.confirmingSkill}
-      armedSkill={skillInteraction.armedSkill}
-      skillDependents={skillInteraction.dependents
-        ? { id: skillInteraction.dependents.id, dependents: skillInteraction.dependents.values }
+      confirmingSkill={skillControl.state.confirmingSkill}
+      armedSkill={skillControl.state.armedSkill}
+      skillDependents={skillControl.state.dependents
+        ? { id: skillControl.state.dependents.id, dependents: skillControl.state.dependents.values }
         : undefined}
       onPickSkill={(skill) => {
         conversation.dispatch({ action: 'suggest-skill', name: skill.name })
       }}
       onSkillAction={(action, skill) => {
-        const requested = requestSkillInteraction(skillInteraction, action, skill)
-        setSkillInteraction(requested.state)
-        const command = requested.command
-        if (!command) return
-        if (command.action === 'uninstall' || command.action === 'disable') {
-          if (!command.skill) return
-          const destructiveAction = command.action
-          const target = command.skill
-          void runtime.perform(async () => {
-            try {
-              const next = await runSkillAction({
-                action: destructiveAction,
-                skill: target,
-                confirm: true,
-                acknowledgeDependents: command.acknowledgeDependents,
-                dependents: command.dependents,
-              })
-              setSkillInteraction((current) => completeSkillInteraction(current))
-              return next
-            } catch (caught) {
-              const error = caught as Error & { code?: string; dependents?: readonly string[] }
-              if (error.code === 'dependents-required' && error.dependents) {
-                setSkillInteraction((current) => requireSkillDependents(
-                  current,
-                  destructiveAction,
-                  target,
-                  error.dependents ?? [],
-                ))
-              }
-              throw caught
-            }
-          })
-          return
-        }
-        void runtime.perform(() => runSkillAction({
-          action: command.action,
-          skill: command.skill,
-          confirm: true,
-          rollback: view.skillRollback,
-        }))
+        skillControl.dispatch(action, skill)
       }}
       confirmingPlugin={workspaceInteraction.confirmingPlugin?.id}
       onAskUninstall={(plugin) => { interactWithWorkspace({ action: 'ask-plugin-uninstall', plugin }) }}
