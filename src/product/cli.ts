@@ -746,6 +746,19 @@ export async function runProductCli(
       await hooks.afterWebUiBound?.(bound)
       io.log(`TARS-NG is running.\nWeb UI: ${bound.url}\nHome: ${layout.root}`)
       await stopped
+      try {
+        const finalOperator = operatorFromBoot(booted)
+        writeLastStatus(layout, {
+          ...snapshot,
+          webUi: bound.url,
+          safeMode: booted.diagnostics.safeMode || runtimeContext?.safeMode === true,
+          recoveryRequired: booted.diagnostics.recoveryRequired || runtimeContext?.profileCompositionError !== undefined,
+          operator: finalOperator,
+          skills: finalOperator.skills,
+        })
+      } catch (error) {
+        appendProductLog(layout.logFile, `lifecycle stop status-snapshot-failed ${error instanceof Error ? error.message : 'unknown error'}`)
+      }
       if (!await shutdownWriter()) {
         io.error('shutdown failed; retaining Home lease')
         appendProductLog(layout.logFile, 'lifecycle stop incomplete')

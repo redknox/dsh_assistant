@@ -10,6 +10,7 @@ import { readProductVersion } from '../src/product/compatibility.js'
 import { OPERATOR_STATUS_SCHEMA_VERSION } from '../src/domain/self-extension/status.js'
 import { runProductCli } from '../src/product/cli.js'
 import { ensureProductHome } from '../src/product/home.js'
+import { bootAssistantControl, type AssistantControl } from '../src/runtime/boot.js'
 import {
   acquireRuntimeLease,
   HOME_AMBIGUOUS_RECOVERY,
@@ -711,6 +712,55 @@ describe('TARS-NG Home runtime lease', () => {
             if (child.exitCode !== null) resolve()
           })
         }
+      }
+    })
+  })
+
+  it('records the final live operator state after an authenticated stop', async () => {
+    await withKeyHome(async (home) => {
+      const previousPort = process.env.TARS_NG_UI_PORT
+      process.env.TARS_NG_UI_PORT = '0'
+      let control: AssistantControl | undefined
+      try {
+        const code = await runProductCli(['start', '--home', home], { log() {}, error() {} }, {
+          bootProduct: async (_layout, allowFixtures) => {
+            control = await bootAssistantControl({ home, allowFixtures })
+            return control
+          },
+          afterWebUiBound: async (web) => {
+            assert.ok(control)
+            control.ctx.capabilityRegistry.register({
+              owner: 'managed/final-status-probe',
+              version: '1.0.0',
+              provenance: { kind: 'managed', origin: 'human' },
+              status: 'active',
+              evidence: 'Verified',
+              capabilities: [{ id: 'status.final-snapshot', permissions: [] }],
+              permissions: [],
+              runtimeSeams: [],
+            })
+            const identity = readRuntimeIdentity(ensureProductHome(home))
+            assert.ok(identity)
+            const stopped = await fetch(`${web.url}/api/runtime-stop`, {
+              method: 'POST',
+              headers: { 'content-type': 'application/json' },
+              body: JSON.stringify({ runId: identity.runId }),
+            })
+            assert.equal(stopped.status, 200)
+          },
+        })
+        assert.equal(code, 0)
+        const lines: string[] = []
+        assert.equal(await runProductCli(['status', '--home', home], {
+          log: (text) => lines.push(text),
+          error: (text) => lines.push(text),
+        }), 0)
+        const status = lines.join('\n')
+        assert.match(status, /operator-source: last-status/)
+        assert.match(status, /managed\/final-status-probe@1\.0\.0/)
+      } finally {
+        if (previousPort === undefined) delete process.env.TARS_NG_UI_PORT
+        else process.env.TARS_NG_UI_PORT = previousPort
       }
     })
   })
