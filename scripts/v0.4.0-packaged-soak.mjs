@@ -7,8 +7,9 @@
  */
 import { spawn, spawnSync } from 'node:child_process'
 import {
-  appendFileSync, chmodSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync,
+  chmodSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync,
 } from 'node:fs'
+import { createRequire } from 'node:module'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
@@ -17,6 +18,51 @@ import { createHash } from 'node:crypto'
 const REPO = join(dirname(fileURLToPath(import.meta.url)), '..')
 const PORT = process.env.TARS_NG_UI_PORT || '8803'
 const evidence = { steps: {}, errors: [] }
+const PROFILE_IDENTITY = 'v1:f151980e5483a185518db82be340a1d4b2ae06441fe3c73f2c8f3236761e5b81'
+const EXPECTED_TARBALL = 'dsh-assistant-0.4.0.tgz'
+const EXPECTED_FILES = 459
+const EXPECTED_BYTES = 966603
+const EXPECTED_SHA256 = 'e7552afd3a6cd1f566b14e12b0f55059eaca360f8ae9e4ecb5961656b05563c1'
+const SESSION_MARKER = 'marker-session-B-only'
+const OFFLINE_KEY = 'sk-offline-not-a-live-key'
+const FORBIDDEN_ENV = [
+  'DEEPSEEK_API_KEY',
+  'DSH_ASSISTANT_GOOGLE_CALENDAR_ACCESS_TOKEN',
+  'DSH_ASSISTANT_GOOGLE_CALENDAR_MODE',
+  'GOOGLE_SEARCH_API_KEY',
+  'GOOGLE_SEARCH_ENGINE_ID',
+  'DSH_ASSISTANT_SANDBOX_ROOT',
+  'TARS_NG_ALLOW_FIXTURES',
+  'TARS_NG_HOME',
+  'DSH_ASSISTANT_HOME',
+  'TARS_NG_PROFILE',
+  'TARS_NG_WORKSPACE',
+  'TARS_NG_SESSION_ROOT',
+  'TARS_NG_SESSION_ID',
+  'GITHUB_TOKEN',
+  'GH_TOKEN',
+  'NPM_TOKEN',
+  'NODE_AUTH_TOKEN',
+  'AWS_ACCESS_KEY_ID',
+  'AWS_SECRET_ACCESS_KEY',
+  'AWS_SESSION_TOKEN',
+  'AZURE_CLIENT_SECRET',
+  'GOOGLE_APPLICATION_CREDENTIALS',
+  'OPENAI_API_KEY',
+  'ANTHROPIC_API_KEY',
+]
+
+function scrubInheritedCredentials() {
+  for (const name of FORBIDDEN_ENV) delete process.env[name]
+  for (const name of Object.keys(process.env)) {
+    if (name === 'TARS_NG_UI_HOST' || name === 'TARS_NG_UI_PORT') continue
+    if (/^(TARS_NG_|DSH_ASSISTANT_|AWS_|AZURE_|OPENAI_|ANTHROPIC_|NPM_TOKEN|NODE_AUTH_TOKEN|GITHUB_TOKEN|GH_TOKEN)/.test(name)) {
+      delete process.env[name]
+    }
+  }
+}
+
+scrubInheritedCredentials()
 
 function sh(cmd, args, opts = {}) {
   const r = spawnSync(cmd, args, { encoding: 'utf8', ...opts })
@@ -39,24 +85,66 @@ function expect(ok, message) {
   evidence.errors.push(message)
 }
 
-const SESSION_MARKER = 'marker-session-B-only'
-const OFFLINE_KEY = 'sk-offline-not-a-live-key'
-
-function writeLocalSessionMarker(sessionId) {
-  const line = `${JSON.stringify({ type: 'user', text: SESSION_MARKER, source: 'packaged-soak-local' })}\n`
-  const files = [
-    join(sessionRoot, `${sessionId}.jsonl`),
-    join(home, 'sessions', `${sessionId}.jsonl`),
-    join(home, 'state', 'sessions', `${sessionId}.jsonl`),
-  ]
-  for (const file of files) {
-    mkdirSync(dirname(file), { recursive: true })
-    appendFileSync(file, line)
+function assertForbiddenEnvAbsent(where, bag) {
+  for (const name of FORBIDDEN_ENV) {
+    const value = bag[name]
+    if (name === 'TARS_NG_HOME' || name === 'DSH_ASSISTANT_HOME') {
+      expect(value === undefined || value === home, `${where} ${name} must be absent or the isolated Home`)
+      continue
+    }
+    expect(value === undefined || value === '' || (name === 'DEEPSEEK_API_KEY' && value === OFFLINE_KEY), `${where} must not inherit ${name}`)
   }
+}
+
+function conversationHas(view, text) {
+  return JSON.stringify(view?.conversation ?? []).includes(text)
+}
+
+function assertBoundedPayload(label, value) {
+  const text = typeof value === 'string' ? value : JSON.stringify(value)
+  expect(!text.includes(OFFLINE_KEY), `${label} must not print the placeholder key`)
+  expect(!/sk-[A-Za-z0-9]{8,}/.test(text), `${label} must not include secret prefixes`)
+  expect(!/ya29\./.test(text), `${label} must not include OAuth token prefixes`)
+  expect(!/chain-of-thought|hidden.?reason/i.test(text), `${label} must not include chain-of-thought`)
+  expect(!/\/dsh_assistant\/src\//.test(text), `${label} must not dump repo src/ paths`)
+  expect(!/\/Users\//.test(text), `${label} must not dump operator host paths`)
+  expect(!/v2-marker/.test(text), `${label} must not include Skill instruction body`)
 }
 
 async function loadProduct(pkgRoot) {
   return import(pathToFileURL(join(pkgRoot, 'dist/index.js')).href)
+}
+
+async function writeSessionMarkerThroughProduct(pkgRoot, product, sessionId) {
+  const require = createRequire(join(pkgRoot, 'package.json'))
+  const { createUserMessage } = await import(pathToFileURL(require.resolve('@deepseek-ai/dsh-llm')).href)
+  const { ensureProductHome } = await import(pathToFileURL(join(pkgRoot, 'dist/product/home.js')).href)
+  const { resolveRuntimeContext } = await import(pathToFileURL(join(pkgRoot, 'dist/product/runtime-context.js')).href)
+  const layout = ensureProductHome(home)
+  const context = resolveRuntimeContext(layout, {
+    workspace,
+    sessionRoot,
+    sessionId,
+  }, undefined, { allowFixtures: false })
+  const control = await product.bootAssistantControl({
+    home,
+    sessionRoot: context.sessionPersistenceDir,
+    sessionId,
+    workspace: context.workspace.value,
+    allowFixtures: false,
+  })
+  try {
+    const handle = await product.createAssistantAgent(control.ctx, sessionId, undefined, context.workspace.value)
+    handle.agent.session.append('user/message', createUserMessage({
+      content: [{ type: 'text', text: SESSION_MARKER }],
+      source: { kind: 'user' },
+    }), { surfaceOp: 'append' })
+    await control.ctx.sessions.flush(handle.agent.session)
+    await handle.dispose()
+    return context
+  } finally {
+    await control.ctx.fiber.dispose()
+  }
 }
 
 function cookieFrom(res) {
@@ -65,7 +153,7 @@ function cookieFrom(res) {
 }
 
 async function waitUrl(bin, env, home, timeoutMs = 60_000) {
-  const child = spawn(bin, ['start', '--home', home], { env, encoding: 'utf8' })
+  const child = spawn(bin, ['start', '--home', home, '--workspace', workspace, '--session-root', sessionRoot], { env, encoding: 'utf8' })
   let buf = ''
   const url = await new Promise((resolve, reject) => {
     const timer = setTimeout(() => reject(new Error(`start timeout: ${buf.slice(-500)}`)), timeoutMs)
@@ -105,18 +193,42 @@ const userHome = join(root, 'user')
 mkdirSync(join(userHome, '.config', 'tars-ng'), { recursive: true })
 mkdirSync(join(userHome, '.local', 'share'), { recursive: true })
 
+assertForbiddenEnvAbsent('runner process.env before build', process.env)
+
 sh('npm', ['run', 'build'], { cwd: REPO })
+const dry = sh('npm', ['pack', '--dry-run', '--json'], { cwd: REPO })
+let packedFileCount
+try {
+  const jsonLine = dry.stdout.trim().split('\n').filter((l) => l.startsWith('{') || l.startsWith('[')).at(-1)
+  const dryJson = JSON.parse(jsonLine)
+  const dryMeta = Array.isArray(dryJson) ? dryJson[0] : dryJson
+  packedFileCount = Array.isArray(dryMeta?.files) ? dryMeta.files.length : undefined
+} catch {
+  packedFileCount = undefined
+}
 const packOut = sh('npm', ['pack', '--pack-destination', packDir], { cwd: REPO })
 const tarballName = packOut.stdout.trim().split('\n').at(-1)
 const tarball = tarballName.startsWith('/') ? tarballName : join(packDir, tarballName)
 const sha256 = createHash('sha256').update(readFileSync(tarball)).digest('hex')
 const st = (await import('node:fs')).statSync(tarball)
+if (packedFileCount === undefined) {
+  packedFileCount = sh('tar', ['-tzf', tarball]).stdout.trim().split('\n').filter(Boolean).length
+}
 
 sh('npm', ['init', '-y'], { cwd: prefix })
 sh('npm', ['install', tarball, '--omit=dev'], { cwd: prefix, timeout: 180_000 })
 const pkgRoot = join(prefix, 'node_modules', 'dsh-assistant')
 const bin = join(prefix, 'node_modules', '.bin', 'tars-ng')
 const installedVer = JSON.parse(readFileSync(join(pkgRoot, 'package.json'), 'utf8')).version
+
+process.env.HOME = userHome
+process.env.XDG_CONFIG_HOME = join(userHome, '.config')
+process.env.XDG_DATA_HOME = join(userHome, '.local', 'share')
+process.env.TARS_NG_HOME = home
+process.env.DSH_ASSISTANT_HOME = home
+process.env.TARS_NG_UI_HOST = '127.0.0.1'
+process.env.TARS_NG_UI_PORT = PORT
+assertForbiddenEnvAbsent('runner process.env before product load', process.env)
 
 const env = {
   ...process.env,
@@ -128,8 +240,7 @@ const env = {
   TARS_NG_UI_HOST: '127.0.0.1',
   TARS_NG_UI_PORT: PORT,
 }
-delete env.TARS_NG_ALLOW_FIXTURES
-delete env.DEEPSEEK_API_KEY
+assertForbiddenEnvAbsent('child env', env)
 
 try {
 const missingDoctor = sh(bin, ['doctor', '--home', home, '--workspace', workspace, '--session-root', sessionRoot], { env })
@@ -148,6 +259,9 @@ const withKeyDoctor = sh(bin, ['doctor', '--home', home, '--workspace', workspac
 evidence.doctorConfigured = redact(withKeyDoctor.stdout).split('\n').filter((l) => !/token|key/i.test(l) || /present|missing/.test(l)).slice(0, 50)
 expect(/DEEPSEEK_API_KEY: present/.test(withKeyDoctor.stdout), 'offline placeholder key must be diagnosed present')
 expect(!withKeyDoctor.stdout.includes(OFFLINE_KEY), 'doctor must not print the placeholder key value')
+expect(withKeyDoctor.stdout.includes(`profile-identity: ${PROFILE_IDENTITY}`), 'doctor must report the shipped assistant Profile identity')
+expect(/workspace: .+ \(cli\)/.test(withKeyDoctor.stdout), 'workspace must be bound from CLI')
+expect(/session-persistence: persistent/.test(withKeyDoctor.stdout), 'session persistence must be persistent under the isolated Session root')
 
 const once = sh(bin, ['start', '--once', '--home', home, '--workspace', workspace, '--session-root', sessionRoot], { env })
 evidence.startOnce = redact(once.stdout).split('\n').slice(0, 20)
@@ -155,9 +269,12 @@ expect(/TARS-NG 0\.4\.0/.test(once.stdout), 'start --once must project 0.4.0')
 expect(!/Web UI:/.test(once.stdout), 'start --once must not start the Web UI')
 
 const product = await loadProduct(pkgRoot)
+assertForbiddenEnvAbsent('runner process.env after loadProduct', process.env)
 
 // --- 1–3 sessions + WUI DTOs ---
 let runtime = await waitUrl(bin, env, home)
+let topicA
+let topicB
 try {
   const cookie = cookieFrom(await fetch(`${runtime.url}/api/session`))
   const headers = { 'content-type': 'application/json', cookie }
@@ -165,11 +282,18 @@ try {
   const rc = view1.view.runtimeContext
   evidence.steps[1] = {
     profile: rc?.profile,
-    workspaceSource: rc?.workspaceSource ?? rc?.workspace?.source,
+    profileIdentity: rc?.profileIdentity,
+    workspaceSource: rc?.sources?.workspace,
+    workspaceIdentity: rc?.workspaceIdentity,
     sessionId: rc?.sessionId,
+    sessionPersistence: rc?.sessionPersistence,
     identity: view1.view.identity,
   }
-  expect(/assistant/i.test(String(rc?.profile ?? '')), 'bound Profile must be assistant')
+  expect(rc?.profile === 'assistant', 'bound Profile must be assistant')
+  expect(rc?.profileIdentity === PROFILE_IDENTITY, 'bound Profile identity must match the shipped assistant composition')
+  expect(rc?.sources?.workspace === 'cli', 'Workspace source must be cli')
+  expect(rc?.sessionPersistence === 'persistent', 'Session persistence must be persistent')
+  expect(typeof rc?.workspaceIdentity === 'string' && rc.workspaceIdentity.length > 0, 'Workspace identity must be present')
   const rev = view1.view.sessions?.revision ?? 0
   const current = view1.view.sessions?.currentId ?? view1.view.runtimeContext?.sessionId
   const created = await fetch(`${runtime.url}/api/conversations`, {
@@ -178,7 +302,7 @@ try {
     body: JSON.stringify({ action: 'create', title: 'Topic-A', sessionId: current, revision: rev }),
   })
   const createdBody = await created.json()
-  const topicA = createdBody.view.sessions?.sessions?.find((s) => s.title === 'Topic-A')
+  topicA = createdBody.view.sessions?.sessions?.find((s) => s.title === 'Topic-A')
   const created2 = await fetch(`${runtime.url}/api/conversations`, {
     method: 'POST',
     headers,
@@ -190,36 +314,23 @@ try {
     }),
   })
   const created2Body = await created2.json()
-  const topicB = created2Body.view.sessions?.sessions?.find((s) => s.title === 'Topic-B')
+  topicB = created2Body.view.sessions?.sessions?.find((s) => s.title === 'Topic-B')
   expect(Boolean(topicA?.id && topicB?.id), 'WUI must create Topic-A and Topic-B')
-  writeLocalSessionMarker(topicB.id)
-  const switched = await fetch(`${runtime.url}/api/conversations`, {
-    method: 'POST',
-    headers,
-    body: JSON.stringify({
-      action: 'switch',
-      id: topicA.id,
-      sessionId: created2Body.view.runtimeContext.sessionId,
-      revision: (await fetch(`${runtime.url}/api/view`).then((r) => r.json())).view.sessions.revision,
-    }),
-  })
-  const switchedBody = await switched.json()
+  expect(created.status === 200, 'Topic-A create must be HTTP 200')
   evidence.steps[2] = {
     httpCreate: created.status,
     topicA: topicA?.id,
     topicB: topicB?.id,
-    afterSwitch: switchedBody.view.runtimeContext?.sessionId,
-    titles: (switchedBody.view.sessions?.sessions ?? []).map((s) => s.title),
+    currentAfterCreateB: created2Body.view.runtimeContext?.sessionId,
   }
+  expect(evidence.steps[2].currentAfterCreateB === topicB.id, 'creating Topic-B must select Topic-B')
   evidence.steps[3] = {
-    identity: switchedBody.view.identity,
-    runtimeContextKeys: Object.keys(switchedBody.view.runtimeContext ?? {}),
-    systemState: switchedBody.view.systemState ?? switchedBody.view.runtime?.systemState,
+    identity: created2Body.view.identity,
+    runtimeContextKeys: Object.keys(created2Body.view.runtimeContext ?? {}),
+    systemState: created2Body.view.systemState ?? created2Body.view.runtime?.systemState,
     webUi: view1.webUi,
     dtoFromView: true,
   }
-  expect(created.status === 200, 'Topic-A create must be HTTP 200')
-  expect(evidence.steps[2].afterSwitch === topicA.id, 'switch must select Topic-A')
   expect(evidence.steps[3].identity === 'TARS-NG', 'WUI identity must be TARS-NG')
   for (const key of ['profile', 'profileIdentity', 'workspaceLabel', 'workspaceIdentity', 'sessionId', 'sessionPersistence', 'safeMode', 'sources']) {
     expect(evidence.steps[3].runtimeContextKeys.includes(key), `runtimeContext must include ${key}`)
@@ -230,17 +341,53 @@ try {
   runtime.child.kill('SIGTERM')
 }
 
-// restart recover current session
+const persistedContext = await writeSessionMarkerThroughProduct(pkgRoot, product, topicB.id)
+evidence.steps[1].sessionPersistenceDirBound = persistedContext.sessionRoot.source
+expect(persistedContext.sessionRoot.source === 'cli' || persistedContext.sessionRoot.source === 'product-config', 'Session root must be the isolated CLI bind')
+expect(persistedContext.sessionPersistenceDir.includes('.tars-ng-sessions'), 'product Session persistence must use the managed Session partition')
+
+runtime = await waitUrl(bin, env, home)
+try {
+  const cookie = cookieFrom(await fetch(`${runtime.url}/api/session`))
+  const headers = { 'content-type': 'application/json', cookie }
+  const onB = await fetch(`${runtime.url}/api/view`).then((r) => r.json())
+  evidence.steps[2].afterMarkerSession = onB.view.runtimeContext?.sessionId
+  evidence.steps[2].markerVisibleOnB = conversationHas(onB.view, SESSION_MARKER)
+  expect(onB.view.runtimeContext?.sessionId === topicB.id, 'after marker write, current session must be Topic-B')
+  expect(evidence.steps[2].markerVisibleOnB === true, 'Topic-B conversation must contain the persisted marker')
+  const switched = await fetch(`${runtime.url}/api/conversations`, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({
+      action: 'switch',
+      id: topicA.id,
+      sessionId: onB.view.runtimeContext.sessionId,
+      revision: onB.view.sessions.revision,
+    }),
+  })
+  const switchedBody = await switched.json()
+  evidence.steps[2].afterSwitch = switchedBody.view.runtimeContext?.sessionId
+  evidence.steps[2].titles = (switchedBody.view.sessions?.sessions ?? []).map((s) => s.title)
+  evidence.steps[2].activeAfterSwitch = (switchedBody.view.sessions?.sessions ?? []).filter((s) => s.archived !== true).length
+  evidence.steps[2].markerOnAAfterSwitch = conversationHas(switchedBody.view, SESSION_MARKER)
+  expect(evidence.steps[2].afterSwitch === topicA.id, 'switch must select Topic-A')
+  expect(evidence.steps[2].markerOnAAfterSwitch === false, 'Topic-A must not contain the Topic-B marker after switch')
+  expect(evidence.steps[2].activeAfterSwitch === 3, 'catalog must have three active sessions after create/switch')
+} finally {
+  stop(bin, env, home)
+  runtime.child.kill('SIGTERM')
+}
+
 runtime = await waitUrl(bin, env, home)
 try {
   const after = await fetch(`${runtime.url}/api/view`).then((r) => r.json())
   evidence.steps[2].afterRestartSession = after.view.runtimeContext?.sessionId
   evidence.steps[2].afterRestartTitles = (after.view.sessions?.sessions ?? []).map((s) => ({ id: s.id, title: s.title }))
-  const conv = JSON.stringify(after.view.conversation ?? [])
-  evidence.steps[2].sessionBBleedIntoCurrent = conv.includes(SESSION_MARKER)
-    && after.view.runtimeContext?.sessionId === evidence.steps[2].topicA
-  expect(after.view.runtimeContext?.sessionId === evidence.steps[2].topicA, 'restart must keep Topic-A current')
-  expect(evidence.steps[2].sessionBBleedIntoCurrent === false, 'Topic-B marker must not bleed into Topic-A')
+  evidence.steps[2].activeAfterRestart = (after.view.sessions?.sessions ?? []).filter((s) => s.archived !== true).length
+  evidence.steps[2].sessionBBleedIntoCurrent = conversationHas(after.view, SESSION_MARKER)
+  expect(after.view.runtimeContext?.sessionId === topicA.id, 'restart must keep Topic-A current')
+  expect(evidence.steps[2].sessionBBleedIntoCurrent === false, 'Topic-B marker must not bleed into Topic-A after restart')
+  expect(evidence.steps[2].activeAfterRestart === 3, 'catalog must keep three active sessions after restart')
 } finally {
   stop(bin, env, home)
   runtime.child.kill('SIGTERM')
@@ -286,8 +433,8 @@ try {
   const ext = (v.view.extensions ?? []).find((e) => e.candidateId === evidence.steps[4].import.candidateId)
   evidence.steps[4].wuiAfterApprove = { lifecycle: ext?.lifecycle, mounted: ext?.mounted, approved: ext?.approval }
   evidence.steps[11] = {
-    conversationHasApproveText: JSON.stringify(v.view.conversation ?? []).includes('approved-for-exact-diff'),
-    acknowledgementSeparate: true,
+    conversationHasApproveText: conversationHas(v.view, 'approved-for-exact-diff'),
+    conversationHasActivateText: conversationHas(v.view, 'self-extension activate') || conversationHas(v.view, 'state=active'),
   }
   expect(ext?.lifecycle === 'APPROVED_NOT_ACTIVE', 'WUI after approve must be APPROVED_NOT_ACTIVE')
   expect(ext?.mounted === false, 'WUI after approve must have mounted=false')
@@ -369,6 +516,13 @@ try {
   expect(evidence.steps[5].wuiDisabled.lifecycle === 'DISABLED_REACTIVATABLE', 'packed WUI after disable must be DISABLED_REACTIVATABLE')
   expect(evidence.steps[5].wuiDisabled.mounted === false, 'packed WUI after disable must have mounted=false')
   expect(evidence.steps[5].wuiDisabled.pluginsActive === false, 'packed WUI after disable must drop the active plugin card')
+  evidence.steps[11].conversationHasActivateText = conversationHas(v.view, 'self-extension activate')
+    || conversationHas(v.view, 'approved-for-exact-diff')
+    || conversationHas(v.view, '"state":"active"')
+  evidence.steps[11].acknowledgementSeparate = evidence.steps[11].conversationHasApproveText === false
+    && evidence.steps[11].conversationHasActivateText === false
+  expect(evidence.steps[11].conversationHasActivateText === false, 'activation results must not persist in chat tails')
+  expect(evidence.steps[11].acknowledgementSeparate === true, 'approval and activation acknowledgements must stay out of conversation')
 } finally {
   stop(bin, env, home)
   runtime.child.kill('SIGTERM')
@@ -447,17 +601,12 @@ try {
   const v = await fetch(`${runtime.url}/api/view`).then((r) => r.json())
   const skill = (v.view.skills ?? []).find((s) => s.id === evidence.steps[6].import.candidateId)
   evidence.steps[6].wui = { lifecycle: skill?.lifecycle, userInvocable: skill?.userInvocable, catalog: v.view.skillCatalog }
-  const activity = JSON.stringify(v.view.activity ?? [])
-  evidence.steps[12] = {
-    activityHasCoT: /chain-of-thought|hidden.?reason/i.test(activity),
-    activityHasSecret: /sk-|ya29\./.test(activity),
-    doctorHasPathDump: /\/dsh_assistant\/src\//.test(JSON.stringify(v)),
-  }
   expect(skill?.lifecycle === 'active', 'WUI Skill v1 must be active')
   expect(v.view.skillCatalog?.state === 'ok', 'Skill catalog must be ok after activate')
-  expect(evidence.steps[12].activityHasCoT === false, 'Activity must not include chain-of-thought')
-  expect(evidence.steps[12].activityHasSecret === false, 'Activity must not include secret prefixes')
-  expect(evidence.steps[12].doctorHasPathDump === false, 'WUI view must not dump repo src/ paths')
+  assertBoundedPayload('WUI view after Skill v1', v)
+  evidence.steps[12] = {
+    wuiBounded: true,
+  }
 } finally {
   stop(bin, env, home)
   runtime.child.kill('SIGTERM')
@@ -507,22 +656,54 @@ try {
 sh(bin, ['self-extension', 'safe-mode', 'enter'], { env })
 runtime = await waitUrl(bin, env, home)
 try {
+  const cookie = cookieFrom(await fetch(`${runtime.url}/api/session`))
   const v = await fetch(`${runtime.url}/api/view`).then((r) => r.json())
   const doctor = sh(bin, ['doctor', '--home', home], { env })
+  const skill = (v.view.skills ?? []).find((s) => s.id === 'weekly-review@1.0.1')
+  const invoke = await fetch(`${runtime.url}/api/skill`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', cookie },
+    body: JSON.stringify({
+      action: 'activate',
+      confirm: true,
+      id: skill?.id,
+      name: skill?.name,
+      version: skill?.version,
+      digest: skill?.digest,
+      generation: skill?.generation,
+    }),
+  })
+  const invokeBody = await invoke.json()
   evidence.steps[8] = {
     wuiSafe: v.view.systemState ?? v.view.runtime?.safeMode ?? v.view.safeMode,
     skillCatalog: v.view.skillCatalog ?? (v.view.skillsHealth && v.view.skillsHealth.catalog),
-    invocable: (v.view.skills ?? []).filter((s) => s.userInvocable),
+    invocable: (v.view.skills ?? []).filter((s) => s.userInvocable).map((s) => s.id),
     doctorSafe: redact(doctor.stdout).split('\n').filter((l) => /safe|skill|catalog/i.test(l)).slice(0, 12),
-    recoveryPresent: Boolean(v.view.recovery || v.view.actions?.some?.((a) => /safe|recover/i.test(JSON.stringify(a)))),
+    recoveryPresent: Boolean(v.view.recovery?.actions?.length || v.view.rollback),
+    invokeDenied: { status: invoke.status, error: invokeBody.error },
   }
   expect(evidence.steps[8].wuiSafe === 'SAFE_MODE', 'WUI must report SAFE_MODE')
   expect(evidence.steps[8].skillCatalog?.state === 'withheld', 'Safe Mode catalog must be withheld')
   expect(evidence.steps[8].doctorSafe.some((l) => /safe-mode: true/.test(l)), 'doctor must report safe-mode: true')
   expect(evidence.steps[8].doctorSafe.some((l) => /catalog=withheld/.test(l)), 'doctor must report catalog=withheld')
+  expect(evidence.steps[8].recoveryPresent === true, 'Safe Mode must keep Recovery/diagnostics visible')
+  expect(invoke.status === 409 && invokeBody.error === 'catalog-withheld', 'active Skill must not be invokable while catalog is withheld')
 } finally {
   stop(bin, env, home)
   runtime.child.kill('SIGTERM')
+}
+
+{
+  const safe = await product.bootSafeModeRuntime({ home })
+  try {
+    const listed = await safe.ctx.skills.list({ cwd: home })
+    evidence.steps[8].skillToolPresent = Boolean(safe.ctx.tools.get('skill'))
+    evidence.steps[8].dshListsWeeklyReview = listed.some((item) => item.name === 'weekly-review')
+    expect(evidence.steps[8].skillToolPresent === false, 'Safe Mode must withhold the skill tool')
+    expect(evidence.steps[8].dshListsWeeklyReview === false, 'Safe Mode DSH catalog must not list weekly-review')
+  } finally {
+    await safe.ctx.fiber.dispose()
+  }
 }
 
 const exited = sh(bin, ['self-extension', 'safe-mode', 'exit'], { env })
@@ -591,23 +772,48 @@ mkdirSync(destGood)
     await control.ctx.fiber.dispose()
   }
 }
+{
+  const restored = await product.bootAssistantControl({ home: destGood })
+  try {
+    const weekly = restored.ctx.skillLifecycle.list().find((s) => s.id === 'weekly-review@1.0.1')
+    const plugin = restored.ctx.candidateWorkspace.list().find((c) => c.id === 'third-party--text-reverse@1.0.0')
+    evidence.steps[10].restoredSkill = weekly
+      ? { id: weekly.id, version: weekly.version, digest: weekly.digest, lifecycle: weekly.lifecycle }
+      : null
+    evidence.steps[10].restoredPlugin = plugin ? { id: plugin.id, lifecycle: plugin.lifecycle } : null
+    expect(weekly?.digest === evidence.steps[7].digest, 'restored Home must keep weekly-review@1.0.1 digest')
+    expect(weekly?.lifecycle === 'active', 'restored Skill must remain active')
+    expect(plugin?.id === 'third-party--text-reverse@1.0.0', 'restored Home must keep the plugin candidate')
+  } finally {
+    await restored.ctx.fiber.dispose()
+  }
+}
 
 const help = sh(bin, ['--help'], { env })
+const status = sh(bin, ['status', '--home', home], { env })
+assertBoundedPayload('doctor after recover', doctorAfterExit.stdout)
+assertBoundedPayload('status', status.stdout)
 evidence.identity = {
   tarball: tarballName.split('/').at(-1),
   sha256,
   bytes: st.size,
+  files: packedFileCount,
   installedVersion: installedVer,
   helpMentionsTars: /tars-ng/i.test(help.stdout),
   packedHasSrc: existsSync(join(pkgRoot, 'src')),
   packedHasWebSrc: existsSync(join(pkgRoot, 'web')),
   layout: 'isolated prefix/home/workspace/sessions port 8803',
 }
+expect(evidence.identity.tarball === EXPECTED_TARBALL, 'packed filename must be dsh-assistant-0.4.0.tgz')
+expect(evidence.identity.files === EXPECTED_FILES, 'packed file count must match the seal')
+expect(evidence.identity.bytes === EXPECTED_BYTES, 'packed byte size must match the seal')
+expect(evidence.identity.sha256 === EXPECTED_SHA256, 'packed SHA-256 must match the seal')
 expect(evidence.identity.installedVersion === '0.4.0', 'installed package version must be 0.4.0')
 expect(evidence.identity.packedHasSrc === false, 'packed install must not include src/')
 expect(evidence.identity.packedHasWebSrc === false, 'packed install must not include web/ source')
 expect(evidence.identity.helpMentionsTars === true, 'installed tars-ng --help must mention tars-ng')
 expect(evidence.steps[7].doctorBeforeRestart.some((l) => /catalog=ok(?:\s+candidates=\d+)?\s+active=weekly-review@1\.0\.1/.test(l)), 'doctor before restart must show catalog=ok and active=weekly-review@1.0.1')
+assertForbiddenEnvAbsent('runner process.env at end', process.env)
 } catch (error) {
   evidence.errors.push(String(error?.stack ?? error).slice(0, 2000))
 }
