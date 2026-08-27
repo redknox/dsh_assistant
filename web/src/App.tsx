@@ -18,6 +18,7 @@ import {
 } from './api'
 import { Glyph } from './icons'
 import { ConversationWorkspace } from './ConversationWorkspace'
+import { ExtensionsWorkspace, PluginLifecycleControl } from './ExtensionsWorkspace'
 import { MemoryWorkspace } from './MemoryWorkspace'
 import { formatDiff, isPendingApproval, skillInvocationSurfaceOpen } from './missionControlPresentation'
 import { WorkspaceNavigation, type WorkspacePane } from './WorkspaceNavigation'
@@ -141,349 +142,6 @@ function RecoveryPanel(props: {
   )
 }
 
-function PluginRow(props: {
-  readonly plugin: UserPluginView
-  readonly locked: boolean
-  readonly confirming: boolean
-  readonly onAsk: (plugin: UserPluginView) => void
-  readonly onCancel: () => void
-  readonly onConfirm: (plugin: UserPluginView) => void
-}) {
-  const { plugin } = props
-  const blocked = plugin.dependency.severity === 'hard' || plugin.dependency.severity === 'unresolved'
-  const hard = plugin.dependency.dependents.filter((item) => item.kind === 'hard')
-  const optional = plugin.dependency.dependents.filter((item) => item.kind === 'optional')
-  const historical = plugin.dependency.dependents.filter((item) => item.kind === 'historical')
-  return (
-    <div
-      className="plugin-row"
-      data-plugin-id={plugin.id}
-      data-owner={plugin.owner}
-      data-version={plugin.version}
-      data-uninstallable={plugin.uninstallable ? 'yes' : 'no'}
-    >
-      <dt>
-        <span className="capability-area">{plugin.owner}@{plugin.version}</span>
-        <span className="capability-action">{plugin.capabilities.join(', ') || 'user plugin'}</span>
-      </dt>
-      <dd>
-        {props.confirming ? (
-          <div className="uninstall-dialog" role="dialog" aria-labelledby={`uninstall-title-${plugin.id}`} aria-describedby={`uninstall-body-${plugin.id}`}>
-            <h3 id={`uninstall-title-${plugin.id}`}>Uninstall {plugin.owner}@{plugin.version}</h3>
-            <p id={`uninstall-body-${plugin.id}`}>
-              Will remove:
-              {plugin.capabilities.length > 0 ? ` Capability: ${plugin.capabilities.join(', ')}.` : ''}
-              {plugin.tools.length > 0 ? ` Tool: ${plugin.tools.join(', ')}.` : ''}
-              {` Runtime mount: ${plugin.mounted ? 1 : 0}.`}
-              {plugin.candidateId ? ` Candidate: ${plugin.candidateId}.` : ''}
-              {plugin.digest ? ` Digest: ${plugin.digest}.` : ''}
-            </p>
-            <p>
-              Dependency check: {plugin.dependency.severity === 'none' ? 'no active dependents' : plugin.dependency.severity}
-              {hard.length > 0 ? ` — ${hard.map((item) => `${item.owner}@${item.version} requires ${item.requiredCapability}`).join('; ')}` : ''}
-              {optional.length > 0 ? ` Optional dependents will degrade: ${optional.map((item) => `${item.owner}@${item.version}`).join(', ')}.` : ''}
-              {historical.length > 0 ? ` Historical dependents: ${historical.map((item) => `${item.owner}@${item.version} required ${item.requiredCapability}`).join(', ')}.` : ''}
-            </p>
-            <p>Candidate files and audit history will be retained.</p>
-            <div className="approval-actions">
-              <button type="button" className="button button--secondary" data-uninstall-action="cancel" onClick={props.onCancel}>Cancel</button>
-              <button
-                type="button"
-                className="button button--approval"
-                data-uninstall-action="confirm"
-                disabled={props.locked || blocked}
-                onClick={() => props.onConfirm(plugin)}
-              >
-                Confirm uninstall
-              </button>
-            </div>
-          </div>
-        ) : (
-          <button
-            type="button"
-            className="plugin-uninstall"
-            data-uninstall-action="ask"
-            aria-label="Uninstall plugin"
-            title="Uninstall plugin"
-            disabled={props.locked}
-            onClick={() => props.onAsk(plugin)}
-          >
-            <Glyph name="trash" />
-          </button>
-        )}
-      </dd>
-    </div>
-  )
-}
-
-function ExtensionsWorkspace(props: {
-  readonly view: MissionControlView
-  readonly locked: boolean
-  readonly inspecting?: string
-  readonly confirmingPlugin?: string
-  readonly armedActivation?: string
-  readonly armedAbandonment?: string
-  readonly onInspect: (id: string) => void
-  readonly onApprove: (card: ApprovalCard) => void
-  readonly onReject: (card: ApprovalCard) => void
-  readonly onActivate?: (card: ActivationCard) => void
-  readonly onAbandonActivation?: (card: ActivationCard) => void
-  readonly onAskUninstall?: (plugin: UserPluginView) => void
-  readonly onCancelUninstall?: () => void
-  readonly onConfirmUninstall?: (plugin: UserPluginView) => void
-  readonly confirmingSkill?: string
-  readonly armedSkill?: string
-  readonly onSkillAction?: (action: 'approve' | 'reject' | 'activate' | 'disable' | 'reactivate' | 'uninstall' | 'rollback', skill?: SkillProjection) => void
-  readonly skillDependents?: { readonly id: string; readonly dependents: readonly string[] }
-}) {
-  return (
-    <main className="conversation-panel extensions-panel" id="extensions" data-workspace-pane="extensions">
-      <div className="conversation-scroll">
-        <section className="capability-section" aria-labelledby="extensions-title">
-          <h2 id="extensions-title">EXTENSIONS</h2>
-          <ul className="workbench-list" data-extensions="true">
-            {(props.view.extensions ?? []).length === 0 ? (
-              <li className="workbench-item">No generated or third-party extensions in this home.</li>
-            ) : (props.view.extensions ?? []).map((item) => {
-              const approval = (props.view.approvals ?? []).find((card) => card.candidateId === item.candidateId)
-              const card = (props.view.activations ?? []).find((activation) => activation.candidateId === item.candidateId)
-              const plugin = (props.view.plugins ?? []).find((row) => row.owner === item.owner && row.version === item.version)
-              const failure = props.view.activationFailure?.candidateId === item.candidateId ? props.view.activationFailure : undefined
-              const open = props.inspecting === item.id
-              const pending = approval !== undefined && isPendingApproval(approval.status)
-              const canActivate = (item.lifecycle === 'DISABLED_REACTIVATABLE' || item.lifecycle === 'APPROVED_NOT_ACTIVE' || item.lifecycle === 'ACTIVATION_FAILED')
-                && card !== undefined
-                && item.eligibilityOk
-              return (
-                <li
-                  key={item.id}
-                  className="workbench-item"
-                  data-extension-id={item.id}
-                  data-extension-lifecycle={item.lifecycle}
-                  data-registry-status={item.registryStatus}
-                  data-extension-inspect={open ? 'open' : 'closed'}
-                >
-                  <div className="workbench-identity">{item.owner}@{item.version}</div>
-                  <div className="workbench-meta">lifecycle {item.lifecycle.replaceAll('_', ' ')}</div>
-                  <div className="workbench-meta">registry {item.registryStatus} · {item.mounted ? 'mounted' : 'unmounted'}</div>
-                  <div className="workbench-meta" data-extension-provenance={item.provenance}>
-                    provenance {item.provenance === 'third-party' || item.provenanceOrigin === 'import' ? 'Third-party' : item.provenance}
-                    {item.provenanceOrigin ? ` / ${item.provenanceOrigin}` : ''}
-                  </div>
-                  <div className="workbench-meta">capabilities {item.capabilities.join(', ') || 'none'}</div>
-                  {item.candidateId ? <div className="workbench-meta">candidate {item.candidateId}</div> : null}
-                  {item.digest ? <div className="workbench-meta">digest {item.digest}</div> : null}
-                  <div className="workbench-meta">
-                    {item.eligibilityOk ? 'eligible' : `not eligible${item.eligibilityDenials.length ? `: ${item.eligibilityDenials.join(', ')}` : ''}`}
-                  </div>
-                  {item.newerAuthoritative ? <div className="workbench-meta">newer authoritative revision exists</div> : null}
-                  {open ? (
-                    <div className="workbench-meta" data-extension-details="true">
-                      review {item.reviewState ?? 'unknown'} · validation {item.validationPassed === true ? 'passed' : 'not passed'} · approval {item.approvalDecision ?? 'none'}
-                      {failure ? ` · failed ${failure.phase}: ${failure.summary}` : ''}
-                    </div>
-                  ) : null}
-                  <div className="approval-actions">
-                    <button
-                      type="button"
-                      className="button button--secondary"
-                      data-extension-action={
-                        item.lifecycle === 'DISABLED_BLOCKED' ? 'inspect-denials'
-                          : item.lifecycle === 'ACTIVATION_FAILED' ? 'diagnostics'
-                            : item.lifecycle === 'SUPERSEDED' ? 'view-history'
-                              : 'inspect'
-                      }
-                      disabled={props.locked}
-                      onClick={() => props.onInspect(item.id)}
-                    >
-                      {item.lifecycle === 'DISABLED_BLOCKED' ? (open ? 'HIDE DENIALS' : 'INSPECT DENIALS')
-                        : item.lifecycle === 'ACTIVATION_FAILED' ? (open ? 'HIDE DIAGNOSTICS' : 'DIAGNOSTICS')
-                          : item.lifecycle === 'SUPERSEDED' ? (open ? 'HIDE HISTORY' : 'VIEW HISTORY')
-                            : (open ? 'HIDE' : 'INSPECT')}
-                    </button>
-                    {item.lifecycle === 'APPROVAL_REQUIRED' && pending && approval ? (
-                      <>
-                        <button type="button" className="button button--secondary" data-extension-action="reject" disabled={props.locked} onClick={() => props.onReject(approval)}>REJECT</button>
-                        <button type="button" className="button button--approval" data-extension-action="approve" disabled={props.locked} onClick={() => props.onApprove(approval)}>APPROVE</button>
-                      </>
-                    ) : null}
-                    {canActivate && card ? (
-                      <>
-                        {item.lifecycle === 'ACTIVATION_FAILED' ? (
-                          <button
-                            type="button"
-                            className="button button--fault"
-                            data-extension-action="abandon"
-                            disabled={props.locked}
-                            onClick={() => props.onAbandonActivation?.(card)}
-                          >
-                            {props.armedAbandonment === card.id ? 'CONFIRM ABANDON' : 'ABANDON'}
-                          </button>
-                        ) : null}
-                        <button
-                          type="button"
-                          className="button button--approval"
-                          data-extension-action={item.lifecycle === 'DISABLED_REACTIVATABLE' ? 'reactivate' : item.lifecycle === 'ACTIVATION_FAILED' ? 'retry' : 'activate'}
-                          disabled={props.locked}
-                          onClick={() => props.onActivate?.(card)}
-                        >
-                          {props.armedActivation === card.id
-                            ? (item.lifecycle === 'DISABLED_REACTIVATABLE' ? 'CONFIRM REACTIVATE' : item.lifecycle === 'ACTIVATION_FAILED' ? 'CONFIRM RETRY' : 'CONFIRM ACTIVATE')
-                            : (item.lifecycle === 'DISABLED_REACTIVATABLE' ? 'REACTIVATE' : item.lifecycle === 'ACTIVATION_FAILED' ? 'RETRY' : 'ACTIVATE')}
-                        </button>
-                      </>
-                    ) : null}
-                    {item.lifecycle === 'ACTIVE' && plugin ? (
-                      <PluginRow
-                        plugin={plugin}
-                        locked={props.locked}
-                        confirming={props.confirmingPlugin === plugin.id}
-                        onAsk={props.onAskUninstall ?? (() => {})}
-                        onCancel={props.onCancelUninstall ?? (() => {})}
-                        onConfirm={props.onConfirmUninstall ?? (() => {})}
-                      />
-                    ) : null}
-                  </div>
-                </li>
-              )
-            })}
-          </ul>
-        </section>
-        <SkillsCenter
-          view={props.view}
-          locked={props.locked}
-            confirmingSkill={props.confirmingSkill}
-            armedSkill={props.armedSkill}
-            skillDependents={props.skillDependents}
-            onSkillAction={props.onSkillAction ?? (() => {})}
-        />
-      </div>
-    </main>
-  )
-}
-
-function SkillsCenter(props: {
-  readonly view: MissionControlView
-  readonly locked: boolean
-  readonly confirmingSkill?: string
-  readonly armedSkill?: string
-  readonly skillDependents?: { readonly id: string; readonly dependents: readonly string[] }
-  readonly onSkillAction: (action: 'approve' | 'reject' | 'activate' | 'disable' | 'reactivate' | 'uninstall' | 'rollback', skill?: SkillProjection) => void
-}) {
-  const skills = props.view.skills ?? []
-  const catalogOpen = skillInvocationSurfaceOpen(props.view)
-  return (
-    <section className="capability-section" aria-labelledby="skills-title">
-      <h2 id="skills-title">SKILLS</h2>
-      {props.view.skillCatalog?.state === 'degraded' || props.view.skillCatalog?.state === 'withheld' ? (
-        <p className="workbench-meta" data-skill-catalog={props.view.skillCatalog.state}>
-          {props.view.skillCatalog.state === 'withheld'
-            ? 'catalog withheld'
-            : `catalog degraded${props.view.skillCatalog.failed.length > 0 ? ` · failed ${props.view.skillCatalog.failed.join(', ')}` : ''}`}
-          {props.view.skillCatalog.detail ? ` · ${props.view.skillCatalog.detail}` : ''}
-        </p>
-      ) : null}
-      <ul className="workbench-list" data-skills="true">
-        {skills.length === 0 ? (
-          <li className="workbench-item">No Skills in this Profile catalog.</li>
-        ) : skills.map((skill) => (
-          <li
-            key={skill.id}
-            className="workbench-item"
-            data-skill-id={skill.id}
-            data-skill-lifecycle={skill.lifecycle}
-            data-skill-system={skill.system ? 'yes' : 'no'}
-          >
-            <div className="workbench-identity">{skill.name}@{skill.version}</div>
-            <div className="workbench-meta">profile {skill.profile} · digest {skill.digest}</div>
-            <div className="workbench-meta">lifecycle {skill.lifecycle} · {skill.provenance}</div>
-            <div className="workbench-meta">{skill.description}</div>
-            {skill.whenToUse ? <div className="workbench-meta">when {skill.whenToUse}</div> : null}
-            <div className="workbench-meta">
-              invocation model {skill.modelInvocable ? 'yes' : 'no'} · user {skill.userInvocable ? 'yes' : 'no'}
-            </div>
-            <div className="workbench-meta">resources {skill.resources.join(', ') || 'none'}</div>
-            <div className="workbench-meta">
-              validation {skill.validationPassed ? 'passed' : 'not passed'} · review {skill.reviewComplete ? 'complete' : 'not complete'}
-            </div>
-            {skill.dependsOn.length > 0 ? <div className="workbench-meta">depends on {skill.dependsOn.join(', ')}</div> : null}
-            {skill.dependents.length > 0 ? <div className="workbench-meta" data-skill-dependents="true">dependents {skill.dependents.join(', ')}</div> : null}
-            {skill.lastFailure ? (
-              <div className="workbench-meta" data-skill-failed="true">failed {skill.lastFailure.phase} · {skill.lastFailure.detail}</div>
-            ) : null}
-            {skill.revisionDiff ? (
-              <div className="workbench-meta" data-skill-diff="true">
-                instruction {skill.revisionDiff.instructionChanged ? 'changed' : 'unchanged'}
-                {' '}({skill.revisionDiff.instructionBeforeChars}→{skill.revisionDiff.instructionAfterChars} chars)
-                {skill.revisionDiff.resources.added.length ? ` · resources +${skill.revisionDiff.resources.added.join(',')}` : ''}
-                {skill.revisionDiff.resources.removed.length ? ` · resources -${skill.revisionDiff.resources.removed.join(',')}` : ''}
-                {` · invocation ${skill.revisionDiff.invocation.before.modelInvocable ? 'model' : 'no-model'}/${skill.revisionDiff.invocation.before.userInvocable ? 'user' : 'no-user'}→${skill.revisionDiff.invocation.after.modelInvocable ? 'model' : 'no-model'}/${skill.revisionDiff.invocation.after.userInvocable ? 'user' : 'no-user'}`}
-                {skill.revisionDiff.dependsOn.added.length ? ` · depends +${skill.revisionDiff.dependsOn.added.join(',')}` : ''}
-                {skill.revisionDiff.dependsOn.removed.length ? ` · depends -${skill.revisionDiff.dependsOn.removed.join(',')}` : ''}
-              </div>
-            ) : null}
-            {skill.resolutionHandoff ? (
-              <div className="workbench-meta" data-skill-handoff="capability-resolution">
-                missing tools {skill.resolutionHandoff.missingTools.join(', ')} · next Capability Resolution
-              </div>
-            ) : null}
-            {props.skillDependents?.id === skill.id ? (
-              <div className="workbench-meta" data-skill-dependent-warning="true">
-                hard dependents {props.skillDependents.dependents.join(', ')}
-              </div>
-            ) : null}
-            <div className="approval-actions">
-              {skill.lifecycle === 'approval-requested' ? (
-                <>
-                  <button type="button" className="button button--secondary" data-skill-action="reject" disabled={props.locked} onClick={() => props.onSkillAction('reject', skill)}>
-                    {props.armedSkill === `reject:${skill.id}` ? 'CONFIRM REJECT' : 'REJECT'}
-                  </button>
-                  <button type="button" className="button button--approval" data-skill-action="approve" disabled={props.locked} onClick={() => props.onSkillAction('approve', skill)}>
-                    {props.armedSkill === `approve:${skill.id}` ? 'CONFIRM APPROVE' : 'APPROVE'}
-                  </button>
-                </>
-              ) : null}
-              {catalogOpen && skill.lifecycle === 'approved' ? (
-                <button type="button" className="button button--approval" data-skill-action="activate" disabled={props.locked} onClick={() => props.onSkillAction('activate', skill)}>
-                  {props.armedSkill === `activate:${skill.id}` ? 'CONFIRM ACTIVATE' : 'ACTIVATE'}
-                </button>
-              ) : null}
-              {catalogOpen && skill.lifecycle === 'disabled' ? (
-                <button type="button" className="button button--approval" data-skill-action="reactivate" disabled={props.locked} onClick={() => props.onSkillAction('reactivate', skill)}>
-                  {props.armedSkill === `reactivate:${skill.id}` ? 'CONFIRM REACTIVATE' : 'REACTIVATE'}
-                </button>
-              ) : null}
-              {skill.lifecycle === 'active' && !skill.system ? (
-                <button type="button" className="button button--secondary" data-skill-action="disable" disabled={props.locked} onClick={() => props.onSkillAction('disable', skill)}>
-                  {props.skillDependents?.id === skill.id ? 'CONFIRM DEPENDENTS'
-                    : props.armedSkill === `disable:${skill.id}` ? 'CONFIRM DISABLE' : 'DISABLE'}
-                </button>
-              ) : null}
-              {!skill.system && skill.lifecycle !== 'uninstalled' ? (
-                props.confirmingSkill === skill.id ? (
-                  <>
-                    <button type="button" className="button button--secondary" data-skill-action="cancel-uninstall" disabled={props.locked} onClick={() => props.onSkillAction('uninstall')}>CANCEL</button>
-                    <button type="button" className="button button--approval" data-skill-action="confirm-uninstall" disabled={props.locked} onClick={() => props.onSkillAction('uninstall', skill)}>
-                      {props.skillDependents?.id === skill.id ? 'CONFIRM DEPENDENTS' : 'CONFIRM UNINSTALL'}
-                    </button>
-                  </>
-                ) : (
-                  <button type="button" className="button button--secondary" data-skill-action="uninstall" disabled={props.locked} onClick={() => props.onSkillAction('uninstall', skill)}>UNINSTALL</button>
-                )
-              ) : null}
-            </div>
-          </li>
-        ))}
-      </ul>
-      {props.view.skillRollback ? (
-        <button type="button" className="button button--secondary" data-skill-action="rollback" disabled={props.locked} onClick={() => props.onSkillAction('rollback')}>
-          {props.armedSkill === 'rollback' ? 'CONFIRM ROLLBACK' : `ROLLBACK ${props.view.skillRollback.name}@${props.view.skillRollback.version}`}
-        </button>
-      ) : null}
-    </section>
-  )
-}
-
 function OperationsPanel(props: {
   readonly view: MissionControlView
   readonly locked?: boolean
@@ -528,14 +186,16 @@ function OperationsPanel(props: {
         </div>
         <dl className="capability-list">
           {(props.view.plugins ?? []).map((plugin) => (
-            <PluginRow
+            <PluginLifecycleControl
               key={plugin.id}
               plugin={plugin}
               locked={props.locked === true}
               confirming={props.confirmingPlugin === plugin.id}
-              onAsk={props.onAskUninstall ?? (() => {})}
-              onCancel={props.onCancelUninstall ?? (() => {})}
-              onConfirm={props.onConfirmUninstall ?? (() => {})}
+              actions={{
+                askUninstall: props.onAskUninstall,
+                cancelUninstall: props.onCancelUninstall,
+                confirmUninstall: props.onConfirmUninstall,
+              }}
             />
           ))}
           {props.view.capabilities.map((item) => (
@@ -816,23 +476,27 @@ export function MissionControlScreen(props: {
         {pane === 'extensions' ? (
           <ExtensionsWorkspace
             view={view}
-            locked={locked}
-            inspecting={props.inspectingExtension}
-            confirmingPlugin={props.confirmingPlugin}
-            armedActivation={props.armedActivation}
-            armedAbandonment={props.armedAbandonment}
-            onInspect={props.onInspectExtension ?? (() => {})}
-            onApprove={props.onApprove}
-            onReject={props.onReject}
-            onActivate={props.onActivate}
-            onAbandonActivation={props.onAbandonActivation}
-            onAskUninstall={props.onAskUninstall}
-            onCancelUninstall={props.onCancelUninstall}
-            onConfirmUninstall={props.onConfirmUninstall}
-            confirmingSkill={props.confirmingSkill}
-            armedSkill={props.armedSkill}
-            skillDependents={props.skillDependents}
-            onSkillAction={props.onSkillAction}
+            state={{
+              locked,
+              inspecting: props.inspectingExtension,
+              confirmingPlugin: props.confirmingPlugin,
+              armedActivation: props.armedActivation,
+              armedAbandonment: props.armedAbandonment,
+              confirmingSkill: props.confirmingSkill,
+              armedSkill: props.armedSkill,
+              skillDependents: props.skillDependents,
+            }}
+            actions={{
+              inspect: props.onInspectExtension ?? (() => {}),
+              approve: props.onApprove,
+              reject: props.onReject,
+              activate: props.onActivate,
+              abandonActivation: props.onAbandonActivation,
+              askUninstall: props.onAskUninstall,
+              cancelUninstall: props.onCancelUninstall,
+              confirmUninstall: props.onConfirmUninstall,
+              skill: props.onSkillAction ?? (() => {}),
+            }}
           />
         ) : pane === 'memory' ? (
           <MemoryWorkspace
