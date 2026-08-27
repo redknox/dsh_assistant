@@ -29,6 +29,15 @@ import {
   requestSkillInteraction,
   requireSkillDependents,
 } from './skillInteraction'
+import {
+  deferActivation,
+  deferSystemRollback,
+  EMPTY_GOVERNANCE_INTERACTION,
+  requestAbandonment,
+  requestActivation,
+  requestRecovery,
+  requestSystemRollback,
+} from './governanceInteraction'
 
 function lampModifier(state: MissionControlView['systemState'], connected: boolean): string {
   if (!connected) return 'offline'
@@ -327,13 +336,8 @@ export function App() {
   const [sending, setSending] = useState(false)
   const [draft, setDraft] = useState('')
   const [error, setError] = useState<string>()
-  const [armedRecovery, setArmedRecovery] = useState<string>()
-  const [armedActivation, setArmedActivation] = useState<string>()
-  const [armedAbandonment, setArmedAbandonment] = useState<string>()
-  const [deferredActivations, setDeferredActivations] = useState<string[]>([])
+  const [governanceInteraction, setGovernanceInteraction] = useState(EMPTY_GOVERNANCE_INTERACTION)
   const [confirmingPlugin, setConfirmingPlugin] = useState<string>()
-  const [deferredRollback, setDeferredRollback] = useState(false)
-  const [armedRollback, setArmedRollback] = useState(false)
   const [pane, setPane] = useState<WorkspacePane>(paneFromHash)
   const [confirmingSession, setConfirmingSession] = useState<string>()
   const [inspectingExtension, setInspectingExtension] = useState<string>()
@@ -425,36 +429,36 @@ export function App() {
       sending={sending}
       error={error}
       draft={draft}
-      armedRecovery={armedRecovery}
+      armedRecovery={governanceInteraction.armedRecovery}
       onDraft={setDraft}
       onSend={() => { void onSend() }}
       acknowledgement={acknowledgement}
       onDismissAcknowledgement={() => setAcknowledgement(undefined)}
       onApprove={(card) => { void act(() => decideApproval(card, 'approve')) }}
       onReject={(card) => { void act(() => decideApproval(card, 'deny')) }}
-      deferredActivations={deferredActivations}
-      armedActivation={armedActivation}
-      armedAbandonment={armedAbandonment}
+      deferredActivations={governanceInteraction.deferredActivations}
+      armedActivation={governanceInteraction.armedActivation}
+      armedAbandonment={governanceInteraction.armedAbandonment}
       onDeferActivation={(card) => {
-        setDeferredActivations((current) => current.includes(card.id) ? current : [...current, card.id])
+        setGovernanceInteraction((current) => deferActivation(current, card))
       }}
       onActivate={(card) => {
-        if (armedActivation !== card.id) {
-          setArmedAbandonment(undefined)
-          setArmedActivation(card.id)
-          return
+        const requested = requestActivation(governanceInteraction, card)
+        setGovernanceInteraction(requested.state)
+        const command = requested.command
+        if (command?.action === 'activate') {
+          const target = command.card
+          void act(() => activateCandidate(target, true))
         }
-        setArmedActivation(undefined)
-        void act(() => activateCandidate(card, true))
       }}
       onAbandonActivation={(card) => {
-        if (armedAbandonment !== card.id) {
-          setArmedActivation(undefined)
-          setArmedAbandonment(card.id)
-          return
+        const requested = requestAbandonment(governanceInteraction, card)
+        setGovernanceInteraction(requested.state)
+        const command = requested.command
+        if (command?.action === 'abandon-activation') {
+          const target = command.card
+          void act(() => abandonCandidateActivation(target, true))
         }
-        setArmedAbandonment(undefined)
-        void act(() => abandonCandidateActivation(card, true))
       }}
       pane={pane}
       onNavigate={navigate}
@@ -528,27 +532,28 @@ export function App() {
         setConfirmingPlugin(undefined)
         void act(() => uninstallPlugin(plugin, true))
       }}
-      deferredRollback={deferredRollback}
-      armedRollback={armedRollback}
+      deferredRollback={governanceInteraction.deferredRollback}
+      armedRollback={governanceInteraction.armedRollback}
       onDeferRollback={() => {
-        setArmedRollback(false)
-        setDeferredRollback(true)
+        setGovernanceInteraction((current) => deferSystemRollback(current))
       }}
       onAskRollback={(card) => {
-        if (!armedRollback) {
-          setArmedRollback(true)
-          return
+        const requested = requestSystemRollback(governanceInteraction, card)
+        setGovernanceInteraction(requested.state)
+        const command = requested.command
+        if (command?.action === 'rollback-system') {
+          const target = command.card
+          void act(() => rollbackSystemState(target, true))
         }
-        setArmedRollback(false)
-        void act(() => rollbackSystemState(card, true))
       }}
       onRecovery={(action) => {
-        if (action !== 'diagnostics' && armedRecovery !== action) {
-          setArmedRecovery(action)
-          return
+        const requested = requestRecovery(governanceInteraction, action)
+        setGovernanceInteraction(requested.state)
+        const command = requested.command
+        if (command?.action === 'recover') {
+          const recovery = command.recovery
+          void act(() => runRecovery(recovery, true))
         }
-        setArmedRecovery(undefined)
-        void act(() => runRecovery(action, true))
       }}
     />
   )
