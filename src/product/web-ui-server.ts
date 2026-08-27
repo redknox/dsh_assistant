@@ -6,9 +6,7 @@ import { ActivationDeniedError, GovernanceContractError, RollbackDeniedError, Un
 import { SkillContractError } from '../domain/skill/errors.js'
 import { SimulatedCrashError } from '../domain/governance/service.js'
 import type { RecoveryRoot } from '../domain/governance/root.js'
-import type { OperatorStatus } from '../domain/self-extension/status.js'
 import { acknowledgementOf } from '../domain/workspace/approvals.js'
-import { runIdEquals } from './runtime-lease.js'
 import { boundActivationDiagnostics } from '../domain/workspace/failure.js'
 import { redactText } from '../domain/workspace/redact.js'
 import { AssistantControlSurface } from '../ui/controller.js'
@@ -27,31 +25,9 @@ import {
   SUPPORTED_RECOVERY_ACTIONS,
   type WebUiListenOptions,
 } from './web-ui-protocol.js'
+import { handleRuntimeControlRequest, type WebUiRuntimeControl } from './web-ui-runtime-control.js'
 
-export interface WebUiRuntimeControl {
-  readonly pid: number
-  readonly startedAt: string
-  readonly productVersion: string
-  readonly normalizedHome: string
-  readonly runId: string
-  readonly onStop: () => void
-  readonly inspectLive?: () => {
-    readonly safeMode: boolean
-    readonly recoveryRequired: boolean
-    readonly persistence?: string
-    readonly operator?: OperatorStatus
-    readonly skills?: {
-      readonly profile: string
-      readonly candidates: number
-      readonly active: readonly string[]
-      readonly disabled: readonly string[]
-      readonly failed: readonly string[]
-      readonly catalog: 'ok' | 'empty' | 'degraded' | 'withheld'
-      readonly recoveryRequired?: boolean
-      readonly catalogDetail?: string
-    }
-  }
-}
+export type { WebUiRuntimeControl } from './web-ui-runtime-control.js'
 
 export interface WebUiServerOptions extends WebUiListenOptions {
   readonly surface: AssistantControlSurface
@@ -468,42 +444,14 @@ export function startWebUiServer(options: WebUiServerOptions): Promise<WebUiServ
       if (rejectOrigin(req, res)) return
       const hostHeader = req.headers.host ?? `${listen.host}:${boundPort()}`
       const requestUrl = new URL(req.url ?? '/', `http://${hostHeader}`)
-      if ((req.method === 'GET' || req.method === 'POST') && requestUrl.pathname === '/api/runtime-health') {
-        const control = options.runtimeControl
-        if (!control) {
-          sendJson(res, 404, { error: 'runtime-control-unavailable' })
-          return
-        }
-        if (req.method === 'POST') {
-          const body = JSON.parse(await readBody(req)) as { runId?: unknown }
-          if (typeof body.runId !== 'string' || !runIdEquals(body.runId, control.runId)) {
-            sendJson(res, 403, { error: 'identity-mismatch' })
-            return
-          }
-        }
-        const publicHealth = {
-          pid: control.pid,
-          startedAt: control.startedAt,
-          productVersion: control.productVersion,
-        }
-        sendJson(res, 200, req.method === 'POST'
-          ? { ...publicHealth, normalizedHome: control.normalizedHome, ...(control.inspectLive ? control.inspectLive() : {}) }
-          : publicHealth)
-        return
-      }
-      if (req.method === 'POST' && requestUrl.pathname === '/api/runtime-stop') {
-        const control = options.runtimeControl
-        if (!control) {
-          sendJson(res, 404, { error: 'runtime-control-unavailable' })
-          return
-        }
-        const body = JSON.parse(await readBody(req)) as { runId?: unknown }
-        if (typeof body.runId !== 'string' || !runIdEquals(body.runId, control.runId)) {
-          sendJson(res, 403, { error: 'identity-mismatch' })
-          return
-        }
-        sendJson(res, 200, { ok: true, pid: control.pid })
-        setImmediate(() => control.onStop())
+      const runtimeControl = await handleRuntimeControlRequest({
+        method: req.method,
+        pathname: requestUrl.pathname,
+        readJson: async () => JSON.parse(await readBody(req)) as unknown,
+      }, options.runtimeControl)
+      if (runtimeControl) {
+        sendJson(res, runtimeControl.status, runtimeControl.body)
+        if (runtimeControl.afterSend) setImmediate(runtimeControl.afterSend)
         return
       }
       if (rejectUntrustedMutation(req, res)) return
