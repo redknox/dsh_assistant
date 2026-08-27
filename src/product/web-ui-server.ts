@@ -1,7 +1,4 @@
-import { createReadStream, existsSync, statSync } from 'node:fs'
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http'
-import path from 'node:path'
-import { fileURLToPath } from 'node:url'
 import type { RecoveryRoot } from '../domain/governance/root.js'
 import { acknowledgementOf } from '../domain/workspace/approvals.js'
 import { redactText } from '../domain/workspace/redact.js'
@@ -10,12 +7,8 @@ import type { MissionControlView } from '../domain/workspace/types.js'
 import { PRODUCT_UI_SESSION_ID } from './constants.js'
 import type { LiveSessionHost } from './session-lifecycle.js'
 import {
-  assertSafePayload,
-  createUiSessionToken,
   originAllowed,
   resolveWebUiListen,
-  sessionCookieHeader,
-  sessionMatches,
   type WebUiListenOptions,
 } from './web-ui-protocol.js'
 import { handleRuntimeControlRequest, type WebUiRuntimeControl } from './web-ui-runtime-control.js'
@@ -25,6 +18,7 @@ import { handleWebUiActivationRequest } from './web-ui-activations.js'
 import { handleWebUiGovernanceLifecycleRequest } from './web-ui-governance-lifecycle.js'
 import { WebUiGovernanceMutations } from './web-ui-governance-mutations.js'
 import { handleWebUiSkillRequest, type WebUiSkillCommand } from './web-ui-skills.js'
+import { WebUiHttpTransport } from './web-ui-http.js'
 
 export type { WebUiRuntimeControl } from './web-ui-runtime-control.js'
 
@@ -45,29 +39,11 @@ export interface WebUiServer {
   close(): Promise<void>
 }
 
-const MIME: Record<string, string> = {
-  '.html': 'text/html; charset=utf-8',
-  '.js': 'text/javascript; charset=utf-8',
-  '.css': 'text/css; charset=utf-8',
-  '.json': 'application/json; charset=utf-8',
-  '.svg': 'image/svg+xml',
-  '.ico': 'image/x-icon',
-  '.map': 'application/json; charset=utf-8',
-}
-
-const MUTATING = new Set(['POST', 'PUT', 'PATCH', 'DELETE'])
-
-export function defaultWebAssetRoot(): string {
-  return path.join(path.dirname(fileURLToPath(import.meta.url)), '../../dist/web')
-}
+export { defaultWebAssetRoot } from './web-ui-http.js'
 
 export function startWebUiServer(options: WebUiServerOptions): Promise<WebUiServer> {
   const listen = resolveWebUiListen(process.env, options)
-  const assetRoot = path.resolve(options.assetRoot ?? defaultWebAssetRoot())
-  const sessionToken = createUiSessionToken()
-  const clients = new Set<ServerResponse>()
   let url = ''
-  let lastPayload = ''
   let poll: ReturnType<typeof setInterval> | undefined
 
   const snapshot = (): MissionControlView => {
@@ -83,21 +59,13 @@ export function startWebUiServer(options: WebUiServerOptions): Promise<WebUiServ
     ...(extra.acknowledgement ? { acknowledgement: extra.acknowledgement } : {}),
   })
 
+  const transport = new WebUiHttpTransport(options.assetRoot, envelope)
+  const sendJson = transport.sendJson.bind(transport)
+  const broadcast = transport.broadcast.bind(transport)
+
   const acknowledgementFor = (confirmationId: string) => {
     const resolution = snapshot().approvalResolutions.find((item) => item.confirmationId === confirmationId)
     return resolution ? { text: redactText(acknowledgementOf(resolution).text) } : undefined
-  }
-
-  const sendJson = (res: ServerResponse, status: number, body: unknown, setSession = false) => {
-    const payload = assertSafePayload(JSON.stringify(body))
-    const headers: Record<string, string> = {
-      'content-type': 'application/json; charset=utf-8',
-      'cache-control': 'no-store',
-      connection: 'close',
-    }
-    if (setSession) headers['set-cookie'] = sessionCookieHeader(sessionToken)
-    res.writeHead(status, headers)
-    res.end(payload)
   }
 
   const rejectOrigin = (req: IncomingMessage, res: ServerResponse): boolean => {
@@ -108,8 +76,7 @@ export function startWebUiServer(options: WebUiServerOptions): Promise<WebUiServ
   }
 
   const rejectUntrustedMutation = (req: IncomingMessage, res: ServerResponse): boolean => {
-    if (!MUTATING.has(req.method ?? 'GET')) return false
-    if (sessionMatches(req.headers.cookie, sessionToken)) return false
+    if (transport.mutationTrusted(req.method, req.headers.cookie)) return false
     sendJson(res, 403, { error: 'untrusted session' })
     return true
   }
@@ -117,31 +84,6 @@ export function startWebUiServer(options: WebUiServerOptions): Promise<WebUiServ
   const boundPort = (): number => {
     const address = server.address()
     return typeof address === 'object' && address ? address.port : listen.port
-  }
-
-  const broadcast = () => {
-    let payload: string
-    try {
-      payload = assertSafePayload(JSON.stringify(envelope()))
-    } catch {
-      return
-    }
-    if (payload === lastPayload) return
-    lastPayload = payload
-    for (const client of clients) {
-      client.write(`event: view\ndata: ${payload}\n\n`)
-    }
-  }
-
-  const readBody = async (req: IncomingMessage): Promise<string> => {
-    const chunks: Buffer[] = []
-    let size = 0
-    for await (const chunk of req) {
-      size += chunk.length
-      if (size > 65_536) throw new Error('request too large')
-      chunks.push(chunk)
-    }
-    return Buffer.concat(chunks).toString('utf8')
   }
 
   const mutations = new WebUiGovernanceMutations(() => options.recoveryRoot.inspect())
@@ -166,37 +108,6 @@ export function startWebUiServer(options: WebUiServerOptions): Promise<WebUiServ
     }
   }
 
-  const serveAsset = (reqPath: string, res: ServerResponse, setSession: boolean) => {
-    const relative = reqPath === '/' ? 'index.html' : reqPath.replace(/^\//, '')
-    const target = path.resolve(assetRoot, relative)
-    if (!target.startsWith(`${assetRoot}${path.sep}`) && target !== assetRoot) {
-      res.writeHead(403).end()
-      return
-    }
-    if (!existsSync(target) || !statSync(target).isFile()) {
-      if (reqPath === '/' || !path.extname(reqPath)) {
-        const index = path.join(assetRoot, 'index.html')
-        if (existsSync(index)) {
-          res.writeHead(200, {
-            'content-type': MIME['.html'],
-            ...(setSession ? { 'set-cookie': sessionCookieHeader(sessionToken) } : {}),
-          })
-          createReadStream(index).pipe(res)
-          return
-        }
-      }
-      res.writeHead(404, { 'content-type': 'text/plain; charset=utf-8' }).end('Web UI assets are not installed')
-      return
-    }
-    const mime = MIME[path.extname(target)] ?? 'application/octet-stream'
-    res.writeHead(200, {
-      'content-type': mime,
-      'cache-control': 'no-store',
-      ...(setSession && target.endsWith(`${path.sep}index.html`) ? { 'set-cookie': sessionCookieHeader(sessionToken) } : {}),
-    })
-    createReadStream(target).pipe(res)
-  }
-
   const server: Server = createServer(async (req, res) => {
     try {
       if (rejectOrigin(req, res)) return
@@ -205,7 +116,7 @@ export function startWebUiServer(options: WebUiServerOptions): Promise<WebUiServ
       const runtimeControl = await handleRuntimeControlRequest({
         method: req.method,
         pathname: requestUrl.pathname,
-        readJson: async () => JSON.parse(await readBody(req)) as unknown,
+        readJson: () => transport.readJson(req),
       }, options.runtimeControl)
       if (runtimeControl) {
         sendJson(res, runtimeControl.status, runtimeControl.body)
@@ -222,24 +133,13 @@ export function startWebUiServer(options: WebUiServerOptions): Promise<WebUiServ
         return
       }
       if (req.method === 'GET' && requestUrl.pathname === '/api/events') {
-        res.writeHead(200, {
-          'content-type': 'text/event-stream; charset=utf-8',
-          'cache-control': 'no-store',
-          connection: 'keep-alive',
-        })
-        clients.add(res)
-        const payload = assertSafePayload(JSON.stringify(envelope()))
-        lastPayload = payload
-        res.write(`event: view\ndata: ${payload}\n\n`)
-        req.on('close', () => {
-          clients.delete(res)
-        })
+        transport.openEvents(req, res)
         return
       }
       const conversation = await handleWebUiConversationRequest({
         method: req.method,
         pathname: requestUrl.pathname,
-        readJson: async () => JSON.parse(await readBody(req)) as unknown,
+        readJson: () => transport.readJson(req),
       }, {
         currentSessionId: () => options.surface.sessionId,
         sendMessage: (text) => options.surface.sendMessage(text),
@@ -254,7 +154,7 @@ export function startWebUiServer(options: WebUiServerOptions): Promise<WebUiServ
       const approval = await handleWebUiApprovalRequest({
         method: req.method,
         pathname: requestUrl.pathname,
-        readJson: async () => JSON.parse(await readBody(req)) as unknown,
+        readJson: () => transport.readJson(req),
       }, {
         approvals: () => snapshot().approvals,
         resolvePolicy: async (id, decision) => {
@@ -277,7 +177,7 @@ export function startWebUiServer(options: WebUiServerOptions): Promise<WebUiServ
       const activation = await handleWebUiActivationRequest({
         method: req.method,
         pathname: requestUrl.pathname,
-        readJson: async () => JSON.parse(await readBody(req)) as unknown,
+        readJson: () => transport.readJson(req),
       }, {
         authority: {
           activate: (candidateId) => {
@@ -301,7 +201,7 @@ export function startWebUiServer(options: WebUiServerOptions): Promise<WebUiServ
       const skill = await handleWebUiSkillRequest({
         method: req.method,
         pathname: requestUrl.pathname,
-        readJson: async () => JSON.parse(await readBody(req)) as unknown,
+        readJson: () => transport.readJson(req),
       }, {
         authority: { execute: executeSkillCommand },
         project: (acknowledgement) => envelope(acknowledgement ? { acknowledgement } : {}),
@@ -314,7 +214,7 @@ export function startWebUiServer(options: WebUiServerOptions): Promise<WebUiServ
       const governanceLifecycle = await handleWebUiGovernanceLifecycleRequest({
         method: req.method,
         pathname: requestUrl.pathname,
-        readJson: async () => JSON.parse(await readBody(req)) as unknown,
+        readJson: () => transport.readJson(req),
       }, {
         authority: {
           inspect: () => options.recoveryRoot.inspect(),
@@ -341,7 +241,7 @@ export function startWebUiServer(options: WebUiServerOptions): Promise<WebUiServ
         return
       }
       if (req.method === 'GET' && !requestUrl.pathname.startsWith('/api/')) {
-        serveAsset(requestUrl.pathname, res, requestUrl.pathname === '/' || requestUrl.pathname === '/index.html')
+        transport.serveAsset(requestUrl.pathname, res, requestUrl.pathname === '/' || requestUrl.pathname === '/index.html')
         return
       }
       sendJson(res, 404, { error: 'not found' })
@@ -373,8 +273,7 @@ export function startWebUiServer(options: WebUiServerOptions): Promise<WebUiServ
         notify: broadcast,
         close: () => new Promise((done, fail) => {
           if (poll) clearInterval(poll)
-          for (const client of clients) client.end()
-          clients.clear()
+          transport.close()
           server.close((error) => error ? fail(error) : done())
           if (typeof server.closeAllConnections === 'function') server.closeAllConnections()
         }),
