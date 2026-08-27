@@ -1,6 +1,6 @@
 # Skill lifecycle packaged human soak record
 
-Status: **recorded, not accepted**. Issue #94 stays open until this soak is accepted. Do not close #94, merge as “Verified”, bump the product version, or claim v0.4.0 Skill lifecycle complete from this file.
+Status: **historical feature soak for Issue #94**. #94 was accepted and closed; PR #95 merged to `main`. This file remains the Skill-lifecycle soak record (package `0.3.0`). It is **not** the v0.4.0 product seal. Final packaged integration evidence is [v0.4.0-seal.md](./v0.4.0-seal.md).
 
 This is not `test/packaging.test.ts` and not `test/skill-lifecycle.test.ts`. Those remain scripted coverage.
 

@@ -24,7 +24,7 @@ Required:
 
 - Node `>=22`
 - npm
-- A packed `dsh-assistant-0.3.0.tgz` (or this repository for contributors)
+- A packed `dsh-assistant-0.4.0.tgz` (or this repository for contributors)
 
 ```sh
 npm install

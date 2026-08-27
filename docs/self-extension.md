@@ -19,13 +19,13 @@ Assistant-generated and imported third-party code has **no privileged runtime pa
 A trusted operator may import one local directory with `tars-ng self-extension import-local <directory>`. Import publishes an inactive Workbench plugin candidate only. Discovery != Import != Validation != Approval != Activation. Marketplace discovery is not part of this command. Skill lifecycle is a separate product path (`tars-ng skill import-local`); see [docs/skills.md](./skills.md).
 
 ```text
-v0.3.0 = Governance + Mission-Control product baseline
-v0.4.0 target = Self-Developing Product Baseline
+v0.3.0 = Governance + Mission-Control product baseline (historical)
+v0.4.0 = Runtime Foundation + Governed Extension Baseline + DSH-native Skill lifecycle
 ```
 
 Self-development is allowed; self-authorization is not. The Candidate Workbench is a bounded conversation-to-review loop (`generated-extension-api/v1` + host scaffold + diagnostics + list/resume). It is not self-approval or arbitrary software development. Real-model soak: [docs/m6c-conversation-soak.md](./m6c-conversation-soak.md).
 
-The v0.1.0 Assistant Core MVP remains the stable product/runtime baseline underneath Self-Extension. Self-Extension sits beside that baseline; it does not replace it. v0.2.0 is the Governed Self-Extension baseline. v0.3.0 is the historical Governance + Mission-Control baseline.
+The v0.1.0 Assistant Core MVP remains the stable product/runtime baseline underneath Self-Extension. Self-Extension sits beside that baseline; it does not replace it. v0.2.0 is the Governed Self-Extension baseline. v0.3.0 is the historical Governance + Mission-Control baseline. v0.4.0 adds host-owned Runtime Context, topic Sessions, governed local import, and DSH-native Skill lifecycle on that same governance contract.
 
 ## Three separate questions
 

@@ -157,7 +157,7 @@ describe('v0.2.x release-confidence suite', () => {
       assert.equal(second.ctx.tools.get('v02_probe_ping'), undefined)
       assert.ok(second.recoveryRoot.inspect())
       const human = second.recoveryRoot.issueAuthority({ kind: 'human-control', source: 'operator-cli' })
-      second.recoveryRoot.disable(human, 'generated/v02-probe', '0.1.0')
+      await second.recoveryRoot.disable(human, 'generated/v02-probe', '0.1.0')
     } finally {
       await second.ctx.fiber.dispose()
     }
@@ -464,7 +464,7 @@ describe('v0.2.x release-confidence suite', () => {
     const home = mkdtempSync(join(tmpdir(), 'dsh-v02-l-'))
     const { first, created, human } = await prepareCandidate(home, true)
     try {
-      first.recoveryRoot.disable(human, 'generated/v02-probe', '0.1.0')
+      await first.recoveryRoot.disable(human, 'generated/v02-probe', '0.1.0')
     } finally {
       await first.ctx.fiber.dispose()
     }

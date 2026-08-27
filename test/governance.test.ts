@@ -452,6 +452,24 @@ describe('extension governance and recovery', () => {
     assert.equal(root.inspect().lastKnownGood?.owners.some((item) => item.owner === 'generated/text-slugify'), false)
   })
 
+  it('trusted disable unmounts the live candidate and records mounted=false', async () => {
+    const { registry, workspace, governance, root, human, runtime } = seeded()
+    const base = ready(workspace, {
+      owner: 'generated/text-slugify',
+      version: '0.1.0',
+      capabilities: ['text.slugify'],
+    })
+    const fingerprint = governance.requestApproval(base.id).fingerprint
+    root.recordApproval(human, { candidateId: base.id, fingerprint, decision: 'approved-for-exact-diff' })
+    await root.activate(base.id, human)
+    assert.ok(runtime.mounted().includes(base.id))
+    const after = await root.disable(human, 'generated/text-slugify', '0.1.0')
+    assert.equal(registry.get('generated/text-slugify', '0.1.0')?.status, 'disabled')
+    assert.equal(runtime.mounted().includes(base.id), false)
+    assert.equal(after.current?.mounted.includes(base.id), false)
+    assert.equal(workspace.get(base.id).sealed, true)
+  })
+
   it('I3g. eligible disabled revision reactivates the exact sealed record', async () => {
     const { registry, workspace, governance, root, human, runtime } = seeded()
     const base = ready(workspace, {
@@ -641,9 +659,61 @@ describe('extension governance and recovery', () => {
     assert.equal(root.inspect().lifecycleBusy, 'uninstall')
     await assert.rejects(() => root.rollback(human), /uninstall-in-flight/)
     await assert.rejects(() => root.enterSafeMode(human), /uninstall-in-flight/)
-    assert.throws(() => root.disable(human, 'generated/text-slugify', '0.1.0'), /uninstall-in-flight/)
+    await assert.rejects(() => root.disable(human, 'generated/text-slugify', '0.1.0'), /uninstall-in-flight/)
     release()
     await pending
+    assert.equal(root.inspect().lifecycleBusy, undefined)
+  })
+
+  it('I3e2. disable reports disable-in-flight and excludes uninstall', async () => {
+    const { workspace, governance, root, human } = seeded()
+    const active = ready(workspace, { owner: 'generated/text-slugify', version: '0.1.0', capabilities: ['text.slugify'] })
+    const idle = ready(workspace, { owner: 'generated/other-idle', version: '0.1.0', capabilities: ['other.idle'] })
+    for (const candidate of [active, idle]) {
+      root.recordApproval(human, {
+        candidateId: candidate.id,
+        fingerprint: governance.requestApproval(candidate.id).fingerprint,
+        decision: 'approved-for-exact-diff',
+      })
+    }
+    await root.activate(active.id, human)
+    let release!: () => void
+    governance.holdDisable = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    const pending = root.disable(human, 'generated/text-slugify', '0.1.0')
+    for (let i = 0; i < 50 && root.inspect().lifecycleBusy !== 'disable'; i += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 10))
+    }
+    assert.equal(root.inspect().lifecycleBusy, 'disable')
+    await assert.rejects(() => root.activate(idle.id, human), (error: unknown) => {
+      assert.ok(error instanceof ActivationDeniedError)
+      assert.ok(error.denials.some((item) => item.reason === 'disable-in-flight'))
+      return true
+    })
+    await assert.rejects(() => root.uninstall(human, 'generated/text-slugify', '0.1.0'), /disable-in-flight/)
+    await assert.rejects(() => root.rollback(human), /disable-in-flight/)
+    await assert.rejects(() => root.enterSafeMode(human), /disable-in-flight/)
+    await assert.rejects(() => root.disable(human, 'generated/text-slugify', '0.1.0'), /disable-in-flight/)
+    release()
+    await pending
+    assert.equal(root.inspect().lifecycleBusy, undefined)
+  })
+
+  it('I3e3. rejected holdDisable releases the disable lock', async () => {
+    const { workspace, governance, root, human } = seeded()
+    const active = ready(workspace, { owner: 'generated/text-slugify', version: '0.1.0', capabilities: ['text.slugify'] })
+    root.recordApproval(human, {
+      candidateId: active.id,
+      fingerprint: governance.requestApproval(active.id).fingerprint,
+      decision: 'approved-for-exact-diff',
+    })
+    await root.activate(active.id, human)
+    governance.holdDisable = Promise.reject(new Error('hold rejected'))
+    await assert.rejects(() => root.disable(human, 'generated/text-slugify', '0.1.0'), /hold rejected/)
+    assert.equal(root.inspect().lifecycleBusy, undefined)
+    governance.holdDisable = undefined
+    await root.disable(human, 'generated/text-slugify', '0.1.0')
     assert.equal(root.inspect().lifecycleBusy, undefined)
   })
 

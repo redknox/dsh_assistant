@@ -355,6 +355,44 @@ describe('local third-party import', () => {
     }
   })
 
+  it('disables an imported plugin by unmounting it, then keeps that state across restart', async () => {
+    const home = mkdtempSync(path.join(tmpdir(), 'tars-ng-import-disable-'))
+    const { ctx, recoveryRoot } = await bootAssistantControl({ home })
+    try {
+      const imported = importLocalExtension({
+        sourceDir: FIXTURE,
+        workspace: ctx.candidateWorkspace,
+        workbench: ctx.candidateWorkbench,
+        registry: ctx.capabilityRegistry,
+      })
+      await governAndActivate(ctx, recoveryRoot, imported.candidateId)
+      assert.ok(ctx.tools.get('text_reverse'))
+      const human = recoveryRoot.issueAuthority({ kind: 'human-control', source: 'operator-cli' })
+      await recoveryRoot.disable(human, 'third-party/text-reverse', '1.0.0')
+      assert.equal(ctx.capabilityRegistry.get('third-party/text-reverse', '1.0.0')?.status, 'disabled')
+      assert.equal(ctx.tools.get('text_reverse'), undefined)
+      const view = projectMissionControl(gatherWorkspaceSnapshot({ ctx, sessionId: 'import-disable' }))
+      assert.equal(view.plugins.some((item) => item.owner === 'third-party/text-reverse'), false)
+      const row = view.extensions.find((item) => item.candidateId === imported.candidateId)
+      assert.equal(row?.lifecycle, 'DISABLED_REACTIVATABLE')
+      assert.equal(row?.mounted, false)
+    } finally {
+      await ctx.fiber.dispose()
+    }
+    const restarted = await bootAssistantControl({ home })
+    try {
+      assert.equal(restarted.ctx.capabilityRegistry.get('third-party/text-reverse', '1.0.0')?.status, 'disabled')
+      assert.equal(restarted.ctx.tools.get('text_reverse'), undefined)
+      const view = projectMissionControl(gatherWorkspaceSnapshot({ ctx: restarted.ctx, sessionId: 'import-disable' }))
+      assert.equal(view.plugins.some((item) => item.owner === 'third-party/text-reverse'), false)
+      const row = view.extensions.find((item) => item.candidateId === 'third-party--text-reverse@1.0.0')
+      assert.equal(row?.lifecycle, 'DISABLED_REACTIVATABLE')
+      assert.equal(row?.mounted, false)
+    } finally {
+      await restarted.ctx.fiber.dispose()
+    }
+  })
+
   it('binds an upgrade candidate to the active version and rolls back to it', async () => {
     const { ctx, recoveryRoot } = await bootAssistantControl({ home: mkdtempSync(path.join(tmpdir(), 'tars-ng-import-upgrade-')) })
     try {

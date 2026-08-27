@@ -29,7 +29,7 @@ export function gatherWorkspaceSnapshot(input: GatherWorkspaceInput): WorkspaceS
       recoveryRequired?: boolean
       state?: string
       pendingCandidateId?: string
-      lifecycleBusy?: 'activation' | 'uninstall' | 'recovery'
+      lifecycleBusy?: 'activation' | 'uninstall' | 'disable' | 'recovery'
       lastFailure?: {
         diagnostics: string
         candidateId?: string

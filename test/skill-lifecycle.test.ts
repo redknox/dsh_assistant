@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { describe, it } from 'node:test'
 import { fileURLToPath } from 'node:url'
+import { CallId } from '@deepseek-ai/dsh-llm'
 import { ReviewService } from '../src/domain/review/index.js'
 import { TrustedAuthorityCredential } from '../src/domain/governance/types.js'
 import { backupSelfExtension, formatOperatorStatus, operatorStatus, PersistenceIntegrityError, restoreSelfExtension } from '../src/domain/self-extension/index.js'
@@ -164,11 +165,22 @@ describe('skill lifecycle', () => {
       recoveryRoot.approveSkill(imported.candidateId, requested.fingerprint, human)
       assert.deepEqual(await ctx.skills.list({ cwd: isolated }), [])
       recoveryRoot.activateSkill(imported.candidateId, human)
-      const listed = await ctx.skills.list({ cwd: isolated })
+      const catalogCwd = ctx.skillLifecycle.activeRoot()
+      const listed = await ctx.skills.list({ cwd: catalogCwd })
       assert.equal(listed.filter((item) => item.name === 'weekly-review').length, 1)
-      const loaded = await ctx.skills.get('weekly-review', { cwd: isolated })
+      const loaded = await ctx.skills.get('weekly-review', { cwd: catalogCwd })
       assert.ok(loaded)
+      assert.equal(loaded.name, 'weekly-review')
       assert.ok(ctx.tools.get('skill'))
+      assert.ok(ctx.tools.get('recall_memory'))
+      const recalled = await ctx.tools.execute({
+        callId: CallId('weekly-review-recall'),
+        name: 'recall_memory',
+        arguments: {},
+        signal: AbortSignal.timeout(5000),
+      })
+      assert.equal(recalled.isError, false, String(recalled.value))
+      assert.equal(ctx.tools.get('text_reverse'), undefined)
       recoveryRoot.disableSkill('weekly-review', human)
       assert.equal((await ctx.skills.list({ cwd: isolated })).some((item) => item.name === 'weekly-review'), false)
     } finally {
