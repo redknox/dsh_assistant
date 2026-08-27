@@ -685,6 +685,7 @@ describe('runtime context', () => {
       assert.match(doctor, /catalog=withheld/)
       assert.match(once, /catalog=withheld/)
       let liveDoctor = ''
+      let liveStatus = ''
       await runProductCli(['start', '--home', layout.root], {
         log() {},
         error() {},
@@ -702,12 +703,23 @@ describe('runtime context', () => {
             error: (text) => lines.push(text),
           })
           liveDoctor = lines.join('\n')
+          const statusLines: string[] = []
+          await runProductCli(['status', '--home', layout.root], {
+            log: (text) => statusLines.push(text),
+            error: (text) => statusLines.push(text),
+          })
+          liveStatus = statusLines.join('\n')
           throw new Error('injected stop after live doctor')
         },
       })
       assert.match(liveDoctor, /safe-mode: true/)
       assert.match(liveDoctor, /doctor-source: live-runtime/)
+      assert.match(liveDoctor, /activation: idle/)
+      assert.doesNotMatch(liveDoctor, /activation: not-booted/)
       assert.match(liveDoctor, /catalog=withheld/)
+      assert.match(liveStatus, /operator-source: live-runtime/)
+      assert.match(liveStatus, /activation: idle/)
+      assert.match(liveStatus, /skills: profile=assistant catalog=withheld/)
       writeFileSync(
         path.join(profiles, 'assistant', 'cordis.patch.yml'),
         readFileSync(path.join(productPackageRoot(), 'profiles', 'assistant', 'cordis.patch.yml'), 'utf8'),

@@ -1,5 +1,5 @@
 import { existsSync, unlinkSync, writeFileSync } from 'node:fs'
-import { operatorStatus, type OperatorStatus } from '../domain/self-extension/status.js'
+import { formatOperatorStatus, operatorStatus, type OperatorStatus } from '../domain/self-extension/status.js'
 import { runSelfExtensionCli } from '../runtime/self-extension-cli.js'
 import { bootAssistantControl, createAssistantAgent, type AssistantControl } from '../runtime/boot.js'
 import { inspectCompatibility } from './compatibility.js'
@@ -256,6 +256,7 @@ function lastStatusSnapshot(last: unknown): {
   readonly safeMode?: boolean
   readonly recoveryRequired?: boolean
   readonly persistence?: string
+  readonly operator?: OperatorStatus
   readonly skills?: OperatorStatus['skills']
 } {
   if (last === null || typeof last !== 'object') return {}
@@ -264,6 +265,7 @@ function lastStatusSnapshot(last: unknown): {
     ...(typeof row.safeMode === 'boolean' ? { safeMode: row.safeMode } : {}),
     ...(typeof row.recoveryRequired === 'boolean' ? { recoveryRequired: row.recoveryRequired } : {}),
     ...(typeof row.persistence === 'string' ? { persistence: row.persistence } : {}),
+    ...(row.operator !== null && typeof row.operator === 'object' ? { operator: row.operator as OperatorStatus } : {}),
     ...(row.skills !== null && typeof row.skills === 'object' ? { skills: row.skills as OperatorStatus['skills'] } : {}),
   }
 }
@@ -272,6 +274,7 @@ async function readLiveRuntimeDoctor(identity: RuntimeIdentity): Promise<{
   readonly safeMode: boolean
   readonly recoveryRequired: boolean
   readonly persistence?: string
+  readonly operator?: OperatorStatus
   readonly skills?: OperatorStatus['skills']
 } | undefined> {
   if (identity.controlEndpoint === undefined || !isLoopbackControlEndpoint(identity.controlEndpoint)) return undefined
@@ -287,6 +290,7 @@ async function readLiveRuntimeDoctor(identity: RuntimeIdentity): Promise<{
       safeMode?: unknown
       recoveryRequired?: unknown
       persistence?: unknown
+      operator?: unknown
       skills?: OperatorStatus['skills']
     }
     if (typeof body.safeMode !== 'boolean') return undefined
@@ -294,6 +298,7 @@ async function readLiveRuntimeDoctor(identity: RuntimeIdentity): Promise<{
       safeMode: body.safeMode,
       recoveryRequired: body.recoveryRequired === true,
       ...(typeof body.persistence === 'string' ? { persistence: body.persistence } : {}),
+      ...(body.operator !== null && typeof body.operator === 'object' ? { operator: body.operator as OperatorStatus } : {}),
       ...(body.skills ? { skills: body.skills } : {}),
     }
   } catch {
@@ -313,7 +318,7 @@ async function defaultBootProduct(layout: ProductHomeLayout, allowFixtures: bool
   })
 }
 
-async function operatorFromBoot(booted: Awaited<ReturnType<typeof bootAssistantControl>>) {
+function operatorFromBoot(booted: Awaited<ReturnType<typeof bootAssistantControl>>): OperatorStatus {
   const { ctx, recoveryRoot, diagnostics } = booted
   const approvals = new Map(ctx.candidateWorkspace.list().map((item) => [
     item.id,
@@ -451,6 +456,7 @@ export async function runProductCli(
     const recorded = lastStatusSnapshot(last)
     const safeMode = live?.safeMode ?? recorded.safeMode ?? runtimeContext?.safeMode === true
     const recoveryRequired = live?.recoveryRequired ?? recorded.recoveryRequired ?? runtimeContext?.profileCompositionError !== undefined
+    const operator = live?.operator ?? recorded.operator
     const webUi = running ? (inspected.identity.controlEndpoint ?? webUiFromLast(last)) : undefined
     io.log([
       `${PRODUCT_NAME} ${compatibility.productVersion}`,
@@ -467,6 +473,8 @@ export async function runProductCli(
       runtimeContext ? `session: ${runtimeContext.sessionId.value} (${runtimeContext.sessionId.source})` : 'session: unresolved',
       `safe-mode: ${safeMode}`,
       `recovery-required: ${recoveryRequired}`,
+      operator ? `operator-source: ${live?.operator ? 'live-runtime' : 'last-status'}` : 'operator-source: unavailable',
+      ...(operator ? formatOperatorStatus(operator).split('\n') : []),
       catalogStatusLine(runtimeContext),
       inspected.state === 'ambiguous' ? `lease: ambiguous` : `lease: ${inspected.state}`,
     ].join('\n'))
@@ -494,6 +502,7 @@ export async function runProductCli(
           persistence: live?.persistence ?? recorded.persistence ?? 'not-booted',
           safeMode,
           recoveryRequired,
+          ...(live?.operator ? { operator: live.operator } : {}),
           source: live ? 'live-runtime' : recorded.safeMode !== undefined ? 'last-status' : 'boot',
           ...(live?.skills ?? recorded.skills ? { skills: live?.skills ?? recorded.skills } : {}),
         })
@@ -624,6 +633,7 @@ export async function runProductCli(
         missingConfiguration: report.missingConfiguration,
         calendar: report.integrations.find((item) => item.capability === 'calendar')?.mode,
         llm: { provider: llm.provider, model: llm.model, routeAvailable: llm.routeAvailable, usable: llm.usable },
+        operator,
         ...(operator.skills ? { skills: operator.skills } : {}),
         ...(runtimeContext ? {
           profile: runtimeContext.profile.value,
@@ -702,10 +712,12 @@ export async function runProductCli(
             onStop: () => requestStop(),
             inspectLive: () => {
               const skills = booted?.ctx.get('skillLifecycle')?.health()
+              const operator = booted ? operatorFromBoot(booted) : undefined
               return {
                 safeMode: Boolean(booted?.diagnostics.safeMode || runtimeContext?.safeMode),
                 recoveryRequired: Boolean(booted?.diagnostics.recoveryRequired || runtimeContext?.profileCompositionError),
                 persistence: booted?.diagnostics.persistence,
+                ...(operator ? { operator } : {}),
                 ...(skills ? { skills } : {}),
               }
             },

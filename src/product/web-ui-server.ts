@@ -6,6 +6,7 @@ import { ActivationDeniedError, GovernanceContractError, RollbackDeniedError, Un
 import { SkillContractError } from '../domain/skill/errors.js'
 import { SimulatedCrashError } from '../domain/governance/service.js'
 import type { RecoveryRoot } from '../domain/governance/root.js'
+import type { OperatorStatus } from '../domain/self-extension/status.js'
 import { acknowledgementOf } from '../domain/workspace/approvals.js'
 import { runIdEquals } from './runtime-lease.js'
 import { boundActivationDiagnostics } from '../domain/workspace/failure.js'
@@ -38,6 +39,7 @@ export interface WebUiRuntimeControl {
     readonly safeMode: boolean
     readonly recoveryRequired: boolean
     readonly persistence?: string
+    readonly operator?: OperatorStatus
     readonly skills?: {
       readonly profile: string
       readonly candidates: number
