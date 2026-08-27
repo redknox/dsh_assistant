@@ -10,7 +10,7 @@ import { acknowledgementOf } from '../domain/workspace/approvals.js'
 import { boundActivationDiagnostics } from '../domain/workspace/failure.js'
 import { redactText } from '../domain/workspace/redact.js'
 import { AssistantControlSurface } from '../ui/controller.js'
-import type { ActivationCard, ApprovalCard, MissionControlView, RollbackCard, SkillProjection, UserPluginView } from '../domain/workspace/types.js'
+import type { ActivationCard, MissionControlView, RollbackCard, SkillProjection, UserPluginView } from '../domain/workspace/types.js'
 import { PRODUCT_UI_SESSION_ID } from './constants.js'
 import type { LiveSessionHost } from './session-lifecycle.js'
 import {
@@ -26,6 +26,7 @@ import {
 } from './web-ui-protocol.js'
 import { handleRuntimeControlRequest, type WebUiRuntimeControl } from './web-ui-runtime-control.js'
 import { handleWebUiConversationRequest } from './web-ui-conversations.js'
+import { handleWebUiApprovalRequest } from './web-ui-approvals.js'
 
 export type { WebUiRuntimeControl } from './web-ui-runtime-control.js'
 
@@ -244,23 +245,6 @@ export function startWebUiServer(options: WebUiServerOptions): Promise<WebUiServ
     } finally {
       recoveryBusy = false
     }
-  }
-
-  const bindCard = (body: { id?: unknown; candidateId?: unknown; fingerprint?: unknown }, cards: readonly ApprovalCard[]) => {
-    if (typeof body.id !== 'string' || body.id === '') return { error: 'malformed' as const }
-    if (typeof body.fingerprint !== 'string' || body.fingerprint === '') return { error: 'malformed' as const }
-    const card = cards.find((item) => item.id === body.id)
-    if (!card) return { error: 'unknown-approval' as const }
-    if (card.fingerprint !== body.fingerprint) return { error: 'stale-fingerprint' as const }
-    if (card.kind === 'self-extension') {
-      if (typeof body.candidateId !== 'string' || body.candidateId === '' || body.candidateId !== card.candidateId) {
-        return { error: 'stale-candidate' as const }
-      }
-    }
-    if (card.status !== 'pending' && card.status !== 'approval-requested' && card.status !== 'unreviewed') {
-      return { error: 'stale-approval' as const }
-    }
-    return { card }
   }
 
   let activationBusy = false
@@ -493,35 +477,27 @@ export function startWebUiServer(options: WebUiServerOptions): Promise<WebUiServ
         if (conversation.broadcast) broadcast()
         return
       }
-      if (req.method === 'POST' && (requestUrl.pathname === '/api/approve' || requestUrl.pathname === '/api/deny' || requestUrl.pathname === '/api/cancel')) {
-        const body = JSON.parse(await readBody(req)) as { id?: unknown; candidateId?: unknown; fingerprint?: unknown }
-        const bound = bindCard(body, snapshot().approvals)
-        if ('error' in bound) {
-          sendJson(res, bound.error === 'malformed' ? 400 : 409, { error: bound.error })
-          return
-        }
-        const decision = requestUrl.pathname === '/api/approve' ? 'approve' : requestUrl.pathname === '/api/deny' ? 'deny' : 'cancel'
-        const { card } = bound
-        if (card.kind === 'self-extension') {
-          if (decision === 'cancel') {
-            sendJson(res, 409, { error: 'unsupported', action: 'cancel-self-extension' })
-            return
-          }
+      const approval = await handleWebUiApprovalRequest({
+        method: req.method,
+        pathname: requestUrl.pathname,
+        readJson: async () => JSON.parse(await readBody(req)) as unknown,
+      }, {
+        approvals: () => snapshot().approvals,
+        resolvePolicy: async (id, decision) => {
+          if (decision === 'approve') return options.surface.approve(id)
+          if (decision === 'deny') return options.surface.deny(id)
+          return options.surface.cancelConfirmation(id)
+        },
+        recordSelfExtensionApproval: (input) => {
           const human = options.recoveryRoot.issueAuthority({ kind: 'human-control', source: 'application-ui' })
-          options.recoveryRoot.recordApproval(human, {
-            candidateId: card.candidateId ?? '',
-            fingerprint: card.fingerprint,
-            decision: decision === 'approve' ? 'approved-for-exact-diff' : 'rejected',
-          })
-        } else if (decision === 'approve') {
-          await options.surface.approve(card.id)
-        } else if (decision === 'deny') {
-          await options.surface.deny(card.id)
-        } else {
-          await options.surface.cancelConfirmation(card.id)
-        }
-        sendJson(res, 200, envelope({ acknowledgement: acknowledgementFor(card.id) }))
-        broadcast()
+          options.recoveryRoot.recordApproval(human, input)
+        },
+        acknowledgementFor,
+        project: (acknowledgement) => envelope(acknowledgement ? { acknowledgement } : {}),
+      })
+      if (approval) {
+        sendJson(res, approval.status, approval.body)
+        if (approval.broadcast) broadcast()
         return
       }
       if (req.method === 'POST' && requestUrl.pathname === '/api/activate') {
