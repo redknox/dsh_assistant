@@ -1,15 +1,15 @@
 # Feature freeze and real-world soak
 
-Status: **Implemented** as the v0.3.0 Product Soak policy. Duration is operational, not a release metric.
+Status: **Implemented** as policy. The current package is **v0.4.0 prepared / release candidate**. Duration is operational, not a release metric. Do not treat this file as human acceptance of the seal.
 
 ```text
-v0.3.0 = Governance + Mission-Control product baseline
-v0.4.0 target = Self-Developing Product Baseline
+v0.3.0 = Governance + Mission-Control product baseline (historical)
+v0.4.0 = Runtime Foundation + Governed Extension Baseline + DSH-native Skill lifecycle
 ```
 
-`v0.3.0` remains an immutable historical seal. v0.4.0 work may proceed on `main` after this re-opening. Self-development is allowed; self-authorization is not. Do not expose model-facing candidate write/build tools until generated activation is isolated.
+`v0.3.0` remains an immutable historical seal. After `v0.4.0` is tagged on `main`, TARS-NG enters feature freeze for that baseline. Self-development is allowed; self-authorization is not.
 
-For any remaining v0.3.x soak-line fixes:
+For any remaining v0.4.x soak-line fixes:
 
 - do not add unrelated user-facing capabilities;
 - do not add providers merely because they are interesting;
@@ -18,13 +18,13 @@ For any remaining v0.3.x soak-line fixes:
 
 The question to answer is: **can I depend on this product every day?**
 
-Allowed v0.3.x work: security, authority/governance, data-loss, reliability/recovery, packaging/install/upgrade, secret/configuration, performance/resource leaks found during soak, usability that makes the existing product operable, documentation corrections.
+Allowed v0.4.x work: security, authority/governance, data-loss, reliability/recovery, packaging/install/upgrade, secret/configuration, performance/resource leaks found during soak, usability that makes the existing product operable, documentation corrections.
 
-Normally deferred: new integrations, new tool categories, new providers for optionality, new Self-Extension authority, additional product features unrelated to a real soak defect.
+Normally deferred: new integrations, new tool categories, new providers for optionality, new Self-Extension authority, marketplace, additional product features unrelated to a real soak defect.
 
 ## Window
 
-Recommended: **2–4 weeks of daily use** after `v0.3.0` is tagged. Adjust for usage density, not calendar vanity.
+Recommended: **2–4 weeks of daily use** after `v0.4.0` is tagged. Adjust for usage density, not calendar vanity.
 
 ## Classification
 
@@ -50,4 +50,4 @@ Trust: no silent authority escalation; no secret leakage; no fixture/live confus
 
 `review-complete` remains distinct from approval and activation.
 
-Soak configuration shape: [v0.3.0-seal.md](./v0.3.0-seal.md).
+Soak configuration and release evidence: [v0.4.0-seal.md](./v0.4.0-seal.md). Historical v0.3.0: [v0.3.0-seal.md](./v0.3.0-seal.md).

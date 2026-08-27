@@ -76,7 +76,7 @@ describe('TARS-NG Home runtime lease', () => {
       pid: 2_147_483_647,
       runId: 'a'.repeat(64),
       startedAt: '2026-08-24T00:00:00.000Z',
-      productVersion: '0.3.0',
+      productVersion: '0.3.0', // stale prior product identity; reclaim must ignore it
       normalizedHome: dead.root,
     })}\n`)
     const reclaimed = await acquireRuntimeLease(dead)

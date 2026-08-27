@@ -12,7 +12,7 @@ Package name: `dsh-assistant` (private). Product command: **`tars-ng`**. DSH com
 npm install
 npm run build
 npm pack
-npm install -g ./dsh-assistant-0.3.0.tgz   # or: npm install ./dsh-assistant-0.3.0.tgz && npx tars-ng
+npm install -g ./dsh-assistant-0.4.0.tgz   # or: npm install ./dsh-assistant-0.4.0.tgz && npx tars-ng
 ```
 
 The tarball install pulls Cordis/DSH runtime dependencies through npm. A public registry publish is not required. `src/` and `tsx` are not part of the runtime contract.
@@ -115,14 +115,15 @@ See [ARCHITECTURE.md](./ARCHITECTURE.md) for layers. See [ENGINEERING.md](./ENGI
 | Self-Extension governance | no | **Verified** | Operator: `tars-ng self-extension` / [docs/self-extension-operations.md](./docs/self-extension-operations.md) |
 | Capability Registry / Resolution / Discovery | no | **Verified** | See docs/capability-*.md |
 | Candidate workspace + reliability + independent review | no | **Verified** | `review-complete` is not approval |
-| Runtime Context (Profile / Workspace / Session) | yes (product start) | **Implemented** | [docs/runtime-context.md](./docs/runtime-context.md) |
+| Runtime Context (Profile / Workspace / Session) | yes (product start) | **Implemented** | [docs/runtime-context.md](./docs/runtime-context.md); packaged seal [docs/v0.4.0-seal.md](./docs/v0.4.0-seal.md) |
 | Topic conversations / Session Catalog | yes (product start) | **Implemented** | [docs/session-catalog.md](./docs/session-catalog.md) |
 | Generated authoring contract `generated-extension-api/v1` | no | **Implemented** | Host-owned; [docs/generated-extension-api-v1.md](./docs/generated-extension-api-v1.md) |
-| Local third-party import (`import-local`) | no | **Implemented** | CLI-only quarantine into an inactive `third-party/import` candidate. Marketplace and Skills are out of scope. |
+| Local third-party import (`import-local`) | no | **Implemented** | CLI-only quarantine into an inactive `third-party/import` candidate. Marketplace is out of scope. |
+| DSH-native Skill lifecycle | no | **Implemented** | Profile-scoped; [docs/skills.md](./docs/skills.md). Feature soak: [docs/skill-lifecycle-soak.md](./docs/skill-lifecycle-soak.md) |
 | TARS-NG personality + Mission-Control workspace | no | **Verified** | [docs/tars-ng-personality.md](./docs/tars-ng-personality.md) |
 | Production persistence, public npm publish | no | **Unsupported** | Package is `private` |
 
-Known limitations: no OAuth refresh, no production security certification, no durable user-level Schedule, no mobile distribution, no public or LAN Web UI. Release status: [docs/RELEASE.md](./docs/RELEASE.md). Soak baseline: [docs/v0.3.0-seal.md](./docs/v0.3.0-seal.md).
+Known limitations: no OAuth refresh, no production security certification, no durable user-level Schedule, no mobile distribution, no public or LAN Web UI, no marketplace or remote Skill/plugin install. Release status: [docs/RELEASE.md](./docs/RELEASE.md). Current seal: [docs/v0.4.0-seal.md](./docs/v0.4.0-seal.md) (prepared / release candidate).
 
 ## Develop
 
@@ -155,5 +156,6 @@ npm run pack:inspect
 | [docs/tars-ng-personality.md](./docs/tars-ng-personality.md) | Personality contract |
 | [docs/mission-control-workspace.md](./docs/mission-control-workspace.md) | Mission-Control IA |
 | [docs/product-vision.md](./docs/product-vision.md) | Product thesis, target users, boundaries, and post-v0.4 direction |
-| [docs/RELEASE.md](./docs/RELEASE.md) | 0.3.0 Product Soak status |
-| [docs/v0.3.0-seal.md](./docs/v0.3.0-seal.md) | Seal drill evidence and soak config |
+| [docs/RELEASE.md](./docs/RELEASE.md) | 0.4.0 release candidate status |
+| [docs/v0.4.0-seal.md](./docs/v0.4.0-seal.md) | v0.4.0 claim → evidence record (prepared) |
+| [docs/v0.3.0-seal.md](./docs/v0.3.0-seal.md) | Historical v0.3.0 soak seal |

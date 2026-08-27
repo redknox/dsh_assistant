@@ -100,8 +100,8 @@ Do not inject unsigned or unowned blobs into the model context.
 **Out of scope unless a later issue says otherwise (Unsupported here):** custom Agent Loop; speculative multi-agent framework; forced production database; pixel-perfect or mobile UI; credentials or real personal data in the repo; autonomous install or self-authorization.
 
 ```text
-v0.3.0 = Governance + Mission-Control product baseline
-v0.4.0 target = Self-Developing Product Baseline
+v0.3.0 = Governance + Mission-Control product baseline (historical)
+v0.4.0 = Runtime Foundation + Governed Extension Baseline + DSH-native Skill lifecycle
 ```
 
 Self-development is allowed; self-authorization is not. Generated and imported third-party candidates activate only through the isolated runner. The Candidate Workbench is a bounded conversation-to-review loop, not autonomous install. A trusted operator may import one local directory (`import-local`); marketplace discovery remains future.
@@ -123,7 +123,7 @@ professional intent
 
 Natural-language intent is never itself execution authority. Dynamic Agent planning may decide how to pursue a goal, select tools, request missing information, and react to results. It may not rewrite policy, bypass approval, expand permissions, certify its own output, or directly own authoritative payment/identity/recording rules.
 
-The current v0.4.0 target covers the governed construction/control substrate. Domain-facing authoring, reusable domain kits, generated product UI, and composition of multiple capabilities into a complete professional application are later milestones and remain **Designed**, not Implemented. See [docs/product-vision.md](./docs/product-vision.md).
+The current v0.4.0 seal covers the governed construction/control substrate. Domain-facing authoring, reusable domain kits, generated product UI, and composition of multiple capabilities into a complete professional application are later milestones and remain **Designed**, not Implemented. See [docs/product-vision.md](./docs/product-vision.md).
 
 ## Evidence
 

@@ -88,4 +88,4 @@ These are **Unsupported** unless a later issue explicitly promotes them:
 
 ## 10. Feature freeze (v0.3.x soak)
 
-`v0.3.0` is the historical Governance + Mission-Control baseline. The v0.4.0 target is a Self-Developing Product Baseline: self-development is allowed; self-authorization is not. Generated candidates must activate only through the isolated runner. Policy: [docs/soak.md](./docs/soak.md).
+`v0.3.0` is the historical Governance + Mission-Control baseline. `v0.4.0` is Runtime Foundation + Governed Extension Baseline + DSH-native Skill lifecycle: self-development is allowed; self-authorization is not. Generated candidates must activate only through the isolated runner. Policy: [docs/soak.md](./docs/soak.md). Seal: [docs/v0.4.0-seal.md](./docs/v0.4.0-seal.md).

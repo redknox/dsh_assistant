@@ -1,6 +1,6 @@
 # Release notes
 
-Personal-assistant product layer on DeepSeek Harness **0.1.0-rc.8**. Current package version: **0.3.0**. Not a production security certification. Not published to a public registry.
+Personal-assistant product layer on DeepSeek Harness **0.1.0-rc.8**. Current package version: **0.4.0**. Release status: **prepared / release candidate** until human acceptance of [docs/v0.4.0-seal.md](./v0.4.0-seal.md). Not a production security certification. Not published to a public registry.
 
 ## Version baseline
 
@@ -9,19 +9,44 @@ Personal-assistant product layer on DeepSeek Harness **0.1.0-rc.8**. Current pac
 | **v0.1.0** | Assistant Core MVP baseline |
 | **v0.2.0** | Governed Self-Extension baseline |
 | **v0.3.0** | Governance + Mission-Control product baseline (historical soak seal) |
-| **v0.4.0 target** | Runtime Foundation + Governed Extension Baseline + DSH-native Skill lifecycle |
+| **v0.4.0** | Runtime Foundation + Governed Extension Baseline + DSH-native Skill lifecycle |
 
-The repository package version is `0.3.0`. The annotated `v0.3.0` git tag is created only on the exact `main` commit after this seal is merged. Do not move or recreate that tag; later soak fixes are `v0.3.1`, `v0.3.2`, etc.
+The repository package version is `0.4.0`. The annotated `v0.4.0` git tag is created only on the exact `main` commit after this seal is merged **and** a human confirms acceptance. Do not tag from a feature branch. Do not move or recreate `v0.3.0`.
 
 DSH dependency versions stay at **0.1.0-rc.8**. They are not changed by this product version bump.
 
-`npm run verify:v0.2` remains the regression contract for the historical Governed Self-Extension baseline. v0.3.0 must continue to pass it.
+`npm run verify:v0.2` remains the regression contract for the historical Governed Self-Extension baseline. v0.4.0 must still pass it.
 
-Seal evidence and soak configuration: [docs/v0.3.0-seal.md](./v0.3.0-seal.md). Feature freeze: [docs/soak.md](./soak.md).
+Seal evidence: [docs/v0.4.0-seal.md](./v0.4.0-seal.md). Historical v0.3.0: [docs/v0.3.0-seal.md](./v0.3.0-seal.md). Feature freeze: [docs/soak.md](./soak.md).
 
-## v0.3.0 Product Soak baseline
+## v0.4.0 Runtime Foundation (current package)
 
-This is the current release. It seals the product that already exists:
+This is the current package. It is a **release candidate** until the packaged cross-slice soak in [v0.4.0-seal.md](./v0.4.0-seal.md) is accepted:
+
+```text
+Host-owned Profile / Workspace / Session Runtime Context
+Topic conversations / Session Catalog
+Governed generated-extension lifecycle (isolated activation)
+Governed local third-party plugin import
+DSH-native Profile-scoped Skill lifecycle
+Mission-Control trusted actions, Safe Mode, Recovery, backup/restore
+```
+
+Default soak LLM:
+
+```text
+provider: deepseek-official
+model: deepseek-v4-flash
+credential: DEEPSEEK_API_KEY
+```
+
+Daily soak surface: loopback Mission-Control Web UI from `tars-ng start` (`http://127.0.0.1:8787`).
+
+Marketplace discovery, remote install, multi-user/cloud operation, and production security certification are **not** claimed.
+
+## v0.3.0 Product Soak baseline (historical)
+
+`v0.3.0` remains the immutable historical Governance + Mission-Control baseline. Do not retag it. It sealed:
 
 ```text
 M1 Governed Self-Extension
@@ -41,8 +66,6 @@ credential: DEEPSEEK_API_KEY
 ```
 
 Daily soak surface: loopback Mission-Control Web UI from `tars-ng start` (`http://127.0.0.1:8787`).
-
-`v0.3.0` remains the immutable historical Governance + Mission-Control baseline. Do not retag it. Development toward **v0.4.0 — Runtime Foundation + Governed Extension Baseline** starts with a host-owned Profile / Workspace / Session Runtime Context, then topic conversations in one bound context (Session Catalog), then the generated-extension lifecycle, then **governed local third-party import**. Self-development is allowed; self-authorization is not. Marketplace discovery remains future. Skill lifecycle is the next Issue and is not claimed here.
 
 ## Direction after v0.4.0
 
