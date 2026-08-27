@@ -849,8 +849,28 @@ const rolled = sh(bin, ['self-extension', 'rollback'], { env })
 evidence.steps[9].rollback = JSON.parse(rolled.stdout)
 const doctorAfterExit = sh(bin, ['doctor', '--home', home], { env })
 evidence.steps[9].doctor = redact(doctorAfterExit.stdout).split('\n').filter((l) => /safe|skill|catalog/i.test(l)).slice(0, 12)
+const recoveredRuntimeProfile = doctorAfterExit.stdout.match(/^profile: ([^ ]+) \(/m)?.[1]
+const recoveredRuntimeProfileIdentity = doctorAfterExit.stdout.match(/^profile-identity: (.+)$/m)?.[1]
+evidence.steps[9].recoveryIdentity = {
+  runtimeProfile: recoveredRuntimeProfile,
+  runtimeProfileIdentity: recoveredRuntimeProfileIdentity,
+  governanceProfileIdentity: evidence.steps[9].rollback.current?.profileIdentity,
+  mounted: evidence.steps[9].rollback.current?.mounted,
+}
 expect(evidence.steps[9].exit.safeMode === false, 'safe-mode exit must clear Safe Mode')
 expect(evidence.steps[9].rollback.state === 'rolled-back' || evidence.steps[9].rollback.state === 'active', 'rollback must restore state')
+expect(recoveredRuntimeProfile === 'assistant', 'after rollback doctor must report the normal assistant Profile')
+expect(recoveredRuntimeProfileIdentity === PROFILE_IDENTITY, 'after rollback doctor must report the authoritative assistant Profile identity')
+expect(evidence.steps[9].rollback.current?.profileIdentity === 'assistant-core', 'rollback current snapshot must restore assistant-core')
+expect(evidence.steps[9].rollback.lastKnownGood?.profileIdentity === 'assistant-core', 'rollback LKG must remain assistant-core')
+expect(
+  JSON.stringify(evidence.steps[9].rollback.current?.owners) === JSON.stringify(evidence.steps[9].rollback.lastKnownGood?.owners),
+  'rollback current owners must match the LKG owners',
+)
+expect(
+  JSON.stringify(evidence.steps[9].rollback.current?.mounted) === JSON.stringify(evidence.steps[9].rollback.lastKnownGood?.mounted),
+  'rollback current mounts must match the LKG mounts',
+)
 expect(evidence.steps[9].doctor.some((l) => /catalog=ok(?:\s+candidates=\d+)?\s+active=weekly-review@1\.0\.1/.test(l)), 'after recover doctor must show catalog=ok and active=weekly-review@1.0.1')
 {
   const { bootAssistantControl, gatherWorkspaceSnapshot, projectMissionControl } = product
@@ -881,6 +901,8 @@ expect(evidence.steps[9].doctor.some((l) => /catalog=ok(?:\s+candidates=\d+)?\s+
     expect(evidence.steps[9].recoveredPlugin.registry === 'active', 'after rollback the plugin must return to pre-Safe active')
     expect(evidence.steps[9].recoveredPlugin.toolPresent === true, 'after rollback text_reverse must be present again')
     expect(evidence.steps[9].recoveredPlugin.pluginsActive === true, 'after rollback the plugin card must be active')
+    expect(evidence.steps[9].recoveredPlugin.lifecycle === 'ACTIVE', 'after rollback the plugin lifecycle must be ACTIVE')
+    expect(evidence.steps[9].recoveredPlugin.mounted === true, 'after rollback the plugin must be mounted')
   } finally {
     await control.ctx.fiber.dispose()
   }
