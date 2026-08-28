@@ -74,6 +74,7 @@ function ContextEndurancePanel(props: { readonly value: MissionControlView['cont
       <div className="context-meter-state">
         <span>TOKEN METER · {value.status === 'ready' ? 'READY' : 'DEGRADED'}</span>
         <span>COMPACTION · {value.compaction === 'automatic' ? 'AUTO' : 'INOP'}</span>
+        <span>CHECKPOINT · {value.checkpoint === 'active' ? 'ACTIVE' : 'INOP'}</span>
         {value.outputRetention && <span>OUTPUT CAP · {formatTokens(value.outputRetention.maxInlineBytes)}B</span>}
         {value.outputRetention && <span>SPILL · {value.outputRetention.spill === 'ready' ? 'READY' : 'INOP'}</span>}
       </div>

@@ -65,6 +65,7 @@ export interface ContextEnduranceView {
     readonly cacheWriteTokens: number
   }
   readonly compaction: 'automatic' | 'unavailable'
+  readonly checkpoint: 'active' | 'unavailable'
   readonly outputRetention?: {
     readonly maxInlineBytes: number
     readonly spill: 'ready' | 'unavailable'

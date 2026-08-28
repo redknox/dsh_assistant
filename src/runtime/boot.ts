@@ -92,6 +92,7 @@ async function bootStack(options: BootOptions = {}): Promise<AssistantControl> {
   await ctx.plugin(ToolRuntime)
   if (!safeMode) await mountContextEndurance(ctx, {
     ...(options.home ? { spillRoot: productHomeLayout(options.home).spill } : {}),
+    checkpoints: options.sessionRoot !== undefined,
   })
   await ctx.plugin(SkillRegistry)
   if (!safeMode) await ctx.plugin(LocalJobRegistry)

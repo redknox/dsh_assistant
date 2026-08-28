@@ -102,8 +102,6 @@
   disabled: true
 - id: timeout-policy
   disabled: true
-- id: session-checkpoint-policy
-  disabled: true
 - id: tool-todo
   disabled: true
 - id: tool-goal

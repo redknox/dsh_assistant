@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { describe, it } from 'node:test'
 import { CallId, createUserMessage } from '@deepseek-ai/dsh-llm'
+import type { Session } from '@deepseek-ai/dsh-session'
 import { defineTool } from '@deepseek-ai/dsh-tools'
 import { FakeReplyAdapter } from '../src/adapters/llm/fake-reply-adapter.js'
 import { inspectContextEndurance } from '../src/product/context-endurance.js'
@@ -26,14 +27,116 @@ describe('Context Endurance', () => {
   })
 
   it('keeps the optional context stack out of Safe Mode', async () => {
-    const control = await bootSafeModeRuntime()
+    const sessionRoot = mkdtempSync(path.join(tmpdir(), 'tars-safe-checkpoint-'))
+    const control = await bootSafeModeRuntime({ sessionRoot })
     try {
+      assert.ok(control.ctx.get('sessionPersistence'))
       assert.equal(control.ctx.get('sessionProjections'), undefined)
       assert.equal(control.ctx.get('tokenMeter'), undefined)
       assert.equal(control.ctx.get('toolResultPruner'), undefined)
       assert.equal(control.ctx.get('compaction'), undefined)
       assert.equal(control.ctx.get('spillStore'), undefined)
+      assert.equal(inspectContextEndurance(control.ctx, undefined), undefined)
     } finally {
+      await control.ctx.fiber.dispose()
+    }
+  })
+
+  it('checkpoints persisted sessions before model and tool dispatch and fails closed on flush rejection', async () => {
+    const home = mkdtempSync(path.join(tmpdir(), 'tars-checkpoint-'))
+    const sessionRoot = path.join(home, 'sessions')
+    const control = await bootAssistantControl({ home, sessionRoot })
+    const adapter = new FakeReplyAdapter('checkpointed')
+    control.ctx.llm.registerAdapter(['checkpoint-fake'], adapter)
+    const handle = await createAssistantAgent(control.ctx, 'checkpoint-owner', { provider: 'checkpoint-fake', model: 'fake' })
+    const sessions = control.ctx.sessions as unknown as { flush(session: Session): Promise<boolean> }
+    const originalFlush = sessions.flush.bind(control.ctx.sessions)
+    let flushes = 0
+    let toolBodies = 0
+    let durableCallSeen = false
+    const unregister = control.ctx.tools.register(defineTool({
+      name: 'checkpoint_probe',
+      description: 'A tool body that must not run before its checkpoint.',
+      parameters: {},
+      output: {
+        schema: { type: 'string' },
+        render(_args, value) { return [{ type: 'text', text: value }] },
+      },
+      async execute() {
+        toolBodies += 1
+        durableCallSeen = (await control.ctx.sessionPersistence.readRaw(handle.agent.session.header.id))?.content.includes('checkpoint-probe-success') === true
+        return 'executed'
+      },
+    }))
+    try {
+      sessions.flush = async (session) => {
+        flushes += 1
+        return originalFlush(session)
+      }
+      for await (const _chunk of control.ctx.llm.stream({
+        provider: 'checkpoint-fake',
+        model: 'fake',
+        messages: [],
+        sessionId: handle.agent.session.header.id,
+        signal: AbortSignal.timeout(5_000),
+      })) {
+        // Drain the stream so the lazy pre-request checkpoint executes.
+      }
+      assert.equal(adapter.invocations, 1)
+      assert.ok(flushes >= 1)
+
+      handle.agent.session.append('turn/start', { turn: 0 })
+      handle.agent.session.append('step/start', { turn: 0, step: 0 })
+      handle.agent.session.append('tool/call', {
+        turn: 0,
+        step: 0,
+        callId: CallId('checkpoint-probe-success'),
+        name: 'checkpoint_probe',
+        arguments: '{}',
+      })
+      const executed = await control.ctx.tools.execute({
+        callId: CallId('checkpoint-probe-success'),
+        name: 'checkpoint_probe',
+        arguments: {},
+        agent: handle.agent,
+        signal: AbortSignal.timeout(5_000),
+      })
+      assert.equal(executed.isError, false)
+      assert.equal(toolBodies, 1)
+      assert.equal(durableCallSeen, true)
+
+      sessions.flush = async () => { throw new Error('checkpoint storage unavailable') }
+      await assert.rejects(async () => {
+        for await (const _chunk of control.ctx.llm.stream({
+          provider: 'checkpoint-fake',
+          model: 'fake',
+          messages: [],
+          sessionId: handle.agent.session.header.id,
+          signal: AbortSignal.timeout(5_000),
+        })) {
+          // A rejected checkpoint must prevent the adapter from yielding.
+        }
+      }, /checkpoint storage unavailable/)
+      assert.equal(adapter.invocations, 1)
+
+      const blocked = await control.ctx.tools.execute({
+        callId: CallId('checkpoint-probe-call'),
+        name: 'checkpoint_probe',
+        arguments: {},
+        agent: handle.agent,
+        signal: AbortSignal.timeout(5_000),
+      })
+      assert.equal(blocked.isError, true)
+      assert.match(blocked.error?.message ?? '', /checkpoint storage unavailable/)
+      assert.equal(toolBodies, 1)
+
+      sessions.flush = originalFlush
+      const view = inspectContextEndurance(control.ctx, handle.agent.session)
+      assert.equal(view?.checkpoint, 'active')
+    } finally {
+      sessions.flush = originalFlush
+      unregister()
+      await handle.dispose()
       await control.ctx.fiber.dispose()
     }
   })

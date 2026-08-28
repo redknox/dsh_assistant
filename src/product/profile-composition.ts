@@ -124,6 +124,7 @@ export const OFFICIAL_RUNTIME_MOUNTS = Object.freeze([
   { official: 'compaction-basic', runtime: 'BasicCompactionEngine', when: 'ready' },
   { official: 'spill-local', runtime: 'LocalSpillStore', when: 'ready' },
   { official: 'spill-policy', runtime: 'spill-policy', when: 'ready' },
+  { official: 'session-checkpoint-policy', runtime: 'session-checkpoint-policy', when: 'session-persistence' },
 ] as const satisfies readonly OfficialRuntimeMount[])
 
 export const PRODUCT_ONLY_SEAMS = Object.freeze([

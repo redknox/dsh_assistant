@@ -2,6 +2,7 @@ import type { Context } from '@deepseek-ai/cordis'
 import BasicCompactionEngine, { type BasicCompactionConfig } from '@deepseek-ai/dsh-compaction-basic'
 import ToolResultPruner from '@deepseek-ai/dsh-compaction-tool-result-pruner'
 import type { Session } from '@deepseek-ai/dsh-session'
+import * as SessionCheckpointPolicy from '@deepseek-ai/dsh-session-checkpoint-policy'
 import SessionProjectionRegistry from '@deepseek-ai/dsh-session-projection'
 import LocalSpillStore from '@deepseek-ai/dsh-spill-local'
 import * as SpillPolicy from '@deepseek-ai/dsh-spill-policy'
@@ -10,15 +11,17 @@ import type { ContextEnduranceView } from '../domain/workspace/types.js'
 
 export const DEFAULT_MAX_INLINE_TOOL_BYTES = 50_000
 const inlineBudgets = new WeakMap<Context, number>()
+const checkpointContexts = new WeakSet<Context>()
 
 export interface ContextEnduranceConfig extends BasicCompactionConfig {
   readonly spillRoot?: string
   readonly maxInlineToolBytes?: number
+  readonly checkpoints?: boolean
 }
 
 /** Mount the native DSH Context Endurance stack behind one product seam. */
 export async function mountContextEndurance(ctx: Context, config: ContextEnduranceConfig = {}): Promise<void> {
-  const { spillRoot, maxInlineToolBytes, ...compactionConfig } = config
+  const { spillRoot, maxInlineToolBytes, checkpoints, ...compactionConfig } = config
   const inlineBudget = maxInlineToolBytes ?? DEFAULT_MAX_INLINE_TOOL_BYTES
   inlineBudgets.set(ctx, inlineBudget)
   await ctx.plugin(SessionProjectionRegistry)
@@ -32,6 +35,10 @@ export async function mountContextEndurance(ctx: Context, config: ContextEnduran
     headChars: 4096,
     tailChars: 1024,
   })
+  if (checkpoints) {
+    await ctx.plugin(SessionCheckpointPolicy)
+    checkpointContexts.add(ctx)
+  }
   await ctx.plugin(BasicCompactionEngine, compactionConfig)
 }
 
@@ -67,6 +74,7 @@ export function inspectContextEndurance(ctx: Context, session: Session | undefin
           }
         : {}),
       compaction,
+      checkpoint: checkpointContexts.has(ctx) ? 'active' : 'unavailable',
       outputRetention: {
         maxInlineBytes,
         spill: ctx.get('spillStore') ? 'ready' : 'unavailable',
@@ -76,6 +84,7 @@ export function inspectContextEndurance(ctx: Context, session: Session | undefin
     return {
       status: 'degraded',
       compaction,
+      checkpoint: checkpointContexts.has(ctx) ? 'active' : 'unavailable',
       outputRetention: {
         maxInlineBytes,
         spill: ctx.get('spillStore') ? 'ready' : 'unavailable',

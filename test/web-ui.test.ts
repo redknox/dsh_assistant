@@ -2300,6 +2300,7 @@ export function apply(ctx) {
           contextWindow: 1_000_000,
           occupancyPercent: 4.2,
           compaction: 'automatic',
+          checkpoint: 'active',
           outputRetention: { maxInlineBytes: 50_000, spill: 'ready' },
         },
       }),
@@ -2324,6 +2325,7 @@ export function apply(ctx) {
     assert.match(ready, /CONTEXT ENDURANCE/)
     assert.match(ready, /42\.0K \/ 1\.0M/)
     assert.match(ready, /COMPACTION · AUTO/)
+    assert.match(ready, /CHECKPOINT · ACTIVE/)
     assert.match(ready, /OUTPUT CAP · 50\.0KB/)
     assert.match(ready, /SPILL · READY/)
     assert.doesNotMatch(ready, /reasoning_content|sk-secret|chain-of-thought/)
