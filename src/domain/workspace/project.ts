@@ -25,11 +25,12 @@ export function projectMissionControl(input: WorkspaceSnapshotInput): MissionCon
     identity: 'TARS-NG',
     systemState,
     ...(input.objective ? { objective: input.objective } : {}),
-    conversation: input.conversation.map((item) => ({
+    conversation: input.conversation.filter(isDialogueItem).map((item) => ({
       kind: workKind(item.kind),
       text: item.text,
     })),
     activity: projectActivity(input),
+    executionLog: input.executionLog ?? [],
     approvals,
     approvalResolutions,
     activations,
@@ -93,11 +94,13 @@ function projectActivationFailure(input: WorkspaceSnapshotInput): MissionControl
   }
 }
 
-function workKind(kind: 'user' | 'assistant' | 'tool_call' | 'tool_result'): WorkObjectKind {
+function isDialogueItem(item: WorkspaceSnapshotInput['conversation'][number]): item is WorkspaceSnapshotInput['conversation'][number] & { readonly kind: 'user' | 'assistant' } {
+  return item.kind === 'user' || item.kind === 'assistant'
+}
+
+function workKind(kind: 'user' | 'assistant'): WorkObjectKind {
   if (kind === 'user') return 'user-message'
-  if (kind === 'assistant') return 'assistant-response'
-  if (kind === 'tool_call') return 'tool-summary'
-  return 'evidence'
+  return 'assistant-response'
 }
 
 function generatedDisabled(input: WorkspaceSnapshotInput): readonly string[] {

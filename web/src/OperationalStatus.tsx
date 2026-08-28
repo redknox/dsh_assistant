@@ -1,6 +1,7 @@
 import React from 'react'
 import type { MissionControlView, UserCapabilityStatus, UserPluginView, WorkbenchProjection } from '../../src/domain/workspace/types'
 import { PluginLifecycleControl } from './ExtensionsWorkspace'
+import { LiveExecutionLog } from './ExecutionLogWorkspace'
 import { PlateRivets } from './Faceplate'
 import { Glyph } from './icons'
 import { formatDiff } from './missionControlPresentation'
@@ -10,6 +11,7 @@ export interface OperationsActions {
   readonly cancelUninstall?: () => void
   readonly confirmUninstall?: (plugin: UserPluginView) => void
   readonly openExtensions?: () => void
+  readonly openLogs?: () => void
 }
 
 function lampModifier(state: MissionControlView['systemState'], connected: boolean): string {
@@ -27,13 +29,6 @@ function capabilitySignal(status: UserCapabilityStatus): 'active' | 'governed' |
   if (status === 'active') return 'active'
   if (status === 'approval-required') return 'governed'
   return 'unavailable'
-}
-
-function activityModifier(kind: string): string {
-  if (kind === 'APPROVAL_REQUIRED') return ' activity-item--approval'
-  if (kind === 'COMPLETED' || kind === 'RECOVERED') return ' activity-item--done'
-  if (kind === 'BLOCKED' || kind === 'FAILED') return ' activity-item--fault'
-  return ''
 }
 
 function capabilityLabel(status: UserCapabilityStatus): string {
@@ -124,7 +119,6 @@ export function OperationsPanel(props: {
   const activeCapabilities = props.view.capabilities.filter((item) => item.status === 'active').length
   const governedCapabilities = props.view.capabilities.filter((item) => item.status === 'approval-required').length
   const unavailableCapabilities = props.view.capabilities.length - activeCapabilities - governedCapabilities
-  const recentActivity = props.view.activity.slice(-3).reverse()
   const degradation = props.view.controlStrip.degradation
   const pendingApprovals = props.view.controlStrip.pendingApprovals
   const currentCandidates = partitionCandidates(props.view.candidates ?? []).current
@@ -168,13 +162,17 @@ export function OperationsPanel(props: {
         </dl>
       </section>
       <WorkbenchPanel candidates={props.view.candidates ?? []} />
-      <details className="activity-section activity-section--recent">
-        <summary><span>ACTIVITY LOG</span><small>{recentActivity.length} RECENT</small></summary>
-        <div className="activity-log-body">
-          {recentActivity.length === 0 ? <p className="ops-empty">NO RECENT EVENTS</p> : <ol className="activity-list">{recentActivity.map((item) => <li key={item.id} className={`activity-item${activityModifier(item.kind)}`} data-activity={item.kind}><span className="activity-node">{item.kind === 'APPROVAL_REQUIRED' ? <Glyph name="warn" /> : null}</span><span>{item.kind.replaceAll('_', ' ')}</span><span className="activity-summary">{item.summary}</span></li>)}</ol>}
-          {(props.view.approvalResolutions ?? []).length > 0 ? <ul className="ops-decisions" data-actions-history="true" aria-label="Recent human decisions">{(props.view.approvalResolutions ?? []).slice(-3).reverse().map((item) => <li key={item.confirmationId} data-approval-resolution={item.confirmationId} data-approval-outcome={item.outcome}><span>{item.capability ?? 'action'}.{item.operation ?? item.decision}</span><strong>{item.decision.toUpperCase()}</strong></li>)}</ul> : null}
-        </div>
-      </details>
+      <LiveExecutionLog entries={props.view.executionLog ?? []} open={props.actions.openLogs ?? (() => {})} />
+      {(props.view.approvalResolutions ?? []).length > 0 ? (
+        <ul className="ops-decisions" data-actions-history="true" aria-label="Recent human decisions">
+          {(props.view.approvalResolutions ?? []).slice(-3).reverse().map((item) => (
+            <li key={item.confirmationId} data-approval-resolution={item.confirmationId} data-approval-outcome={item.outcome}>
+              <span>{item.capability ?? 'action'}.{item.operation ?? item.decision}</span>
+              <strong>{item.decision.toUpperCase()}</strong>
+            </li>
+          ))}
+        </ul>
+      ) : null}
       <div className="ops-footer"><span><strong>{activeExtensions}</strong> ACTIVE · {(props.view.extensions ?? []).length} EXTENSION RECORDS</span><button type="button" className="button button--secondary" data-open-extensions="true" onClick={props.actions.openExtensions}>MANAGE</button></div>
     </aside>
   )

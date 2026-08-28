@@ -6,7 +6,7 @@ import type { TarsPersonality } from '../personality/types.js'
 import { flattenEffects, summarizeCandidateEffects } from './effects.js'
 import { boundActivationDiagnostics } from './failure.js'
 import { activationViewOf, approvalStateOf, compareOwnerVersion, extensionLifecycleOf } from './lifecycle.js'
-import type { MissionControlView, ObjectiveView, WorkspaceSnapshotInput } from './types.js'
+import type { ExecutionLogEntry, MissionControlView, ObjectiveView, WorkspaceSnapshotInput } from './types.js'
 import { projectMissionControl } from './project.js'
 
 export interface GatherWorkspaceInput {
@@ -84,6 +84,7 @@ export function gatherWorkspaceSnapshot(input: GatherWorkspaceInput): WorkspaceS
       ?.service.list().map((job) => ({ name: job.name, lastRunStatus: job.lastRun?.status })) ?? [],
     toolEvents: agent ? toolEventsFromSession(agent.session.events) : [],
     conversation: agent ? conversationWithoutReasoning(agent.session.events) : [],
+    executionLog: agent ? executionLogFromSession(agent.session.events) : [],
     integrationStatus: Object.entries((ctx.get('integrations') as { hub: { status(): Record<string, { available: boolean; configured?: boolean; reason?: string; provider?: string }> } } | undefined)?.hub.status() ?? {})
       .map(([capability, availability]) => ({
         capability,
@@ -201,24 +202,71 @@ function visibleText(blocks: readonly ContentBlock[]): string {
     .join('')
 }
 
-function conversationWithoutReasoning(events: readonly SessionEvent[]): WorkspaceSnapshotInput['conversation'] {
+function finalAssistantSeqs(events: readonly SessionEvent[]): ReadonlySet<number> {
+  const final = new Set<number>()
+  let assistantSeq: number | undefined
+  let executionSeq = -1
+  const flush = () => {
+    if (assistantSeq !== undefined && assistantSeq > executionSeq) final.add(assistantSeq)
+    assistantSeq = undefined
+    executionSeq = -1
+  }
+  for (const event of events) {
+    if (event.type === 'user/message' && isAppendSurfaceEvent(event) && isHumanUserMessage(event.data)) flush()
+    if (event.type === 'assistant/message' && isAppendSurfaceEvent(event) && visibleText(event.data.message.content).trim()) assistantSeq = event.seq
+    if (event.type === 'tool/call' || (event.type === 'tool/result' && isAppendSurfaceEvent(event))) executionSeq = event.seq
+  }
+  flush()
+  return final
+}
+
+export function conversationWithoutReasoning(events: readonly SessionEvent[]): WorkspaceSnapshotInput['conversation'] {
   const items: WorkspaceSnapshotInput['conversation'][number][] = []
+  const finalAssistant = finalAssistantSeqs(events)
   for (const event of events) {
     if (event.type === 'user/message' && isAppendSurfaceEvent(event)) {
       if (!isHumanUserMessage(event.data)) continue
       items.push({ kind: 'user', text: visibleText(event.data.content) })
     }
     if (event.type === 'assistant/message' && isAppendSurfaceEvent(event)) {
+      if (!finalAssistant.has(event.seq)) continue
       items.push({ kind: 'assistant', text: visibleText(event.data.message.content) })
-    }
-    if (event.type === 'tool/call') {
-      items.push({ kind: 'tool_call', text: event.data.name })
-    }
-    if (event.type === 'tool/result' && isAppendSurfaceEvent(event)) {
-      items.push({ kind: 'tool_result', text: visibleText(event.data.message.content) })
     }
   }
   return items
+}
+
+export function executionLogFromSession(events: readonly SessionEvent[]): readonly ExecutionLogEntry[] {
+  const entries: ExecutionLogEntry[] = []
+  const finalAssistant = finalAssistantSeqs(events)
+  let lastCall: { readonly id: string; readonly name: string } | undefined
+  for (const event of events) {
+    if (event.type === 'assistant/message' && isAppendSurfaceEvent(event) && !finalAssistant.has(event.seq)) {
+      const detail = visibleText(event.data.message.content).trim()
+      if (detail) entries.push({ id: `agent-${event.seq}`, seq: event.seq, time: event.time, kind: 'agent-note', label: 'AGENT', detail })
+      continue
+    }
+    if (event.type === 'tool/call') {
+      const callId = String(event.data.callId)
+      lastCall = { id: callId, name: event.data.name }
+      entries.push({ id: `call-${event.seq}`, seq: event.seq, time: event.time, kind: 'tool-call', label: event.data.name, detail: event.data.arguments, callId })
+      continue
+    }
+    if (event.type === 'tool/result' && isAppendSurfaceEvent(event)) {
+      const callId = lastCall?.id
+      entries.push({
+        id: `result-${event.seq}`,
+        seq: event.seq,
+        time: event.time,
+        kind: 'tool-result',
+        label: lastCall?.name ?? 'tool result',
+        detail: visibleText(event.data.message.content),
+        ...(callId ? { callId } : {}),
+        isError: event.data.error !== undefined,
+      })
+    }
+  }
+  return entries
 }
 
 function isHumanUserMessage(message: { readonly source: { readonly kind: string; readonly form?: string }; readonly content: readonly ContentBlock[] }): boolean {

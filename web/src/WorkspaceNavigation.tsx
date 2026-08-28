@@ -2,7 +2,7 @@ import React from 'react'
 import type { MissionControlView } from '../../src/domain/workspace/types'
 import { Glyph } from './icons'
 
-export type WorkspacePane = 'today' | 'extensions' | 'memory'
+export type WorkspacePane = 'today' | 'extensions' | 'memory' | 'logs'
 
 export interface WorkspaceNavigationActions {
   readonly navigate: (pane: WorkspacePane) => void
@@ -87,6 +87,15 @@ export function WorkspaceNavigation(props: {
         </button>
         <button type="button" className="nav-item" data-nav="capabilities" onClick={props.actions.openOperations}>
           <span className="control-lamp" aria-hidden="true" /><Glyph name="capabilities" /><span>CAPABILITIES</span>
+        </button>
+        <button
+          type="button"
+          className={`nav-item${props.pane === 'logs' ? ' nav-item--active' : ''}`}
+          data-nav="logs"
+          aria-current={props.pane === 'logs' ? 'page' : undefined}
+          onClick={() => props.actions.navigate('logs')}
+        >
+          <span className="control-lamp" aria-hidden="true" /><Glyph name="terminal" /><span>LOGS</span>
         </button>
       </nav>
       <div className="panel-coordinates" aria-label="Local runtime marker">

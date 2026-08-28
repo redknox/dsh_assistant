@@ -2,6 +2,7 @@ import React, { useState } from 'react'
 import type { ActivationCard, ApprovalCard, MissionControlView, SkillProjection, UserPluginView } from '../../src/domain/workspace/types'
 import { ConversationWorkspace } from './ConversationWorkspace'
 import { ExtensionsWorkspace } from './ExtensionsWorkspace'
+import { ExecutionLogWorkspace } from './ExecutionLogWorkspace'
 import { Glyph } from './icons'
 import { MemoryWorkspace } from './MemoryWorkspace'
 import { ControlStripView, OperationsPanel } from './OperationalStatus'
@@ -181,6 +182,8 @@ export function MissionControlScreen(input: MissionControlScreenProps) {
               confirmDelete: props.onConfirmDeleteConversation,
             }}
           />
+        ) : pane === 'logs' ? (
+          <ExecutionLogWorkspace view={view} />
         ) : (
         <ConversationWorkspace
           view={view}
@@ -214,6 +217,7 @@ export function MissionControlScreen(input: MissionControlScreenProps) {
             cancelUninstall: props.onCancelUninstall,
             confirmUninstall: props.onConfirmUninstall,
             openExtensions: () => navigate('extensions'),
+            openLogs: () => navigate('logs'),
           }}
         />
       </div>

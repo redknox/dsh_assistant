@@ -2275,8 +2275,8 @@ export function apply(ctx) {
     assert.match(ready, /class="console"/)
     assert.match(ready, /Hello/)
     assert.match(ready, /TARS-NG/)
-    assert.match(ready, /COMPLETED/)
-    assert.match(ready, /Calendar inspected/)
+    assert.match(ready, /LIVE EXECUTION LOG/)
+    assert.match(ready, /OPEN FULL LOG/)
     assert.match(ready, /MEMORY|Memory/)
     assert.match(ready, /data-control-plane="user-workspace"/)
     assert.doesNotMatch(ready, /reasoning_content|sk-secret|chain-of-thought/)
@@ -2331,10 +2331,40 @@ export function apply(ctx) {
     assert.match(memory, /Remembered facts/)
     assert.match(memory, /Knowledge sources/)
 
+    const logs = renderToStaticMarkup(createElement(MissionControlScreen, {
+      view: fixtureView({
+        executionLog: [
+          { id: 'call-10', seq: 10, kind: 'tool-call', label: 'write_candidate_file', detail: '{"path":"src/plugin.js"}', callId: 'call-1' },
+          { id: 'result-11', seq: 11, kind: 'tool-result', label: 'write_candidate_file', detail: '{"lifecycle":"developing"}', callId: 'call-1' },
+        ],
+      }),
+      pane: 'logs',
+      connected: true,
+      sending: false,
+      draft: '',
+      onDraft() {},
+      onSend() {},
+      onApprove() {},
+      onReject() {},
+      onRecovery() {},
+    }))
+    assert.match(logs, /data-workspace-pane="logs"/)
+    assert.match(logs, /write_candidate_file/)
+    assert.match(logs, /src\/plugin\.js/)
+    assert.match(logs, /lifecycle/)
+    assert.match(logs, /data-nav="logs"[^>]*aria-current="page"/)
+
     const working = renderToStaticMarkup(createElement(MissionControlScreen, {
       view: fixtureView({
         systemState: 'WORKING',
-        activity: [{ id: 'run', kind: 'RUNNING', summary: 'Calendar inspected', source: 'calendar' }],
+        executionLog: [{
+          id: 'run',
+          seq: 12,
+          kind: 'tool-call',
+          label: 'calendar_list_events',
+          detail: '{"date":"2026-08-28"}',
+          callId: 'run',
+        }],
         controlStrip: { pendingApprovals: 0, backgroundJobs: 0, mode: 'WORKING' },
       }),
       connected: true,
@@ -2347,7 +2377,8 @@ export function apply(ctx) {
       onRecovery() {},
     }))
     assert.match(working, /WORKING/)
-    assert.match(working, /RUNNING/)
+    assert.match(working, /calendar_list_events/)
+    assert.match(working, /1 EVENTS/)
 
     const approval = renderToStaticMarkup(createElement(MissionControlScreen, {
       view: fixtureView({

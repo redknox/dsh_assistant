@@ -8,6 +8,7 @@ describe('Web UI presentation routing', () => {
     assert.equal(workspacePaneFromHash('#today'), 'today')
     assert.equal(workspacePaneFromHash('#extensions'), 'extensions')
     assert.equal(workspacePaneFromHash('#memory'), 'memory')
+    assert.equal(workspacePaneFromHash('#logs'), 'logs')
     assert.equal(workspacePaneFromHash('#conversations'), 'memory')
     assert.equal(workspacePaneFromHash('#unknown'), 'today')
     assert.equal(workspacePaneFromHash(undefined), 'today')
@@ -17,6 +18,7 @@ describe('Web UI presentation routing', () => {
     assert.equal(workspacePaneHash('today'), '#today')
     assert.equal(workspacePaneHash('memory'), '#memory')
     assert.equal(workspacePaneHash('extensions'), '#extensions')
+    assert.equal(workspacePaneHash('logs'), '#logs')
   })
 
   it('maps only recovery actions supported by the Web UI', () => {

@@ -54,6 +54,19 @@ export interface ActivityItem {
   readonly sessionId?: string
 }
 
+export type ExecutionLogKind = 'agent-note' | 'tool-call' | 'tool-result' | 'command-run' | 'command-result'
+
+export interface ExecutionLogEntry {
+  readonly id: string
+  readonly seq: number
+  readonly time?: number
+  readonly kind: ExecutionLogKind
+  readonly label: string
+  readonly detail: string
+  readonly callId?: string
+  readonly isError?: boolean
+}
+
 export interface ApprovalResolution {
   readonly type: 'approval/resolved'
   readonly confirmationId: string
@@ -223,6 +236,7 @@ export interface MissionControlView {
   readonly objective?: ObjectiveView
   readonly conversation: readonly { readonly kind: WorkObjectKind; readonly text: string }[]
   readonly activity: readonly ActivityItem[]
+  readonly executionLog?: readonly ExecutionLogEntry[]
   readonly approvals: readonly ApprovalCard[]
   readonly skills?: readonly SkillProjection[]
   readonly skillCatalog?: {
@@ -381,6 +395,7 @@ export interface WorkspaceSnapshotInput {
     readonly isError?: boolean
     readonly seq: number
   }[]
+  readonly executionLog?: readonly ExecutionLogEntry[]
   readonly conversation: readonly { readonly kind: 'user' | 'assistant' | 'tool_call' | 'tool_result'; readonly text: string }[]
   readonly integrationStatus: readonly { readonly capability: string; readonly available: boolean; readonly configured?: boolean; readonly reason?: string; readonly provider?: string }[]
   readonly autoExecuteCapabilities?: readonly string[]
