@@ -1,4 +1,6 @@
 import { existsSync, unlinkSync, writeFileSync } from 'node:fs'
+import { request as requestHttp } from 'node:http'
+import { request as requestHttps } from 'node:https'
 import { formatOperatorStatus, operatorStatus, parseOperatorSkills, parseOperatorStatus, type OperatorStatus } from '../domain/self-extension/status.js'
 import { runSelfExtensionCli } from '../runtime/self-extension-cli.js'
 import { bootAssistantControl, createAssistantAgent, type AssistantControl } from '../runtime/boot.js'
@@ -206,19 +208,32 @@ function removeOwnPidFile(layout: ProductHomeLayout): void {
 
 async function requestAuthenticatedStop(identity: RuntimeIdentity): Promise<'accepted' | 'mismatch' | 'unreachable'> {
   if (identity.controlEndpoint === undefined || !isLoopbackControlEndpoint(identity.controlEndpoint)) return 'unreachable'
-  try {
-    const response = await fetch(runtimeStopUrl(identity.controlEndpoint), {
+  const status = await postLoopbackJson(runtimeStopUrl(identity.controlEndpoint), { runId: identity.runId }, 2000)
+  if (status === 200) return 'accepted'
+  if (status === 403) return 'mismatch'
+  return 'unreachable'
+}
+
+/** Use the Node HTTP client for process-control requests so shutdown cannot strand Undici work. */
+function postLoopbackJson(url: string, body: unknown, timeoutMs: number): Promise<number | undefined> {
+  return new Promise((resolve) => {
+    const endpoint = new URL(url)
+    const payload = JSON.stringify(body)
+    const request = (endpoint.protocol === 'https:' ? requestHttps : requestHttp)(endpoint, {
       method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ runId: identity.runId }),
-      signal: AbortSignal.timeout(2000),
+      headers: {
+        'content-type': 'application/json',
+        'content-length': Buffer.byteLength(payload),
+        connection: 'close',
+      },
+    }, (response) => {
+      response.resume()
+      response.once('end', () => resolve(response.statusCode))
     })
-    if (response.status === 200) return 'accepted'
-    if (response.status === 403) return 'mismatch'
-    return 'unreachable'
-  } catch {
-    return 'unreachable'
-  }
+    request.setTimeout(timeoutMs, () => request.destroy(new Error('runtime control timeout')))
+    request.once('error', () => resolve(undefined))
+    request.end(payload)
+  })
 }
 
 function delay(ms: number): Promise<void> {
