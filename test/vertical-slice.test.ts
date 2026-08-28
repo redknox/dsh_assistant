@@ -64,7 +64,8 @@ describe('plan-my-day vertical slice', () => {
       const brief = ui.startJob('morning-brief')
       const briefRun = await ui.waitJob(brief.runId)
       assert.equal(briefRun.status, 'completed')
-      assert.match(briefRun.summary ?? '', /calendarEvents/)
+      assert.match(briefRun.summary ?? '', /Work brief/)
+      assert.match(briefRun.summary ?? '', /Calendar \(\d+\)/)
 
       ctx.assistantJobs.service.register({
         name: 'hold',

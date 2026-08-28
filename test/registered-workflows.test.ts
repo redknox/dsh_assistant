@@ -52,7 +52,8 @@ describe('registered workflows', () => {
         signal: AbortSignal.timeout(6_000),
       })
       assert.equal(output.isError, false)
-      assert.match(JSON.stringify(output), /calendarEvents: \d+/)
+      assert.match(JSON.stringify(output), /Work brief/)
+      assert.match(JSON.stringify(output), /Calendar \(\d+\)/)
       assert.match(JSON.stringify(output), /completed/)
     } finally {
       await first.dispose()

@@ -8,6 +8,9 @@ import * as integrationsPlugin from '../src/plugins/integrations-plugin.js'
 import { FakeClock } from '../src/adapters/jobs/interval-scheduler.js'
 import * as jobsPlugin from '../src/plugins/jobs-plugin.js'
 import * as policyPlugin from '../src/plugins/policy-plugin.js'
+import { FakeIntegrationSuite } from '../src/adapters/integrations/fake-providers.js'
+import { buildWorkBrief } from '../src/domain/jobs/work-brief.js'
+import { KnowledgeService } from '../src/domain/knowledge/service.js'
 
 async function bootJobs(clock?: FakeClock, everyMs?: number) {
   const ctx = new Context()
@@ -31,8 +34,11 @@ describe('assistant jobs', () => {
     const first = ctx.assistantJobs.service.start('morning-brief')
     const firstRun = await ctx.assistantJobs.service.wait(first.runId)
     assert.equal(firstRun.status, 'completed')
-    assert.match(firstRun.summary ?? '', /calendarEvents: 3/)
-    assert.match(firstRun.summary ?? '', /openTasks: 1/)
+    assert.match(firstRun.summary ?? '', /Work brief/)
+    assert.match(firstRun.summary ?? '', /Calendar \(3\)/)
+    assert.match(firstRun.summary ?? '', /Open tasks \(1\)/)
+    assert.match(firstRun.summary ?? '', /Recent mail \(1\)/)
+    assert.match(firstRun.summary ?? '', /Team standup/)
 
     const second = ctx.assistantJobs.service.start('morning-brief')
     const secondRun = await ctx.assistantJobs.service.wait(second.runId)
@@ -42,6 +48,46 @@ describe('assistant jobs', () => {
     assert.equal(status?.schedule.kind, 'every')
     assert.equal(ctx.jobs.get(first.jobId).status, 'completed')
     await ctx.fiber.dispose()
+  })
+
+  it('uses the requested local day and degrades one unavailable source without losing the brief', async () => {
+    const suite = new FakeIntegrationSuite()
+    suite.state.unavailable.mail = 'mail offline token=SECRET'
+    suite.state.notConfigured.add('mail')
+
+    const brief = await buildWorkBrief({
+      hub: suite.hub,
+      now: new Date('2026-08-20T16:30:00.000Z'),
+      timeZone: 'Asia/Shanghai',
+    })
+
+    assert.match(brief, /Work brief — 2026-08-21/)
+    assert.match(brief, /09:00–09:15 · "Team standup"/)
+    assert.match(brief, /Calendar \(3\)/)
+    assert.match(brief, /Mail: not connected/)
+    assert.doesNotMatch(brief, /SECRET|offline token/)
+  })
+
+  it('retrieves knowledge related to the actual events and tasks in the brief', async () => {
+    const suite = new FakeIntegrationSuite()
+    const knowledge = new KnowledgeService()
+    knowledge.ingest({
+      sourceUri: 'vault/team-standup.md',
+      sourceKind: 'note',
+      title: 'Team standup playbook',
+      text: 'For the Team standup, bring the Review agenda and name the decision owner.',
+    })
+
+    const brief = await buildWorkBrief({
+      hub: suite.hub,
+      knowledge,
+      now: new Date('2026-08-21T08:00:00.000Z'),
+      timeZone: 'UTC',
+    })
+
+    assert.match(brief, /Relevant knowledge \(1\)/)
+    assert.match(brief, /Team standup playbook/)
+    assert.match(brief, /decision owner/)
   })
 
   it('triggers morning brief twice from the scheduler after time advances', async () => {
