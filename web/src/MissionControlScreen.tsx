@@ -5,6 +5,7 @@ import { ExtensionsWorkspace } from './ExtensionsWorkspace'
 import { ExecutionLogWorkspace } from './ExecutionLogWorkspace'
 import { Glyph } from './icons'
 import { MemoryWorkspace } from './MemoryWorkspace'
+import { SettingsWorkspace } from './SettingsWorkspace'
 import { ControlStripView, OperationsPanel } from './OperationalStatus'
 import { RecoveryPanel, SystemHeader } from './SystemStatus'
 import { WorkspaceNavigation, type WorkspacePane } from './WorkspaceNavigation'
@@ -13,6 +14,7 @@ import type { GovernanceControl } from './useGovernanceControl'
 import type { MissionControlRuntime } from './useMissionControlRuntime'
 import type { SkillControl } from './useSkillControl'
 import type { WorkspaceControl } from './useWorkspaceControl'
+import type { SettingsControl } from './useSettingsControl'
 
 type CompactSurface = 'conversation' | 'navigation' | 'operations'
 
@@ -23,6 +25,7 @@ export interface MissionControlScreenProps {
   readonly governance: GovernanceControl
   readonly workspace: WorkspaceControl
   readonly skill: SkillControl
+  readonly settings: SettingsControl
   readonly navigation: {
     readonly pane: WorkspacePane
     readonly navigate: (pane: WorkspacePane) => void
@@ -184,6 +187,8 @@ export function MissionControlScreen(input: MissionControlScreenProps) {
           />
         ) : pane === 'logs' ? (
           <ExecutionLogWorkspace view={view} />
+        ) : pane === 'settings' ? (
+          <SettingsWorkspace control={input.settings} locked={locked} />
         ) : (
         <ConversationWorkspace
           view={view}

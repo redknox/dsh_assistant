@@ -19,6 +19,8 @@ import { handleWebUiGovernanceLifecycleRequest } from './web-ui-governance-lifec
 import { WebUiGovernanceMutations } from './web-ui-governance-mutations.js'
 import { handleWebUiSkillRequest, type WebUiSkillCommand } from './web-ui-skills.js'
 import { WebUiHttpTransport } from './web-ui-http.js'
+import type { ProductSettings } from './settings.js'
+import { handleWebUiSettingsRequest } from './web-ui-settings.js'
 
 export type { WebUiRuntimeControl } from './web-ui-runtime-control.js'
 
@@ -29,6 +31,7 @@ export interface WebUiServerOptions extends WebUiListenOptions {
   readonly assetRoot?: string
   readonly runtimeControl?: WebUiRuntimeControl
   readonly sessionHost?: LiveSessionHost
+  readonly settings?: ProductSettings
 }
 
 export interface WebUiServer {
@@ -134,6 +137,26 @@ export function startWebUiServer(options: WebUiServerOptions): Promise<WebUiServ
       }
       if (req.method === 'GET' && requestUrl.pathname === '/api/events') {
         transport.openEvents(req, res)
+        return
+      }
+      if (requestUrl.pathname === '/api/settings') {
+        if (!transport.sessionTrusted(req.headers.cookie)) {
+          sendJson(res, 403, { error: 'untrusted session' })
+          return
+        }
+        if (!options.settings) {
+          sendJson(res, 503, { error: 'settings-unavailable' })
+          return
+        }
+        const settings = await handleWebUiSettingsRequest({
+          method: req.method,
+          pathname: requestUrl.pathname,
+          readJson: () => transport.readJson(req),
+        }, {
+          inspect: () => options.settings!.inspect(),
+          update: (input) => options.settings!.update(input),
+        })
+        if (settings) sendJson(res, settings.status, settings.body)
         return
       }
       const conversation = await handleWebUiConversationRequest({

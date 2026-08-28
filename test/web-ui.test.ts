@@ -22,6 +22,7 @@ import {
 } from '../src/product/web-ui-protocol.js'
 import { ensureProductHome } from '../src/product/home.js'
 import { inspectRuntimeContext } from '../src/product/runtime-context.js'
+import { ProductSettings } from '../src/product/settings.js'
 import { catalogBindingOf, SessionCatalog } from '../src/product/session-catalog.js'
 import { LiveSessionHost } from '../src/product/session-lifecycle.js'
 import { attachWebUiBroadcast, startWebUiServer } from '../src/product/web-ui-server.js'
@@ -63,6 +64,7 @@ async function withServer(
     recoveryRoot: Awaited<ReturnType<typeof bootAssistantControl>>['recoveryRoot'],
     adapter: FakeReplyAdapter,
   ) => Promise<void>,
+  settings?: ProductSettings,
 ) {
   const control = await boot()
   const adapter = new FakeReplyAdapter('ack')
@@ -77,6 +79,7 @@ async function withServer(
     diagnostics: { persistence: 'ok' },
     assetRoot: assets,
     port: 0,
+    ...(settings ? { settings } : {}),
   })
   const detach = attachWebUiBroadcast(control.ctx, () => web.notify())
   try {
@@ -251,6 +254,35 @@ describe('local Mission-Control Web UI', () => {
       })
       assert.equal(unknown.status, 404)
     })
+  })
+
+  it('keeps Settings behind the trusted local session and never returns secret values', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'tars-web-settings-'))
+    const envFile = join(root, 'env')
+    writeFileSync(envFile, 'DEEPSEEK_API_KEY=never-return-this\nDSH_ASSISTANT_FEISHU_MODE=cli\n')
+    const settings = new ProductSettings(envFile, {})
+    try {
+      await withServer(bootAssistantControl, 'web-ui-settings', async (url) => {
+        const denied = await fetch(`${url}/api/settings`)
+        assert.equal(denied.status, 403)
+        const cookie = await cookieHeader(url)
+        const response = await fetch(`${url}/api/settings`, { headers: authHeaders(cookie) })
+        assert.equal(response.status, 200)
+        const snapshot = await response.json() as { revision: string; fields: readonly { id: string; value?: string }[] }
+        assert.doesNotMatch(JSON.stringify(snapshot), /never-return-this/)
+        assert.equal(snapshot.fields.find((field) => field.id === 'DSH_ASSISTANT_FEISHU_MODE')?.value, 'cli')
+
+        const saved = await fetch(`${url}/api/settings`, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json', ...authHeaders(cookie) },
+          body: JSON.stringify({ revision: snapshot.revision, changes: [{ id: 'DSH_ASSISTANT_FEISHU_MODE', clear: true }] }),
+        })
+        assert.equal(saved.status, 200)
+        assert.doesNotMatch(readFileSync(envFile, 'utf8'), /DSH_ASSISTANT_FEISHU_MODE/)
+      }, settings)
+    } finally {
+      rmSync(root, { recursive: true, force: true })
+    }
   })
 
   it('keeps read-only tools executable after Web UI broadcast is attached', async () => {

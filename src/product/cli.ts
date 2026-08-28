@@ -18,6 +18,7 @@ import {
   type ProductHomeLayout,
 } from './home.js'
 import { appendProductLog } from './log.js'
+import { ProductSettings } from './settings.js'
 import {
   acquireRuntimeLease,
   inspectRuntimeLease,
@@ -710,6 +711,7 @@ export async function runProductCli(
         web = await startWebUiServer({
           surface,
           recoveryRoot: booted.recoveryRoot,
+          settings: new ProductSettings(layout.envFile),
           ...(sessionHost ? { sessionHost } : {}),
           diagnostics: { persistence: booted.diagnostics.persistence, reasons: booted.diagnostics.reasons },
           runtimeControl: {

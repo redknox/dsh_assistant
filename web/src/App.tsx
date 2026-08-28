@@ -6,6 +6,7 @@ import { useGovernanceControl } from './useGovernanceControl'
 import { useMissionControlRuntime } from './useMissionControlRuntime'
 import { useSkillControl } from './useSkillControl'
 import { useWorkspaceControl } from './useWorkspaceControl'
+import { useSettingsControl } from './useSettingsControl'
 import { workspacePaneFromHash, workspacePaneHash } from './workspaceRoute'
 
 export { MissionControlScreen } from './MissionControlScreen'
@@ -17,6 +18,7 @@ export function App() {
   const skillControl = useSkillControl(runtime)
   const workspace = useWorkspaceControl(runtime, conversation)
   const [pane, setPane] = useState<WorkspacePane>(() => workspacePaneFromHash(globalThis.location?.hash))
+  const settings = useSettingsControl(pane === 'settings')
 
   useEffect(() => {
     const sync = () => { setPane(workspacePaneFromHash(globalThis.location?.hash)) }
@@ -45,6 +47,7 @@ export function App() {
       governance={governance}
       workspace={workspace}
       skill={skillControl}
+      settings={settings}
       navigation={{ pane, navigate }}
     />
   )

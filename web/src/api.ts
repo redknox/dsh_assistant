@@ -1,4 +1,5 @@
 import type { ActivationCard, ApprovalCard, MissionControlView, RollbackCard, SkillProjection, UserPluginView, WorkObjectKind } from '../../src/domain/workspace/types'
+import type { SettingsSnapshot, SettingsUpdate } from '../../src/product/settings-types'
 
 export interface UiEnvelope {
   readonly view: MissionControlView
@@ -42,6 +43,25 @@ export async function establishSession(): Promise<void> {
 
 export async function fetchView(): Promise<UiEnvelope> {
   return parseEnvelope(await fetch('/api/view', include))
+}
+
+export async function fetchSettings(): Promise<SettingsSnapshot> {
+  const response = await fetch('/api/settings', include)
+  const body = await response.json() as SettingsSnapshot & { error?: string }
+  if (!response.ok) throw new Error(body.error ?? `settings request failed (${response.status})`)
+  return body
+}
+
+export async function saveSettings(input: SettingsUpdate): Promise<SettingsSnapshot> {
+  const response = await fetch('/api/settings', {
+    ...include,
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(input),
+  })
+  const body = await response.json() as SettingsSnapshot & { error?: string }
+  if (!response.ok) throw new Error(body.error ?? `settings update failed (${response.status})`)
+  return body
 }
 
 export async function sendMessage(text: string, sessionId: string): Promise<UiEnvelope> {

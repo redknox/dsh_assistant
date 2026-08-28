@@ -43,6 +43,10 @@ export class WebUiHttpTransport {
     return !MUTATING.has(method ?? 'GET') || sessionMatches(cookie, this.sessionToken)
   }
 
+  sessionTrusted(cookie: string | undefined): boolean {
+    return sessionMatches(cookie, this.sessionToken)
+  }
+
   async readJson(req: IncomingMessage): Promise<unknown> {
     const chunks: Buffer[] = []
     let size = 0

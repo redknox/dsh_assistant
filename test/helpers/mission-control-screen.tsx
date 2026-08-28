@@ -74,6 +74,17 @@ export function MissionControlScreen(props: LegacyMissionControlScreenProps) {
         },
         dispatch() {},
       }}
+      settings={{
+        draft: {},
+        clearing: new Set(),
+        loading: false,
+        saving: false,
+        dirty: false,
+        load() {},
+        change() {},
+        clear() {},
+        save() {},
+      }}
       navigation={{ pane: props.pane ?? 'today', navigate() {} }}
     />
   )
