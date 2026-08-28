@@ -1,4 +1,5 @@
 import type { JobId, JobOutcome, JobRegistry } from '@deepseek-ai/dsh-jobs'
+import type { Agent } from '@deepseek-ai/dsh-agent'
 import type { WorkflowDefinition, WorkflowRunRecord, WorkflowStatus } from './types.js'
 
 declare module '@deepseek-ai/dsh-jobs' {
@@ -8,8 +9,10 @@ declare module '@deepseek-ai/dsh-jobs' {
 }
 
 export class AssistantJobService {
+  static readonly maxActivePerOwner = 4
   private readonly workflows = new Map<string, WorkflowDefinition>()
   private readonly runs = new Map<string, WorkflowRunRecord>()
+  private readonly owners = new Map<string, Agent>()
   private nextRun = 1
 
   constructor(private readonly jobs: JobRegistry) {}
@@ -36,14 +39,22 @@ export class AssistantJobService {
     return this.runs.get(runId)
   }
 
-  start(name: string, input: Record<string, unknown> = {}): { runId: string; jobId: JobId } {
+  start(name: string, input: Record<string, unknown> = {}, owner?: Agent): { runId: string; jobId: JobId } {
     const workflow = this.workflows.get(name)
     if (!workflow) throw new Error(`unknown workflow: ${name}`)
+    if (owner) {
+      const active = [...this.runs.values()].filter((run) => run.status === 'running' && this.owners.get(run.runId) === owner).length
+      if (active >= AssistantJobService.maxActivePerOwner) {
+        throw new Error(`a session may run at most ${AssistantJobService.maxActivePerOwner} registered workflows at once`)
+      }
+    }
     const runId = `run-${this.nextRun++}`
     const controller = new AbortController()
     const jobId = this.jobs.start({
       kind: 'assistant',
       label: workflow.title,
+      outputLimitBytes: 64 * 1024,
+      ...(owner ? { owner } : {}),
       run: () => {
         const done = this.execute(runId, workflow, controller.signal, input)
         return {
@@ -61,19 +72,20 @@ export class AssistantJobService {
       startedAt: new Date().toISOString(),
       status: 'running',
     })
+    if (owner) this.owners.set(runId, owner)
     return { runId, jobId }
   }
 
   cancel(runId: string, reason = 'cancelled by caller'): 'requested' | 'already-finished' {
     const run = this.runs.get(runId)
     if (!run) throw new Error(`unknown run: ${runId}`)
-    return this.jobs.kill(run.jobId, undefined, reason)
+    return this.jobs.kill(run.jobId, this.owners.get(runId), reason)
   }
 
   wait(runId: string, timeoutMs = 5000): Promise<WorkflowRunRecord> {
     const run = this.runs.get(runId)
     if (!run) return Promise.reject(new Error(`unknown run: ${runId}`))
-    return this.jobs.wait(run.jobId, timeoutMs).then(() => {
+    return this.jobs.wait(run.jobId, timeoutMs, this.owners.get(runId)).then(() => {
       const latest = this.runs.get(runId)
       if (!latest) throw new Error(`unknown run: ${runId}`)
       return latest

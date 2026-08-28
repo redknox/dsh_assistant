@@ -42,7 +42,11 @@
 - id: tool-pwsh
   disabled: true
 - id: tool-jobs
-  disabled: true
+  config:
+    waitTimeoutMs: 30000
+    maxWaitTimeoutMs: 120000
+    completionDelivery: quiet
+    maxConsecutiveWakes: 1
 - id: fs-observation-policy
   disabled: true
 - id: tool-fs

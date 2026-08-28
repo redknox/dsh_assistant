@@ -4,6 +4,7 @@ import AgentDefaultModel from '@deepseek-ai/dsh-agent-default-model'
 import AgentLoop from '@deepseek-ai/dsh-agent-loop'
 import InvariantRegistry from '@deepseek-ai/dsh-invariants'
 import LocalJobRegistry from '@deepseek-ai/dsh-jobs-local'
+import * as ToolJobs from '@deepseek-ai/dsh-tool-jobs'
 import LlmRuntime from '@deepseek-ai/dsh-llm'
 import * as DeepSeekLlm from '@deepseek-ai/dsh-llm-deepseek'
 import SessionStore, { SessionId } from '@deepseek-ai/dsh-session'
@@ -103,7 +104,15 @@ async function bootStack(options: BootOptions = {}): Promise<AssistantControl> {
   if (!safeMode) await mountSessionIntelligence(ctx, options.home ? { home: options.home } : {})
   if (!safeMode) await mountAgentTaskControl(ctx)
   await ctx.plugin(SkillRegistry)
-  if (!safeMode) await ctx.plugin(LocalJobRegistry)
+  if (!safeMode) {
+    await ctx.plugin(LocalJobRegistry)
+    await ctx.plugin(ToolJobs, {
+      waitTimeoutMs: 30_000,
+      maxWaitTimeoutMs: 120_000,
+      completionDelivery: 'quiet',
+      maxConsecutiveWakes: 1,
+    })
+  }
   await ctx.plugin(AgentLoop, { agents: [] })
   let recoveryRoot: RecoveryRoot | undefined
   const skillHome = resolveAssistantHome(options.home)

@@ -28,6 +28,7 @@ import * as skillPlugin from '../plugins/skill-plugin.js'
 import type { SkillPluginConfig } from '../plugins/skill-plugin.js'
 import * as dshApprovalBridgePlugin from '../plugins/dsh-approval-bridge-plugin.js'
 import { mountBoundedWorkbench } from './bounded-workbench.js'
+import * as registeredWorkflows from './registered-workflows.js'
 
 export const name = 'dsh-assistant'
 export const inject = ['systemPrompt', 'agents']
@@ -81,6 +82,7 @@ export async function apply(ctx: Context, config: AssistantBundleConfig = {}) {
   await ctx.plugin(policyPlugin, config.policy)
   await ctx.plugin(dshApprovalBridgePlugin)
   await ctx.plugin(jobsPlugin, config.jobs)
+  await ctx.plugin(registeredWorkflows)
   await ctx.plugin(assistantPlugin)
 }
 
