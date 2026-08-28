@@ -15,6 +15,10 @@ import * as toolSkill from '@deepseek-ai/dsh-tool-skill'
 import ToolRuntime from '@deepseek-ai/dsh-tools'
 import SubagentRuntime from '@deepseek-ai/dsh-subagent'
 import * as SpawnSubagent from '@deepseek-ai/dsh-subagent-spawn-in-process'
+import WebRuntime from '@deepseek-ai/dsh-web'
+import * as DeepSeekWebSearch from '@deepseek-ai/dsh-web-search-deepseek'
+import * as ToolWeb from '@deepseek-ai/dsh-tool-web'
+import * as ToolTimeoutPolicy from '@deepseek-ai/dsh-tool-call-timeout-policy'
 import { mountContextEndurance } from '../product/context-endurance.js'
 import { mountMaterialInput } from '../product/material-input.js'
 import { mountSessionIntelligence } from '../product/session-intelligence.js'
@@ -99,6 +103,18 @@ async function bootStack(options: BootOptions = {}): Promise<AssistantControl> {
   await ctx.plugin(AgentDefaultModel, { provider: DEFAULT_LLM_PROVIDER, model: DEFAULT_LLM_MODEL })
   await ctx.plugin(SystemPrompt, {})
   await ctx.plugin(ToolRuntime)
+  if (!safeMode) {
+    await ctx.plugin(ToolTimeoutPolicy)
+    await ctx.plugin(WebRuntime, { searchProvider: 'deepseek' })
+    await ctx.plugin(DeepSeekWebSearch, { apiKeyEnv: 'DEEPSEEK_API_KEY', maxTokens: 2048, maxUses: 2 })
+    await ctx.plugin(ToolWeb, {
+      search: true,
+      fetch: false,
+      searchMaxResults: 6,
+      searchMaxQueries: 2,
+      searchTimeoutMs: 30_000,
+    })
+  }
   if (!safeMode) await mountContextEndurance(ctx, {
     ...(options.home ? { spillRoot: productHomeLayout(options.home).spill } : {}),
     checkpoints: options.sessionRoot !== undefined,

@@ -16,6 +16,7 @@ const SAFE_CHILD_TOOLS = new Set([
   'list_registered_workflows', 'list_workbench', 'lookup_capability',
   'mail_get_message', 'mail_list_messages', 'read_candidate_file',
   'recall_memory', 'retrieve_knowledge', 'review_capability_resolution',
+  'web_search',
 ])
 
 function finalText(output: readonly ContentBlock[]): string {

@@ -39,6 +39,7 @@ const PLAN_READ_TOOLS = new Set([
   'list_registered_workflows',
   'job_list',
   'job_output',
+  'web_search',
   'integration_status',
   'meeting_get_artifacts',
   'meeting_read_ai_notes',

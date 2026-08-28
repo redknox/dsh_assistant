@@ -30,6 +30,7 @@ import * as dshApprovalBridgePlugin from '../plugins/dsh-approval-bridge-plugin.
 import { mountBoundedWorkbench } from './bounded-workbench.js'
 import * as registeredWorkflows from './registered-workflows.js'
 import * as governedSubagents from './governed-subagents.js'
+import * as governedWeb from './governed-web.js'
 
 export const name = 'dsh-assistant'
 export const inject = ['systemPrompt', 'agents']
@@ -85,6 +86,7 @@ export async function apply(ctx: Context, config: AssistantBundleConfig = {}) {
   await ctx.plugin(jobsPlugin, config.jobs)
   await ctx.plugin(registeredWorkflows)
   await ctx.plugin(governedSubagents)
+  await ctx.plugin(governedWeb)
   await ctx.plugin(assistantPlugin)
 }
 

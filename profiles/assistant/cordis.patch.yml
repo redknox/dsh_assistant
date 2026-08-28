@@ -98,7 +98,7 @@
 - id: tool-workflow
   disabled: true
 - id: timeout-policy
-  disabled: true
+  config: {}
 - id: tool-todo
   config:
     allowParallelInProgress: false
@@ -112,10 +112,19 @@
 - id: repeat-tool-reminder
   disabled: true
 - id: web
-  disabled: true
+  config:
+    searchProvider: deepseek
 - id: web-search-deepseek
-  disabled: true
+  config:
+    apiKeyEnv: DEEPSEEK_API_KEY
+    maxTokens: 2048
+    maxUses: 2
 - id: tool-web
-  disabled: true
+  config:
+    search: true
+    fetch: false
+    searchMaxResults: 6
+    searchMaxQueries: 2
+    searchTimeoutMs: 30000
 - id: fs-sandbox
   disabled: true
