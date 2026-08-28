@@ -402,8 +402,9 @@ export class WorkbenchService implements CandidateWorkbench {
     assertImportedReadOnly(parent)
     if (!parent.sealed) throw new WorkbenchContractError('repair requires a sealed parent revision')
     const last = this.independentReview.lastReport(parent.id)
-    if (last?.state !== 'changes-required') {
-      throw new WorkbenchContractError('repair requires Independent Review changes-required on the parent')
+    const approval = this.governance.inspectApproval(parent.id)
+    if (last?.state !== 'changes-required' && approval?.decision !== 'rejected') {
+      throw new WorkbenchContractError('repair requires Independent Review changes-required or a rejected approval on the parent')
     }
     const snapshot = snapshotRepairParent(parent)
     const binding = this.bindings.get(parent.id)

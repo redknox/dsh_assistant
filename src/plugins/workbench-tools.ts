@@ -240,7 +240,7 @@ export function registerWorkbenchTools(
 
   const disposeRepair = tools.register(defineTool({
     name: 'repair_candidate',
-    description: 'Create a new mutable revision from a sealed parent with changes-required review. Parent stays immutable.',
+    description: 'Create a new mutable revision from a sealed parent with changes-required review or a rejected human approval. Parent stays immutable.',
     parameters: { candidateId: { type: 'string', required: true } },
     output: textOutput(),
     async execute(args) {

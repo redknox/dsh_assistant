@@ -271,6 +271,27 @@ describe('candidate workbench', () => {
     assert.equal(closed.findings.some((item) => item.claim === 'needs-repair' && item.status === 'open'), false)
   })
 
+  it('D2. a human-rejected sealed candidate can be repaired without reopening Independent Review', () => {
+    const setup = isolatedWorkbench()
+    const parent = authorIsolated(setup)
+    const report = setup.workbench.review(parent)
+    assert.equal(report.state, 'review-complete')
+
+    const requested = setup.governance.requestApproval(parent)
+    const human = setup.root.issueAuthority({ kind: 'human-control', source: 'application-ui' })
+    setup.root.recordApproval(human, {
+      candidateId: parent,
+      fingerprint: requested.fingerprint,
+      decision: 'rejected',
+    })
+    assert.equal(setup.governance.inspectApproval(parent)?.decision, 'rejected')
+
+    const repaired = setup.workbench.repair(parent)
+    assert.equal(repaired.parentId, parent)
+    assert.equal(repaired.parentDigest, setup.workspace.get(parent).digest)
+    assert.equal(repaired.sealed, false)
+  })
+
   it('E. scripted slice reaches an Approval Card, isolated activation, and rollback', async () => {
     const { ctx, recoveryRoot } = await bootAssistantControl()
     try {
