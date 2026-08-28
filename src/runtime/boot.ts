@@ -15,6 +15,7 @@ import ToolRuntime from '@deepseek-ai/dsh-tools'
 import { mountContextEndurance } from '../product/context-endurance.js'
 import { mountMaterialInput } from '../product/material-input.js'
 import { mountSessionIntelligence } from '../product/session-intelligence.js'
+import { mountAgentTaskControl } from '../product/agent-task-control.js'
 import type { RecoveryRoot } from '../domain/governance/root.js'
 import { SkillService } from '../domain/skill/index.js'
 import { mountGovernedSkillFilesystem } from './skill-filesystem-mount.js'
@@ -97,6 +98,7 @@ async function bootStack(options: BootOptions = {}): Promise<AssistantControl> {
     checkpoints: options.sessionRoot !== undefined,
   })
   if (!safeMode) await mountSessionIntelligence(ctx, options.home ? { home: options.home } : {})
+  if (!safeMode) await mountAgentTaskControl(ctx)
   await ctx.plugin(SkillRegistry)
   if (!safeMode) await ctx.plugin(LocalJobRegistry)
   await ctx.plugin(AgentLoop, { agents: [] })

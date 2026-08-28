@@ -10,6 +10,7 @@ import type { ExecutionLogEntry, MissionControlView, ObjectiveView, WorkspaceSna
 import { projectMissionControl } from './project.js'
 import { inspectContextEndurance } from '../../product/context-endurance.js'
 import { inspectMaterialInput } from '../../product/material-input.js'
+import { inspectAgentTaskControl } from '../../product/agent-task-control.js'
 
 export interface GatherWorkspaceInput {
   readonly ctx: Context
@@ -27,6 +28,7 @@ export function gatherWorkspaceSnapshot(input: GatherWorkspaceInput): WorkspaceS
   const agent = ctx.agents.get(SessionId(sessionId))
   const contextEndurance = inspectContextEndurance(ctx, agent?.session)
   const materialInput = inspectMaterialInput(ctx)
+  const taskControl = inspectAgentTaskControl(ctx, agent)
   const actionPolicy = ctx.get('actionPolicy') as {
     policy: {
       confirmations(): WorkspaceSnapshotInput['pendingConfirmations']
@@ -158,7 +160,12 @@ export function gatherWorkspaceSnapshot(input: GatherWorkspaceInput): WorkspaceS
       })) ?? [],
     ...(contextEndurance ? { contextEndurance } : {}),
     materialInput,
-    ...(input.objective ? { objective: input.objective } : {}),
+    ...(taskControl ? { taskControl } : {}),
+    ...(input.objective
+      ? { objective: input.objective }
+      : taskControl?.goal
+        ? { objective: { text: taskControl.goal.objective, status: objectiveStatus(taskControl.goal.phase) } }
+        : {}),
     personality: {
       humor: personality.humor,
       directness: personality.directness,
@@ -170,6 +177,13 @@ export function gatherWorkspaceSnapshot(input: GatherWorkspaceInput): WorkspaceS
     ...(input.sessions ? { sessions: input.sessions } : {}),
     ...(input.approvalOrigins ? { approvalOrigins: input.approvalOrigins } : {}),
   }
+}
+
+function objectiveStatus(phase: NonNullable<NonNullable<WorkspaceSnapshotInput['taskControl']>['goal']>['phase']): ObjectiveView['status'] {
+  if (phase === 'active') return 'active'
+  if (phase === 'paused') return 'waiting'
+  if (phase === 'blocked') return 'blocked'
+  return 'done'
 }
 
 export function projectWorkspace(input: GatherWorkspaceInput): MissionControlView {

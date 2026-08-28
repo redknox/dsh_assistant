@@ -47,6 +47,25 @@ export interface ObjectiveView {
   readonly status: ObjectiveStatus
 }
 
+export interface AgentTaskControlView {
+  readonly maxAutonomousRounds: number
+  readonly driver: 'active' | 'held'
+  readonly goal?: {
+    readonly id: string
+    readonly revision: number
+    readonly objective: string
+    readonly phase: 'active' | 'paused' | 'blocked' | 'complete'
+    readonly roundsStarted: number
+    readonly maxGoalRounds: number
+    readonly activation: 'armed' | 'disarmed'
+    readonly blockedReason?: string
+  }
+  readonly todos: readonly {
+    readonly content: string
+    readonly status: 'pending' | 'in_progress' | 'completed'
+  }[]
+}
+
 export interface ContextEnduranceView {
   readonly status: 'ready' | 'degraded'
   readonly measuredTokens?: number
@@ -266,6 +285,7 @@ export interface MissionControlView {
   readonly identity: 'TARS-NG'
   readonly systemState: SystemState
   readonly objective?: ObjectiveView
+  readonly taskControl?: AgentTaskControlView
   readonly conversation: readonly { readonly kind: WorkObjectKind; readonly text: string }[]
   readonly activity: readonly ActivityItem[]
   readonly executionLog?: readonly ExecutionLogEntry[]
@@ -501,6 +521,7 @@ export interface WorkspaceSnapshotInput {
   readonly contextEndurance?: ContextEnduranceView
   readonly materialInput?: MaterialInputView
   readonly objective?: ObjectiveView
+  readonly taskControl?: AgentTaskControlView
   readonly personality: MissionControlView['personality']
   readonly blockedReason?: string
   readonly runtimeContext?: MissionControlView['runtimeContext']

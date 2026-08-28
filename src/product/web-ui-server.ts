@@ -21,6 +21,7 @@ import { handleWebUiSkillRequest, type WebUiSkillCommand } from './web-ui-skills
 import { WebUiHttpTransport } from './web-ui-http.js'
 import type { ProductSettings } from './settings.js'
 import { handleWebUiSettingsRequest } from './web-ui-settings.js'
+import { handleWebUiTaskControlRequest } from './web-ui-task-control.js'
 
 export type { WebUiRuntimeControl } from './web-ui-runtime-control.js'
 
@@ -161,6 +162,19 @@ export function startWebUiServer(options: WebUiServerOptions): Promise<WebUiServ
       }
       if (req.method === 'GET' && requestUrl.pathname === '/api/session-search' && !transport.sessionTrusted(req.headers.cookie)) {
         sendJson(res, 403, { error: 'untrusted session' })
+        return
+      }
+      const taskControl = await handleWebUiTaskControlRequest({
+        method: req.method,
+        pathname: requestUrl.pathname,
+        readJson: () => transport.readJson(req),
+      }, {
+        control: (action, id, revision) => options.surface.controlGoal(action, id, revision),
+        project: (acknowledgement) => envelope({ acknowledgement }),
+      })
+      if (taskControl) {
+        sendJson(res, taskControl.status, taskControl.body)
+        if (taskControl.broadcast) broadcast()
         return
       }
       const conversation = await handleWebUiConversationRequest({

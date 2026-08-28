@@ -12,6 +12,56 @@ export interface OperationsActions {
   readonly confirmUninstall?: (plugin: UserPluginView) => void
   readonly openExtensions?: () => void
   readonly openLogs?: () => void
+  readonly controlGoal?: (action: 'pause' | 'resume', id: string, revision: number) => void
+}
+
+function TaskControlPanel(props: {
+  readonly value: MissionControlView['taskControl']
+  readonly locked: boolean
+  readonly control?: OperationsActions['controlGoal']
+}) {
+  const value = props.value
+  if (!value) return null
+  const goal = value.goal
+  const completed = value.todos.filter((todo) => todo.status === 'completed').length
+  return (
+    <section className="task-control-status" aria-labelledby="task-control-title" data-task-driver={value.driver}>
+      <div className="ops-section-heading">
+        <h2 id="task-control-title">TASK CONTROL</h2>
+        <span>{value.driver === 'active' ? `DRIVER · ${value.maxAutonomousRounds} MAX` : 'DRIVER · HELD'}</span>
+      </div>
+      {goal ? (
+        <>
+          <div className="task-goal-heading">
+            <span data-goal-phase={goal.phase}>{goal.phase.toUpperCase()}</span>
+            <strong>{goal.objective}</strong>
+          </div>
+          <div className="task-round-meter"><span style={{ width: `${Math.min(100, (goal.roundsStarted / goal.maxGoalRounds) * 100)}%` }} /></div>
+          <div className="task-control-meta">
+            <span>ROUND {goal.roundsStarted} / {goal.maxGoalRounds}</span>
+            <span>{goal.activation.toUpperCase()}</span>
+          </div>
+          {goal.blockedReason ? <p className="task-blocked-reason">{goal.blockedReason}</p> : null}
+          {(goal.phase === 'active' || goal.phase === 'paused') ? (
+            <button
+              type="button"
+              className="button button--secondary task-control-button"
+              disabled={props.locked}
+              onClick={() => props.control?.(goal.phase === 'active' ? 'pause' : 'resume', goal.id, goal.revision)}
+            >
+              {goal.phase === 'active' ? 'PAUSE GOAL' : 'RESUME GOAL'}
+            </button>
+          ) : null}
+        </>
+      ) : <p className="ops-empty">NO ACTIVE GOAL</p>}
+      {value.todos.length > 0 ? (
+        <div className="task-todo-list">
+          <div className="task-todo-summary">TODO · {completed}/{value.todos.length} COMPLETE</div>
+          <ul>{value.todos.map((todo, index) => <li key={`${index}-${todo.content}`} data-todo-status={todo.status}><span />{todo.content}</li>)}</ul>
+        </div>
+      ) : null}
+    </section>
+  )
 }
 
 function lampModifier(state: MissionControlView['systemState'], connected: boolean): string {
@@ -211,6 +261,7 @@ export function OperationsPanel(props: {
       </section>
       <ContextEndurancePanel value={props.view.contextEndurance} />
       <MaterialInputPanel value={props.view.materialInput} />
+      <TaskControlPanel value={props.view.taskControl} locked={!props.connected} control={props.actions.controlGoal} />
       <section className="capability-section" id="capabilities" aria-labelledby="capability-title">
         <div className="ops-section-heading capability-heading"><h2 id="capability-title">CONNECTED CAPABILITIES</h2><span>{props.view.capabilities.length} CHANNELS</span></div>
         <div className="capability-summary" aria-label="Capability summary">

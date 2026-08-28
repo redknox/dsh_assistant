@@ -7,6 +7,7 @@ export type {
   ControlStrip,
   ExtensionRecord,
   MissionControlView,
+  AgentTaskControlView,
   ObjectiveStatus,
   ObjectiveView,
   RecoveryView,

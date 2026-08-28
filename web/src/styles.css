@@ -1383,6 +1383,29 @@ button.nav-item::after { content: "›"; color: #7f857f; font: 500 22px/1 var(--
   padding: 16px;
   border-bottom: 1px solid #555a56;
 }
+.task-control-status {
+  padding: 16px 18px;
+  border-bottom: 1px solid #555a56;
+  background: #0d100e;
+}
+.task-goal-heading { display: grid; gap: 7px; margin-top: 14px; }
+.task-goal-heading > span { color: #79bd76; font: 700 9px/1 var(--font-instrument); letter-spacing: .12em; }
+.task-goal-heading > span[data-goal-phase="paused"] { color: var(--caution-amber); }
+.task-goal-heading > span[data-goal-phase="blocked"] { color: var(--fault-red); }
+.task-goal-heading > strong { color: var(--ink-inverse); font: 600 13px/1.35 var(--font-body); }
+.task-round-meter { height: 6px; margin-top: 12px; border: 1px solid #555e56; background: #060806; }
+.task-round-meter > span { display: block; height: 100%; min-width: 2px; background: #71af70; box-shadow: 0 0 7px rgb(105 179 108 / 45%); }
+.task-control-meta { display: flex; justify-content: space-between; margin-top: 7px; color: #9ea69b; font: 650 9px/1 var(--font-instrument); letter-spacing: .09em; }
+.task-control-button { width: 100%; margin-top: 12px; }
+.task-blocked-reason { color: #e7a09a; font-size: 11px; }
+.task-todo-list { margin-top: 14px; border-top: 1px solid #3d423e; padding-top: 11px; }
+.task-todo-summary { color: #aab1a7; font: 650 9px/1 var(--font-instrument); letter-spacing: .09em; }
+.task-todo-list ul { display: grid; gap: 7px; margin: 10px 0 0; padding: 0; list-style: none; }
+.task-todo-list li { display: grid; grid-template-columns: 8px 1fr; gap: 8px; color: #cbd0c9; font-size: 11px; line-height: 1.3; }
+.task-todo-list li > span { width: 7px; height: 7px; margin-top: 3px; border: 1px solid #7d857d; }
+.task-todo-list li[data-todo-status="in_progress"] > span { background: var(--caution-amber); box-shadow: 0 0 5px rgb(210 156 62 / 60%); }
+.task-todo-list li[data-todo-status="completed"] { color: #747b74; text-decoration: line-through; }
+.task-todo-list li[data-todo-status="completed"] > span { background: #608a62; }
 .context-meter-copy {
   display: flex;
   align-items: baseline;

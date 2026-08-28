@@ -2,6 +2,7 @@ import type { Context } from '@deepseek-ai/cordis'
 import type { FileReferenceCandidate } from '@deepseek-ai/dsh-file-reference'
 import { createUserMessage } from '@deepseek-ai/dsh-llm'
 import { SessionId } from '@deepseek-ai/dsh-session'
+import { GoalId } from '@deepseek-ai/dsh-goal'
 import type { KnowledgeRetrieval } from '../domain/knowledge/types.js'
 import type { MemoryCategory, MemoryReplaceInput, MemoryWriteInput, Provenance } from '../domain/memory/types.js'
 import type { PolicyOutcome } from '../domain/policy/types.js'
@@ -100,6 +101,14 @@ export class AssistantControlSurface {
       source: { kind: 'user' },
     })
     agent.followup(message)
+  }
+
+  controlGoal(action: 'pause' | 'resume', id: string, revision: number) {
+    const agent = this.requireAgent()
+    const ref = { id: GoalId(id), revision }
+    if (action === 'pause') this.ctx.goals.pause(agent, ref)
+    else this.ctx.goals.resume(agent, ref)
+    return this.workspace()
   }
 
   async listFileReferences(query: string, signal: AbortSignal): Promise<readonly FileReferenceCandidate[]> {

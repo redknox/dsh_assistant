@@ -15,12 +15,13 @@ import type { MissionControlRuntime } from './useMissionControlRuntime'
 import type { SkillControl } from './useSkillControl'
 import type { WorkspaceControl } from './useWorkspaceControl'
 import type { SettingsControl } from './useSettingsControl'
+import { controlGoal } from './api'
 
 type CompactSurface = 'conversation' | 'navigation' | 'operations'
 
 export interface MissionControlScreenProps {
   readonly view: MissionControlView
-  readonly runtime: Pick<MissionControlRuntime, 'connected' | 'error' | 'acknowledgement' | 'dismissAcknowledgement'>
+  readonly runtime: Pick<MissionControlRuntime, 'connected' | 'error' | 'acknowledgement' | 'dismissAcknowledgement' | 'perform'>
   readonly conversation: ConversationControl
   readonly governance: GovernanceControl
   readonly workspace: WorkspaceControl
@@ -76,6 +77,9 @@ function projectScreenControls(input: MissionControlScreenProps) {
       ? { id: input.skill.state.dependents.id, dependents: input.skill.state.dependents.values }
       : undefined,
     onSkillAction: input.skill.dispatch,
+    onGoalAction: (action: 'pause' | 'resume', id: string, revision: number) => {
+      void input.runtime.perform(() => controlGoal({ action, id, revision }), `unable to ${action} goal`)
+    },
   }
 }
 
@@ -224,6 +228,7 @@ export function MissionControlScreen(input: MissionControlScreenProps) {
             confirmUninstall: props.onConfirmUninstall,
             openExtensions: () => navigate('extensions'),
             openLogs: () => navigate('logs'),
+            controlGoal: props.onGoalAction,
           }}
         />
       </div>

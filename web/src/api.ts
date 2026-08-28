@@ -74,6 +74,19 @@ export async function sendMessage(text: string, sessionId: string): Promise<UiEn
   }))
 }
 
+export async function controlGoal(input: {
+  readonly action: 'pause' | 'resume'
+  readonly id: string
+  readonly revision: number
+}): Promise<UiEnvelope> {
+  return parseEnvelope(await fetch('/api/task-control', {
+    ...include,
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(input),
+  }))
+}
+
 export async function listFileReferences(query: string): Promise<readonly FileReferenceCandidate[]> {
   const response = await fetch(`/api/file-references?query=${encodeURIComponent(query)}`, include)
   const body = await response.json() as { readonly candidates?: readonly FileReferenceCandidate[]; readonly error?: string }

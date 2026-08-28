@@ -63,9 +63,9 @@
 - id: command-feedback
   disabled: true
 - id: goal
-  disabled: true
+  config:
+    defaultMaxGoalRounds: 8
 - id: goal-round-driver
-  disabled: true
 - id: command-goal
   disabled: true
 - id: plan-mode
@@ -95,9 +95,11 @@
 - id: timeout-policy
   disabled: true
 - id: tool-todo
-  disabled: true
+  config:
+    allowParallelInProgress: false
 - id: tool-goal
-  disabled: true
+  config:
+    blockedAfterConsecutiveRounds: 3
 - id: tool-ralph
   disabled: true
 - id: tool-str-replace-editor

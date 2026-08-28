@@ -129,6 +129,10 @@ export const OFFICIAL_RUNTIME_MOUNTS = Object.freeze([
   { official: 'spill-policy', runtime: 'spill-policy', when: 'ready' },
   { official: 'session-checkpoint-policy', runtime: 'session-checkpoint-policy', when: 'session-persistence' },
   { official: 'attachment-local', runtime: 'LocalAttachmentStore', when: 'ready' },
+  { official: 'goal', runtime: 'GoalService', when: 'ready' },
+  { official: 'goal-round-driver', runtime: 'goal-round-driver', when: 'ready' },
+  { official: 'tool-goal', runtime: 'tool-goal', when: 'ready' },
+  { official: 'tool-todo', runtime: 'tool-todo', when: 'ready' },
 ] as const satisfies readonly OfficialRuntimeMount[])
 
 export const PRODUCT_ONLY_SEAMS = Object.freeze([

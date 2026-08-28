@@ -25,6 +25,7 @@ export function projectMissionControl(input: WorkspaceSnapshotInput): MissionCon
     identity: 'TARS-NG',
     systemState,
     ...(input.objective ? { objective: input.objective } : {}),
+    ...(input.taskControl ? { taskControl: input.taskControl } : {}),
     conversation: input.conversation.filter(isDialogueItem).map((item) => ({
       kind: workKind(item.kind),
       text: item.text,
