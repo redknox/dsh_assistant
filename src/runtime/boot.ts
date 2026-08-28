@@ -13,6 +13,7 @@ import SkillRegistry from '@deepseek-ai/dsh-skill'
 import * as toolSkill from '@deepseek-ai/dsh-tool-skill'
 import ToolRuntime from '@deepseek-ai/dsh-tools'
 import { mountContextEndurance } from '../product/context-endurance.js'
+import { mountMaterialInput } from '../product/material-input.js'
 import type { RecoveryRoot } from '../domain/governance/root.js'
 import { SkillService } from '../domain/skill/index.js'
 import { mountGovernedSkillFilesystem } from './skill-filesystem-mount.js'
@@ -150,6 +151,7 @@ async function bootStack(options: BootOptions = {}): Promise<AssistantControl> {
       },
     },
   })
+  if (!safeMode) await mountMaterialInput(ctx, options.home ? { home: options.home } : {})
   if (!safeMode) {
     const mounted = await mountGovernedSkillFilesystem(ctx, {
       includeDefaultRoots: false,

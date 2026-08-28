@@ -82,6 +82,25 @@ function ContextEndurancePanel(props: { readonly value: MissionControlView['cont
   )
 }
 
+function MaterialInputPanel(props: { readonly value: MissionControlView['materialInput'] }) {
+  const value = props.value
+  if (!value) return null
+  const ready = value.fileReferences === 'active' && value.imageStore === 'ready'
+  return (
+    <section className="material-input-status" aria-labelledby="material-input-title">
+      <div className="ops-section-heading">
+        <h2 id="material-input-title">MATERIAL INPUT</h2>
+        <span className={`status-lamp status-lamp--${ready ? 'ready' : 'degraded'}`} aria-hidden="true" />
+      </div>
+      <div className="context-meter-state">
+        <span>@FILE REFERENCES · {value.fileReferences === 'active' ? 'ACTIVE' : 'INOP'}</span>
+        <span>IMAGE STORE · {value.imageStore === 'ready' ? 'READY' : 'INOP'}</span>
+        <span>IMAGE MODEL INPUT · NOT CONFIGURED</span>
+      </div>
+    </section>
+  )
+}
+
 function lifecycleLabel(item: WorkbenchProjection): string {
   if (item.extensionLifecycle === 'ACTIVE') return 'ACTIVE'
   if (item.extensionLifecycle === 'APPROVED_NOT_ACTIVE') return 'READY TO ACTIVATE'
@@ -191,6 +210,7 @@ export function OperationsPanel(props: {
         </div>
       </section>
       <ContextEndurancePanel value={props.view.contextEndurance} />
+      <MaterialInputPanel value={props.view.materialInput} />
       <section className="capability-section" id="capabilities" aria-labelledby="capability-title">
         <div className="ops-section-heading capability-heading"><h2 id="capability-title">CONNECTED CAPABILITIES</h2><span>{props.view.capabilities.length} CHANNELS</span></div>
         <div className="capability-summary" aria-label="Capability summary">

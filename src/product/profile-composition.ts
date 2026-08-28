@@ -125,6 +125,7 @@ export const OFFICIAL_RUNTIME_MOUNTS = Object.freeze([
   { official: 'spill-local', runtime: 'LocalSpillStore', when: 'ready' },
   { official: 'spill-policy', runtime: 'spill-policy', when: 'ready' },
   { official: 'session-checkpoint-policy', runtime: 'session-checkpoint-policy', when: 'session-persistence' },
+  { official: 'attachment-local', runtime: 'LocalAttachmentStore', when: 'ready' },
 ] as const satisfies readonly OfficialRuntimeMount[])
 
 export const PRODUCT_ONLY_SEAMS = Object.freeze([
@@ -143,6 +144,7 @@ export const PRODUCT_ONLY_SEAMS = Object.freeze([
   { runtime: 'dsh-assistant-policy', when: 'ready', reason: 'product trust policy' },
   { runtime: 'ApprovalService', when: 'ready', reason: 'DSH one-shot approval service' },
   { runtime: 'dsh-assistant-approval-bridge', when: 'ready', reason: 'unified DSH approval control surface' },
+  { runtime: 'SandboxFileReferenceService', when: 'ready', reason: 'browser-safe references aligned to governed Files' },
   { runtime: 'DshApprovalBridgeService', when: 'ready', reason: 'pending DSH approval broker' },
   { runtime: 'dsh-assistant-skills', when: 'always', reason: 'profile-scoped Skill lifecycle' },
 ] as const satisfies readonly ProductOnlySeam[])

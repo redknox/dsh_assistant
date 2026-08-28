@@ -162,10 +162,12 @@ export function startWebUiServer(options: WebUiServerOptions): Promise<WebUiServ
       const conversation = await handleWebUiConversationRequest({
         method: req.method,
         pathname: requestUrl.pathname,
+        query: requestUrl.searchParams.get('query') ?? undefined,
         readJson: () => transport.readJson(req),
       }, {
         currentSessionId: () => options.surface.sessionId,
         sendMessage: (text) => options.surface.sendMessage(text),
+        listFileReferences: (query, signal) => options.surface.listFileReferences(query, signal),
         ...(options.sessionHost ? { sessionHost: options.sessionHost } : {}),
         project: (acknowledgement) => envelope(acknowledgement ? { acknowledgement } : {}),
       })

@@ -72,6 +72,12 @@ export interface ContextEnduranceView {
   }
 }
 
+export interface MaterialInputView {
+  readonly fileReferences: 'active' | 'unavailable'
+  readonly imageStore: 'ready' | 'unavailable'
+  readonly imageInput: 'unsupported'
+}
+
 export interface ActivityItem {
   readonly id: string
   readonly kind: ActivityKind
@@ -281,6 +287,7 @@ export interface MissionControlView {
   readonly memory: readonly WorkspaceMemoryItem[]
   readonly knowledge: readonly WorkspaceKnowledgeItem[]
   readonly contextEndurance?: ContextEnduranceView
+  readonly materialInput?: MaterialInputView
   readonly recovery?: RecoveryView
   readonly controlStrip: ControlStrip
   readonly personality: {
@@ -492,6 +499,7 @@ export interface WorkspaceSnapshotInput {
   readonly memory: readonly WorkspaceMemoryItem[]
   readonly knowledge: readonly WorkspaceKnowledgeItem[]
   readonly contextEndurance?: ContextEnduranceView
+  readonly materialInput?: MaterialInputView
   readonly objective?: ObjectiveView
   readonly personality: MissionControlView['personality']
   readonly blockedReason?: string

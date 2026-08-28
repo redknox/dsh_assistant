@@ -23,6 +23,21 @@ function context(overrides: Partial<WebUiConversationContext> = {}): WebUiConver
 }
 
 describe('Web UI conversations', () => {
+  it('lists file-reference candidates without reading file contents', async () => {
+    const result = await handleWebUiConversationRequest({
+      method: 'GET',
+      pathname: '/api/file-references',
+      query: 'alpha',
+      readJson: async () => ({}),
+    }, context({
+      listFileReferences: async (query) => [{ path: `${query}.md`, kind: 'file' }],
+    }))
+    assert.deepEqual(result, {
+      status: 200,
+      body: { candidates: [{ path: 'alpha.md', kind: 'file' }] },
+    })
+  })
+
   it('trims and submits a message to the current session', async () => {
     const sent: string[] = []
     const previews: string[] = []

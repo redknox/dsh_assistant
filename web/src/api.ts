@@ -1,5 +1,6 @@
 import type { ActivationCard, ApprovalCard, MissionControlView, RollbackCard, SkillProjection, UserPluginView, WorkObjectKind } from '../../src/domain/workspace/types'
 import type { SettingsSnapshot, SettingsUpdate } from '../../src/product/settings-types'
+import type { FileReferenceCandidate } from '@deepseek-ai/dsh-file-reference'
 
 export interface UiEnvelope {
   readonly view: MissionControlView
@@ -71,6 +72,13 @@ export async function sendMessage(text: string, sessionId: string): Promise<UiEn
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ text, sessionId }),
   }))
+}
+
+export async function listFileReferences(query: string): Promise<readonly FileReferenceCandidate[]> {
+  const response = await fetch(`/api/file-references?query=${encodeURIComponent(query)}`, include)
+  const body = await response.json() as { readonly candidates?: readonly FileReferenceCandidate[]; readonly error?: string }
+  if (!response.ok) throw new Error(body.error ?? `file reference lookup failed (${response.status})`)
+  return body.candidates ?? []
 }
 
 export async function runConversation(

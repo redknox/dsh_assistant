@@ -20,12 +20,14 @@ interface SessionExpectation {
 export interface WebUiConversationRequest {
   readonly method?: string
   readonly pathname: string
+  readonly query?: string
   readonly readJson: () => Promise<unknown>
 }
 
 export interface WebUiConversationContext {
   readonly currentSessionId: () => string
   readonly sendMessage: (text: string) => void
+  readonly listFileReferences?: (query: string, signal: AbortSignal) => Promise<readonly { readonly path: string; readonly kind: 'file' | 'directory' }[]>
   readonly sessionHost?: ConversationSessionHost
   readonly project: (acknowledgement?: { readonly text: string }) => {
     readonly view: MissionControlView
@@ -44,6 +46,12 @@ export async function handleWebUiConversationRequest(
   request: WebUiConversationRequest,
   context: WebUiConversationContext,
 ): Promise<WebUiConversationResponse | undefined> {
+  if (request.method === 'GET' && request.pathname === '/api/file-references') {
+    if (!context.listFileReferences) return { status: 503, body: { error: 'unavailable' } }
+    const controller = new AbortController()
+    const candidates = await context.listFileReferences(request.query ?? '', controller.signal)
+    return { status: 200, body: { candidates } }
+  }
   if (request.method !== 'POST') return undefined
   if (request.pathname === '/api/message') return handleMessage(await request.readJson(), context)
   if (request.pathname === '/api/conversations') return handleConversation(await request.readJson(), context)

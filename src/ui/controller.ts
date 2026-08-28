@@ -1,4 +1,5 @@
 import type { Context } from '@deepseek-ai/cordis'
+import type { FileReferenceCandidate } from '@deepseek-ai/dsh-file-reference'
 import { createUserMessage } from '@deepseek-ai/dsh-llm'
 import { SessionId } from '@deepseek-ai/dsh-session'
 import type { KnowledgeRetrieval } from '../domain/knowledge/types.js'
@@ -98,6 +99,12 @@ export class AssistantControlSurface {
       source: { kind: 'user' },
     })
     agent.followup(message)
+  }
+
+  async listFileReferences(query: string, signal: AbortSignal): Promise<readonly FileReferenceCandidate[]> {
+    const service = this.ctx.get('fileReferences')
+    if (!service) return []
+    return service.list(this.requireAgent(), query, signal)
   }
 
   async approve(confirmationId: string): Promise<PolicyOutcome> {

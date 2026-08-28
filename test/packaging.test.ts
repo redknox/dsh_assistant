@@ -63,6 +63,8 @@ describe('product package and profile', () => {
     assert.equal(pkg.dependencies['@deepseek-ai/dsh-spill-local'], '0.1.0-rc.8')
     assert.equal(pkg.dependencies['@deepseek-ai/dsh-spill-policy'], '0.1.0-rc.8')
     assert.equal(pkg.dependencies['@deepseek-ai/dsh-session-checkpoint-policy'], '0.1.0-rc.8')
+    assert.equal(pkg.dependencies['@deepseek-ai/dsh-attachment-local'], '0.1.0-rc.8')
+    assert.equal(pkg.dependencies['@deepseek-ai/dsh-file-reference'], '0.1.0-rc.8')
     assert.match(readFileSync(join(root, 'cordis.patch.yml'), 'utf8'), /id: dsh-assistant/)
 
     const profile = JSON.parse(readFileSync(join(root, 'profiles/assistant/package.json'), 'utf8')) as {

@@ -24,8 +24,6 @@
   disabled: true
 - id: llm-pi-ai
   disabled: true
-- id: attachment-local
-  disabled: true
 - id: session-query-sqlite
   disabled: true
 - id: session-telemetry-otel

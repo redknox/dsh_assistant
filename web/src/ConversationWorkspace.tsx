@@ -1,8 +1,10 @@
-import React, { type FormEvent, useEffect, useMemo, useRef } from 'react'
+import React, { type FormEvent, useEffect, useMemo, useRef, useState } from 'react'
+import { formatFileMention, type FileReferenceCandidate } from '@deepseek-ai/dsh-file-reference'
 import type { ActivationCard, ApprovalCard, MissionControlView, SkillProjection, WorkObjectKind } from '../../src/domain/workspace/types'
 import { Glyph } from './icons'
 import { MarkdownMessage } from './MarkdownMessage'
 import { formatDiff, isPendingApproval, skillInvocationSurfaceOpen } from './missionControlPresentation'
+import { listFileReferences } from './api'
 
 export interface ConversationWorkspaceState {
   readonly connected: boolean
@@ -135,6 +137,12 @@ export function ConversationWorkspace(props: {
     && state.activations.length === 0
   const scrollViewport = useRef<HTMLDivElement>(null)
   const followingTail = useRef(true)
+  const [referenceOpen, setReferenceOpen] = useState(false)
+  const [referenceQuery, setReferenceQuery] = useState('')
+  const [referenceCandidates, setReferenceCandidates] = useState<readonly FileReferenceCandidate[]>([])
+  const [referenceLoading, setReferenceLoading] = useState(false)
+  const [referenceError, setReferenceError] = useState<string>()
+  const referencesReady = props.view.materialInput?.fileReferences === 'active'
   const tailRevision = `${props.view.conversation.length}:${props.view.conversation.at(-1)?.text.length ?? 0}:${pendingApprovals.length}:${state.activations.length}:${state.sending ? 1 : 0}`
   useEffect(() => {
     if (props.active === false || !followingTail.current) return
@@ -147,6 +155,36 @@ export function ConversationWorkspace(props: {
     const frame = globalThis.requestAnimationFrame?.(followTail)
     return () => { if (frame !== undefined) globalThis.cancelAnimationFrame?.(frame) }
   }, [props.active, tailRevision])
+  useEffect(() => {
+    if (!referenceOpen || !referencesReady) return
+    let cancelled = false
+    setReferenceLoading(true)
+    setReferenceError(undefined)
+    const timer = globalThis.setTimeout(() => {
+      void listFileReferences(referenceQuery).then((candidates) => {
+        if (!cancelled) setReferenceCandidates(candidates)
+      }).catch((error: unknown) => {
+        if (!cancelled) setReferenceError(error instanceof Error ? error.message : 'file reference lookup failed')
+      }).finally(() => {
+        if (!cancelled) setReferenceLoading(false)
+      })
+    }, 120)
+    return () => {
+      cancelled = true
+      globalThis.clearTimeout(timer)
+    }
+  }, [referenceOpen, referenceQuery, referencesReady])
+  const chooseReference = (candidate: FileReferenceCandidate) => {
+    if (candidate.kind === 'directory') {
+      setReferenceQuery(`${candidate.path}/`)
+      return
+    }
+    const mention = formatFileMention(candidate, false)
+    if (!mention) return
+    actions.draft(state.draft.trimEnd() === '' ? mention : `${state.draft.trimEnd()} ${mention}`)
+    setReferenceOpen(false)
+    setReferenceQuery('')
+  }
   return (
     <main className="conversation-panel" id="today">
       <div
@@ -199,6 +237,24 @@ export function ConversationWorkspace(props: {
             ))}
           </div>
         ) : null}
+        {referenceOpen ? (
+          <section className="file-reference-picker" aria-label="Reference a file">
+            <header><strong>REFERENCE FILE</strong><span>PATH ONLY · CONTENT READ ON DEMAND</span></header>
+            <input autoFocus value={referenceQuery} onChange={(event) => setReferenceQuery(event.target.value)} placeholder="Search the governed Files sandbox" />
+            <div className="file-reference-results">
+              {referenceLoading ? <p>SCANNING…</p> : null}
+              {referenceError ? <p className="error" role="alert">{referenceError}</p> : null}
+              {!referenceLoading && !referenceError && referenceCandidates.length === 0 ? <p>NO MATCHES</p> : null}
+              {referenceCandidates.map((candidate) => (
+                <button key={`${candidate.kind}:${candidate.path}`} type="button" onClick={() => chooseReference(candidate)}>
+                  <Glyph name={candidate.kind === 'directory' ? 'folder' : 'files'} />
+                  <span>{candidate.path}{candidate.kind === 'directory' ? '/' : ''}</span>
+                  <small>{candidate.kind.toUpperCase()}</small>
+                </button>
+              ))}
+            </div>
+          </section>
+        ) : null}
         <form className="composer" aria-label="Send a message" onSubmit={(event: FormEvent) => { event.preventDefault(); actions.send() }}>
           <label className="sr-only" htmlFor="message">Message TARS-NG</label>
           <textarea
@@ -213,8 +269,8 @@ export function ConversationWorkspace(props: {
               if (!sendDisabled) actions.send()
             }}
           />
-          <button className="icon-button" type="button" aria-label="Attach file" title="Attachments are not available in this soak" disabled>
-            <Glyph name="attach" /><span className="composer-button-label">ATTACH</span><small>INOP</small>
+          <button className="icon-button" type="button" aria-label="Reference file" title="Reference a file from the governed Files sandbox" aria-expanded={referenceOpen} disabled={locked || !referencesReady} onClick={() => setReferenceOpen((open) => !open)}>
+            <Glyph name="attach" /><span className="composer-button-label">REFERENCE</span><small>{referencesReady ? '@FILE' : 'INOP'}</small>
           </button>
           <button className="send-button" type="submit" aria-label="Send message" disabled={sendDisabled}>
             <Glyph name="send" /><span className="composer-button-label">{state.sending ? 'SENDING' : 'SEND'}</span>

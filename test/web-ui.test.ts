@@ -2303,6 +2303,11 @@ export function apply(ctx) {
           checkpoint: 'active',
           outputRetention: { maxInlineBytes: 50_000, spill: 'ready' },
         },
+        materialInput: {
+          fileReferences: 'active',
+          imageStore: 'ready',
+          imageInput: 'unsupported',
+        },
       }),
       connected: true,
       sending: false,
@@ -2328,6 +2333,11 @@ export function apply(ctx) {
     assert.match(ready, /CHECKPOINT · ACTIVE/)
     assert.match(ready, /OUTPUT CAP · 50\.0KB/)
     assert.match(ready, /SPILL · READY/)
+    assert.match(ready, /MATERIAL INPUT/)
+    assert.match(ready, /@FILE REFERENCES · ACTIVE/)
+    assert.match(ready, /IMAGE STORE · READY/)
+    assert.match(ready, /REFERENCE/)
+    assert.match(ready, /@FILE/)
     assert.doesNotMatch(ready, /reasoning_content|sk-secret|chain-of-thought/)
 
     const emptyKnowledge = renderToStaticMarkup(createElement(MissionControlScreen, {

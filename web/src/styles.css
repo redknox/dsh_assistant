@@ -723,6 +723,25 @@ button.nav-item::after { content: "›"; color: #7f857f; font: 500 22px/1 var(--
   gap: 8px;
   margin: 0 clamp(26px, 4vw, 58px) 8px;
 }
+.file-reference-picker {
+  margin: 0 clamp(26px, 4vw, 58px) 8px;
+  padding: 10px;
+  border: 2px solid var(--line);
+  border-radius: 8px;
+  background: #d8cbb6;
+  box-shadow: inset 0 0 0 1px rgb(255 255 255 / 35%);
+}
+.file-reference-picker header { display: flex; justify-content: space-between; gap: 12px; margin-bottom: 8px; font-family: var(--font-instrument); letter-spacing: .08em; }
+.file-reference-picker header strong { font-size: 13px; }
+.file-reference-picker header span { color: var(--muted); font-size: 9px; }
+.file-reference-picker > input { width: 100%; padding: 9px 10px; border: 1px solid var(--line-soft); border-radius: 4px; background: var(--panel-ivory); color: var(--ink); }
+.file-reference-results { max-height: 210px; margin-top: 8px; overflow-y: auto; border: 1px solid var(--line-soft); background: var(--panel-ivory-deep); }
+.file-reference-results > p { margin: 0; padding: 12px; color: var(--muted); font: 600 10px/1 var(--font-instrument); letter-spacing: .08em; }
+.file-reference-results > button { width: 100%; display: grid; grid-template-columns: 18px minmax(0, 1fr) auto; align-items: center; gap: 8px; padding: 9px 10px; border: 0; border-bottom: 1px solid var(--line-soft); background: transparent; color: var(--ink); text-align: left; cursor: pointer; }
+.file-reference-results > button:hover, .file-reference-results > button:focus-visible { background: #c9b99d; outline: 0; }
+.file-reference-results > button .glyph { width: 15px; height: 15px; }
+.file-reference-results > button span { overflow-wrap: anywhere; }
+.file-reference-results > button small { color: var(--muted); font: 600 9px/1 var(--font-instrument); letter-spacing: .08em; }
 .composer {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 72px 88px;
@@ -1352,6 +1371,10 @@ button.nav-item::after { content: "›"; color: #7f857f; font: 500 22px/1 var(--
 .context-endurance {
   border-bottom: 1px solid #555a56;
   background: #111411;
+}
+.material-input-status {
+  padding: 16px;
+  border-bottom: 1px solid #555a56;
 }
 .context-meter-copy {
   display: flex;
