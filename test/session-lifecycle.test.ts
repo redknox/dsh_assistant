@@ -70,6 +70,65 @@ async function liveHost(input: {
 }
 
 describe('Session lifecycle transactions', () => {
+  it('projects automatic titles and pins explicit current-session renames in the DSH log', async () => {
+    const { catalog, host, surface, control } = await liveHost()
+    try {
+      surface.sendMessage('Quarterly travel expense anomalies')
+      await host.currentHandle().agent.whenIdle()
+      await waitUntil(() => catalog.inspect().sessions.find((item) => item.id === 'main')?.title !== 'Conversation')
+      assert.notEqual(catalog.inspect().sessions.find((item) => item.id === 'main')?.title, 'Conversation')
+
+      const beforeRename = catalog.inspect()
+      await host.rename('main', 'Pinned / Finance', { sessionId: 'main', revision: beforeRename.revision })
+      assert.equal(control.ctx.sessionTitle.get(host.currentHandle().agent.session)?.source.kind, 'user')
+
+      surface.sendMessage('A later prompt must not replace the title')
+      await host.currentHandle().agent.whenIdle()
+      assert.equal(catalog.inspect().sessions.find((item) => item.id === 'main')?.title, 'Pinned / Finance')
+    } finally {
+      await host.currentHandle().dispose()
+      await control.ctx.fiber.dispose()
+    }
+  })
+
+  it('pins a pre-existing catalog title when its session first becomes live', async () => {
+    const home = mkdtempSync(path.join(tmpdir(), 'tars-session-existing-title-'))
+    const layout = ensureProductHome(home)
+    const context = inspectRuntimeContext(layout, {}, undefined)
+    mkdirSync(context.sessionPersistenceDir, { recursive: true, mode: 0o700 })
+    const catalog = new SessionCatalog(context.sessionPersistenceDir, catalogBindingOf(context))
+    catalog.ensureMigrated('main')
+    catalog.rename('main', 'Existing user title')
+    const control = await bootAssistantControl({ home: context.home, sessionRoot: context.sessionPersistenceDir })
+    const handle = await createAssistantAgent(control.ctx, 'main', { provider: 'fake', model: 'fake-echo' }, context.workspace.value)
+    const surface = new AssistantControlSurface(control.ctx, 'main', context, catalog)
+    const host = new LiveSessionHost(control.ctx, surface, catalog, context.workspace.value, () => {}, handle, false)
+    try {
+      const title = control.ctx.sessionTitle.get(handle.agent.session)
+      assert.equal(title?.title, 'Existing user title')
+      assert.equal(title?.source.kind, 'user')
+    } finally {
+      await host.currentHandle().dispose()
+      await control.ctx.fiber.dispose()
+    }
+  })
+
+  it('searches persisted conversation content through the DSH query index', async () => {
+    const { host, surface, control } = await liveHost()
+    try {
+      surface.sendMessage('The uncommon phrase is heliotrope ledger')
+      await host.currentHandle().agent.whenIdle()
+      await control.ctx.sessions.flush(host.currentHandle().agent.session)
+      const results = await surface.searchSessions('heliotrope ledger', new AbortController().signal)
+      assert.equal(results.length, 1)
+      assert.equal(results[0]?.id, 'main')
+      assert.match(results[0]?.snippet ?? '', /heliotrope ledger/i)
+    } finally {
+      await host.currentHandle().dispose()
+      await control.ctx.fiber.dispose()
+    }
+  })
+
   it('rolls switch back to the previous current session after a catalog-commit fault', async () => {
     const { catalog, extra, host, surface, control } = await liveHost({ failAt: 'after-catalog-commit' })
     try {

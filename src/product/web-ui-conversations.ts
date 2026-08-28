@@ -28,6 +28,7 @@ export interface WebUiConversationContext {
   readonly currentSessionId: () => string
   readonly sendMessage: (text: string) => void
   readonly listFileReferences?: (query: string, signal: AbortSignal) => Promise<readonly { readonly path: string; readonly kind: 'file' | 'directory' }[]>
+  readonly searchSessions?: (query: string, signal: AbortSignal) => Promise<readonly { readonly id: string; readonly title: string; readonly snippet: string }[]>
   readonly sessionHost?: ConversationSessionHost
   readonly project: (acknowledgement?: { readonly text: string }) => {
     readonly view: MissionControlView
@@ -51,6 +52,14 @@ export async function handleWebUiConversationRequest(
     const controller = new AbortController()
     const candidates = await context.listFileReferences(request.query ?? '', controller.signal)
     return { status: 200, body: { candidates } }
+  }
+  if (request.method === 'GET' && request.pathname === '/api/session-search') {
+    if (!context.searchSessions) return { status: 503, body: { error: 'unavailable' } }
+    const query = request.query?.trim() ?? ''
+    if (query === '') return { status: 200, body: { results: [] } }
+    const controller = new AbortController()
+    const results = await context.searchSessions(query, controller.signal)
+    return { status: 200, body: { results } }
   }
   if (request.method !== 'POST') return undefined
   if (request.pathname === '/api/message') return handleMessage(await request.readJson(), context)

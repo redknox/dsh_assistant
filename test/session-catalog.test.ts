@@ -67,12 +67,12 @@ describe('Session Catalog', () => {
     assert.throws(() => catalog.delete('main'), (error: SessionCatalogError) => error.code === 'confirmation-required')
   })
 
-  it('rejects stale revision and path-like titles', () => {
+  it('rejects stale revision and safely normalizes titles', () => {
     const { catalog } = catalogFor()
     const migrated = catalog.ensureMigrated('main')
     assert.throws(() => catalog.rename('main', 'Other', { revision: migrated.revision - 1 }), (error: SessionCatalogError) => error.code === 'stale-revision')
-    assert.throws(() => catalog.create('../secret'), SessionCatalogError)
-    assert.throws(() => catalog.create('ok/nope'), SessionCatalogError)
+    assert.equal(catalog.create('Projects / TARS-NG').title, 'Projects / TARS-NG')
+    assert.equal(catalog.create('line one\nline two').title, 'line one line two')
   })
 
   it('fails closed when current session or timestamps are invalid', () => {

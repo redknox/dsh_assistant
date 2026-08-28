@@ -159,6 +159,10 @@ export function startWebUiServer(options: WebUiServerOptions): Promise<WebUiServ
         if (settings) sendJson(res, settings.status, settings.body)
         return
       }
+      if (req.method === 'GET' && requestUrl.pathname === '/api/session-search' && !transport.sessionTrusted(req.headers.cookie)) {
+        sendJson(res, 403, { error: 'untrusted session' })
+        return
+      }
       const conversation = await handleWebUiConversationRequest({
         method: req.method,
         pathname: requestUrl.pathname,
@@ -168,6 +172,7 @@ export function startWebUiServer(options: WebUiServerOptions): Promise<WebUiServ
         currentSessionId: () => options.surface.sessionId,
         sendMessage: (text) => options.surface.sendMessage(text),
         listFileReferences: (query, signal) => options.surface.listFileReferences(query, signal),
+        searchSessions: (query, signal) => options.surface.searchSessions(query, signal),
         ...(options.sessionHost ? { sessionHost: options.sessionHost } : {}),
         project: (acknowledgement) => envelope(acknowledgement ? { acknowledgement } : {}),
       })

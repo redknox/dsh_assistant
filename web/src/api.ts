@@ -81,6 +81,19 @@ export async function listFileReferences(query: string): Promise<readonly FileRe
   return body.candidates ?? []
 }
 
+export interface SessionSearchResult {
+  readonly id: string
+  readonly title: string
+  readonly snippet: string
+}
+
+export async function searchSessions(query: string): Promise<readonly SessionSearchResult[]> {
+  const response = await fetch(`/api/session-search?query=${encodeURIComponent(query)}`, include)
+  const body = await response.json() as { readonly results?: readonly SessionSearchResult[]; readonly error?: string }
+  if (!response.ok) throw new Error(body.error ?? `session search failed (${response.status})`)
+  return body.results ?? []
+}
+
 export async function runConversation(
   action: 'create' | 'switch' | 'rename' | 'archive' | 'restore' | 'delete',
   input: { readonly id?: string; readonly title?: string; readonly sessionId: string; readonly revision: number; readonly confirm?: boolean },

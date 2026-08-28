@@ -1,5 +1,6 @@
-import React from 'react'
+import React, { useState } from 'react'
 import type { MissionControlView } from '../../src/domain/workspace/types'
+import { searchSessions, type SessionSearchResult } from './api'
 
 export interface MemoryWorkspaceActions {
   readonly create?: () => void
@@ -22,9 +23,35 @@ export function MemoryWorkspace(props: {
   readonly confirmingSession?: string
   readonly actions: MemoryWorkspaceActions
 }) {
+  const [query, setQuery] = useState('')
+  const [results, setResults] = useState<readonly SessionSearchResult[] | undefined>()
+  const [searching, setSearching] = useState(false)
+  const [searchError, setSearchError] = useState<string>()
   const sessions = (props.view.sessions?.sessions ?? [])
     .slice()
     .sort((left, right) => right.lastActivityAt.localeCompare(left.lastActivityAt))
+  const resultById = new Map((results ?? []).map((item) => [item.id, item]))
+  const visibleSessions = results === undefined
+    ? sessions
+    : sessions.filter((session) => resultById.has(session.id))
+  const submitSearch = async (event: React.FormEvent) => {
+    event.preventDefault()
+    const normalized = query.trim()
+    if (normalized === '') {
+      setResults(undefined)
+      setSearchError(undefined)
+      return
+    }
+    setSearching(true)
+    setSearchError(undefined)
+    try {
+      setResults(await searchSessions(normalized))
+    } catch (error) {
+      setSearchError(error instanceof Error ? error.message : 'Search failed')
+    } finally {
+      setSearching(false)
+    }
+  }
   return (
     <main className="conversation-panel memory-panel" id="memory" data-workspace-pane="memory">
       <div className="memory-scroll">
@@ -46,15 +73,24 @@ export function MemoryWorkspace(props: {
             <div><p>SESSION HISTORY</p><h2 id="memory-conversations-title">Conversations</h2></div>
             <button type="button" className="memory-primary-action" onClick={props.actions.create}>New conversation</button>
           </div>
+          <form className="memory-session-search" role="search" onSubmit={(event) => void submitSearch(event)}>
+            <label htmlFor="memory-session-query">Search titles and conversation content</label>
+            <div>
+              <input id="memory-session-query" type="search" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search session history…" />
+              <button type="submit" disabled={searching}>{searching ? 'Searching…' : 'Search'}</button>
+              {results !== undefined ? <button type="button" onClick={() => { setQuery(''); setResults(undefined); setSearchError(undefined) }}>Clear</button> : null}
+            </div>
+            {searchError ? <p className="error">{searchError}</p> : null}
+          </form>
           <div className="memory-card-grid" data-memory-cards="conversations">
-            {sessions.length === 0 ? <p className="memory-empty">No conversations yet.</p> : sessions.map((session) => (
+            {visibleSessions.length === 0 ? <p className="memory-empty">{results === undefined ? 'No conversations yet.' : 'No matching conversations.'}</p> : visibleSessions.map((session) => (
               <article key={session.id} className={`memory-card conversation-card${session.current ? ' conversation-card--current' : ''}`} data-session-id={session.id}>
                 <div className="memory-card-topline">
                   <span className={`memory-badge${session.current ? ' memory-badge--current' : ''}`}>{session.current ? 'Current' : session.lifecycle}</span>
                   <span>{formatMemoryDate(session.lastActivityAt)}</span>
                 </div>
                 <h3>{session.title}</h3>
-                <p>{session.preview || 'No conversation preview yet.'}</p>
+                <p>{resultById.get(session.id)?.snippet || session.preview || 'No conversation preview yet.'}</p>
                 <div className="memory-card-actions">
                   {session.lifecycle === 'archived' ? (
                     <button type="button" onClick={() => props.actions.restore?.(session.id)}>Restore</button>

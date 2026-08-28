@@ -9,6 +9,7 @@ export interface ProductHomeLayout {
   readonly config: string
   readonly data: string
   readonly spill: string
+  readonly sessionQueryIndex: string
   readonly state: string
   readonly logs: string
   readonly backups: string
@@ -49,6 +50,7 @@ export function productHomeLayout(root: string): ProductHomeLayout {
     config,
     data,
     spill: path.join(data, 'spill'),
+    sessionQueryIndex: path.join(data, 'session-query.sqlite'),
     state: path.join(resolved, 'state'),
     logs: path.join(resolved, 'logs'),
     backups: path.join(resolved, 'backups'),

@@ -11,6 +11,7 @@ import { projectWorkspace } from '../domain/workspace/gather.js'
 import type { UserPersonalityPrefs } from '../domain/personality/types.js'
 import type { AssistantView, KnowledgeSourceDto } from './dto.js'
 import { projectAssistantView } from './projection.js'
+import { redactText } from '../domain/workspace/redact.js'
 
 export interface RememberInput {
   readonly category: MemoryCategory
@@ -105,6 +106,24 @@ export class AssistantControlSurface {
     const service = this.ctx.get('fileReferences')
     if (!service) return []
     return service.list(this.requireAgent(), query, signal)
+  }
+
+  async searchSessions(query: string, signal: AbortSignal): Promise<readonly {
+    id: string
+    title: string
+    snippet: string
+  }[]> {
+    const service = this.ctx.get('sessionQuery')
+    if (!service || !this.sessionCatalog) return []
+    const catalog = this.sessionCatalog.inspect()
+    if (!catalog) return []
+    const visible = new Map(catalog.sessions.map((item) => [item.id, item.title]))
+    const page = await service.searchSessions({ query, limit: 50 }, { signal })
+    return page.items.flatMap((item) => {
+      const id = String(item.header.id)
+      const title = visible.get(id)
+      return title === undefined ? [] : [{ id, title, snippet: redactText(item.bestMatch.snippet) }]
+    })
   }
 
   async approve(confirmationId: string): Promise<PolicyOutcome> {

@@ -23,6 +23,19 @@ function context(overrides: Partial<WebUiConversationContext> = {}): WebUiConver
 }
 
 describe('Web UI conversations', () => {
+  it('serves bounded session-search results through the read-only route', async () => {
+    const response = await handleWebUiConversationRequest({
+      method: 'GET',
+      pathname: '/api/session-search',
+      query: 'needle',
+      readJson: async () => ({}),
+    }, context({
+      searchSessions: async (query) => [{ id: 'main', title: 'Needle session', snippet: `match ${query}` }],
+    }))
+    assert.equal(response?.status, 200)
+    assert.deepEqual(response?.body, { results: [{ id: 'main', title: 'Needle session', snippet: 'match needle' }] })
+  })
+
   it('lists file-reference candidates without reading file contents', async () => {
     const result = await handleWebUiConversationRequest({
       method: 'GET',

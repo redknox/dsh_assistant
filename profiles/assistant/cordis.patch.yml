@@ -10,10 +10,6 @@
   disabled: true
 - id: typert-gateway
   disabled: true
-- id: session-title
-  disabled: true
-- id: session-title-llm
-  disabled: true
 - id: user-questions
   disabled: true
 - id: llm-retry
@@ -23,8 +19,6 @@
 - id: credentials
   disabled: true
 - id: llm-pi-ai
-  disabled: true
-- id: session-query-sqlite
   disabled: true
 - id: session-telemetry-otel
   disabled: true
