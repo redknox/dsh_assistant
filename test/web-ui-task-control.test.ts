@@ -13,7 +13,9 @@ describe('Web UI Task Control', () => {
       pathname: '/api/task-control',
       readJson: async () => ({ action: 'pause', id: 'goal-1', revision: 3 }),
     }, {
-      control: (...args) => calls.push(args),
+      controlGoal: (...args) => calls.push(args),
+      controlPlan: () => {},
+      answerQuestion: () => {},
       project: (acknowledgement) => ({ view, webUi: 'http://127.0.0.1:8787', acknowledgement }),
     })
     assert.deepEqual(calls, [['pause', 'goal-1', 3]])
@@ -25,7 +27,9 @@ describe('Web UI Task Control', () => {
   it('rejects malformed and unrelated requests without invoking authority', async () => {
     let calls = 0
     const context = {
-      control: () => { calls += 1 },
+      controlGoal: () => { calls += 1 },
+      controlPlan: () => { calls += 1 },
+      answerQuestion: () => { calls += 1 },
       project: (acknowledgement: { readonly text: string }) => ({ view, webUi: '', acknowledgement }),
     }
     assert.equal(await handleWebUiTaskControlRequest({ method: 'GET', pathname: '/api/task-control', readJson: async () => ({}) }, context), undefined)
@@ -43,5 +47,18 @@ describe('Web UI Task Control', () => {
       assert.deepEqual(response, { status: 400, body: { error: 'malformed' } })
     }
     assert.equal(calls, 0)
+  })
+
+  it('routes Plan Mode and structured question decisions separately', async () => {
+    const calls: unknown[][] = []
+    const context = {
+      controlGoal: (...args: unknown[]) => calls.push(['goal', ...args]),
+      controlPlan: (...args: unknown[]) => calls.push(['plan', ...args]),
+      answerQuestion: (...args: unknown[]) => calls.push(['answer', ...args]),
+      project: (acknowledgement: { readonly text: string }) => ({ view, webUi: '', acknowledgement }),
+    }
+    await handleWebUiTaskControlRequest({ method: 'POST', pathname: '/api/task-control', readJson: async () => ({ action: 'enter-plan' }) }, context)
+    await handleWebUiTaskControlRequest({ method: 'POST', pathname: '/api/task-control', readJson: async () => ({ action: 'answer-question', id: 'question-1', selected: 'Approve' }) }, context)
+    assert.deepEqual(calls, [['plan', true], ['answer', 'question-1', 'Approve', undefined]])
   })
 })

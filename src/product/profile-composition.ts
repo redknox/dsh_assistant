@@ -133,6 +133,8 @@ export const OFFICIAL_RUNTIME_MOUNTS = Object.freeze([
   { official: 'goal-round-driver', runtime: 'goal-round-driver', when: 'ready' },
   { official: 'tool-goal', runtime: 'tool-goal', when: 'ready' },
   { official: 'tool-todo', runtime: 'tool-todo', when: 'ready' },
+  { official: 'user-questions', runtime: 'UserQuestionService', when: 'ready' },
+  { official: 'plan-mode', runtime: 'PlanModeController', when: 'ready' },
 ] as const satisfies readonly OfficialRuntimeMount[])
 
 export const PRODUCT_ONLY_SEAMS = Object.freeze([

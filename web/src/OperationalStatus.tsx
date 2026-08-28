@@ -13,12 +13,16 @@ export interface OperationsActions {
   readonly openExtensions?: () => void
   readonly openLogs?: () => void
   readonly controlGoal?: (action: 'pause' | 'resume', id: string, revision: number) => void
+  readonly controlPlan?: (active: boolean) => void
+  readonly answerQuestion?: (id: string, selected: string) => void
 }
 
 function TaskControlPanel(props: {
   readonly value: MissionControlView['taskControl']
   readonly locked: boolean
   readonly control?: OperationsActions['controlGoal']
+  readonly controlPlan?: OperationsActions['controlPlan']
+  readonly answerQuestion?: OperationsActions['answerQuestion']
 }) {
   const value = props.value
   if (!value) return null
@@ -58,6 +62,25 @@ function TaskControlPanel(props: {
         <div className="task-todo-list">
           <div className="task-todo-summary">TODO · {completed}/{value.todos.length} COMPLETE</div>
           <ul>{value.todos.map((todo, index) => <li key={`${index}-${todo.content}`} data-todo-status={todo.status}><span />{todo.content}</li>)}</ul>
+        </div>
+      ) : null}
+      <div className="plan-mode-control" data-plan-active={value.plan.active ? 'true' : 'false'}>
+        <div><span>PLAN MODE</span><strong>{value.plan.pending !== undefined ? 'SWITCHING' : value.plan.active ? 'READ ONLY' : 'OFF'}</strong></div>
+        <button
+          type="button"
+          className="button button--secondary task-control-button"
+          disabled={props.locked || value.plan.pending !== undefined}
+          onClick={() => props.controlPlan?.(!value.plan.active)}
+        >{value.plan.active ? 'LEAVE PLAN MODE' : 'ENTER PLAN MODE'}</button>
+      </div>
+      {value.question ? (
+        <div className="task-question" role="group" aria-label={value.question.header ?? 'Question'}>
+          <span>{value.question.header ?? 'INPUT REQUIRED'}</span>
+          <strong>{value.question.question}</strong>
+          {value.question.detail ? <pre>{value.question.detail}</pre> : null}
+          <div>{value.question.options.map((option) => (
+            <button key={option.label} type="button" className="button button--secondary" disabled={props.locked} onClick={() => props.answerQuestion?.(value.question!.id, option.label)}>{option.label}</button>
+          ))}</div>
         </div>
       ) : null}
     </section>
@@ -261,7 +284,7 @@ export function OperationsPanel(props: {
       </section>
       <ContextEndurancePanel value={props.view.contextEndurance} />
       <MaterialInputPanel value={props.view.materialInput} />
-      <TaskControlPanel value={props.view.taskControl} locked={!props.connected} control={props.actions.controlGoal} />
+      <TaskControlPanel value={props.view.taskControl} locked={!props.connected} control={props.actions.controlGoal} controlPlan={props.actions.controlPlan} answerQuestion={props.actions.answerQuestion} />
       <section className="capability-section" id="capabilities" aria-labelledby="capability-title">
         <div className="ops-section-heading capability-heading"><h2 id="capability-title">CONNECTED CAPABILITIES</h2><span>{props.view.capabilities.length} CHANNELS</span></div>
         <div className="capability-summary" aria-label="Capability summary">

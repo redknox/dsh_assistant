@@ -120,6 +120,21 @@ export function sanitizeMissionControlView(view: MissionControlView): MissionCon
                 }
               : {}),
             todos: view.taskControl.todos.map((todo) => ({ ...todo, content: redactText(todo.content) })),
+            ...(view.taskControl.question
+              ? {
+                  question: {
+                    ...view.taskControl.question,
+                    question: redactText(view.taskControl.question.question),
+                    ...(view.taskControl.question.header ? { header: redactText(view.taskControl.question.header) } : {}),
+                    ...(view.taskControl.question.detail ? { detail: redactText(view.taskControl.question.detail) } : {}),
+                    options: view.taskControl.question.options.map((option) => ({
+                      ...option,
+                      label: redactText(option.label),
+                      ...(option.description ? { description: redactText(option.description) } : {}),
+                    })),
+                  },
+                }
+              : {}),
           },
         }
       : {}),

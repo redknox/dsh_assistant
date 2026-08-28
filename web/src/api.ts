@@ -79,6 +79,18 @@ export async function controlGoal(input: {
   readonly id: string
   readonly revision: number
 }): Promise<UiEnvelope> {
+  return taskControlRequest(input)
+}
+
+export async function controlPlan(active: boolean): Promise<UiEnvelope> {
+  return taskControlRequest({ action: active ? 'enter-plan' : 'leave-plan' })
+}
+
+export async function answerTaskQuestion(id: string, selected: string, custom?: string): Promise<UiEnvelope> {
+  return taskControlRequest({ action: 'answer-question', id, selected, ...(custom ? { custom } : {}) })
+}
+
+async function taskControlRequest(input: Record<string, unknown>): Promise<UiEnvelope> {
   return parseEnvelope(await fetch('/api/task-control', {
     ...include,
     method: 'POST',

@@ -64,6 +64,17 @@ export interface AgentTaskControlView {
     readonly content: string
     readonly status: 'pending' | 'in_progress' | 'completed'
   }[]
+  readonly plan: {
+    readonly active: boolean
+    readonly pending?: boolean
+  }
+  readonly question?: {
+    readonly id: string
+    readonly header?: string
+    readonly question: string
+    readonly detail?: string
+    readonly options: readonly { readonly label: string; readonly description?: string }[]
+  }
 }
 
 export interface ContextEnduranceView {

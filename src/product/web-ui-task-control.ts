@@ -7,7 +7,9 @@ export interface WebUiTaskControlRequest {
 }
 
 export interface WebUiTaskControlContext {
-  readonly control: (action: 'pause' | 'resume', id: string, revision: number) => unknown
+  readonly controlGoal: (action: 'pause' | 'resume', id: string, revision: number) => unknown
+  readonly controlPlan: (active: boolean) => unknown
+  readonly answerQuestion: (id: string, selected: string, custom?: string) => unknown
   readonly project: (acknowledgement: { readonly text: string }) => {
     readonly view: MissionControlView
     readonly webUi: string
@@ -28,18 +30,32 @@ export async function handleWebUiTaskControlRequest(
 ): Promise<WebUiTaskControlResponse | undefined> {
   if (request.method !== 'POST' || request.pathname !== '/api/task-control') return undefined
   const body = await request.readJson()
-  if (!isRecord(body)
-    || (body.action !== 'pause' && body.action !== 'resume')
-    || typeof body.id !== 'string'
-    || body.id === ''
-    || !Number.isSafeInteger(body.revision)
-    || (body.revision as number) < 1) {
+  if (!isRecord(body) || typeof body.action !== 'string') {
     return { status: 400, body: { error: 'malformed' } }
   }
-  context.control(body.action, body.id, body.revision as number)
+  let text: string
+  if (body.action === 'pause' || body.action === 'resume') {
+    if (typeof body.id !== 'string' || body.id === '' || !Number.isSafeInteger(body.revision) || (body.revision as number) < 1) {
+      return { status: 400, body: { error: 'malformed' } }
+    }
+    context.controlGoal(body.action, body.id, body.revision as number)
+    text = body.action === 'pause' ? 'Goal paused.' : 'Goal resumed.'
+  } else if (body.action === 'enter-plan' || body.action === 'leave-plan') {
+    context.controlPlan(body.action === 'enter-plan')
+    text = body.action === 'enter-plan' ? 'Plan Mode enabled.' : 'Plan Mode disabled.'
+  } else if (body.action === 'answer-question') {
+    if (typeof body.id !== 'string' || body.id === '' || typeof body.selected !== 'string' || body.selected === ''
+      || (body.custom !== undefined && typeof body.custom !== 'string')) {
+      return { status: 400, body: { error: 'malformed' } }
+    }
+    context.answerQuestion(body.id, body.selected, body.custom)
+    text = 'Answer submitted.'
+  } else {
+    return { status: 400, body: { error: 'malformed' } }
+  }
   return {
     status: 200,
-    body: context.project({ text: body.action === 'pause' ? 'Goal paused.' : 'Goal resumed.' }),
+    body: context.project({ text }),
     broadcast: true,
   }
 }

@@ -15,7 +15,7 @@ import type { MissionControlRuntime } from './useMissionControlRuntime'
 import type { SkillControl } from './useSkillControl'
 import type { WorkspaceControl } from './useWorkspaceControl'
 import type { SettingsControl } from './useSettingsControl'
-import { controlGoal } from './api'
+import { answerTaskQuestion, controlGoal, controlPlan } from './api'
 
 type CompactSurface = 'conversation' | 'navigation' | 'operations'
 
@@ -79,6 +79,12 @@ function projectScreenControls(input: MissionControlScreenProps) {
     onSkillAction: input.skill.dispatch,
     onGoalAction: (action: 'pause' | 'resume', id: string, revision: number) => {
       void input.runtime.perform(() => controlGoal({ action, id, revision }), `unable to ${action} goal`)
+    },
+    onPlanAction: (active: boolean) => {
+      void input.runtime.perform(() => controlPlan(active), `unable to ${active ? 'enter' : 'leave'} Plan Mode`)
+    },
+    onQuestionAnswer: (id: string, selected: string) => {
+      void input.runtime.perform(() => answerTaskQuestion(id, selected), 'unable to submit answer')
     },
   }
 }
@@ -229,6 +235,8 @@ export function MissionControlScreen(input: MissionControlScreenProps) {
             openExtensions: () => navigate('extensions'),
             openLogs: () => navigate('logs'),
             controlGoal: props.onGoalAction,
+            controlPlan: props.onPlanAction,
+            answerQuestion: props.onQuestionAnswer,
           }}
         />
       </div>

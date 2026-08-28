@@ -13,6 +13,7 @@ import type { UserPersonalityPrefs } from '../domain/personality/types.js'
 import type { AssistantView, KnowledgeSourceDto } from './dto.js'
 import { projectAssistantView } from './projection.js'
 import { redactText } from '../domain/workspace/redact.js'
+import { answerTaskQuestion, controlPlanMode } from '../product/agent-task-control.js'
 
 export interface RememberInput {
   readonly category: MemoryCategory
@@ -108,6 +109,16 @@ export class AssistantControlSurface {
     const ref = { id: GoalId(id), revision }
     if (action === 'pause') this.ctx.goals.pause(agent, ref)
     else this.ctx.goals.resume(agent, ref)
+    return this.workspace()
+  }
+
+  controlPlan(active: boolean) {
+    controlPlanMode(this.ctx, this.requireAgent(), active)
+    return this.workspace()
+  }
+
+  answerTaskQuestion(id: string, selected: string, custom?: string) {
+    answerTaskQuestion(this.ctx, this.requireAgent(), id, selected, custom)
     return this.workspace()
   }
 

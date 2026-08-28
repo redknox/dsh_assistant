@@ -169,7 +169,9 @@ export function startWebUiServer(options: WebUiServerOptions): Promise<WebUiServ
         pathname: requestUrl.pathname,
         readJson: () => transport.readJson(req),
       }, {
-        control: (action, id, revision) => options.surface.controlGoal(action, id, revision),
+        controlGoal: (action, id, revision) => options.surface.controlGoal(action, id, revision),
+        controlPlan: (active) => options.surface.controlPlan(active),
+        answerQuestion: (id, selected, custom) => options.surface.answerTaskQuestion(id, selected, custom),
         project: (acknowledgement) => envelope({ acknowledgement }),
       })
       if (taskControl) {
