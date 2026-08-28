@@ -134,6 +134,16 @@ describe('TARS-NG mission-control workspace', () => {
     assert.equal(mail?.advanced?.provider, 'feishu')
   })
 
+  it('preserves the provider for integration-only capability rows', () => {
+    const view = projectMissionControl(snapshot({
+      registry: [],
+      integrationStatus: [{ capability: 'contacts', available: true, configured: true, provider: 'feishu' }],
+    }))
+    const contacts = view.capabilities.find((item) => item.area === 'Contacts')
+    assert.equal(contacts?.status, 'active')
+    assert.equal(contacts?.advanced?.provider, 'feishu')
+  })
+
   it('D. calendar create is a first-class approval object', () => {
     const view = projectMissionControl(snapshot({
       pendingConfirmations: [{
@@ -873,6 +883,27 @@ describe('TARS-NG mission-control workspace', () => {
     assert.equal(view.personality.humorSuppressed, true)
     assert.match(renderMissionControlAsHtml(view), /data-system-state="SAFE_MODE"/)
     assert.ok(view.capabilities.some((item) => item.status === 'safe-mode-disabled'))
+  })
+
+  it('marks Safe Mode ready to exit after recovery is complete', () => {
+    const entered = projectMissionControl(snapshot({ safeMode: true, recoveryRequired: false }))
+    assert.equal(entered.recovery?.exitReady, false)
+    const view = projectMissionControl(snapshot({
+      safeMode: true,
+      recoveryRequired: false,
+      activation: {
+        state: 'safe-mode',
+        rollbackPlan: {
+          id: 'rollback-10-7',
+          currentGeneration: 10,
+          targetGeneration: 7,
+          fingerprint: 'verified-rollback',
+          available: false,
+          denials: [{ reason: 'already-restored', detail: 'current owner set already matches the rollback target' }],
+        },
+      },
+    }))
+    assert.equal(view.recovery?.exitReady, true)
   })
 
   it('I. personality tuning previews behavior without granting authority', () => {

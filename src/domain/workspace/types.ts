@@ -166,6 +166,7 @@ export interface RecoveryView {
   readonly why: string
   readonly disabled: readonly string[]
   readonly actions: readonly string[]
+  readonly exitReady?: boolean
 }
 
 export interface RollbackOwnerChange {

@@ -48,6 +48,9 @@ export function projectMissionControl(input: WorkspaceSnapshotInput): MissionCon
             why: input.recoveryWhy ?? 'Trusted core is available; generated capabilities are disabled.',
             disabled: generatedDisabled(input),
             actions: ['Diagnostics', 'Rollback', 'Exit Safe Mode', 'Disable candidate', 'Restore backup'],
+            exitReady: input.safeMode
+              && !input.recoveryRequired
+              && input.activation?.rollbackPlan?.denials.some((item) => item.reason === 'already-restored') === true,
           },
         }
       : {}),

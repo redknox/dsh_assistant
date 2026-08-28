@@ -36,32 +36,81 @@ function activityModifier(kind: string): string {
   return ''
 }
 
+function capabilityLabel(status: UserCapabilityStatus): string {
+  if (status === 'active') return 'READY'
+  if (status === 'approval-required') return 'CONFIRM TO USE'
+  if (status === 'not-connected') return 'NOT CONNECTED'
+  if (status === 'safe-mode-disabled') return 'SAFE MODE OFF'
+  return 'UNAVAILABLE'
+}
+
+function lifecycleLabel(item: WorkbenchProjection): string {
+  if (item.extensionLifecycle === 'ACTIVE') return 'ACTIVE'
+  if (item.extensionLifecycle === 'APPROVED_NOT_ACTIVE') return 'READY TO ACTIVATE'
+  if (item.extensionLifecycle === 'ACTIVATING') return 'ACTIVATING'
+  if (item.extensionLifecycle === 'ACTIVATION_FAILED') return 'ACTIVATION FAILED'
+  if (item.extensionLifecycle === 'DISABLED_REACTIVATABLE') return 'DISABLED'
+  if (item.extensionLifecycle === 'DISABLED_BLOCKED') return 'BLOCKED'
+  if (item.extensionLifecycle === 'SUPERSEDED') return 'SUPERSEDED'
+  if (item.approvalState === 'approval-requested') return 'AWAITING APPROVAL'
+  if (item.canRequestApproval) return 'READY FOR APPROVAL'
+  return 'IN REVIEW'
+}
+
+function compareVersions(left: string, right: string): number {
+  const leftParts = left.split(/[.-]/).map((part) => Number.parseInt(part, 10) || 0)
+  const rightParts = right.split(/[.-]/).map((part) => Number.parseInt(part, 10) || 0)
+  for (let index = 0; index < Math.max(leftParts.length, rightParts.length); index += 1) {
+    const difference = (leftParts[index] ?? 0) - (rightParts[index] ?? 0)
+    if (difference !== 0) return difference
+  }
+  return 0
+}
+
+function partitionCandidates(candidates: readonly WorkbenchProjection[]): {
+  readonly current: readonly WorkbenchProjection[]
+  readonly history: readonly WorkbenchProjection[]
+} {
+  const latestByOwner = new Map<string, WorkbenchProjection>()
+  for (const item of candidates) {
+    const previous = latestByOwner.get(item.owner)
+    if (!previous || compareVersions(item.version, previous.version) > 0) latestByOwner.set(item.owner, item)
+  }
+  const current = [...latestByOwner.values()].filter((item) => item.extensionLifecycle !== 'SUPERSEDED')
+  const currentIds = new Set(current.map((item) => item.id))
+  return { current, history: candidates.filter((item) => !currentIds.has(item.id)) }
+}
+
+function CandidateSummary(props: { readonly item: WorkbenchProjection; readonly historical?: boolean }) {
+  const item = props.item
+  return (
+    <li className="workbench-item" data-candidate-id={item.id} data-can-request={item.canRequestApproval ? 'yes' : 'no'} data-review-state={item.reviewState ?? 'not-reviewed'}>
+      <div className="workbench-title-row">
+        <span className="workbench-identity">{item.owner}@{item.version}</span>
+        <strong className="workbench-state" data-extension-lifecycle={item.extensionLifecycle ?? 'APPROVAL_REQUIRED'}>{lifecycleLabel(item)}</strong>
+      </div>
+      {!props.historical ? <>
+        <div className="workbench-checks">
+          <span data-check={item.validationPassed === true ? 'passed' : 'pending'}>VALIDATION {item.validationPassed === true ? 'PASS' : 'PENDING'}</span>
+          <span data-check={item.reviewState === 'review-complete' ? 'passed' : 'pending'}>REVIEW {item.reviewState === 'review-complete' ? 'COMPLETE' : 'PENDING'}</span>
+        </div>
+        {item.activationFailureSummary ? <div className="workbench-warning">{item.activationFailureSummary}</div> : null}
+        <div className="workbench-meta" data-current-step={item.currentStep ?? 'author'}>CURRENT STEP · {(item.currentStep ?? item.lifecycle).replaceAll('-', ' ').toUpperCase()}</div>
+        <div className="workbench-diff">CAPABILITIES · {formatDiff(item.diff?.capabilities.added ?? [], item.diff?.capabilities.removed ?? [], item.diff?.capabilities.changed ?? [])}</div>
+        {item.canRequestApproval && (!item.extensionLifecycle || item.extensionLifecycle === 'APPROVAL_REQUIRED') ? <div className="workbench-request">HUMAN APPROVAL AVAILABLE</div> : null}
+      </> : null}
+    </li>
+  )
+}
+
 function WorkbenchPanel(props: { readonly candidates: readonly WorkbenchProjection[] }) {
   if (props.candidates.length === 0) return null
+  const { current, history } = partitionCandidates(props.candidates)
   return (
     <section className="workbench-section" data-workbench="true" aria-labelledby="workbench-title">
-      <h2 id="workbench-title">CANDIDATE WORKBENCH</h2>
-      <ul className="workbench-list">
-        {props.candidates.map((item) => (
-          <li key={item.id} className="workbench-item" data-candidate-id={item.id} data-can-request={item.canRequestApproval ? 'yes' : 'no'} data-review-state={item.reviewState ?? 'not-reviewed'}>
-            <div className="workbench-identity">{item.owner}@{item.version}</div>
-            <div className="workbench-meta">{item.resolutionKind ?? 'unresolved'} {item.resolutionCapability ?? ''}</div>
-            <div className="workbench-meta" data-current-step={item.currentStep ?? 'author'}>step {item.currentStep ?? item.lifecycle}{item.parentId ? ` · repair of ${item.parentId}` : ''}{item.leftover ? ' · leftover repair' : ''}</div>
-            <div className="workbench-meta">validation {item.validationPassed === true ? 'passed' : item.validationFailureSummary || item.validationFailed?.join(', ') || item.lifecycle}</div>
-            <div className="workbench-meta">review {item.reviewState ?? 'not-reviewed'}{item.blockingFindings ? ` · ${item.blockingFindings} blockers` : ''}{item.blockerClaims?.length ? ` (${item.blockerClaims.join(', ')})` : ''}</div>
-            <div className="workbench-meta" data-review-state={item.reviewState ?? 'not-reviewed'}>reviewState {item.reviewState ?? 'not-reviewed'}</div>
-            <div className="workbench-meta" data-governance-approval={item.governanceApproval ?? 'none'}>governanceApproval {item.governanceApproval ?? 'none'}</div>
-            <div className="workbench-meta" data-activation-state={item.activationState ?? 'inactive'}>activationState {item.activationState ?? 'inactive'}{item.activationFailureSummary ? ` · ${item.activationFailureSummary}` : ''}</div>
-            <div className="workbench-meta" data-approval-state={item.approvalState ?? 'not-ready'} data-extension-lifecycle={item.extensionLifecycle ?? 'APPROVAL_REQUIRED'}>
-              {item.extensionLifecycle === 'ACTIVE' ? 'approved and active' : item.extensionLifecycle === 'APPROVED_NOT_ACTIVE' ? 'approved, not active' : item.extensionLifecycle === 'ACTIVATING' ? 'activating' : item.extensionLifecycle === 'ACTIVATION_FAILED' ? 'activation failed' : item.extensionLifecycle === 'DISABLED_REACTIVATABLE' ? 'disabled, reactivatable' : item.extensionLifecycle === 'DISABLED_BLOCKED' ? 'disabled, blocked' : item.extensionLifecycle === 'SUPERSEDED' ? 'superseded' : item.approvalState === 'approval-requested' || item.canRequestApproval ? 'ready for approval' : 'not ready for approval'}
-            </div>
-            <div className="workbench-diff">capabilities {formatDiff(item.diff?.capabilities.added ?? [], item.diff?.capabilities.removed ?? [], item.diff?.capabilities.changed ?? [])}</div>
-            <div className="workbench-diff">permissions {formatDiff(item.diff?.permissions.added ?? [], item.diff?.permissions.removed ?? [], item.diff?.permissions.changed ?? [])}</div>
-            <div className="workbench-diff">effects {item.effectSummary?.length ? item.effectSummary.join('; ') : 'none'}</div>
-            <div className="workbench-request" data-can-request={item.canRequestApproval ? 'yes' : 'no'}>{item.canRequestApproval ? 'can request approval' : `cannot request${item.requestDenials?.length ? `: ${item.requestDenials.join(', ')}` : ''}`}</div>
-          </li>
-        ))}
-      </ul>
+      <div className="ops-section-heading"><h2 id="workbench-title">EXTENSION PIPELINE</h2><span>{current.length} CURRENT</span></div>
+      {current.length > 0 ? <ul className="workbench-list">{current.map((item) => <CandidateSummary key={item.id} item={item} />)}</ul> : <p className="ops-empty">NO EXTENSION WORK IN PROGRESS</p>}
+      {history.length > 0 ? <details className="workbench-history"><summary>PAST CANDIDATES <span>{history.length}</span></summary><ul className="workbench-list">{history.map((item) => <CandidateSummary key={item.id} item={item} historical />)}</ul></details> : null}
     </section>
   )
 }
@@ -78,40 +127,55 @@ export function OperationsPanel(props: {
   const recentActivity = props.view.activity.slice(-3).reverse()
   const degradation = props.view.controlStrip.degradation
   const pendingApprovals = props.view.controlStrip.pendingApprovals
+  const currentCandidates = partitionCandidates(props.view.candidates ?? []).current
+  const failedCandidates = currentCandidates.filter((item) => item.extensionLifecycle === 'ACTIVATION_FAILED').length
+  const systemNeedsAttention = ['SAFE_MODE', 'RECOVERY', 'DEGRADED', 'BLOCKED', 'FAULT'].includes(props.view.systemState)
+  const attentionCount = pendingApprovals + unavailableCapabilities + failedCandidates + (props.connected ? 0 : 1) + (systemNeedsAttention ? 1 : 0)
+  const activeExtensions = (props.view.extensions ?? []).filter((item) => item.lifecycle === 'ACTIVE').length
   return (
     <aside className="ops-panel instrument-panel" id="activity" aria-label="Operational state">
       <div className="panel-code"><span>OPS 04</span><span>LIVE STATUS</span></div>
+      <section className="attention-section" aria-labelledby="attention-title" data-attention={attentionCount > 0 ? 'required' : 'clear'}>
+        <div className="ops-section-heading"><h2 id="attention-title">ATTENTION</h2><span className={`status-lamp status-lamp--${attentionCount > 0 ? 'approval' : 'ready'}`} aria-hidden="true" /></div>
+        <strong>{attentionCount > 0 ? `${attentionCount} ITEM${attentionCount === 1 ? '' : 'S'} NEED REVIEW` : 'NO ACTION REQUIRED'}</strong>
+        {pendingApprovals > 0 ? <p><Glyph name="warn" /> {pendingApprovals} APPROVAL{pendingApprovals === 1 ? '' : 'S'} WAITING</p> : null}
+        {systemNeedsAttention ? <p><Glyph name="warn" /> SYSTEM MODE · {props.view.systemState.replaceAll('_', ' ')}</p> : null}
+        {!props.connected ? <p><Glyph name="warn" /> CONTROL LINK OFFLINE</p> : null}
+        {unavailableCapabilities > 0 ? <p><Glyph name="warn" /> {unavailableCapabilities} CAPABILIT{unavailableCapabilities === 1 ? 'Y' : 'IES'} UNAVAILABLE</p> : null}
+        {failedCandidates > 0 ? <p><Glyph name="warn" /> {failedCandidates} ACTIVATION FAILURE{failedCandidates === 1 ? '' : 'S'}</p> : null}
+      </section>
       <section className="ops-overview" aria-labelledby="ops-overview-title">
-        <div className="ops-section-heading"><h2 id="ops-overview-title">OPERATIONS</h2><span className={`status-lamp status-lamp--${lampModifier(props.view.systemState, props.connected)}`} aria-hidden="true" /></div>
+        <div className="ops-section-heading"><h2 id="ops-overview-title">SYSTEM HEALTH</h2><span className={`status-lamp status-lamp--${lampModifier(props.view.systemState, props.connected)}`} aria-hidden="true" /></div>
         <strong className="ops-mode">{props.view.systemState.replaceAll('_', ' ')}</strong>
-        <p className="ops-detail">{props.connected ? degradation ?? 'ALL CORE SYSTEMS NOMINAL' : 'CONTROL LINK OFFLINE'}</p>
+        <p className="ops-detail">{props.connected ? degradation ?? props.view.recovery?.why ?? 'ALL CORE SYSTEMS NOMINAL' : 'CONTROL LINK OFFLINE'}</p>
         <div className="ops-counters" aria-label="Operational counters">
           <span><small>APPROVALS</small><strong className={pendingApprovals > 0 ? 'amber' : undefined}>{pendingApprovals}</strong></span>
           <span><small>JOBS</small><strong>{props.view.controlStrip.backgroundJobs}</strong></span>
         </div>
-        {pendingApprovals > 0 ? <p className="ops-alert"><Glyph name="warn" /> HUMAN DECISION REQUIRED</p> : null}
       </section>
-      <WorkbenchPanel candidates={props.view.candidates ?? []} />
       <section className="capability-section" id="capabilities" aria-labelledby="capability-title">
-        <div className="ops-section-heading capability-heading"><h2 id="capability-title">CAPABILITIES</h2><span>{props.view.capabilities.length} CHANNELS</span></div>
+        <div className="ops-section-heading capability-heading"><h2 id="capability-title">CONNECTED CAPABILITIES</h2><span>{props.view.capabilities.length} CHANNELS</span></div>
         <div className="capability-summary" aria-label="Capability summary">
-          <span data-capability-state="active"><strong>{activeCapabilities}</strong> ACTIVE</span>
-          <span data-capability-state="governed"><strong>{governedCapabilities}</strong> GOVERNED</span>
-          <span data-capability-state="unavailable"><strong>{unavailableCapabilities}</strong> INOP</span>
+          <span data-capability-state="active"><strong>{activeCapabilities}</strong> READY</span>
+          <span data-capability-state="governed"><strong>{governedCapabilities}</strong> CONFIRM</span>
+          <span data-capability-state="unavailable"><strong>{unavailableCapabilities}</strong> UNAVAILABLE</span>
         </div>
         <dl className="capability-list">
           {(props.view.plugins ?? []).map((plugin) => <PluginLifecycleControl key={plugin.id} plugin={plugin} locked={!props.connected} confirming={props.confirmingPlugin === plugin.id} actions={props.actions} />)}
           {props.view.capabilities.map((item) => (
-            <div key={`${item.area}-${item.action}`}><dt><span className="capability-area">{item.area}</span><span className="capability-action">{item.action}</span></dt><dd data-status={item.status} data-capability-state={capabilitySignal(item.status)}>{item.status === 'approval-required' ? 'CONFIRM' : item.status === 'not-connected' ? 'NOT LINKED' : item.status === 'safe-mode-disabled' ? 'SAFE OFF' : item.status === 'unavailable' ? 'INOP' : 'ACTIVE'}</dd></div>
+            <div key={`${item.area}-${item.action}`}><dt><span className="capability-area">{item.area}{item.advanced?.provider && item.advanced.provider !== 'fake' ? <small>{item.advanced.provider}</small> : null}</span><span className="capability-action">{item.action}</span></dt><dd data-status={item.status} data-capability-state={capabilitySignal(item.status)}>{capabilityLabel(item.status)}</dd></div>
           ))}
         </dl>
       </section>
-      <section className="activity-section activity-section--recent" aria-labelledby="activity-title">
-        <div className="ops-section-heading"><h2 id="activity-title">RECENT EVENTS</h2><span>LAST {recentActivity.length}</span></div>
-        {recentActivity.length === 0 ? <p className="ops-empty">NO RECENT EVENTS</p> : <ol className="activity-list">{recentActivity.map((item) => <li key={item.id} className={`activity-item${activityModifier(item.kind)}`} data-activity={item.kind}><span className="activity-node">{item.kind === 'APPROVAL_REQUIRED' ? <Glyph name="warn" /> : null}</span><span>{item.kind.replaceAll('_', ' ')}</span><span className="activity-summary">{item.summary}</span></li>)}</ol>}
-        {(props.view.approvalResolutions ?? []).length > 0 ? <ul className="ops-decisions" data-actions-history="true" aria-label="Recent human decisions">{(props.view.approvalResolutions ?? []).slice(-3).reverse().map((item) => <li key={item.confirmationId} data-approval-resolution={item.confirmationId} data-approval-outcome={item.outcome}><span>{item.capability ?? 'action'}.{item.operation ?? item.decision}</span><strong>{item.decision.toUpperCase()}</strong></li>)}</ul> : null}
-      </section>
-      <div className="ops-footer"><span><strong>{(props.view.extensions ?? []).length}</strong> USER EXTENSIONS</span><button type="button" className="button button--secondary" data-open-extensions="true" onClick={props.actions.openExtensions}>OPEN</button></div>
+      <WorkbenchPanel candidates={props.view.candidates ?? []} />
+      <details className="activity-section activity-section--recent">
+        <summary><span>ACTIVITY LOG</span><small>{recentActivity.length} RECENT</small></summary>
+        <div className="activity-log-body">
+          {recentActivity.length === 0 ? <p className="ops-empty">NO RECENT EVENTS</p> : <ol className="activity-list">{recentActivity.map((item) => <li key={item.id} className={`activity-item${activityModifier(item.kind)}`} data-activity={item.kind}><span className="activity-node">{item.kind === 'APPROVAL_REQUIRED' ? <Glyph name="warn" /> : null}</span><span>{item.kind.replaceAll('_', ' ')}</span><span className="activity-summary">{item.summary}</span></li>)}</ol>}
+          {(props.view.approvalResolutions ?? []).length > 0 ? <ul className="ops-decisions" data-actions-history="true" aria-label="Recent human decisions">{(props.view.approvalResolutions ?? []).slice(-3).reverse().map((item) => <li key={item.confirmationId} data-approval-resolution={item.confirmationId} data-approval-outcome={item.outcome}><span>{item.capability ?? 'action'}.{item.operation ?? item.decision}</span><strong>{item.decision.toUpperCase()}</strong></li>)}</ul> : null}
+        </div>
+      </details>
+      <div className="ops-footer"><span><strong>{activeExtensions}</strong> ACTIVE · {(props.view.extensions ?? []).length} EXTENSION RECORDS</span><button type="button" className="button button--secondary" data-open-extensions="true" onClick={props.actions.openExtensions}>MANAGE</button></div>
     </aside>
   )
 }

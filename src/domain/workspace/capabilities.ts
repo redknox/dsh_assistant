@@ -73,6 +73,7 @@ export function projectUserCapabilities(input: WorkspaceSnapshotInput): readonly
         area: row.area,
         action: row.action,
         status: resolveStatus(input, row),
+        ...(integration.provider ? { advanced: { provider: integration.provider } } : {}),
       })
     }
   }

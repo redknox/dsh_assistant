@@ -2295,7 +2295,7 @@ export function apply(ctx) {
       onReject() {},
       onRecovery() {},
     }))
-    assert.match(governed, />CONFIRM</)
+    assert.match(governed, />CONFIRM TO USE</)
     assert.doesNotMatch(governed, />APPROVAL</)
 
     const memory = renderToStaticMarkup(createElement(MissionControlScreen, {
@@ -2860,16 +2860,12 @@ export function apply(ctx) {
     assert.match(workbench, /data-candidate-id="cand-wb"/)
     assert.match(workbench, /generated\/r0-workbench-ping@0.1.0/)
     assert.match(workbench, /r0.workbench.ping/)
-    assert.match(workbench, /can request approval/)
-    assert.match(workbench, /step request/)
-    assert.match(workbench, /ready for approval/)
+    assert.match(workbench, /HUMAN APPROVAL AVAILABLE/)
+    assert.match(workbench, /CURRENT STEP · REQUEST/)
+    assert.match(workbench, /READY FOR APPROVAL/)
     assert.match(workbench, /\+r0.workbench.ping/)
-    assert.match(workbench, /remote-side-effect mutate/)
-    assert.match(workbench, /workspace\/notes/)
-    assert.match(workbench, /https:\/\/example.com/)
-    assert.match(workbench, /child_process/)
-    assert.match(workbench, /secret-access CALENDAR_TOKEN/)
-    assert.match(workbench, /calendar.google/)
+    assert.doesNotMatch(workbench, /remote-side-effect mutate/)
+    assert.doesNotMatch(workbench, /secret-access CALENDAR_TOKEN/)
 
     const degraded = renderToStaticMarkup(createElement(MissionControlScreen, {
       view: fixtureView({
@@ -2896,6 +2892,7 @@ export function apply(ctx) {
           why: 'Generated Calendar artifact failed integrity verification.',
           disabled: ['generated/google-calendar@0.1.0'],
           actions: ['Diagnostics', 'Rollback', 'Exit Safe Mode', 'Disable candidate'],
+          exitReady: true,
         },
         personality: { humor: 90, directness: 70, initiative: 50, verbosity: 'normal', humorSuppressed: true },
         controlStrip: { pendingApprovals: 0, backgroundJobs: 0, mode: 'SAFE_MODE' },
@@ -2911,6 +2908,9 @@ export function apply(ctx) {
     }))
     assert.match(safe, /SAFE_MODE/)
     assert.match(safe, /integrity/)
+    assert.match(safe, /data-attention="required"/)
+    assert.doesNotMatch(safe, /ALL CORE SYSTEMS NOMINAL/)
+    assert.match(safe, /ROLLBACK COMPLETE · EXIT SAFE MODE TO RESUME/)
     assert.match(safe, /disabled/)
     assert.match(safe, /data-recovery="true"/)
     assert.match(safe, /data-recovery-action="diagnostics"/)

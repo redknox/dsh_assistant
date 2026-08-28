@@ -59,6 +59,7 @@ export function RecoveryPanel(props: {
       <h1>{props.systemState}</h1>
       <p>{props.recovery.why}</p>
       <p>Disabled: {props.recovery.disabled.join(', ') || 'generated/optional capabilities'}</p>
+      {props.recovery.exitReady ? <p className="recovery-next-step" role="status">ROLLBACK COMPLETE · EXIT SAFE MODE TO RESUME</p> : null}
       {props.error ? <p className="error" role="alert">{props.error}</p> : null}
       <div className="recovery-actions">
         {props.recovery.actions.map((action) => {
@@ -69,14 +70,20 @@ export function RecoveryPanel(props: {
           const needsConfirm = mapped !== 'diagnostics'
           const armed = props.armedRecovery === mapped
           const label = needsConfirm && armed ? `Confirm ${action}` : action
-          const tone = mapped === 'diagnostics' ? 'button--secondary' : 'button--fault'
+          const rollbackComplete = props.recovery.exitReady === true && mapped === 'rollback'
+          const tone = mapped === 'diagnostics' || rollbackComplete
+            ? 'button--secondary'
+            : props.recovery.exitReady && mapped === 'exit-safe-mode'
+              ? 'button--approval'
+              : 'button--fault'
           return (
             <button
               key={action}
               type="button"
               className={`button ${tone}`}
               data-recovery-action={mapped}
-              disabled={props.locked}
+              disabled={props.locked || rollbackComplete}
+              title={rollbackComplete ? 'Rollback already complete' : undefined}
               onClick={() => props.onRecovery(mapped)}
             >
               {label}
