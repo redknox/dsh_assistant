@@ -1,5 +1,5 @@
 import React, { useState } from 'react'
-import type { ActivationCard, ApprovalCard, MissionControlView, RollbackCard, SkillProjection, UserPluginView } from '../../src/domain/workspace/types'
+import type { ActivationCard, ApprovalCard, MissionControlView, SkillProjection, UserPluginView } from '../../src/domain/workspace/types'
 import { ConversationWorkspace } from './ConversationWorkspace'
 import { ExtensionsWorkspace } from './ExtensionsWorkspace'
 import { Glyph } from './icons'
@@ -49,15 +49,11 @@ function projectScreenControls(input: MissionControlScreenProps) {
     deferredActivations: input.governance.state.deferredActivations,
     armedActivation: input.governance.state.armedActivation,
     armedAbandonment: input.governance.state.armedAbandonment,
-    deferredRollback: input.governance.state.deferredRollback,
-    armedRollback: input.governance.state.armedRollback,
     onApprove: (card: ApprovalCard) => input.governance.dispatch({ action: 'approve', card }),
     onReject: (card: ApprovalCard) => input.governance.dispatch({ action: 'reject', card }),
     onActivate: (card: ActivationCard) => input.governance.dispatch({ action: 'activate', card }),
     onAbandonActivation: (card: ActivationCard) => input.governance.dispatch({ action: 'abandon-activation', card }),
     onDeferActivation: (card: ActivationCard) => input.governance.dispatch({ action: 'defer-activation', card }),
-    onAskRollback: (card: RollbackCard) => input.governance.dispatch({ action: 'rollback', card }),
-    onDeferRollback: () => input.governance.dispatch({ action: 'defer-rollback' }),
     onRecovery: (recovery: 'diagnostics' | 'rollback' | 'exit-safe-mode') => input.governance.dispatch({ action: 'recover', recovery }),
     pane: input.navigation.pane,
     onNavigate: input.navigation.navigate,
@@ -196,9 +192,6 @@ export function MissionControlScreen(input: MissionControlScreenProps) {
             activations: (view.activations ?? []).filter((card) => !(props.deferredActivations ?? []).includes(card.id)),
             armedActivation: props.armedActivation,
             armedAbandonment: props.armedAbandonment,
-            rollback: view.rollback,
-            deferredRollback: props.deferredRollback,
-            armedRollback: props.armedRollback,
           }}
           actions={{
             draft: props.onDraft,
@@ -209,8 +202,6 @@ export function MissionControlScreen(input: MissionControlScreenProps) {
             abandonActivation: props.onAbandonActivation ?? (() => {}),
             deferActivation: props.onDeferActivation ?? (() => {}),
             pickSkill: props.onPickSkill,
-            askRollback: props.onAskRollback,
-            deferRollback: props.onDeferRollback,
           }}
         />
         )}

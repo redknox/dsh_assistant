@@ -1005,9 +1005,9 @@ export function apply(ctx) {
           onReject() {},
           onRecovery() {},
         }))
-        assert.match(markup, /Rollback system state/)
-        assert.match(markup, /not a single-plugin uninstall/)
-        assert.match(markup, /data-rollback-action="ask"/)
+        assert.doesNotMatch(markup, /Rollback system state/)
+        assert.doesNotMatch(markup, /not a single-plugin uninstall/)
+        assert.doesNotMatch(markup, /data-rollback-action="ask"/)
         const deferred = renderToStaticMarkup(createElement(MissionControlScreen, {
           view: ready.view,
           connected: true,

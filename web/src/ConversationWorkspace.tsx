@@ -1,5 +1,5 @@
 import React, { type FormEvent } from 'react'
-import type { ActivationCard, ApprovalCard, MissionControlView, RollbackCard, SkillProjection, WorkObjectKind } from '../../src/domain/workspace/types'
+import type { ActivationCard, ApprovalCard, MissionControlView, SkillProjection, WorkObjectKind } from '../../src/domain/workspace/types'
 import { Glyph } from './icons'
 import { MarkdownMessage } from './MarkdownMessage'
 import { formatDiff, isPendingApproval, skillInvocationSurfaceOpen } from './missionControlPresentation'
@@ -12,9 +12,6 @@ export interface ConversationWorkspaceState {
   readonly activations: readonly ActivationCard[]
   readonly armedActivation?: string
   readonly armedAbandonment?: string
-  readonly rollback?: RollbackCard
-  readonly deferredRollback?: boolean
-  readonly armedRollback?: boolean
 }
 
 export interface ConversationWorkspaceActions {
@@ -26,8 +23,6 @@ export interface ConversationWorkspaceActions {
   readonly abandonActivation: (card: ActivationCard) => void
   readonly deferActivation: (card: ActivationCard) => void
   readonly pickSkill?: (skill: SkillProjection) => void
-  readonly askRollback?: (card: RollbackCard) => void
-  readonly deferRollback?: (card: RollbackCard) => void
 }
 
 function isUserMessage(kind: WorkObjectKind): boolean {
@@ -116,48 +111,6 @@ function ActivationCardView(props: {
   )
 }
 
-function RollbackCardView(props: {
-  readonly card: RollbackCard
-  readonly locked: boolean
-  readonly deferred: boolean
-  readonly armed: boolean
-  readonly actions: Pick<ConversationWorkspaceActions, 'askRollback' | 'deferRollback'>
-}) {
-  const { card } = props
-  if (props.deferred) return null
-  return (
-    <article className="approval-card" data-rollback-id={card.id} data-kind={card.kind} data-fingerprint={card.fingerprint} data-current-generation={card.currentGeneration} data-target-generation={card.targetGeneration} aria-labelledby={`rollback-title-${card.id}`}>
-      <header className="approval-header">
-        <Glyph name="shield" className="glyph approval-symbol" />
-        <h2 id={`rollback-title-${card.id}`}>{card.title}</h2>
-      </header>
-      <dl className="approval-facts">
-        <div><dt>CURRENT</dt><dd>generation {card.currentGeneration}</dd></div>
-        <div><dt>TARGET</dt><dd>generation {card.targetGeneration}</dd></div>
-        <div><dt>FINGERPRINT</dt><dd>{card.fingerprint}</dd></div>
-        <div><dt>WHY</dt><dd>{card.reason}</dd></div>
-        <div><dt>OWNERS</dt><dd>{card.ownerChanges.map((item) => `${item.change} ${item.owner}${item.from ? ` ${item.from}` : ''}${item.to ? `→${item.to}` : ''}`).join('; ') || 'none'}</dd></div>
-        <div><dt>CAPABILITIES</dt><dd>added {card.capabilitiesAdded.join(', ') || 'none'}; removed {card.capabilitiesRemoved.join(', ') || 'none'}</dd></div>
-        <div><dt>TOOLS</dt><dd>added {card.toolsAdded.join(', ') || 'none'}; removed {card.toolsRemoved.join(', ') || 'none'}</dd></div>
-        <div><dt>MOUNTS</dt><dd>added {card.mountsAdded.length}; removed {card.mountsRemoved.length}</dd></div>
-        <div><dt>RECOVERY REQUIRED</dt><dd>{card.recoveryRequired ? 'yes' : 'no'}</dd></div>
-        <div><dt>WARNING</dt><dd>This is a system-state rollback, not a single-plugin uninstall. Candidate, approval, review, and audit history are retained.</dd></div>
-      </dl>
-      {props.armed ? (
-        <div className="approval-actions">
-          <button type="button" className="button button--secondary" data-rollback-action="cancel" disabled={props.locked} onClick={() => props.actions.deferRollback?.(card)}>Not now</button>
-          <button type="button" className="button button--fault" data-rollback-action="confirm" disabled={props.locked} onClick={() => props.actions.askRollback?.(card)}>Confirm Rollback system state</button>
-        </div>
-      ) : (
-        <div className="approval-actions">
-          <button type="button" className="button button--secondary" data-rollback-action="defer" disabled={props.locked} onClick={() => props.actions.deferRollback?.(card)}>Not now</button>
-          <button type="button" className="button button--approval" data-rollback-action="ask" disabled={props.locked} onClick={() => props.actions.askRollback?.(card)}>Rollback system state</button>
-        </div>
-      )}
-    </article>
-  )
-}
-
 export function ConversationWorkspace(props: {
   readonly view: MissionControlView
   readonly state: ConversationWorkspaceState
@@ -169,7 +122,6 @@ export function ConversationWorkspace(props: {
   const empty = props.view.conversation.length === 0
     && props.view.approvals.filter((card) => isPendingApproval(card.status)).length === 0
     && state.activations.length === 0
-    && state.rollback === undefined
   return (
     <main className="conversation-panel" id="today">
       <div className="conversation-scroll">
@@ -205,9 +157,6 @@ export function ConversationWorkspace(props: {
         {state.activations.map((card) => (
           <ActivationCardView key={`act-${card.id}`} card={card} locked={locked} armed={state.armedActivation === card.id} abandonArmed={state.armedAbandonment === card.id} actions={actions} />
         ))}
-        {state.rollback ? (
-          <RollbackCardView card={state.rollback} locked={locked} deferred={state.deferredRollback === true} armed={state.armedRollback === true} actions={actions} />
-        ) : null}
       </div>
       <div>
         {skillInvocationSurfaceOpen(props.view) && (props.view.skills ?? []).some((skill) => skill.userInvocable && skill.lifecycle === 'active') ? (
