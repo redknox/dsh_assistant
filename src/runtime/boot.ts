@@ -13,6 +13,8 @@ import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
 import SkillRegistry from '@deepseek-ai/dsh-skill'
 import * as toolSkill from '@deepseek-ai/dsh-tool-skill'
 import ToolRuntime from '@deepseek-ai/dsh-tools'
+import SubagentRuntime from '@deepseek-ai/dsh-subagent'
+import * as SpawnSubagent from '@deepseek-ai/dsh-subagent-spawn-in-process'
 import { mountContextEndurance } from '../product/context-endurance.js'
 import { mountMaterialInput } from '../product/material-input.js'
 import { mountSessionIntelligence } from '../product/session-intelligence.js'
@@ -114,6 +116,10 @@ async function bootStack(options: BootOptions = {}): Promise<AssistantControl> {
     })
   }
   await ctx.plugin(AgentLoop, { agents: [] })
+  if (!safeMode) {
+    await ctx.plugin(SubagentRuntime)
+    await ctx.plugin(SpawnSubagent, { providerName: 'tars-spawn' })
+  }
   let recoveryRoot: RecoveryRoot | undefined
   const skillHome = resolveAssistantHome(options.home)
   await ctx.plugin(assistantProduct, {

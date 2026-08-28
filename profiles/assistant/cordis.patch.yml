@@ -77,9 +77,10 @@
 - id: command-compact
   disabled: true
 - id: subagent
-  disabled: true
+  config: {}
 - id: subagent-spawn-in-process
-  disabled: true
+  config:
+    providerName: tars-spawn
 - id: subagent-fork-in-process
   disabled: true
 - id: tool-subagent-control
