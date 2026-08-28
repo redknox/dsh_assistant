@@ -8,6 +8,7 @@ import { boundActivationDiagnostics } from './failure.js'
 import { activationViewOf, approvalStateOf, compareOwnerVersion, extensionLifecycleOf } from './lifecycle.js'
 import type { ExecutionLogEntry, MissionControlView, ObjectiveView, WorkspaceSnapshotInput } from './types.js'
 import { projectMissionControl } from './project.js'
+import { inspectContextEndurance } from '../../product/context-endurance.js'
 
 export interface GatherWorkspaceInput {
   readonly ctx: Context
@@ -23,6 +24,7 @@ export function gatherWorkspaceSnapshot(input: GatherWorkspaceInput): WorkspaceS
   const { ctx, sessionId } = input
   const personality = readPersonality(ctx)
   const agent = ctx.agents.get(SessionId(sessionId))
+  const contextEndurance = inspectContextEndurance(ctx, agent?.session)
   const actionPolicy = ctx.get('actionPolicy') as {
     policy: {
       confirmations(): WorkspaceSnapshotInput['pendingConfirmations']
@@ -152,6 +154,7 @@ export function gatherWorkspaceSnapshot(input: GatherWorkspaceInput): WorkspaceS
         sourceUri: document.sourceUri,
         ...(document.title ? { title: document.title } : {}),
       })) ?? [],
+    ...(contextEndurance ? { contextEndurance } : {}),
     ...(input.objective ? { objective: input.objective } : {}),
     personality: {
       humor: personality.humor,

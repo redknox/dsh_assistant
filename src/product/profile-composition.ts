@@ -118,6 +118,12 @@ export const OFFICIAL_RUNTIME_MOUNTS = Object.freeze([
   { official: 'tool-skill', runtime: 'tool-skill', when: 'ready' },
   { official: 'jobs', runtime: 'LocalJobRegistry', when: 'ready' },
   { official: 'session-persistence-jsonl', runtime: 'JsonlSessionPersistence', when: 'session-persistence' },
+  { official: 'session-projection', runtime: 'SessionProjectionRegistry', when: 'ready' },
+  { official: 'token-meter', runtime: 'TokenMeter', when: 'ready' },
+  { official: 'tool-result-pruner', runtime: 'ToolResultPruner', when: 'ready' },
+  { official: 'compaction-basic', runtime: 'BasicCompactionEngine', when: 'ready' },
+  { official: 'spill-local', runtime: 'LocalSpillStore', when: 'ready' },
+  { official: 'spill-policy', runtime: 'spill-policy', when: 'ready' },
 ] as const satisfies readonly OfficialRuntimeMount[])
 
 export const PRODUCT_ONLY_SEAMS = Object.freeze([

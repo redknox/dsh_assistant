@@ -22,7 +22,9 @@ import {
 import { activeComposedIds, loadGovernedAssistantComposition, productPackageRoot, profileIdentityOf } from '../src/product/profile-load.js'
 import { ensureProductHome } from '../src/product/home.js'
 import { readRuntimeIdentity } from '../src/product/runtime-lease.js'
+import { catalogBindingOf, inspectSessionCatalog, migrateSessionCatalogProfileBinding, SessionCatalog } from '../src/product/session-catalog.js'
 import {
+  authorizeProfileIdentityMigration,
   claimSessionPartition,
   commitRuntimeContext,
   completeProfileIdentityMigration,
@@ -737,7 +739,7 @@ describe('runtime context', () => {
     }
   })
 
-  it('rejects a same-named Profile whose resolved identity changed and does not read the old session', async () => {
+  it('rejects a same-named Profile drift until an explicit migration preserves the old session', async () => {
     const profiles = mkdtempSync(path.join(tmpdir(), 'tars-profiles-'))
     cpSync(path.join(productPackageRoot(), 'profiles'), profiles, { recursive: true })
     const previous = process.env.TARS_NG_PROFILE_ROOT
@@ -747,6 +749,7 @@ describe('runtime context', () => {
       const context = resolveRuntimeContext(layout, {}, undefined, { allowFixtures: false })
       const originalIdentity = context.profileIdentity
       assert.match(originalIdentity, /^v1:[0-9a-f]{64}$/)
+      new SessionCatalog(context.sessionPersistenceDir, catalogBindingOf(context)).ensureMigrated(context.sessionId.value)
       const first = await bootAssistantControl({
         home: layout.root,
         sessionRoot: context.sessionPersistenceDir,
@@ -782,12 +785,22 @@ describe('runtime context', () => {
       }, undefined)
       assert.notEqual(drifted.profileIdentity, originalIdentity)
       assert.notEqual(drifted.sessionPersistenceDir, context.sessionPersistenceDir)
-      writeFileSync(
-        path.join(profiles, 'assistant', 'cordis.patch.yml'),
-        readFileSync(path.join(productPackageRoot(), 'profiles', 'assistant', 'cordis.patch.yml'), 'utf8'),
-      )
-      const restored = inspectRuntimeContext(layout, {}, undefined)
-      assert.equal(restored.profileIdentity, originalIdentity)
+      const authorization = authorizeProfileIdentityMigration(layout)
+      assert.deepEqual(authorization, {
+        fromIdentity: originalIdentity,
+        toIdentity: mutated,
+        alreadyAuthorized: false,
+      })
+      assert.equal(authorizeProfileIdentityMigration(layout).alreadyAuthorized, true)
+      const staged = inspectRuntimeContext(layout, {}, undefined)
+      assert.equal(staged.profileIdentity, originalIdentity)
+      const restored = completeProfileIdentityMigration(layout, staged, { allowFixtures: false })
+      assert.equal(restored.profileIdentity, mutated)
+      assert.equal(restored.migrated, true)
+      assert.equal(existsSync(profileIdentityMigrationFile(layout)), false)
+      assert.equal(migrateSessionCatalogProfileBinding(restored.sessionPersistenceDir, catalogBindingOf(restored)), true)
+      assert.equal(inspectSessionCatalog(restored.sessionPersistenceDir, catalogBindingOf(restored)).health, 'ok')
+      assert.equal(migrateSessionCatalogProfileBinding(restored.sessionPersistenceDir, catalogBindingOf(restored)), false)
       const second = await bootAssistantControl({
         home: layout.root,
         sessionRoot: restored.sessionPersistenceDir,

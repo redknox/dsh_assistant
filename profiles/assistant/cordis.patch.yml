@@ -28,8 +28,6 @@
   disabled: true
 - id: session-query-sqlite
   disabled: true
-- id: session-projection
-  disabled: true
 - id: session-telemetry-otel
   disabled: true
 - id: subprocess
@@ -80,10 +78,6 @@
   disabled: true
 - id: plan-mode
   disabled: true
-- id: token-meter
-  disabled: true
-- id: compaction-basic
-  disabled: true
 - id: command-compact
   disabled: true
 - id: subagent
@@ -108,13 +102,7 @@
   disabled: true
 - id: timeout-policy
   disabled: true
-- id: spill-local
-  disabled: true
-- id: spill-policy
-  disabled: true
 - id: session-checkpoint-policy
-  disabled: true
-- id: tool-result-pruner
   disabled: true
 - id: tool-todo
   disabled: true

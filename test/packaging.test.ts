@@ -57,6 +57,8 @@ describe('product package and profile', () => {
     assert.equal(pkg.dependencies['@deepseek-ai/dsh-agent-default-model'], '0.1.0-rc.8')
     assert.equal(pkg.dependencies['@deepseek-ai/dsh-app-boot'], '0.1.0-rc.8')
     assert.equal(pkg.dependencies['@deepseek-ai/dsh-base'], '0.1.0-rc.8')
+    assert.equal(pkg.dependencies['@deepseek-ai/dsh-token-meter'], '0.1.0-rc.8')
+    assert.equal(pkg.dependencies['@deepseek-ai/dsh-compaction-basic'], '0.1.0-rc.8')
     assert.match(readFileSync(join(root, 'cordis.patch.yml'), 'utf8'), /id: dsh-assistant/)
 
     const profile = JSON.parse(readFileSync(join(root, 'profiles/assistant/package.json'), 'utf8')) as {

@@ -33,6 +33,7 @@ import {
 import { AssistantControlSurface } from '../ui/controller.js'
 import { assertAssistantAdapterContract, assertRecoveryAdapterContract, assertSelectedProfile } from './profile-composition.js'
 import {
+  authorizeProfileIdentityMigration,
   claimSessionPartition,
   commitRuntimeContext,
   completeProfileIdentityMigration,
@@ -46,7 +47,7 @@ import {
   type RuntimeContext,
   type SessionPartitionHold,
 } from './runtime-context.js'
-import { catalogBindingOf, inspectSessionCatalog, inspectSessionJournal, SessionCatalog, SessionCatalogError, type CatalogJournal } from './session-catalog.js'
+import { catalogBindingOf, inspectSessionCatalog, inspectSessionJournal, migrateSessionCatalogProfileBinding, SessionCatalog, SessionCatalogError, type CatalogJournal } from './session-catalog.js'
 import { LiveSessionHost } from './session-lifecycle.js'
 import { attachWebUiBroadcast, startWebUiServer, type WebUiServer } from './web-ui-server.js'
 
@@ -69,6 +70,7 @@ function usage(): string {
   status [--home <dir>]
   doctor [--home <dir>] [--allow-fixtures] [--profile <name>] [--workspace <dir>] [--session-root <dir>] [--session-id <id>]
   stop [--home <dir>]
+  migrate-profile [--home <dir>]   authorize the stopped Home to migrate to the current governed Profile identity
   self-extension <subcommand>
     import-local <directory>   trusted operator only; no model or browser path
   skill <subcommand>
@@ -403,6 +405,30 @@ export async function runProductCli(
     const { runSkillCli } = await import('../runtime/skill-cli-import.js')
     return runSkillCli([...parsed.rest], parsed.home)
   }
+  if (parsed.command === 'migrate-profile') {
+    const inspected = await inspectRuntimeLease(layout)
+    if (inspected.state === 'held') {
+      io.error('Profile migration requires the verified runtime to be stopped')
+      return 1
+    }
+    if (inspected.state === 'ambiguous') {
+      io.error(`home-ambiguous: ${inspected.detail}`)
+      return 1
+    }
+    try {
+      const migration = authorizeProfileIdentityMigration(layout)
+      io.log([
+        migration.alreadyAuthorized ? 'Profile migration was already authorized.' : 'Profile migration authorized.',
+        `from: ${migration.fromIdentity}`,
+        `to: ${migration.toIdentity}`,
+        'Run start to complete the journaled migration.',
+      ].join('\n'))
+      return 0
+    } catch (error) {
+      io.error(error instanceof Error ? error.message : 'Profile migration authorization failed')
+      return 1
+    }
+  }
   const envFiles = loadEnvFiles(layout)
   const userConfig = readProductUserConfig(layout)
   const allowFixtures = resolveAllowFixtures(parsed.allowFixtures, userConfig.config.allowFixtures)
@@ -671,7 +697,12 @@ export async function runProductCli(
       let catalog: SessionCatalog | undefined
       let recoveredJournal: CatalogJournal | undefined
       if (runtimeContext) {
-        catalog = new SessionCatalog(sessionPersistenceDirOf(runtimeContext), catalogBindingOf(runtimeContext))
+        const catalogDir = sessionPersistenceDirOf(runtimeContext)
+        const catalogBinding = catalogBindingOf(runtimeContext)
+        if (!runtimeContext.ephemeralRecovery) {
+          migrateSessionCatalogProfileBinding(catalogDir, catalogBinding)
+        }
+        catalog = new SessionCatalog(catalogDir, catalogBinding)
         if (!runtimeContext.ephemeralRecovery) {
           const started = catalog.resolveStartSession(sessionId)
           sessionId = started.sessionId

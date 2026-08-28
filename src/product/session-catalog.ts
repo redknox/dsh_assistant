@@ -318,6 +318,49 @@ export function inspectSessionCatalog(
   return publicView(stored)
 }
 
+function profileOnlyBindingChange(from: SessionCatalogBinding, to: SessionCatalogBinding): boolean {
+  return from.home === to.home
+    && from.workspaceIdentity === to.workspaceIdentity
+    && from.sessionRootIdentity === to.sessionRootIdentity
+}
+
+export function migrateSessionCatalogProfileBinding(
+  sessionPersistenceDir: string,
+  binding: SessionCatalogBinding,
+): boolean {
+  const file = sessionCatalogFile(sessionPersistenceDir)
+  if (!existsSync(file)) return false
+  let raw: unknown
+  try {
+    raw = JSON.parse(readFileSync(file, 'utf8'))
+  } catch {
+    throw new SessionCatalogError('corrupt', 'session catalog is corrupt')
+  }
+  if (raw === null || typeof raw !== 'object') {
+    throw new SessionCatalogError('corrupt', 'session catalog is corrupt')
+  }
+  const storedBinding = (raw as Partial<SessionCatalogFile>).binding
+  if (storedBinding === undefined || !profileOnlyBindingChange(storedBinding, binding)) {
+    throw new SessionCatalogError('context-mismatch', 'session catalog is bound to another Home/Profile/Workspace')
+  }
+  const stored = parseCatalogRecord(raw, storedBinding)
+  if (sameBinding(storedBinding, binding)) return false
+
+  const journalFile = sessionCatalogJournalFile(sessionPersistenceDir)
+  if (existsSync(journalFile)) {
+    const journal = readCatalogJournal(journalFile, storedBinding)
+    if (journal !== undefined) {
+      writeJsonAtomic(journalFile, {
+        ...journal,
+        previous: { ...journal.previous, binding },
+        ...(journal.intended ? { intended: { ...journal.intended, binding } } : {}),
+      })
+    }
+  }
+  writeJsonAtomic(file, { ...stored, binding })
+  return true
+}
+
 function publicView(stored: SessionCatalogFile): PublicSessionCatalog {
   const sessions = stored.sessions.map((item) => ({
     ...item,

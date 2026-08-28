@@ -39,6 +39,48 @@ function capabilityLabel(status: UserCapabilityStatus): string {
   return 'UNAVAILABLE'
 }
 
+function formatTokens(value: number | undefined): string {
+  if (value === undefined) return 'CALCULATING'
+  if (value >= 1_000_000) return `${(value / 1_000_000).toFixed(1)}M`
+  if (value >= 1_000) return `${(value / 1_000).toFixed(1)}K`
+  return String(value)
+}
+
+function ContextEndurancePanel(props: { readonly value: MissionControlView['contextEndurance'] }) {
+  const value = props.value
+  if (!value) return null
+  const percent = value.occupancyPercent
+  const barWidth = Math.max(0, Math.min(100, percent ?? 0))
+  return (
+    <section className="context-endurance" aria-labelledby="context-endurance-title" data-context-status={value.status}>
+      <div className="ops-section-heading">
+        <h2 id="context-endurance-title">CONTEXT ENDURANCE</h2>
+        <span className={`status-lamp status-lamp--${value.status === 'ready' ? 'ready' : 'degraded'}`} aria-hidden="true" />
+      </div>
+      <div className="context-meter-copy">
+        <span>CONTEXT PRESSURE</span>
+        <strong>{formatTokens(value.measuredTokens)}{value.contextWindow ? ` / ${formatTokens(value.contextWindow)}` : ''}</strong>
+      </div>
+      <div
+        className="context-meter-track"
+        role="progressbar"
+        aria-label="Context occupancy"
+        aria-valuemin={0}
+        aria-valuemax={100}
+        aria-valuenow={percent === undefined ? undefined : Math.min(100, Math.round(percent))}
+      >
+        <span style={{ width: `${barWidth}%` }} />
+      </div>
+      <div className="context-meter-state">
+        <span>TOKEN METER · {value.status === 'ready' ? 'READY' : 'DEGRADED'}</span>
+        <span>COMPACTION · {value.compaction === 'automatic' ? 'AUTO' : 'INOP'}</span>
+        {value.outputRetention && <span>OUTPUT CAP · {formatTokens(value.outputRetention.maxInlineBytes)}B</span>}
+        {value.outputRetention && <span>SPILL · {value.outputRetention.spill === 'ready' ? 'READY' : 'INOP'}</span>}
+      </div>
+    </section>
+  )
+}
+
 function lifecycleLabel(item: WorkbenchProjection): string {
   if (item.extensionLifecycle === 'ACTIVE') return 'ACTIVE'
   if (item.extensionLifecycle === 'APPROVED_NOT_ACTIVE') return 'READY TO ACTIVATE'
@@ -147,6 +189,7 @@ export function OperationsPanel(props: {
           <span><small>JOBS</small><strong>{props.view.controlStrip.backgroundJobs}</strong></span>
         </div>
       </section>
+      <ContextEndurancePanel value={props.view.contextEndurance} />
       <section className="capability-section" id="capabilities" aria-labelledby="capability-title">
         <div className="ops-section-heading capability-heading"><h2 id="capability-title">CONNECTED CAPABILITIES</h2><span>{props.view.capabilities.length} CHANNELS</span></div>
         <div className="capability-summary" aria-label="Capability summary">

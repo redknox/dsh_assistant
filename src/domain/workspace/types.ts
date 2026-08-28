@@ -47,6 +47,30 @@ export interface ObjectiveView {
   readonly status: ObjectiveStatus
 }
 
+export interface ContextEnduranceView {
+  readonly status: 'ready' | 'degraded'
+  readonly measuredTokens?: number
+  readonly pressureTokens?: number
+  readonly contextWindow?: number
+  readonly occupancyPercent?: number
+  readonly breakdown?: {
+    readonly systemTokens: number
+    readonly toolsTokens: number
+    readonly messageTokens: number
+  }
+  readonly cumulativeUsage?: {
+    readonly inputTokens: number
+    readonly outputTokens: number
+    readonly cacheReadTokens: number
+    readonly cacheWriteTokens: number
+  }
+  readonly compaction: 'automatic' | 'unavailable'
+  readonly outputRetention?: {
+    readonly maxInlineBytes: number
+    readonly spill: 'ready' | 'unavailable'
+  }
+}
+
 export interface ActivityItem {
   readonly id: string
   readonly kind: ActivityKind
@@ -255,6 +279,7 @@ export interface MissionControlView {
   readonly capabilities: readonly UserCapabilityView[]
   readonly memory: readonly WorkspaceMemoryItem[]
   readonly knowledge: readonly WorkspaceKnowledgeItem[]
+  readonly contextEndurance?: ContextEnduranceView
   readonly recovery?: RecoveryView
   readonly controlStrip: ControlStrip
   readonly personality: {
@@ -465,6 +490,7 @@ export interface WorkspaceSnapshotInput {
   readonly candidates?: readonly WorkbenchProjection[]
   readonly memory: readonly WorkspaceMemoryItem[]
   readonly knowledge: readonly WorkspaceKnowledgeItem[]
+  readonly contextEndurance?: ContextEnduranceView
   readonly objective?: ObjectiveView
   readonly personality: MissionControlView['personality']
   readonly blockedReason?: string

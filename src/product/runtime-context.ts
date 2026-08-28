@@ -473,6 +473,52 @@ function writeProfileIdentityMigration(layout: ProductHomeLayout, journal: Profi
   writeJsonAtomic(profileIdentityMigrationFile(layout), journal)
 }
 
+export interface ProfileIdentityMigrationAuthorization {
+  readonly fromIdentity: string
+  readonly toIdentity: string
+  readonly alreadyAuthorized: boolean
+}
+
+export function authorizeProfileIdentityMigration(
+  layout: ProductHomeLayout,
+): ProfileIdentityMigrationAuthorization {
+  const existing = readRuntimeBinding(layout)
+  if (!existing) {
+    throw new RuntimeContextError('Profile migration is unavailable: this Home is not bound')
+  }
+  const loaded = tryLoadGovernedAssistantComposition()
+  if (!loaded.ok) {
+    throw new RuntimeContextError(`Profile migration is unavailable: ${loaded.error}`)
+  }
+  const toIdentity = profileIdentityOf(loaded.composition)
+  const journal = readProfileIdentityMigration(layout)
+  if (journal) {
+    if (journal.fromIdentity !== existing.profileIdentity || journal.toIdentity !== toIdentity) {
+      throw new RuntimeContextError('profile identity migration journal does not match the resolved Profile')
+    }
+    return {
+      fromIdentity: journal.fromIdentity,
+      toIdentity: journal.toIdentity,
+      alreadyAuthorized: true,
+    }
+  }
+  if (existing.profileIdentity === toIdentity) {
+    throw new RuntimeContextError('Profile migration is unnecessary: this Home already uses the resolved Profile identity')
+  }
+  const next: ProfileIdentityMigration = {
+    schemaVersion: PROFILE_IDENTITY_MIGRATION_SCHEMA_VERSION,
+    fromIdentity: existing.profileIdentity,
+    toIdentity,
+    phase: 'started',
+  }
+  writeProfileIdentityMigration(layout, next)
+  return {
+    fromIdentity: next.fromIdentity,
+    toIdentity: next.toIdentity,
+    alreadyAuthorized: false,
+  }
+}
+
 function copyPartitionWithoutLocks(sessionRoot: string, from: string, to: string): void {
   const realFrom = existingManagedSessionPartition(sessionRoot, from)
   const container = ensureManagedSessionsContainer(sessionRoot)
@@ -991,7 +1037,9 @@ export function completeProfileIdentityMigration(
     if (journal.toIdentity !== nextIdentity) {
       throw new RuntimeContextError('profile identity migration journal does not match the resolved Profile')
     }
-    if (existing.profileIdentity === existing.profile) {
+    if (existing.profileIdentity === journal.fromIdentity) {
+      // The binding still points at the explicitly authorized source identity.
+    } else if (existing.profileIdentity === existing.profile) {
       if (journal.fromIdentity !== existing.profileIdentity) {
         throw new RuntimeContextError('profile identity migration journal does not match this Home binding')
       }

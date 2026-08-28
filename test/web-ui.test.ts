@@ -2293,7 +2293,16 @@ export function apply(ctx) {
 
   it('renders frontend scenarios from the authoritative view', () => {
     const ready = renderToStaticMarkup(createElement(MissionControlScreen, {
-      view: fixtureView(),
+      view: fixtureView({
+        contextEndurance: {
+          status: 'ready',
+          measuredTokens: 42_000,
+          contextWindow: 1_000_000,
+          occupancyPercent: 4.2,
+          compaction: 'automatic',
+          outputRetention: { maxInlineBytes: 50_000, spill: 'ready' },
+        },
+      }),
       connected: true,
       sending: false,
       draft: '',
@@ -2312,6 +2321,11 @@ export function apply(ctx) {
     assert.match(ready, /OPEN FULL LOG/)
     assert.match(ready, /MEMORY|Memory/)
     assert.match(ready, /data-control-plane="user-workspace"/)
+    assert.match(ready, /CONTEXT ENDURANCE/)
+    assert.match(ready, /42\.0K \/ 1\.0M/)
+    assert.match(ready, /COMPACTION · AUTO/)
+    assert.match(ready, /OUTPUT CAP · 50\.0KB/)
+    assert.match(ready, /SPILL · READY/)
     assert.doesNotMatch(ready, /reasoning_content|sk-secret|chain-of-thought/)
 
     const emptyKnowledge = renderToStaticMarkup(createElement(MissionControlScreen, {
