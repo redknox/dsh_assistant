@@ -53,6 +53,7 @@ function fixtureView(overrides: Partial<MissionControlView> = {}): MissionContro
   }
 }
 
+
 async function withServer(
   boot: () => Promise<{ ctx: Awaited<ReturnType<typeof bootAssistantControl>>['ctx']; recoveryRoot: Awaited<ReturnType<typeof bootAssistantControl>>['recoveryRoot'] }>,
   sessionId: string,
@@ -2308,6 +2309,12 @@ export function apply(ctx) {
           imageStore: 'ready',
           imageInput: 'unsupported',
         },
+        workBrief: {
+          status: 'completed',
+          runId: 'run-brief-1',
+          generatedAt: '2026-08-28T08:00:00.000Z',
+          markdown: '# Work brief — 2026-08-28\n\n## Calendar (1)\n- 10:00–11:00 · "Design review"',
+        },
       }),
       connected: true,
       sending: false,
@@ -2338,6 +2345,9 @@ export function apply(ctx) {
     assert.match(ready, /IMAGE STORE · READY/)
     assert.match(ready, /REFERENCE/)
     assert.match(ready, /@FILE/)
+    assert.match(ready, /class="work-brief-card"/)
+    assert.match(ready, /DAILY WORK BRIEF/)
+    assert.match(ready, /Design review/)
     assert.doesNotMatch(ready, /reasoning_content|sk-secret|chain-of-thought/)
 
     const emptyKnowledge = renderToStaticMarkup(createElement(MissionControlScreen, {

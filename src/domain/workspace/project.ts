@@ -21,6 +21,7 @@ export function projectMissionControl(input: WorkspaceSnapshotInput): MissionCon
   if (input.skillCatalog?.state === 'degraded') degraded.push('skill catalog')
   const activationFailure = projectActivationFailure(input)
   const rollback = projectRollbackCard(input, systemState)
+  const brief = input.jobs.find((job) => job.name === 'morning-brief')
   return sanitizeMissionControlView({
     identity: 'TARS-NG',
     systemState,
@@ -44,6 +45,16 @@ export function projectMissionControl(input: WorkspaceSnapshotInput): MissionCon
     capabilities: projectUserCapabilities(input),
     memory: input.memory,
     knowledge: input.knowledge,
+    ...(brief
+      ? {
+          workBrief: {
+            status: brief.lastRunStatus ?? 'idle',
+            ...(brief.lastRunId ? { runId: brief.lastRunId } : {}),
+            ...(brief.lastRunFinishedAt ? { generatedAt: brief.lastRunFinishedAt } : {}),
+            ...(brief.lastRunStatus === 'completed' && brief.lastRunSummary ? { markdown: brief.lastRunSummary } : {}),
+          },
+        }
+      : {}),
     ...(input.contextEndurance ? { contextEndurance: input.contextEndurance } : {}),
     ...(input.materialInput ? { materialInput: input.materialInput } : {}),
     ...(systemState === 'SAFE_MODE' || systemState === 'RECOVERY'

@@ -292,6 +292,13 @@ export interface WorkspaceKnowledgeItem {
   readonly excerpt?: string
 }
 
+export interface WorkBriefView {
+  readonly status: string
+  readonly runId?: string
+  readonly generatedAt?: string
+  readonly markdown?: string
+}
+
 export interface MissionControlView {
   readonly identity: 'TARS-NG'
   readonly systemState: SystemState
@@ -317,6 +324,7 @@ export interface MissionControlView {
   readonly capabilities: readonly UserCapabilityView[]
   readonly memory: readonly WorkspaceMemoryItem[]
   readonly knowledge: readonly WorkspaceKnowledgeItem[]
+  readonly workBrief?: WorkBriefView
   readonly contextEndurance?: ContextEnduranceView
   readonly materialInput?: MaterialInputView
   readonly recovery?: RecoveryView
@@ -453,7 +461,13 @@ export interface WorkspaceSnapshotInput {
     readonly level: string
   }[]
   readonly dshApprovals?: readonly DshApprovalTicket[]
-  readonly jobs: readonly { readonly name: string; readonly lastRunStatus?: string }[]
+  readonly jobs: readonly {
+    readonly name: string
+    readonly lastRunStatus?: string
+    readonly lastRunId?: string
+    readonly lastRunSummary?: string
+    readonly lastRunFinishedAt?: string
+  }[]
   readonly toolEvents: readonly {
     readonly type: 'tool/call' | 'tool/result'
     readonly name?: string

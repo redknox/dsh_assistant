@@ -207,6 +207,26 @@ describe('TARS-NG mission-control workspace', () => {
     assert.equal(connected.capabilities.some((item) => item.action.toLowerCase().includes('fetch')), false)
   })
 
+  it('projects only the latest completed work brief and redacts its text', () => {
+    const completed = projectMissionControl(snapshot({
+      jobs: [{
+        name: 'morning-brief',
+        lastRunStatus: 'completed',
+        lastRunId: 'run-7',
+        lastRunFinishedAt: '2026-08-28T08:00:00.000Z',
+        lastRunSummary: '# Work brief\nAuthorization: Bearer hidden.value',
+      }],
+    }))
+    const running = projectMissionControl(snapshot({
+      jobs: [{ name: 'morning-brief', lastRunStatus: 'running', lastRunSummary: 'stale brief' }],
+    }))
+
+    assert.equal(completed.workBrief?.runId, 'run-7')
+    assert.match(completed.workBrief?.markdown ?? '', /\[redacted\]/)
+    assert.doesNotMatch(completed.workBrief?.markdown ?? '', /Authorization: Bearer/)
+    assert.equal(running.workBrief?.markdown, undefined)
+  })
+
   it('D. calendar create is a first-class approval object', () => {
     const view = projectMissionControl(snapshot({
       pendingConfirmations: [{

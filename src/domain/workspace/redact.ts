@@ -104,6 +104,14 @@ export function sanitizeMissionControlView(view: MissionControlView): MissionCon
       ...(item.title ? { title: redactText(item.title) } : {}),
       ...(item.excerpt ? { excerpt: redactText(item.excerpt) } : {}),
     })),
+    ...(view.workBrief
+      ? {
+          workBrief: {
+            ...view.workBrief,
+            ...(view.workBrief.markdown ? { markdown: redactText(view.workBrief.markdown) } : {}),
+          },
+        }
+      : {}),
     ...(view.taskControl
       ? {
           taskControl: {

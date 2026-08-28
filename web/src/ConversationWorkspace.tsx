@@ -135,6 +135,7 @@ export function ConversationWorkspace(props: {
   const empty = props.view.conversation.length === 0
     && pendingApprovals.length === 0
     && state.activations.length === 0
+    && !props.view.workBrief?.markdown
   const scrollViewport = useRef<HTMLDivElement>(null)
   const followingTail = useRef(true)
   const [referenceOpen, setReferenceOpen] = useState(false)
@@ -196,6 +197,15 @@ export function ConversationWorkspace(props: {
           followingTail.current = viewport.scrollHeight - viewport.clientHeight - viewport.scrollTop <= 32
         }}
       >
+        {props.view.workBrief?.markdown ? (
+          <details className="work-brief-card" data-work-brief-status={props.view.workBrief.status} open>
+            <summary>
+              <span><Glyph name="today" /> DAILY WORK BRIEF</span>
+              <small>{props.view.workBrief.generatedAt ? new Date(props.view.workBrief.generatedAt).toLocaleString() : 'LATEST COMPLETED RUN'}</small>
+            </summary>
+            <div className="work-brief-body"><MarkdownMessage text={props.view.workBrief.markdown} /></div>
+          </details>
+        ) : null}
         {empty ? (
           <section className="conversation-empty" aria-labelledby="conversation-empty-title">
             <div className="empty-mark" aria-hidden="true"><Glyph name="hex" /><span>T</span></div>

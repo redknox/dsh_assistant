@@ -89,8 +89,14 @@ export function gatherWorkspaceSnapshot(input: GatherWorkspaceInput): WorkspaceS
       broker: { list(): WorkspaceSnapshotInput['dshApprovals'] }
     } | undefined)?.broker.list() ?? [],
     autoExecuteCapabilities: actionPolicy?.policy.autoExecuteCapabilities() ?? [],
-    jobs: (ctx.get('assistantJobs') as { service: { list(): { name: string; lastRun?: { status: string } }[] } } | undefined)
-      ?.service.list().map((job) => ({ name: job.name, lastRunStatus: job.lastRun?.status })) ?? [],
+    jobs: (ctx.get('assistantJobs') as { service: { list(): { name: string; lastRun?: { runId: string; status: string; summary?: string; finishedAt?: string } }[] } } | undefined)
+      ?.service.list().map((job) => ({
+        name: job.name,
+        ...(job.lastRun?.status ? { lastRunStatus: job.lastRun.status } : {}),
+        ...(job.lastRun?.runId ? { lastRunId: job.lastRun.runId } : {}),
+        ...(job.lastRun?.summary ? { lastRunSummary: job.lastRun.summary } : {}),
+        ...(job.lastRun?.finishedAt ? { lastRunFinishedAt: job.lastRun.finishedAt } : {}),
+      })) ?? [],
     toolEvents: agent ? toolEventsFromSession(agent.session.events) : [],
     conversation: agent ? conversationWithoutReasoning(agent.session.events) : [],
     executionLog: agent ? executionLogFromSession(agent.session.events) : [],

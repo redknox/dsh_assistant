@@ -21,6 +21,7 @@ export type {
   UserCapabilityView,
   UserPluginView,
   WorkObjectKind,
+  WorkBriefView,
   WorkspaceKnowledgeItem,
   WorkspaceMemoryItem,
   WorkspaceSnapshotInput,
