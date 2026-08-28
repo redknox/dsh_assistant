@@ -28,6 +28,7 @@ describe('Product settings', () => {
   it('never exposes secrets and identifies where values are managed', () => {
     withSettings('DEEPSEEK_API_KEY=home-secret\nDSH_ASSISTANT_FEISHU_MODE=cli\n', (settings) => {
       const snapshot = settings.inspect()
+      assert.match(snapshot.fields.find((field) => field.id === 'DEEPSEEK_API_KEY')?.description ?? '', /governed Web Search/)
       const secret = snapshot.fields.find((field) => field.id === 'DEEPSEEK_API_KEY')!
       const feishu = snapshot.fields.find((field) => field.id === 'DSH_ASSISTANT_FEISHU_MODE')!
       const external = snapshot.fields.find((field) => field.id === 'DSH_ASSISTANT_FEISHU_PROFILE')!

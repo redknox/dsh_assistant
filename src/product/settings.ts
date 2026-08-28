@@ -14,7 +14,7 @@ type Definition = {
 }
 
 const DEFINITIONS: readonly Definition[] = [
-  { id: 'DEEPSEEK_API_KEY', label: 'DeepSeek API key', group: 'AI', kind: 'secret', description: 'Required for the primary model route.' },
+  { id: 'DEEPSEEK_API_KEY', label: 'DeepSeek API key', group: 'AI', kind: 'secret', description: 'Shared credential for primary model replies and governed Web Search; each capability keeps its own policy.' },
   { id: 'DSH_ASSISTANT_FEISHU_MODE', label: 'Mail & Contacts', group: 'Feishu', kind: 'select', description: 'Use the authorized lark-cli user profile.', options: modes('cli') },
   { id: 'DSH_ASSISTANT_FEISHU_CALENDAR_MODE', label: 'Feishu Calendar', group: 'Feishu', kind: 'select', description: 'Use Feishu Calendar and meeting-note permissions.', options: modes('cli') },
   { id: 'DSH_ASSISTANT_FEISHU_PROFILE', label: 'lark-cli profile', group: 'Feishu', kind: 'text', description: 'Local lark-cli profile name; credentials remain outside TARS-NG.', validate: boundedName },
