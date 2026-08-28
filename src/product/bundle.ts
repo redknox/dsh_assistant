@@ -27,6 +27,7 @@ import type { WorkbenchPluginConfig } from '../plugins/workbench-plugin.js'
 import * as skillPlugin from '../plugins/skill-plugin.js'
 import type { SkillPluginConfig } from '../plugins/skill-plugin.js'
 import * as dshApprovalBridgePlugin from '../plugins/dsh-approval-bridge-plugin.js'
+import { mountBoundedWorkbench } from './bounded-workbench.js'
 
 export const name = 'dsh-assistant'
 export const inject = ['systemPrompt', 'agents']
@@ -47,6 +48,7 @@ export interface AssistantBundleConfig {
   readonly governance?: GovernancePluginConfig
   readonly workbench?: WorkbenchPluginConfig
   readonly skills?: SkillPluginConfig
+  readonly boundedWorkbenchRoot?: string
 }
 
 /** Bundle entry: compose product plugins through public Cordis lifecycle. */
@@ -75,6 +77,7 @@ export async function apply(ctx: Context, config: AssistantBundleConfig = {}) {
   await ctx.plugin(memoryPlugin, config.memory)
   await ctx.plugin(knowledgePlugin, config.knowledge)
   await ctx.plugin(integrationsPlugin, config.integrations)
+  await mountBoundedWorkbench(ctx, config.boundedWorkbenchRoot)
   await ctx.plugin(policyPlugin, config.policy)
   await ctx.plugin(dshApprovalBridgePlugin)
   await ctx.plugin(jobsPlugin, config.jobs)

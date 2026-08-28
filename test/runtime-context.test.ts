@@ -381,9 +381,10 @@ describe('runtime context', () => {
       const mounted = mountedAdapterPluginIds(booted.ctx)
       const composition = loadGovernedAssistantComposition()
       const active = activeComposedIds(composition.entries)
-      const expected = expectedProductionAdapterIds(active, { safeMode: false, sessionPersistence: false })
+      const boundedWorkbench = Boolean(booted.ctx.get('fs'))
+      const expected = expectedProductionAdapterIds(active, { safeMode: false, sessionPersistence: false, boundedWorkbench })
       assert.deepEqual(mounted, [...expected])
-      assertMountedAdapterContract(booted.ctx, { safeMode: false, sessionPersistence: false })
+      assertMountedAdapterContract(booted.ctx, { safeMode: false, sessionPersistence: false, boundedWorkbench })
       assert.ok(active.includes('dsh-assistant'))
       assert.equal(active.includes('skill'), true)
       assert.throws(
@@ -401,7 +402,7 @@ describe('runtime context', () => {
       await withDshAssistantProfile(async ({ composedIds }) => {
         assertOfficialComposedIds(composedIds)
         assert.deepEqual(composedIds, [...ASSISTANT_OFFICIAL_COMPOSED_IDS])
-        assertOfficialEquivalentToAdapter(composedIds, mounted, { safeMode: false, sessionPersistence: false })
+        assertOfficialEquivalentToAdapter(composedIds, mounted, { safeMode: false, sessionPersistence: false, boundedWorkbench })
         assert.equal(composedIds.filter((id) => id === 'dsh-assistant').length, 1)
         assert.throws(
           () => assertOfficialComposedIds(['dsh-assistant', 'agent', 'system-prompt', 'not-mounted-by-production']),

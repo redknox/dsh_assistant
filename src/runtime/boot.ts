@@ -31,6 +31,7 @@ import { mkdirSync } from 'node:fs'
 import path from 'node:path'
 import type { MemoryPluginConfig } from '../plugins/memory-plugin.js'
 import type { KnowledgePluginConfig } from '../plugins/knowledge-plugin.js'
+import { boundedWorkspaceRoot } from '../product/bounded-workbench.js'
 
 /**
  * Minimal public DSH plugin stack for this product layer.
@@ -54,6 +55,8 @@ export interface BootOptions {
   sessionId?: string
   /** Operator workspace directory. Context only; not a filesystem grant. */
   workspace?: string
+  /** Explicit Files authority for embedded/test hosts; product CLI normally uses DSH_ASSISTANT_SANDBOX_ROOT. */
+  sandboxRoot?: string
 }
 
 export interface BootDiagnostics {
@@ -154,6 +157,7 @@ async function bootStack(options: BootOptions = {}): Promise<AssistantControl> {
         holder.skills = store
       },
     },
+    boundedWorkbenchRoot: options.sandboxRoot ?? process.env.DSH_ASSISTANT_SANDBOX_ROOT,
   })
   if (!safeMode) await mountMaterialInput(ctx, options.home ? { home: options.home } : {})
   if (!safeMode) {
@@ -188,6 +192,7 @@ async function bootStack(options: BootOptions = {}): Promise<AssistantControl> {
     assertMountedAdapterContract(ctx, {
       safeMode,
       sessionPersistence: Boolean(options.sessionRoot),
+      boundedWorkbench: Boolean(ctx.get('fs')),
     })
   } catch (error) {
     await ctx.fiber.dispose()
@@ -240,9 +245,10 @@ export async function createAssistantAgent(
       })
     }
   }
+  const sessionWorkspace = boundedWorkspaceRoot(ctx) ?? workspace
   return ctx.agents.create({
     sessionId: SessionId(sessionId),
-    ...(workspace === undefined ? {} : { meta: { cwd: workspace } }),
+    ...(sessionWorkspace === undefined ? {} : { meta: { cwd: sessionWorkspace } }),
     agentOptions: options,
   })
 }

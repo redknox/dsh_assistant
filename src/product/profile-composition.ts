@@ -92,7 +92,7 @@ export const ASSISTANT_OFFICIAL_COMPOSED_IDS = Object.freeze([
   'dsh-assistant',
 ] as const)
 
-export type AdapterWhen = 'always' | 'ready' | 'session-persistence'
+export type AdapterWhen = 'always' | 'ready' | 'session-persistence' | 'bounded-workbench'
 
 export type OfficialRuntimeMount = {
   readonly official: string
@@ -155,6 +155,12 @@ export const PRODUCT_ONLY_SEAMS = Object.freeze([
   { runtime: 'dsh-assistant-approval-bridge', when: 'ready', reason: 'unified DSH approval control surface' },
   { runtime: 'SandboxFileReferenceService', when: 'ready', reason: 'browser-safe references aligned to governed Files' },
   { runtime: 'DshApprovalBridgeService', when: 'ready', reason: 'pending DSH approval broker' },
+  { runtime: 'SandboxPolicyService', when: 'bounded-workbench', reason: 'single Files workspace policy owner' },
+  { runtime: 'BoundedWorkspaceFileSystemPlugin', when: 'bounded-workbench', reason: 'read-and-write confinement to the Files root' },
+  { runtime: 'fs-observation-policy', when: 'bounded-workbench', reason: 'read-before-edit and stale-write protection' },
+  { runtime: 'tool-fs', when: 'bounded-workbench', reason: 'native bounded read/write/edit tools' },
+  { runtime: 'LocalSubprocessRuntime', when: 'bounded-workbench', reason: 'managed packaged-ripgrep process owner' },
+  { runtime: 'tool-fs-search', when: 'bounded-workbench', reason: 'native bounded glob and grep tools' },
   { runtime: 'dsh-assistant-skills', when: 'always', reason: 'profile-scoped Skill lifecycle' },
 ] as const satisfies readonly ProductOnlySeam[])
 
@@ -166,15 +172,16 @@ export interface ProfilePatchRow {
   readonly config?: unknown
 }
 
-function mappingApplies(when: AdapterWhen, options: { readonly safeMode?: boolean; readonly sessionPersistence?: boolean }): boolean {
+function mappingApplies(when: AdapterWhen, options: { readonly safeMode?: boolean; readonly sessionPersistence?: boolean; readonly boundedWorkbench?: boolean }): boolean {
   if (when === 'ready') return options.safeMode !== true
   if (when === 'session-persistence') return options.sessionPersistence === true
+  if (when === 'bounded-workbench') return options.safeMode !== true && options.boundedWorkbench === true
   return true
 }
 
 export function expectedProductionAdapterIds(
   activeOfficialIds: readonly string[],
-  options: { readonly safeMode?: boolean; readonly sessionPersistence?: boolean } = {},
+  options: { readonly safeMode?: boolean; readonly sessionPersistence?: boolean; readonly boundedWorkbench?: boolean } = {},
 ): readonly string[] {
   const active = new Set(activeOfficialIds)
   const ids = new Set<string>()
@@ -250,7 +257,7 @@ export function assertGovernedActiveComposition(entries: readonly ComposedProfil
 export function assertOfficialEquivalentToAdapter(
   composedIds: readonly string[],
   mountedIds: readonly string[],
-  options: { readonly safeMode?: boolean; readonly sessionPersistence?: boolean } = {},
+  options: { readonly safeMode?: boolean; readonly sessionPersistence?: boolean; readonly boundedWorkbench?: boolean } = {},
 ): void {
   const composition = loadGovernedAssistantComposition({ recovery: options.safeMode === true })
   assertOfficialComposedIds(composedIds)
@@ -260,7 +267,7 @@ export function assertOfficialEquivalentToAdapter(
 export function assertActiveProfileMatchesAdapter(
   composition: GovernedProfileComposition,
   mountedIds: readonly string[],
-  options: { readonly safeMode?: boolean; readonly sessionPersistence?: boolean } = {},
+  options: { readonly safeMode?: boolean; readonly sessionPersistence?: boolean; readonly boundedWorkbench?: boolean } = {},
 ): void {
   assertAssistantBundles(composition.bundles)
   assertProfilePatchSafe(composition.patches)
@@ -274,7 +281,7 @@ export function assertActiveProfileMatchesAdapter(
 
 export function assertMountedAdapterContract(
   ctx: Context,
-  options: { readonly safeMode?: boolean; readonly sessionPersistence?: boolean } = {},
+  options: { readonly safeMode?: boolean; readonly sessionPersistence?: boolean; readonly boundedWorkbench?: boolean } = {},
 ): void {
   assertActiveProfileMatchesAdapter(loadGovernedAssistantComposition({ recovery: options.safeMode === true }), mountedAdapterPluginIds(ctx), options)
 }
