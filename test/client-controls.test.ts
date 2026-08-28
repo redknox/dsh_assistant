@@ -5,6 +5,7 @@ import { act, createElement } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import type { MissionControlView } from '../src/domain/workspace/types.js'
 import type { UiEnvelope } from '../web/src/api.js'
+import { ConversationWorkspace, type ConversationWorkspaceActions } from '../web/src/ConversationWorkspace.js'
 import { useConversationControl, type ConversationControl } from '../web/src/useConversationControl.js'
 import { useMissionControlRuntime, type MissionControlRuntime } from '../web/src/useMissionControlRuntime.js'
 
@@ -101,6 +102,58 @@ async function flush(): Promise<void> {
 }
 
 describe('client control hooks', () => {
+  it('follows growing replies only while the reader remains at the conversation tail', async () => {
+    const container = dom.window.document.createElement('div')
+    dom.window.document.body.append(container)
+    const root = createRoot(container)
+    mounted.push(root)
+    const actions: ConversationWorkspaceActions = {
+      draft() {},
+      send() {},
+      approve() {},
+      reject() {},
+      activate() {},
+      abandonActivation() {},
+      deferActivation() {},
+    }
+    const renderConversation = (text: string, active: boolean) => root.render(createElement(ConversationWorkspace, {
+      view: { ...fixtureView(), conversation: [{ kind: 'assistant-response', text }] },
+      active,
+      state: { connected: true, sending: true, draft: '', activations: [] },
+      actions,
+    }))
+
+    await act(async () => renderConversation('Working', true))
+    const viewport = container.querySelector<HTMLElement>('[data-follow-tail="true"]')
+    assert.ok(viewport)
+    let scrollHeight = 900
+    Object.defineProperty(viewport, 'scrollHeight', { configurable: true, get: () => scrollHeight })
+    Object.defineProperty(viewport, 'clientHeight', { configurable: true, value: 100 })
+    viewport.scrollTop = 0
+
+    await act(async () => renderConversation('Working on the answer…', true))
+    assert.equal(viewport.scrollTop, 900)
+
+    viewport.scrollTop = 200
+    viewport.dispatchEvent(new dom.window.Event('scroll', { bubbles: true }))
+    scrollHeight = 1_000
+    await act(async () => renderConversation('Working on the longer answer…', true))
+    assert.equal(viewport.scrollTop, 200)
+
+    viewport.scrollTop = 900
+    viewport.dispatchEvent(new dom.window.Event('scroll', { bubbles: true }))
+    scrollHeight = 1_100
+    await act(async () => renderConversation('Working on the longest answer yet…', true))
+    assert.equal(viewport.scrollTop, 1_100)
+
+    viewport.scrollTop = 300
+    viewport.dispatchEvent(new dom.window.Event('scroll', { bubbles: true }))
+    await act(async () => renderConversation('Working on the answer…', false))
+    assert.equal(viewport.scrollTop, 300)
+    await act(async () => renderConversation('Working on the answer…', true))
+    assert.equal(viewport.scrollTop, 300)
+  })
+
   it('locks duplicate sends and preserves input typed while the request is pending', async () => {
     const calls: { readonly url: string; readonly init?: RequestInit }[] = []
     let resolveResponse: ((response: Response) => void) | undefined

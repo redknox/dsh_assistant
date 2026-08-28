@@ -26,6 +26,7 @@ import { appendProductLog } from '../product/log.js'
 import { mkdirSync } from 'node:fs'
 import path from 'node:path'
 import type { MemoryPluginConfig } from '../plugins/memory-plugin.js'
+import type { KnowledgePluginConfig } from '../plugins/knowledge-plugin.js'
 
 /**
  * Minimal public DSH plugin stack for this product layer.
@@ -36,6 +37,7 @@ import type { MemoryPluginConfig } from '../plugins/memory-plugin.js'
  */
 export interface BootOptions {
   knowledgeFixturePaths?: string[]
+  knowledge?: KnowledgePluginConfig
   memory?: MemoryPluginConfig
   safeMode?: boolean
   /** Durable Self-Extension home. Falls back to TARS_NG_HOME, then DSH_ASSISTANT_HOME. */
@@ -94,7 +96,7 @@ async function bootStack(options: BootOptions = {}): Promise<AssistantControl> {
   const skillHome = resolveAssistantHome(options.home)
   await ctx.plugin(assistantProduct, {
     memory: options.memory,
-    knowledge: { fixturePaths: options.knowledgeFixturePaths },
+    knowledge: options.knowledge ?? { fixturePaths: options.knowledgeFixturePaths },
     integrations: options.allowFixtures === undefined ? undefined : { allowFixtures: options.allowFixtures },
     safeMode,
     jobs: safeMode ? { autoTickMs: null } : undefined,

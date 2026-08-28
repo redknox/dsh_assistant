@@ -79,6 +79,9 @@ export function gatherWorkspaceSnapshot(input: GatherWorkspaceInput): WorkspaceS
         ? { recoveryWhy: 'Generated capabilities are disabled. Trusted core is available.' }
         : {}),
     pendingConfirmations: actionPolicy?.policy.confirmations() ?? [],
+    dshApprovals: (ctx.get('dshApprovalBridge') as {
+      broker: { list(): WorkspaceSnapshotInput['dshApprovals'] }
+    } | undefined)?.broker.list() ?? [],
     autoExecuteCapabilities: actionPolicy?.policy.autoExecuteCapabilities() ?? [],
     jobs: (ctx.get('assistantJobs') as { service: { list(): { name: string; lastRun?: { status: string } }[] } } | undefined)
       ?.service.list().map((job) => ({ name: job.name, lastRunStatus: job.lastRun?.status })) ?? [],

@@ -134,6 +134,9 @@ export const PRODUCT_ONLY_SEAMS = Object.freeze([
   { runtime: 'dsh-assistant-knowledge', when: 'ready', reason: 'personal knowledge' },
   { runtime: 'dsh-assistant-memory', when: 'ready', reason: 'personal memory' },
   { runtime: 'dsh-assistant-policy', when: 'ready', reason: 'product trust policy' },
+  { runtime: 'ApprovalService', when: 'ready', reason: 'DSH one-shot approval service' },
+  { runtime: 'dsh-assistant-approval-bridge', when: 'ready', reason: 'unified DSH approval control surface' },
+  { runtime: 'DshApprovalBridgeService', when: 'ready', reason: 'pending DSH approval broker' },
   { runtime: 'dsh-assistant-skills', when: 'always', reason: 'profile-scoped Skill lifecycle' },
 ] as const satisfies readonly ProductOnlySeam[])
 

@@ -1,4 +1,5 @@
 import type { CandidateDiff } from '../candidate/types.js'
+import type { DshApprovalTicket } from '../approval/types.js'
 import type { SkillRevisionDiff } from '../skill/diff.js'
 import type { SystemState } from '../personality/types.js'
 import type { ActivationViewState, ExtensionLifecycleState } from './lifecycle.js'
@@ -71,7 +72,7 @@ export interface ApprovalResolution {
   readonly type: 'approval/resolved'
   readonly confirmationId: string
   readonly decision: 'approve' | 'deny' | 'cancel'
-  readonly outcome: 'completed' | 'denied' | 'cancelled' | 'failed'
+  readonly outcome: 'completed' | 'resumed' | 'denied' | 'cancelled' | 'failed'
   readonly capability?: string
   readonly operation?: string
   readonly occurredAt?: string
@@ -79,7 +80,7 @@ export interface ApprovalResolution {
 
 export interface ApprovalCard {
   readonly id: string
-  readonly kind: 'calendar-create' | 'self-extension' | 'other-side-effect'
+  readonly kind: 'calendar-create' | 'self-extension' | 'other-side-effect' | 'dsh-tool'
   readonly title: string
   readonly target: string
   readonly sideEffect: string
@@ -387,6 +388,7 @@ export interface WorkspaceSnapshotInput {
     readonly status: string
     readonly level: string
   }[]
+  readonly dshApprovals?: readonly DshApprovalTicket[]
   readonly jobs: readonly { readonly name: string; readonly lastRunStatus?: string }[]
   readonly toolEvents: readonly {
     readonly type: 'tool/call' | 'tool/result'

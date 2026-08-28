@@ -4,7 +4,7 @@ import { SessionId } from '@deepseek-ai/dsh-session'
 import type { KnowledgeRetrieval } from '../domain/knowledge/types.js'
 import type { MemoryCategory, MemoryReplaceInput, MemoryWriteInput, Provenance } from '../domain/memory/types.js'
 import type { PolicyOutcome } from '../domain/policy/types.js'
-import type { MissionControlView, ObjectiveView } from '../domain/workspace/types.js'
+import type { ApprovalCard, MissionControlView, ObjectiveView } from '../domain/workspace/types.js'
 import { publicRuntimeContextView, type RuntimeContext } from '../product/runtime-context.js'
 import { projectWorkspace } from '../domain/workspace/gather.js'
 import type { UserPersonalityPrefs } from '../domain/personality/types.js'
@@ -110,6 +110,20 @@ export class AssistantControlSurface {
 
   async cancelConfirmation(confirmationId: string): Promise<PolicyOutcome> {
     return this.ctx.actionPolicy.policy.resolve(confirmationId, 'cancel')
+  }
+
+  /** Route one bound UI decision to its owning approval system. */
+  async resolveApproval(card: ApprovalCard, decision: 'approve' | 'deny' | 'cancel'): Promise<unknown> {
+    if (card.kind === 'dsh-tool') {
+      const bridge = this.ctx.get('dshApprovalBridge') as {
+        broker: { resolve(id: string, decision: 'approve' | 'deny' | 'cancel'): unknown }
+      } | undefined
+      if (!bridge) throw new Error('DSH approval bridge is unavailable')
+      return bridge.broker.resolve(card.id, decision)
+    }
+    if (decision === 'approve') return this.approve(card.id)
+    if (decision === 'deny') return this.deny(card.id)
+    return this.cancelConfirmation(card.id)
   }
 
   startJob(name: string, input: Record<string, unknown> = {}) {

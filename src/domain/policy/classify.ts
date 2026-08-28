@@ -97,6 +97,30 @@ export const TOOL_ACTIONS: Record<string, ToolActionSpec> = {
     intent: 'execute',
     payload: (args) => pick(args, ['id']),
   },
+  obsidian_propose_create_note: {
+    capability: 'obsidian',
+    operation: 'propose_create_note',
+    intent: 'propose',
+    payload: (args) => pick(args, ['path', 'content']),
+  },
+  obsidian_propose_append_note: {
+    capability: 'obsidian',
+    operation: 'propose_append_note',
+    intent: 'propose',
+    payload: (args) => pick(args, ['path', 'content']),
+  },
+  obsidian_create_note: {
+    capability: 'obsidian',
+    operation: 'create_note',
+    intent: 'execute',
+    payload: (args) => pick(args, ['path', 'content']),
+  },
+  obsidian_append_note: {
+    capability: 'obsidian',
+    operation: 'append_note',
+    intent: 'execute',
+    payload: (args) => pick(args, ['path', 'content', 'expectedDigest']),
+  },
 }
 
 export function classifyTool(name: string): ToolActionSpec | undefined {

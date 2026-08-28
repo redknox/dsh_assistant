@@ -187,6 +187,7 @@ export function MissionControlScreen(input: MissionControlScreenProps) {
         ) : (
         <ConversationWorkspace
           view={view}
+          active={compactSurface === 'conversation'}
           state={{
             connected: props.connected,
             sending: props.sending,

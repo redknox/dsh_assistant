@@ -315,6 +315,11 @@ async function defaultBootProduct(layout: ProductHomeLayout, allowFixtures: bool
     home: layout.root,
     allowFixtures,
     memory: { persistence: 'json-file', jsonFilePath: layout.memoryFile },
+    knowledge: {
+      ...(process.env.DSH_ASSISTANT_KNOWLEDGE_OBSIDIAN_VAULT
+        ? { obsidianVaultPath: process.env.DSH_ASSISTANT_KNOWLEDGE_OBSIDIAN_VAULT }
+        : {}),
+    },
     sessionRoot: persistSessions ? context?.sessionPersistenceDir : undefined,
     sessionId: context?.sessionId.value,
     workspace: context?.workspace.value,

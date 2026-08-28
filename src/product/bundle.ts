@@ -1,4 +1,5 @@
 import type { Context } from '@deepseek-ai/cordis'
+import ApprovalService from '@deepseek-ai/dsh-user-approval'
 import * as assistantPlugin from '../plugins/assistant-plugin.js'
 import * as integrationsPlugin from '../plugins/integrations-plugin.js'
 import type { IntegrationsPluginConfig } from '../plugins/integrations-plugin.js'
@@ -25,6 +26,7 @@ import * as workbenchPlugin from '../plugins/workbench-plugin.js'
 import type { WorkbenchPluginConfig } from '../plugins/workbench-plugin.js'
 import * as skillPlugin from '../plugins/skill-plugin.js'
 import type { SkillPluginConfig } from '../plugins/skill-plugin.js'
+import * as dshApprovalBridgePlugin from '../plugins/dsh-approval-bridge-plugin.js'
 
 export const name = 'dsh-assistant'
 export const inject = ['systemPrompt', 'agents']
@@ -67,10 +69,14 @@ export async function apply(ctx: Context, config: AssistantBundleConfig = {}) {
     inspectOnly: config.safeMode === true,
   })
   if (config.safeMode) return
+  // Official app-boot may already supply the native service even when the
+  // product patch marks its base row disabled; the manual adapter does not.
+  if (!ctx.get('approval')) await ctx.plugin(ApprovalService, { policy: 'ask' })
   await ctx.plugin(memoryPlugin, config.memory)
   await ctx.plugin(knowledgePlugin, config.knowledge)
   await ctx.plugin(integrationsPlugin, config.integrations)
   await ctx.plugin(policyPlugin, config.policy)
+  await ctx.plugin(dshApprovalBridgePlugin)
   await ctx.plugin(jobsPlugin, config.jobs)
   await ctx.plugin(assistantPlugin)
 }

@@ -157,7 +157,15 @@ export function OperationsPanel(props: {
         <dl className="capability-list">
           {(props.view.plugins ?? []).map((plugin) => <PluginLifecycleControl key={plugin.id} plugin={plugin} locked={!props.connected} confirming={props.confirmingPlugin === plugin.id} actions={props.actions} />)}
           {props.view.capabilities.map((item) => (
-            <div key={`${item.area}-${item.action}`}><dt><span className="capability-area">{item.area}{item.advanced?.provider && item.advanced.provider !== 'fake' ? <small>{item.advanced.provider}</small> : null}</span><span className="capability-action">{item.action}</span></dt><dd data-status={item.status} data-capability-state={capabilitySignal(item.status)}>{capabilityLabel(item.status)}</dd></div>
+            <div key={`${item.area}-${item.action}`}>
+              <dt>
+                <span className="capability-area">{item.area}{item.advanced?.provider && item.advanced.provider !== 'fake' ? <small>{item.advanced.provider}</small> : null}</span>
+                <span className="capability-action">{item.area === 'Knowledge' ? `${props.view.knowledge.length} sources indexed` : item.action}</span>
+              </dt>
+              <dd data-status={item.status} data-capability-state={capabilitySignal(item.status)}>
+                {item.area === 'Knowledge' && item.status === 'active' && props.view.knowledge.length === 0 ? 'EMPTY' : capabilityLabel(item.status)}
+              </dd>
+            </div>
           ))}
         </dl>
       </section>

@@ -157,11 +157,7 @@ export function startWebUiServer(options: WebUiServerOptions): Promise<WebUiServ
         readJson: () => transport.readJson(req),
       }, {
         approvals: () => snapshot().approvals,
-        resolvePolicy: async (id, decision) => {
-          if (decision === 'approve') return options.surface.approve(id)
-          if (decision === 'deny') return options.surface.deny(id)
-          return options.surface.cancelConfirmation(id)
-        },
+        resolveApproval: (card, decision) => options.surface.resolveApproval(card, decision),
         recordSelfExtensionApproval: (input) => {
           const human = options.recoveryRoot.issueAuthority({ kind: 'human-control', source: 'application-ui' })
           options.recoveryRoot.recordApproval(human, input)

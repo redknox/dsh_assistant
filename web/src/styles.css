@@ -646,12 +646,19 @@ button.nav-item::after { content: "›"; color: #7f857f; font: 500 22px/1 var(--
 }
 .approval-header { display: flex; align-items: center; gap: 12px; padding: 16px 20px; border-bottom: 1px solid var(--line-soft); }
 .approval-header h2 { margin: 0; font: 700 18px/1.2 var(--font-instrument); letter-spacing: .04em; }
+.approval-kicker { margin: 0 0 3px; color: var(--muted); font: 650 11px/1.2 var(--font-instrument); letter-spacing: .12em; }
+.approval-guidance { margin: 0; padding: 14px 20px 4px; color: #514c43; font: 500 14px/1.45 var(--font-body); }
 .approval-facts { margin: 0; padding: 8px 20px; }
 .approval-facts div { display: grid; grid-template-columns: 110px 1fr; gap: 12px; padding: 7px 0; }
 .approval-facts dt { color: var(--muted); font: 650 14px/1.5 var(--font-instrument); letter-spacing: .08em; }
 .approval-facts dd { margin: 0; }
 .effect-line { display: flex; gap: 12px; align-items: center; padding: 12px 20px; border-top: 1px solid var(--line-soft); border-bottom: 1px solid var(--line-soft); }
 .effect-line strong { margin-right: 8px; font: 700 14px/1 var(--font-instrument); letter-spacing: .08em; }
+.approval-technical { border-bottom: 1px solid var(--line-soft); }
+.approval-technical summary { padding: 11px 20px; color: var(--muted); font: 650 12px/1.2 var(--font-instrument); letter-spacing: .1em; cursor: pointer; }
+.approval-technical summary:hover { color: var(--ink); }
+.approval-facts--technical { padding-top: 0; background: rgb(50 48 43 / 5%); }
+.approval-facts--technical dd { font-family: var(--font-instrument); font-size: 12px; overflow-wrap: anywhere; }
 .approval-status { margin: 0; padding: 16px 20px; font: 600 14px/1.4 var(--font-instrument); }
 .approval-actions { display: grid; grid-template-columns: 1fr 1.25fr; gap: 14px; padding: 16px 20px; }
 .button {

@@ -1,5 +1,5 @@
 import type { ApprovalCard, ApprovalResolution, WorkspaceSnapshotInput } from './types.js'
-import { allowedApprovalPayload } from './redact.js'
+import { allowedApprovalPayload, redactUnknown } from './redact.js'
 
 const RESOLVED_TICKET = new Set(['denied', 'cancelled', 'consumed', 'failed'])
 const HISTORY_EXTENSION = new Set(['approval-requested', 'unreviewed'])
@@ -19,6 +19,7 @@ export function projectApprovalCards(input: WorkspaceSnapshotInput): readonly Ap
       ...(input.approvalOrigins?.[approval.id] ? { sessionId: input.approvalOrigins[approval.id] } : {}),
     })
   }
+  for (const approval of input.dshApprovals ?? []) cards.push(dshToolCard(approval))
   return cards
 }
 
@@ -49,15 +50,61 @@ export function projectApprovalResolutions(input: WorkspaceSnapshotInput): reado
       })
     }
   }
+  for (const approval of input.dshApprovals ?? []) {
+    if (approval.status === 'pending') continue
+    items.push({
+      type: 'approval/resolved',
+      confirmationId: approval.id,
+      decision: approval.status === 'allowed-once' ? 'approve' : approval.status === 'cancelled' ? 'cancel' : 'deny',
+      outcome: approval.status === 'allowed-once'
+        ? 'resumed'
+        : approval.status === 'rejected' ? 'denied' : approval.status === 'cancelled' ? 'cancelled' : 'failed',
+      capability: 'dsh-tool',
+      operation: approval.toolName,
+      occurredAt: approval.createdAt,
+    })
+  }
   return items
 }
 
 export function acknowledgementOf(resolution: ApprovalResolution): { readonly text: string } {
   const target = resolution.capability && resolution.operation ? `${resolution.capability}.${resolution.operation}` : 'action'
   if (resolution.outcome === 'completed') return { text: `Approved. ${target} completed.` }
+  if (resolution.outcome === 'resumed') return { text: `Approved once. ${target} resumed.` }
   if (resolution.outcome === 'denied') return { text: `Rejected. ${target} was denied.` }
   if (resolution.outcome === 'cancelled') return { text: `Cancelled. ${target} was not executed.` }
   return { text: `Failed. ${target} did not complete.` }
+}
+
+function dshToolCard(approval: NonNullable<WorkspaceSnapshotInput['dshApprovals']>[number]): ApprovalCard {
+  return {
+    id: approval.id,
+    kind: 'dsh-tool',
+    title: 'AUTHORIZE TOOL EXECUTION',
+    target: approval.toolName,
+    sideEffect: approval.reason ?? 'allow this DSH tool call to continue once',
+    authorityChange: 'none — one exact DSH tool call only',
+    fingerprint: approval.fingerprint,
+    status: approval.status,
+    sessionId: approval.sessionId,
+    details: [
+      `Tool        ${approval.toolName}`,
+      ...(approval.callId ? [`Call        ${approval.callId}`] : []),
+      ...(approval.reason ? [`Reason      ${approval.reason}`] : []),
+      ...argumentDetails(approval.arguments),
+      'Approval returns allowed-once to DSH; TARS-NG does not re-run the tool.',
+    ],
+  }
+}
+
+function argumentDetails(value: unknown): readonly string[] {
+  if (value === undefined) return []
+  const safe = redactUnknown(value)
+  if (safe !== null && typeof safe === 'object' && !Array.isArray(safe)) {
+    return Object.entries(safe as Record<string, unknown>)
+      .map(([key, nested]) => `${key.padEnd(12)}${stringify(nested)}`)
+  }
+  return [`Arguments   ${stringify(safe)}`]
 }
 
 function resolutionFromTicket(ticket: WorkspaceSnapshotInput['pendingConfirmations'][number]): ApprovalResolution | undefined {
@@ -123,6 +170,24 @@ function sideEffectCard(ticket: WorkspaceSnapshotInput['pendingConfirmations'][n
       ],
     }
   }
+  if (ticket.capability === 'obsidian') {
+    const content = String(payload.content ?? '')
+    return {
+      id: ticket.id,
+      kind: 'other-side-effect',
+      title: ticket.operation === 'create_note' ? 'CREATE OBSIDIAN NOTE' : 'APPEND TO OBSIDIAN NOTE',
+      target: String(payload.path ?? '(unknown note)'),
+      sideEffect: ticket.operation === 'create_note' ? 'create one Markdown note' : 'append to one existing Markdown note',
+      authorityChange: 'none — one exact write only',
+      fingerprint: ticket.fingerprint,
+      status: ticket.status,
+      details: [
+        `Path        ${String(payload.path ?? '(unknown)')}`,
+        `Content     ${content.slice(0, 4_000)}${content.length > 4_000 ? `\n… (${content.length} characters total)` : ''}`,
+        ...(payload.expectedDigest ? [`Version     ${String(payload.expectedDigest)}`] : []),
+      ],
+    }
+  }
   return {
     id: ticket.id,
     kind: 'other-side-effect',
@@ -132,7 +197,9 @@ function sideEffectCard(ticket: WorkspaceSnapshotInput['pendingConfirmations'][n
     authorityChange: 'none',
     fingerprint: ticket.fingerprint,
     status: ticket.status,
-    details: Object.entries(payload).map(([key, value]) => `${key}: ${stringify(value)}`),
+    details: [
+      ...Object.entries(payload).map(([key, value]) => `${key}: ${stringify(value)}`),
+    ],
   }
 }
 

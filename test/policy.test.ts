@@ -210,6 +210,7 @@ describe('action policy', () => {
     assert.equal(retry.code, 'failed')
     assert.equal(executed, 1)
   })
+
 })
 
 describe('policy through DSH tools', () => {

@@ -1,4 +1,4 @@
-import React, { type FormEvent } from 'react'
+import React, { type FormEvent, useEffect, useMemo, useRef } from 'react'
 import type { ActivationCard, ApprovalCard, MissionControlView, SkillProjection, WorkObjectKind } from '../../src/domain/workspace/types'
 import { Glyph } from './icons'
 import { MarkdownMessage } from './MarkdownMessage'
@@ -40,20 +40,29 @@ function ApprovalCardView(props: {
     <article className="approval-card" data-approval-id={card.id} data-kind={card.kind} data-fingerprint={card.fingerprint} data-candidate-id={card.candidateId ?? ''} aria-labelledby={`approval-title-${card.id}`}>
       <header className="approval-header">
         <Glyph name="calendar" className="glyph approval-symbol" />
-        <h2 id={`approval-title-${card.id}`}>{card.title}</h2>
+        <div>
+          <p className="approval-kicker">APPROVAL REQUIRED · ONE EXACT ACTION</p>
+          <h2 id={`approval-title-${card.id}`}>{card.title}</h2>
+        </div>
       </header>
+      <p className="approval-guidance">Review the target and exact change below. Approving permits this action once.</p>
       <dl className="approval-facts">
-        <div><dt>TARGET</dt><dd>Target {card.target}</dd></div>
-        <div><dt>AUTHORITY</dt><dd>{card.authorityChange}</dd></div>
-        <div><dt>FINGERPRINT</dt><dd>Fingerprint {card.fingerprint}</dd></div>
-        {card.candidateId ? <div><dt>CANDIDATE</dt><dd>{card.candidateId}</dd></div> : null}
-        {card.digest ? <div><dt>DIGEST</dt><dd>{card.digest}</dd></div> : null}
-        {card.details.map((line) => <div key={line}><dt>DETAIL</dt><dd>{line}</dd></div>)}
+        <div><dt>TARGET</dt><dd>{card.target}</dd></div>
+        {card.details.map((line) => <div key={line}><dt>CHANGE</dt><dd>{line}</dd></div>)}
       </dl>
       <div className="effect-line">
         <Glyph name="info" className="glyph effect-icon" />
-        <span><strong>EFFECT</strong> External side effect: {card.sideEffect}</span>
+        <span><strong>WHAT WILL HAPPEN</strong> {card.sideEffect}</span>
       </div>
+      <details className="approval-technical">
+        <summary>TECHNICAL DETAILS</summary>
+        <dl className="approval-facts approval-facts--technical">
+          <div><dt>AUTHORITY</dt><dd>{card.authorityChange}</dd></div>
+          <div><dt>FINGERPRINT</dt><dd>{card.fingerprint}</dd></div>
+          {card.candidateId ? <div><dt>CANDIDATE</dt><dd>{card.candidateId}</dd></div> : null}
+          {card.digest ? <div><dt>DIGEST</dt><dd>{card.digest}</dd></div> : null}
+        </dl>
+      </details>
       {pending ? (
         <div className="approval-actions">
           <button type="button" className="button button--secondary" data-approval-action="reject" disabled={props.locked} onClick={() => props.actions.reject(card)}>REJECT</button>
@@ -115,16 +124,40 @@ export function ConversationWorkspace(props: {
   readonly view: MissionControlView
   readonly state: ConversationWorkspaceState
   readonly actions: ConversationWorkspaceActions
+  readonly active?: boolean
 }) {
   const { state, actions } = props
   const locked = !state.connected
   const sendDisabled = state.sending || locked || state.draft.trim() === ''
+  const pendingApprovals = useMemo(() => props.view.approvals.filter((card) => isPendingApproval(card.status)), [props.view.approvals])
   const empty = props.view.conversation.length === 0
-    && props.view.approvals.filter((card) => isPendingApproval(card.status)).length === 0
+    && pendingApprovals.length === 0
     && state.activations.length === 0
+  const scrollViewport = useRef<HTMLDivElement>(null)
+  const followingTail = useRef(true)
+  const tailRevision = `${props.view.conversation.length}:${props.view.conversation.at(-1)?.text.length ?? 0}:${pendingApprovals.length}:${state.activations.length}:${state.sending ? 1 : 0}`
+  useEffect(() => {
+    if (props.active === false || !followingTail.current) return
+    const viewport = scrollViewport.current
+    if (!viewport) return
+    const followTail = () => {
+      if (followingTail.current) viewport.scrollTop = viewport.scrollHeight
+    }
+    followTail()
+    const frame = globalThis.requestAnimationFrame?.(followTail)
+    return () => { if (frame !== undefined) globalThis.cancelAnimationFrame?.(frame) }
+  }, [props.active, tailRevision])
   return (
     <main className="conversation-panel" id="today">
-      <div className="conversation-scroll">
+      <div
+        className="conversation-scroll"
+        ref={scrollViewport}
+        data-follow-tail="true"
+        onScroll={(event) => {
+          const viewport = event.currentTarget
+          followingTail.current = viewport.scrollHeight - viewport.clientHeight - viewport.scrollTop <= 32
+        }}
+      >
         {empty ? (
           <section className="conversation-empty" aria-labelledby="conversation-empty-title">
             <div className="empty-mark" aria-hidden="true"><Glyph name="hex" /><span>T</span></div>
@@ -151,7 +184,7 @@ export function ConversationWorkspace(props: {
             </article>
           )
         })}
-        {props.view.approvals.filter((card) => isPendingApproval(card.status)).map((card) => (
+        {pendingApprovals.map((card) => (
           <ApprovalCardView key={card.id} card={card} locked={locked} actions={actions} />
         ))}
         {state.activations.map((card) => (

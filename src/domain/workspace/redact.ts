@@ -13,6 +13,9 @@ const APPROVAL_PAYLOAD_ALLOWLIST = [
   'allDay',
   'id',
   'description',
+  'path',
+  'content',
+  'expectedDigest',
 ] as const
 
 export function isSensitiveKey(key: string): boolean {

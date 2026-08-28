@@ -45,16 +45,27 @@ export function projectActivity(input: WorkspaceSnapshotInput): readonly Activit
       ...(input.approvalOrigins?.[ticket.id] ? { sessionId: input.approvalOrigins[ticket.id] } : {}),
     })
   }
+  for (const ticket of (input.dshApprovals ?? []).filter((item) => item.status === 'pending')) {
+    items.push({
+      id: `approval-${ticket.id}`,
+      kind: 'APPROVAL_REQUIRED',
+      summary: `${ticket.toolName} waiting for one-time DSH approval`,
+      source: 'dsh.approval',
+      sessionId: ticket.sessionId,
+    })
+  }
   for (const resolution of projectApprovalResolutions(input)) {
     const target = resolution.capability && resolution.operation
       ? `${resolution.capability}.${resolution.operation}`
       : resolution.confirmationId
     items.push({
       id: `approval-resolved-${resolution.confirmationId}`,
-      kind: resolution.outcome === 'failed' ? 'FAILED' : 'COMPLETED',
+      kind: resolution.outcome === 'failed' ? 'FAILED' : resolution.outcome === 'resumed' ? 'RUNNING' : 'COMPLETED',
       summary: `${target} ${resolution.outcome}`,
       source: 'approval/resolved',
-      ...(input.approvalOrigins?.[resolution.confirmationId]
+      ...((input.dshApprovals ?? []).find((item) => item.id === resolution.confirmationId)?.sessionId
+        ? { sessionId: (input.dshApprovals ?? []).find((item) => item.id === resolution.confirmationId)!.sessionId }
+        : input.approvalOrigins?.[resolution.confirmationId]
         ? { sessionId: input.approvalOrigins[resolution.confirmationId] }
         : {}),
     })

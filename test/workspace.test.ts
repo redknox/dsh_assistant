@@ -206,6 +206,31 @@ describe('TARS-NG mission-control workspace', () => {
     assert.match(renderMissionControlAsHtml(view), /CREATE CALENDAR EVENT/)
   })
 
+  it('projects an exact Obsidian write as a reviewable approval card', () => {
+    const view = projectMissionControl(snapshot({
+      pendingConfirmations: [{
+        id: 'conf-obsidian',
+        capability: 'obsidian',
+        operation: 'append_note',
+        fingerprint: 'fp-obsidian',
+        status: 'pending',
+        level: 'L4',
+        payload: {
+          path: 'Projects/TARS-NG.md',
+          content: '## Decision\n\nUse [[Governed Tools]].\n',
+          expectedDigest: 'abc123',
+        },
+      }],
+    }))
+    const card = view.approvals[0]
+    assert.equal(view.systemState, 'NEEDS_APPROVAL')
+    assert.equal(card?.title, 'APPEND TO OBSIDIAN NOTE')
+    assert.equal(card?.target, 'Projects/TARS-NG.md')
+    assert.equal(card?.fingerprint, 'fp-obsidian')
+    assert.match(card?.details.join('\n') ?? '', /Use \[\[Governed Tools\]\]/)
+    assert.match(card?.details.join('\n') ?? '', /abc123/)
+  })
+
   it('E. denied approval stays calm and does not re-queue the action', () => {
     const view = projectMissionControl(snapshot({
       pendingConfirmations: [{

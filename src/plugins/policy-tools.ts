@@ -15,7 +15,7 @@ function asRecord(args: unknown): Record<string, unknown> {
 }
 
 /** Execute/confirm adapters. Side effects run only after PolicyService allows them. */
-export function registerPolicyTools(tools: Pick<ToolRuntime, 'register'>, policy: PolicyService): () => void {
+export function registerPolicyTools(tools: Pick<ToolRuntime, 'register'>, policy: PolicyService, obsidianAvailable = false): () => void {
   const disposers = [
     tools.register(defineTool({
       name: 'calendar_create_event',
@@ -91,6 +91,37 @@ export function registerPolicyTools(tools: Pick<ToolRuntime, 'register'>, policy
       },
     })),
   ]
+  if (obsidianAvailable) {
+    disposers.push(
+      tools.register(defineTool({
+        name: 'obsidian_create_note',
+        description: 'Execute creating a new Obsidian Markdown note. L4: always requires confirmation bound to the exact Vault-relative path and content. Existing notes are never overwritten.',
+        parameters: {
+          path: { type: 'string', required: true },
+          content: { type: 'string', required: true },
+          confirmationId: { type: 'string' },
+        },
+        output: textOutput(),
+        async execute(args, exec) {
+          return JSON.stringify(await policy.apply(requestFromTool('obsidian_create_note', asRecord(args), exec.signal)!))
+        },
+      })),
+      tools.register(defineTool({
+        name: 'obsidian_append_note',
+        description: 'Execute appending Markdown to an existing Obsidian note. L4: always requires confirmation bound to the exact path, content, and expected current digest.',
+        parameters: {
+          path: { type: 'string', required: true },
+          content: { type: 'string', required: true },
+          expectedDigest: { type: 'string', required: true },
+          confirmationId: { type: 'string' },
+        },
+        output: textOutput(),
+        async execute(args, exec) {
+          return JSON.stringify(await policy.apply(requestFromTool('obsidian_append_note', asRecord(args), exec.signal)!))
+        },
+      })),
+    )
+  }
   return () => {
     for (const dispose of [...disposers].reverse()) dispose()
   }

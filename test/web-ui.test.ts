@@ -2275,11 +2275,26 @@ export function apply(ctx) {
     assert.match(ready, /class="console"/)
     assert.match(ready, /Hello/)
     assert.match(ready, /TARS-NG/)
+    assert.match(ready, /data-follow-tail="true"/)
     assert.match(ready, /LIVE EXECUTION LOG/)
     assert.match(ready, /OPEN FULL LOG/)
     assert.match(ready, /MEMORY|Memory/)
     assert.match(ready, /data-control-plane="user-workspace"/)
     assert.doesNotMatch(ready, /reasoning_content|sk-secret|chain-of-thought/)
+
+    const emptyKnowledge = renderToStaticMarkup(createElement(MissionControlScreen, {
+      view: fixtureView({ capabilities: [{ area: 'Knowledge', action: 'Retrieve notes', status: 'active' }] }),
+      connected: true,
+      sending: false,
+      draft: '',
+      onDraft() {},
+      onSend() {},
+      onApprove() {},
+      onReject() {},
+      onRecovery() {},
+    }))
+    assert.match(emptyKnowledge, /0 sources indexed/)
+    assert.match(emptyKnowledge, />EMPTY</)
 
     const governed = renderToStaticMarkup(createElement(MissionControlScreen, {
       view: fixtureView({

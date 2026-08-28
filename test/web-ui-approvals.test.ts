@@ -30,7 +30,7 @@ function sideEffectCard(overrides: Partial<ApprovalCard> = {}): ApprovalCard {
 function context(overrides: Partial<WebUiApprovalContext> = {}): WebUiApprovalContext {
   return {
     approvals: () => [sideEffectCard()],
-    resolvePolicy: async () => {},
+    resolveApproval: async () => {},
     recordSelfExtensionApproval: () => {},
     acknowledgementFor: () => ({ text: 'Approved.' }),
     project: (acknowledgement) => ({ view, webUi: 'http://127.0.0.1:8787', ...(acknowledgement ? { acknowledgement } : {}) }),
@@ -45,12 +45,26 @@ describe('Web UI approvals', () => {
       id: 'approval-1',
       fingerprint: 'fingerprint-1',
     }), context({
-      resolvePolicy: async (...args) => { calls.push(args) },
+      resolveApproval: async (...args) => { calls.push(args) },
     }))
-    assert.deepEqual(calls, [['approval-1', 'approve']])
+    assert.deepEqual(calls, [[sideEffectCard(), 'approve']])
     assert.equal(result?.status, 200)
     assert.equal(result?.broadcast, true)
     assert.deepEqual((result?.body as { acknowledgement?: unknown }).acknowledgement, { text: 'Approved.' })
+  })
+
+  it('routes a DSH tool approval through the same bound control', async () => {
+    const calls: unknown[][] = []
+    const card = sideEffectCard({ kind: 'dsh-tool', id: 'dsh:request-1', target: 'tool_fs', fingerprint: 'dsh-fingerprint' })
+    const result = await handleWebUiApprovalRequest(request('/api/approve', {
+      id: card.id,
+      fingerprint: card.fingerprint,
+    }), context({
+      approvals: () => [card],
+      resolveApproval: async (...args) => { calls.push(args) },
+    }))
+    assert.deepEqual(calls, [[card, 'approve']])
+    assert.equal(result?.status, 200)
   })
 
   it('binds a self-extension decision to its candidate and exact fingerprint', async () => {

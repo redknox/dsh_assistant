@@ -10,7 +10,7 @@ export interface WebUiApprovalRequest {
 
 export interface WebUiApprovalContext {
   readonly approvals: () => readonly ApprovalCard[]
-  readonly resolvePolicy: (id: string, decision: ApprovalDecision) => Promise<unknown>
+  readonly resolveApproval: (card: ApprovalCard, decision: ApprovalDecision) => Promise<unknown>
   readonly recordSelfExtensionApproval: (input: {
     readonly candidateId: string
     readonly fingerprint: string
@@ -53,7 +53,7 @@ export async function handleWebUiApprovalRequest(
       decision: decision === 'approve' ? 'approved-for-exact-diff' : 'rejected',
     })
   } else {
-    await context.resolvePolicy(card.id, decision)
+    await context.resolveApproval(card, decision)
   }
 
   return {
