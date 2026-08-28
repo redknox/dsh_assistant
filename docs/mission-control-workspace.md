@@ -47,6 +47,9 @@ Projected from authoritative runtime/governance/policy/integration state, never 
 | WAITING | job running/pending |
 | READY | otherwise |
 
+Capability rows describe availability, not queued decisions. `ACTIVE` means the current policy may execute the action without a human confirmation; `CONFIRM` means the capability is available but an exact-action confirmation will be required when execution is attempted. Only the approval counter and approval cards represent decisions currently waiting for a human.
+Optional providers that were never configured render as `NOT LINKED` and do not make the system `DEGRADED`. `INOP`/`DEGRADED` is reserved for a configured provider whose authorization, executable, or upstream service has failed.
+
 ## Approvals
 
 Calendar create is an ordinary external side-effect card: target, when, attendees, external side effect, no authority change.

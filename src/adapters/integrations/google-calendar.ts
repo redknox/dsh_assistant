@@ -60,7 +60,7 @@ export function createGoogleCalendarProvider(options: GoogleCalendarOptions): Ca
   return {
     capability: 'calendar',
     availability(): Availability {
-      return { available: true }
+      return { available: true, provider: 'google' }
     },
     async listEvents(query: { from: string; to: string } & PageQuery): Promise<Page<CalendarEvent>> {
       const calendarId = 'primary'

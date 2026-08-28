@@ -15,8 +15,60 @@ export interface CalendarEvent {
   readonly timeZone?: string
   readonly calendarId?: string
   readonly description?: string
+  /** Provider-neutral participant labels (display names, addresses, or ids). */
   readonly attendees?: readonly string[]
+  readonly attendeeDetails?: readonly CalendarAttendeeDetail[]
+  readonly hasMoreAttendees?: boolean
   readonly allDay?: boolean
+  /** Optional detail fields are omitted when the provider did not return them. */
+  readonly organizer?: CalendarOrganizer
+  readonly location?: CalendarLocation
+  readonly reminders?: readonly CalendarReminder[]
+  readonly selfRsvpStatus?: string
+  readonly freeBusyStatus?: string
+  readonly attendeeAbility?: string
+  readonly conference?: CalendarConference
+  readonly appLink?: string
+  readonly visibility?: string
+  readonly attachments?: readonly CalendarAttachment[]
+}
+
+export interface CalendarOrganizer {
+  readonly id?: string
+  readonly displayName?: string
+}
+
+export interface CalendarAttendeeDetail {
+  readonly id?: string
+  readonly displayName?: string
+  readonly type?: string
+  readonly rsvpStatus?: string
+  readonly organizer?: boolean
+  readonly optional?: boolean
+  readonly external?: boolean
+}
+
+export interface CalendarLocation {
+  readonly name?: string
+  readonly address?: string
+  readonly latitude?: number
+  readonly longitude?: number
+}
+
+export interface CalendarReminder {
+  readonly minutesBeforeStart: number
+}
+
+export interface CalendarConference {
+  readonly type?: string
+  readonly meetingUrl?: string
+}
+
+export interface CalendarAttachment {
+  readonly id?: string
+  readonly name?: string
+  readonly url?: string
+  readonly mimeType?: string
 }
 
 export interface CalendarCreateInput {
@@ -44,10 +96,15 @@ export interface MailMessage {
   readonly snippet: string
 }
 
+export interface MailMessageDetail extends MailMessage {
+  readonly body: string
+}
+
 export interface Contact {
   readonly id: string
   readonly name: string
   readonly email?: string
+  readonly source?: 'mail-contact' | 'directory'
 }
 
 export interface FileEntry {
@@ -76,12 +133,13 @@ export interface MailProvider {
   readonly capability: 'mail'
   availability(): Availability
   listMessages(query: { query?: string } & PageQuery): Promise<Page<MailMessage>>
+  getMessage(id: string, signal?: AbortSignal): Promise<MailMessageDetail>
 }
 
 export interface ContactsProvider {
   readonly capability: 'contacts'
   availability(): Availability
-  listContacts(query: PageQuery): Promise<Page<Contact>>
+  listContacts(query: { query?: string } & PageQuery): Promise<Page<Contact>>
 }
 
 export interface ConfinedFileOp {
@@ -129,6 +187,22 @@ export class IntegrationHub {
     this.providers = { ...this.providers, calendar: provider }
     return () => {
       this.providers = { ...this.providers, calendar: previous }
+    }
+  }
+
+  replaceMail(provider: MailProvider): () => void {
+    const previous = this.providers.mail
+    this.providers = { ...this.providers, mail: provider }
+    return () => {
+      this.providers = { ...this.providers, mail: previous }
+    }
+  }
+
+  replaceContacts(provider: ContactsProvider): () => void {
+    const previous = this.providers.contacts
+    this.providers = { ...this.providers, contacts: provider }
+    return () => {
+      this.providers = { ...this.providers, contacts: previous }
     }
   }
 

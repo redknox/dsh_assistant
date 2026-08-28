@@ -25,6 +25,7 @@ import type {
 
 interface FakeState {
   unavailable: Partial<Record<IntegrationCapability, string>>
+  notConfigured: Set<IntegrationCapability>
   fail: Partial<Record<IntegrationCapability, string>>
   waitForAbort: Partial<Record<IntegrationCapability, boolean>>
   waiting?: () => void
@@ -54,7 +55,9 @@ class FakeBase<C extends IntegrationCapability> {
 
   availability(): Availability {
     const reason = this.state.unavailable[this.capability]
-    return reason ? { available: false, reason } : { available: true }
+    return reason
+      ? { available: false, configured: !this.state.notConfigured.has(this.capability), reason, provider: 'fake' }
+      : { available: true, configured: true, provider: 'fake' }
   }
 
   protected guard(signal?: AbortSignal): void {
@@ -153,6 +156,12 @@ class FakeMail extends FakeBase<'mail'> implements MailProvider {
     const filtered = query.query ? all.filter((item) => item.subject.toLowerCase().includes(query.query!.toLowerCase())) : all
     return pageSlice(filtered, query, 'mail')
   }
+
+  async getMessage(id: string, signal?: AbortSignal) {
+    await this.waitIfRequested(signal)
+    this.guard(signal)
+    return { id, from: 'noreply@example.com', subject: 'Weekly digest', snippet: 'Three unread items', body: 'Three unread items' }
+  }
 }
 
 class FakeContacts extends FakeBase<'contacts'> implements ContactsProvider {
@@ -239,7 +248,7 @@ class FakeTasks extends FakeBase<'tasks'> implements TasksProvider {
 }
 
 export class FakeIntegrationSuite {
-  readonly state: FakeState = { unavailable: {}, fail: {}, waitForAbort: {} }
+  readonly state: FakeState = { unavailable: {}, notConfigured: new Set(), fail: {}, waitForAbort: {} }
   readonly providers: IntegrationProviders
   readonly hub: IntegrationHub
 

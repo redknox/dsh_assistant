@@ -58,6 +58,9 @@ Precedence: CLI flag → environment → env file → `product.json` → default
 | `DEEPSEEK_API_KEY` | yes (for AI) | Secret. Official DeepSeek adapter; never commit |
 | `DSH_ASSISTANT_GOOGLE_CALENDAR_MODE` | no | `live` selects the host-bounded Google Calendar transport |
 | `DSH_ASSISTANT_GOOGLE_CALENDAR_ACCESS_TOKEN` | no | Secret. OAuth access token; expires; never commit |
+| `DSH_ASSISTANT_FEISHU_MODE` | no | `cli` enables read-only Feishu Mail/Contacts through the host `lark-cli` user identity |
+| `DSH_ASSISTANT_FEISHU_PROFILE` | no | Dedicated least-privilege `lark-cli` profile for Feishu Mail/Contacts (default `tars-ng`) |
+| `DSH_ASSISTANT_FEISHU_CALENDAR_MODE` | no | `cli` selects Feishu for Calendar through the same dedicated profile |
 | `DSH_ASSISTANT_SANDBOX_ROOT` | no | Existing directory for confined files/tasks (`~` allowed; not a symlink) |
 | `GOOGLE_SEARCH_API_KEY` | no | Secret. Diagnosed by name; Search is not shipped |
 | `GOOGLE_SEARCH_ENGINE_ID` | no | Non-secret config. Diagnosed by name; Search is not shipped |

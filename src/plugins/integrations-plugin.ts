@@ -3,11 +3,23 @@ import { FakeIntegrationSuite } from '../adapters/integrations/fake-providers.js
 import { createGoogleCalendarProvider, createHostGoogleCalendarTransport } from '../adapters/integrations/google-calendar.js'
 import { createSandboxFilesProvider } from '../adapters/integrations/sandbox-files.js'
 import { createSandboxTasksProvider } from '../adapters/integrations/sandbox-tasks.js'
+import { createFeishuCalendarProvider } from '../adapters/integrations/feishu-calendar.js'
+import { createFeishuMeetingNotesProvider, type MeetingNotesProvider } from '../adapters/integrations/feishu-meeting-notes.js'
+import {
+  createFeishuContactsProvider,
+  createFeishuMailProvider,
+  createHostFeishuCliRunner,
+  FEISHU_CALENDAR_SCOPES,
+  FEISHU_MAIL_CONTACT_SCOPES,
+  FEISHU_MEETING_NOTES_SCOPES,
+  inspectFeishuCli,
+} from '../adapters/integrations/feishu-cli.js'
 import { applySandboxAuthorityStamp } from '../domain/files/sandbox-authority.js'
 import { inspectSandboxRoot } from '../domain/files/sandbox-root.js'
 import type { CapabilityRegistry } from '../domain/registry/index.js'
 import { IntegrationHub } from '../domain/integrations/hub.js'
 import type { BoundedGoogleCalendarTransport } from '../domain/integrations/google-api.js'
+import { DEFAULT_FEISHU_PROFILE } from '../product/constants.js'
 import { registerIntegrationTools } from './integration-tools.js'
 
 function liveCalendarConfigured(): boolean {
@@ -46,14 +58,46 @@ export async function apply(ctx: Context, config: IntegrationsPluginConfig = {})
   if (config.allowFixtures === false) {
     for (const capability of FIXTURE_CAPABILITIES) {
       fakes.state.unavailable[capability] = `${capability} is not configured`
+      fakes.state.notConfigured.add(capability)
     }
   }
   const googleCalendarTransport = createHostGoogleCalendarTransport()
+  let meetingNotes: MeetingNotesProvider | undefined
   if (liveCalendarConfigured()) {
     fakes.hub.replaceCalendar(createGoogleCalendarProvider({
       transport: googleCalendarTransport,
       allowCreate: true,
     }))
+  }
+  if (process.env.DSH_ASSISTANT_FEISHU_MODE === 'cli' || process.env.DSH_ASSISTANT_FEISHU_CALENDAR_MODE === 'cli') {
+    const runner = createHostFeishuCliRunner({
+      profile: process.env.DSH_ASSISTANT_FEISHU_PROFILE ?? DEFAULT_FEISHU_PROFILE,
+    })
+    if (process.env.DSH_ASSISTANT_FEISHU_MODE === 'cli') {
+      fakes.state.notConfigured.delete('mail')
+      fakes.state.notConfigured.delete('contacts')
+      const availability = await inspectFeishuCli(runner, FEISHU_MAIL_CONTACT_SCOPES)
+      if (availability.available) {
+        fakes.hub.replaceMail(createFeishuMailProvider({ runner }))
+        fakes.hub.replaceContacts(createFeishuContactsProvider({ runner }))
+        delete fakes.state.unavailable.mail
+        delete fakes.state.unavailable.contacts
+      } else {
+        fakes.state.unavailable.mail = availability.reason ?? 'Feishu user authorization is unavailable'
+        fakes.state.unavailable.contacts = availability.reason ?? 'Feishu user authorization is unavailable'
+      }
+    }
+    if (process.env.DSH_ASSISTANT_FEISHU_CALENDAR_MODE === 'cli') {
+      const calendarAvailability = await inspectFeishuCli(runner, FEISHU_CALENDAR_SCOPES)
+      if (calendarAvailability.available) {
+        fakes.hub.replaceCalendar(createFeishuCalendarProvider({ runner, allowCreate: true }))
+        delete fakes.state.unavailable.calendar
+      } else {
+        fakes.state.unavailable.calendar = calendarAvailability.reason ?? 'Feishu Calendar authorization is unavailable'
+      }
+      const meetingNotesAvailability = await inspectFeishuCli(runner, FEISHU_MEETING_NOTES_SCOPES)
+      if (meetingNotesAvailability.available) meetingNotes = createFeishuMeetingNotesProvider({ runner })
+    }
   }
   const sandbox = inspectSandboxRoot(process.env.DSH_ASSISTANT_SANDBOX_ROOT)
   if (sandbox.configured && sandbox.ok) {
@@ -77,5 +121,5 @@ export async function apply(ctx: Context, config: IntegrationsPluginConfig = {})
       ? 'Personal integrations are provider-neutral. Files and tasks are confined to the configured operator sandbox. Use sandbox-relative paths only. Absolute paths and parent traversal are rejected. Prefer read tools for lookup. Proposal tools do not execute. Execution tools (files_write, files_delete, tasks_create) run only through the policy/confirmation path.'
       : 'Personal integrations are provider-neutral. Prefer read tools for lookup. Proposal tools do not execute. Execution tools run only through the policy/confirmation path.',
   })
-  ctx.effect(() => registerIntegrationTools(ctx.tools, fakes.hub))
+  ctx.effect(() => registerIntegrationTools(ctx.tools, fakes.hub, meetingNotes))
 }

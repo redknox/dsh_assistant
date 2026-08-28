@@ -102,7 +102,7 @@ export function OperationsPanel(props: {
         <dl className="capability-list">
           {(props.view.plugins ?? []).map((plugin) => <PluginLifecycleControl key={plugin.id} plugin={plugin} locked={!props.connected} confirming={props.confirmingPlugin === plugin.id} actions={props.actions} />)}
           {props.view.capabilities.map((item) => (
-            <div key={`${item.area}-${item.action}`}><dt><span className="capability-area">{item.area}</span><span className="capability-action">{item.action}</span></dt><dd data-status={item.status} data-capability-state={capabilitySignal(item.status)}>{item.status === 'approval-required' ? 'APPROVAL' : item.status === 'safe-mode-disabled' ? 'SAFE OFF' : item.status === 'unavailable' ? 'INOP' : 'ACTIVE'}</dd></div>
+            <div key={`${item.area}-${item.action}`}><dt><span className="capability-area">{item.area}</span><span className="capability-action">{item.action}</span></dt><dd data-status={item.status} data-capability-state={capabilitySignal(item.status)}>{item.status === 'approval-required' ? 'CONFIRM' : item.status === 'not-connected' ? 'NOT LINKED' : item.status === 'safe-mode-disabled' ? 'SAFE OFF' : item.status === 'unavailable' ? 'INOP' : 'ACTIVE'}</dd></div>
           ))}
         </dl>
       </section>

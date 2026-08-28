@@ -49,6 +49,18 @@ export const TOOL_ACTIONS: Record<string, ToolActionSpec> = {
     intent: 'read',
     payload: (args) => pick(args, ['query', 'limit', 'cursor']),
   },
+  mail_get_message: {
+    capability: 'mail',
+    operation: 'get_message',
+    intent: 'read',
+    payload: (args) => pick(args, ['id']),
+  },
+  contacts_search: {
+    capability: 'contacts',
+    operation: 'search',
+    intent: 'read',
+    payload: (args) => pick(args, ['query', 'limit', 'cursor']),
+  },
   tasks_propose_create: {
     capability: 'tasks',
     operation: 'propose_create',

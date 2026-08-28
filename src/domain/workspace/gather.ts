@@ -23,6 +23,12 @@ export function gatherWorkspaceSnapshot(input: GatherWorkspaceInput): WorkspaceS
   const { ctx, sessionId } = input
   const personality = readPersonality(ctx)
   const agent = ctx.agents.get(SessionId(sessionId))
+  const actionPolicy = ctx.get('actionPolicy') as {
+    policy: {
+      confirmations(): WorkspaceSnapshotInput['pendingConfirmations']
+      autoExecuteCapabilities(): readonly string[]
+    }
+  } | undefined
   const recovery = ctx.get('extensionRecovery') as {
     inspect(): {
       safeMode: boolean
@@ -72,17 +78,19 @@ export function gatherWorkspaceSnapshot(input: GatherWorkspaceInput): WorkspaceS
       : safeMode
         ? { recoveryWhy: 'Generated capabilities are disabled. Trusted core is available.' }
         : {}),
-    pendingConfirmations: (ctx.get('actionPolicy') as { policy: { confirmations(): WorkspaceSnapshotInput['pendingConfirmations'] } } | undefined)
-      ?.policy.confirmations() ?? [],
+    pendingConfirmations: actionPolicy?.policy.confirmations() ?? [],
+    autoExecuteCapabilities: actionPolicy?.policy.autoExecuteCapabilities() ?? [],
     jobs: (ctx.get('assistantJobs') as { service: { list(): { name: string; lastRun?: { status: string } }[] } } | undefined)
       ?.service.list().map((job) => ({ name: job.name, lastRunStatus: job.lastRun?.status })) ?? [],
     toolEvents: agent ? toolEventsFromSession(agent.session.events) : [],
     conversation: agent ? conversationWithoutReasoning(agent.session.events) : [],
-    integrationStatus: Object.entries((ctx.get('integrations') as { hub: { status(): Record<string, { available: boolean; reason?: string }> } } | undefined)?.hub.status() ?? {})
+    integrationStatus: Object.entries((ctx.get('integrations') as { hub: { status(): Record<string, { available: boolean; configured?: boolean; reason?: string; provider?: string }> } } | undefined)?.hub.status() ?? {})
       .map(([capability, availability]) => ({
         capability,
         available: availability.available,
+        ...(availability.configured !== undefined ? { configured: availability.configured } : {}),
         ...(availability.reason ? { reason: availability.reason } : {}),
+        ...(availability.provider ? { provider: availability.provider } : {}),
       })),
     registry: (ctx.get('capabilityRegistry') as { list(): { owner: string; version: string; provenance: { kind: string }; status: string; capabilities: { id: string }[]; permissions?: readonly string[]; provider?: string; providers?: readonly string[]; tools?: readonly string[]; runtimeSeams?: readonly string[]; pluginDependencies?: readonly { capability: string; strength: 'hard' | 'optional' }[] }[] } | undefined)
       ?.list().map((record) => ({

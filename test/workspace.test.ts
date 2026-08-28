@@ -88,6 +88,52 @@ describe('TARS-NG mission-control workspace', () => {
     assert.equal(calendar.every((item) => item.status === 'unavailable'), true)
   })
 
+  it('projects auto-executing tasks as active while file writes stay governed', () => {
+    const view = projectMissionControl(snapshot({
+      integrationStatus: [
+        { capability: 'tasks', available: true },
+        { capability: 'files', available: true },
+      ],
+      autoExecuteCapabilities: ['tasks'],
+    }))
+
+    assert.ok(view.capabilities.some((item) => item.area === 'Tasks' && item.status === 'active'))
+    assert.ok(view.capabilities.some((item) => item.area === 'Files' && item.status === 'approval-required'))
+  })
+
+  it('does not degrade for optional integrations that were never connected', () => {
+    const view = projectMissionControl(snapshot({
+      integrationStatus: [
+        { capability: 'mail', available: false, configured: false, reason: 'mail is not connected' },
+        { capability: 'contacts', available: false, configured: false, reason: 'contacts are not connected' },
+      ],
+      registry: [],
+    }))
+
+    assert.equal(view.systemState, 'READY')
+    assert.equal(view.controlStrip.degradation, undefined)
+    assert.ok(view.capabilities.some((item) => item.area === 'Mail' && item.status === 'not-connected'))
+    assert.ok(view.capabilities.some((item) => item.area === 'Contacts' && item.status === 'not-connected'))
+  })
+
+  it('projects the live integration provider instead of the registry fixture default', () => {
+    const view = projectMissionControl(snapshot({
+      integrationStatus: [{ capability: 'mail', available: true, configured: true, provider: 'feishu' }],
+      registry: [{
+        owner: 'managed/integrations',
+        version: '0.1.0',
+        provenance: 'managed',
+        status: 'active',
+        capabilities: ['mail'],
+        provider: 'fake',
+      }],
+    }))
+
+    const mail = view.capabilities.find((item) => item.area === 'Mail')
+    assert.equal(mail?.status, 'active')
+    assert.equal(mail?.advanced?.provider, 'feishu')
+  })
+
   it('D. calendar create is a first-class approval object', () => {
     const view = projectMissionControl(snapshot({
       pendingConfirmations: [{

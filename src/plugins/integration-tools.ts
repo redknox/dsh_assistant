@@ -1,6 +1,7 @@
 import { defineTool, type ToolRuntime } from '@deepseek-ai/dsh-tools'
 import type { IntegrationHub } from '../domain/integrations/hub.js'
 import { IntegrationError } from '../domain/integrations/types.js'
+import type { MeetingNotesProvider } from '../adapters/integrations/feishu-meeting-notes.js'
 
 function textOutput() {
   return {
@@ -23,7 +24,11 @@ async function runJson(action: () => Promise<unknown>): Promise<string> {
 }
 
 /** Thin DSH adapters. Trust is declared in names/descriptions; no vendor SDKs here. */
-export function registerIntegrationTools(tools: Pick<ToolRuntime, 'register'>, hub: IntegrationHub): () => void {
+export function registerIntegrationTools(
+  tools: Pick<ToolRuntime, 'register'>,
+  hub: IntegrationHub,
+  meetingNotes?: MeetingNotesProvider,
+): () => void {
   const disposers = [
     tools.register(defineTool({
       name: 'calendar_list_events',
@@ -74,7 +79,7 @@ export function registerIntegrationTools(tools: Pick<ToolRuntime, 'register'>, h
     })),
     tools.register(defineTool({
       name: 'calendar_get_event',
-      description: 'Read-only: inspect one calendar event by id. Does not create or change events.',
+      description: 'Read-only: inspect one calendar event by id. Optional properties are included only when the provider returns them; an omitted property means unknown/not returned, not proof that the detail does not exist. Does not create or change events.',
       parameters: {
         id: { type: 'string', required: true },
       },
@@ -121,6 +126,28 @@ export function registerIntegrationTools(tools: Pick<ToolRuntime, 'register'>, h
           cursor: args.cursor,
           signal: exec.signal,
         }))
+      },
+    })),
+    tools.register(defineTool({
+      name: 'mail_get_message',
+      description: 'Read-only: get one Feishu mail message by id. Does not modify or send mail.',
+      parameters: { id: { type: 'string', required: true } },
+      output: textOutput(),
+      async execute(args, exec) {
+        return runJson(() => hub.mail().getMessage(args.id, exec.signal))
+      },
+    })),
+    tools.register(defineTool({
+      name: 'contacts_search',
+      description: 'Read-only: list personal mail contacts, or search the Feishu enterprise directory by query.',
+      parameters: {
+        query: { type: 'string' },
+        limit: { type: 'integer' },
+        cursor: { type: 'string' },
+      },
+      output: textOutput(),
+      async execute(args, exec) {
+        return runJson(() => hub.contacts().listContacts({ query: args.query, limit: args.limit, cursor: args.cursor, signal: exec.signal }))
       },
     })),
     tools.register(defineTool({
@@ -175,6 +202,31 @@ export function registerIntegrationTools(tools: Pick<ToolRuntime, 'register'>, h
       },
     })),
   ]
+  if (meetingNotes) {
+    disposers.push(
+      tools.register(defineTool({
+        name: 'meeting_get_artifacts',
+        description: 'Read-only: resolve a calendar event id to available Feishu meeting artifacts. Reports AI notes, transcript, Minutes, and shared-document availability without reading their content.',
+        parameters: { calendarEventId: { type: 'string', required: true } },
+        output: textOutput(),
+        async execute(args, exec) {
+          return runJson(() => meetingNotes.inspect(args.calendarEventId, exec.signal))
+        },
+      })),
+      tools.register(defineTool({
+        name: 'meeting_read_ai_notes',
+        description: 'Read-only: fetch the Feishu-generated AI meeting notes document for a calendar event id as Markdown. This is provider-generated AI content, not an independent analysis from the transcript. Content defaults to 20,000 characters and is capped at 50,000.',
+        parameters: {
+          calendarEventId: { type: 'string', required: true },
+          maxChars: { type: 'integer' },
+        },
+        output: textOutput(),
+        async execute(args, exec) {
+          return runJson(() => meetingNotes.readAiNotes(args.calendarEventId, { maxChars: args.maxChars, signal: exec.signal }))
+        },
+      })),
+    )
+  }
   return () => {
     for (const dispose of [...disposers].reverse()) dispose()
   }

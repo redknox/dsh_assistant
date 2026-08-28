@@ -17,7 +17,7 @@ export function projectMissionControl(input: WorkspaceSnapshotInput): MissionCon
   const approvalResolutions = projectApprovalResolutions(input)
   const activations = projectActivationCards(input)
   const jobsRunning = input.jobs.filter((job) => job.lastRunStatus === 'running' || job.lastRunStatus === 'pending').length
-  const degraded = input.integrationStatus.filter((item) => !item.available).map((item) => item.capability)
+  const degraded = input.integrationStatus.filter((item) => !item.available && item.configured !== false).map((item) => item.capability)
   if (input.skillCatalog?.state === 'degraded') degraded.push('skill catalog')
   const activationFailure = projectActivationFailure(input)
   const rollback = projectRollbackCard(input, systemState)

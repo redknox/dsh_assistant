@@ -103,6 +103,8 @@ export const PRODUCT_TOOL_NAMES = [
   'calendar_freebusy',
   'calendar_propose_event',
   'mail_list_messages',
+  'mail_get_message',
+  'contacts_search',
   'tasks_propose_create',
   'files_list',
   'files_read',

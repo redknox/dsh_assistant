@@ -65,6 +65,8 @@ export const CORE_BOOTSTRAP_INVENTORY: readonly RegistryRegisterInput[] = [
       'calendar_propose_event',
       'calendar_create_event',
       'mail_list_messages',
+      'mail_get_message',
+      'contacts_search',
       'tasks_propose_create',
       'tasks_create',
       'files_list',

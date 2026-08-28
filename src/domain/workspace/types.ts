@@ -35,10 +35,10 @@ export const WORK_OBJECT_KINDS = [
 ] as const
 export type WorkObjectKind = (typeof WORK_OBJECT_KINDS)[number]
 
-export const USER_CAPABILITY_AREAS = ['Calendar', 'Tasks', 'Files', 'Memory', 'Knowledge', 'Mail'] as const
+export const USER_CAPABILITY_AREAS = ['Calendar', 'Tasks', 'Files', 'Memory', 'Knowledge', 'Mail', 'Contacts'] as const
 export type UserCapabilityArea = (typeof USER_CAPABILITY_AREAS)[number]
 
-export const USER_CAPABILITY_STATUSES = ['active', 'approval-required', 'unavailable', 'safe-mode-disabled'] as const
+export const USER_CAPABILITY_STATUSES = ['active', 'approval-required', 'not-connected', 'unavailable', 'safe-mode-disabled'] as const
 export type UserCapabilityStatus = (typeof USER_CAPABILITY_STATUSES)[number]
 
 export interface ObjectiveView {
@@ -381,7 +381,8 @@ export interface WorkspaceSnapshotInput {
     readonly seq: number
   }[]
   readonly conversation: readonly { readonly kind: 'user' | 'assistant' | 'tool_call' | 'tool_result'; readonly text: string }[]
-  readonly integrationStatus: readonly { readonly capability: string; readonly available: boolean; readonly reason?: string }[]
+  readonly integrationStatus: readonly { readonly capability: string; readonly available: boolean; readonly configured?: boolean; readonly reason?: string; readonly provider?: string }[]
+  readonly autoExecuteCapabilities?: readonly string[]
   readonly registry: readonly {
     readonly owner: string
     readonly version: string

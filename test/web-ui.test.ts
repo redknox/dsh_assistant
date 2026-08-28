@@ -2281,6 +2281,23 @@ export function apply(ctx) {
     assert.match(ready, /data-control-plane="user-workspace"/)
     assert.doesNotMatch(ready, /reasoning_content|sk-secret|chain-of-thought/)
 
+    const governed = renderToStaticMarkup(createElement(MissionControlScreen, {
+      view: fixtureView({
+        capabilities: [{ area: 'Files', action: 'Manage files', status: 'approval-required' }],
+      }),
+      pane: 'today',
+      connected: true,
+      sending: false,
+      draft: '',
+      onDraft() {},
+      onSend() {},
+      onApprove() {},
+      onReject() {},
+      onRecovery() {},
+    }))
+    assert.match(governed, />CONFIRM</)
+    assert.doesNotMatch(governed, />APPROVAL</)
+
     const memory = renderToStaticMarkup(createElement(MissionControlScreen, {
       view: fixtureView({
         memory: [{ id: 'm1', topicKey: 'preferences', statement: 'Prefers concise summaries.', status: 'active', origin: 'conversation' }],

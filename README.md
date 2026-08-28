@@ -40,12 +40,19 @@ Required for AI (chmod 600, never git):
 mkdir -p ~/.config/tars-ng && chmod 700 ~/.config/tars-ng
 # DEEPSEEK_API_KEY=                            (required for a usable AI runtime)
 # DSH_ASSISTANT_GOOGLE_CALENDAR_ACCESS_TOKEN=  (OAuth access token; expires; not an API key)
+# DSH_ASSISTANT_FEISHU_MODE=cli                (host lark-cli user identity; Mail/Contacts read-only)
+# DSH_ASSISTANT_FEISHU_PROFILE=tars-ng         (dedicated least-privilege profile; this is the default)
+# DSH_ASSISTANT_FEISHU_CALENDAR_MODE=cli       (select Feishu as the Calendar provider)
 # GOOGLE_SEARCH_API_KEY=
 # GOOGLE_SEARCH_ENGINE_ID=                     (non-secret config)
 chmod 600 ~/.config/tars-ng/env
 ```
 
-`tars-ng doctor` reports missing **names** only. Soak LLM baseline is `deepseek-official` / `deepseek-v4-flash`, shipped with the package. Missing `DEEPSEEK_API_KEY` does not block `doctor`/`status`, but `tars-ng start` exits non-zero with `LLM not configured/unavailable` and does not enter the running state. Core start does not require Google credentials. Default Calendar is **unavailable**, not a realistic fixture. Live Calendar: `DSH_ASSISTANT_GOOGLE_CALENDAR_MODE=live` plus the access token. When the token expires, replace it; TARS-NG does not refresh OAuth in this release.
+`tars-ng doctor` reports missing **names** only. Soak LLM baseline is `deepseek-official` / `deepseek-v4-flash`, shipped with the package. Missing `DEEPSEEK_API_KEY` does not block `doctor`/`status`, but `tars-ng start` exits non-zero with `LLM not configured/unavailable` and does not enter the running state. Core start does not require Google credentials. Default Calendar is **unavailable**, not a realistic fixture. Live Calendar: `DSH_ASSISTANT_GOOGLE_CALENDAR_MODE=live` plus the access token. When the token expires, replace it; TARS-NG does not implement Google OAuth refresh in this release.
+
+Feishu Mail/Contacts are optional and read-only. `DSH_ASSISTANT_FEISHU_MODE=cli` enables allowlisted host `lark-cli` read commands under the authenticated user identity. Calls are pinned to `DSH_ASSISTANT_FEISHU_PROFILE` (default `tars-ng`) so the product does not inherit the default CLI application's broader authority. Credentials remain in the CLI credential store and are never passed to the Agent. Without this mode, these capabilities are `NOT LINKED` and do not degrade the core runtime.
+
+Feishu Calendar is selected explicitly with `DSH_ASSISTANT_FEISHU_CALENDAR_MODE=cli`. It uses the same dedicated profile and replaces the Calendar provider as one unit: agenda, event detail, and free/busy are read-only; event creation still runs only after the existing TARS-NG confirmation gate.
 
 Operator manual: [docs/operator.md](./docs/operator.md). Soak / feature freeze: [docs/soak.md](./docs/soak.md).
 

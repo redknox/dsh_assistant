@@ -19,6 +19,10 @@ export class IntegrationError extends Error {
 export interface Availability {
   readonly available: boolean
   readonly reason?: string
+  /** False means the optional integration was never connected, not that it failed. */
+  readonly configured?: boolean
+  /** Public provider label for operational status; never contains credentials or account ids. */
+  readonly provider?: string
 }
 
 export interface PageQuery {

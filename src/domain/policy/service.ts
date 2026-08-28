@@ -32,6 +32,10 @@ export class PolicyService {
     return [...this.tickets.values()]
   }
 
+  autoExecuteCapabilities(): readonly string[] {
+    return this.config.autoExecute.filter((capability) => this.levelFor(capability, 'execute') === 'L3')
+  }
+
   auditTrail(): readonly AuditRecord[] {
     return [...this.audit]
   }
