@@ -36,7 +36,7 @@ export const WORK_OBJECT_KINDS = [
 ] as const
 export type WorkObjectKind = (typeof WORK_OBJECT_KINDS)[number]
 
-export const USER_CAPABILITY_AREAS = ['Calendar', 'Tasks', 'Files', 'Memory', 'Knowledge', 'Mail', 'Contacts'] as const
+export const USER_CAPABILITY_AREAS = ['Calendar', 'Tasks', 'Files', 'Memory', 'Knowledge', 'Mail', 'Contacts', 'Web'] as const
 export type UserCapabilityArea = (typeof USER_CAPABILITY_AREAS)[number]
 
 export const USER_CAPABILITY_STATUSES = ['active', 'approval-required', 'not-connected', 'unavailable', 'safe-mode-disabled'] as const

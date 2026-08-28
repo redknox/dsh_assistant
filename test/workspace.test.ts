@@ -179,6 +179,34 @@ describe('TARS-NG mission-control workspace', () => {
     assert.equal(contacts?.advanced?.provider, 'feishu')
   })
 
+  it('projects governed Web Search from its live provider status', () => {
+    const registry = [{
+      owner: 'managed/web-search',
+      version: '0.1.0',
+      provenance: 'managed',
+      status: 'active',
+      capabilities: ['web.search'],
+      provider: 'deepseek',
+    }] as const
+    const disconnected = projectMissionControl(snapshot({
+      registry,
+      integrationStatus: [{ capability: 'web', available: false, configured: false, provider: 'deepseek' }],
+    }))
+    const connected = projectMissionControl(snapshot({
+      registry,
+      integrationStatus: [{ capability: 'web', available: true, configured: true, provider: 'deepseek' }],
+    }))
+
+    assert.deepEqual(disconnected.capabilities.find((item) => item.area === 'Web'), {
+      area: 'Web',
+      action: 'Search public sources',
+      status: 'not-connected',
+      advanced: { owner: 'managed/web-search', version: '0.1.0', provenance: 'managed', provider: 'deepseek' },
+    })
+    assert.equal(connected.capabilities.find((item) => item.area === 'Web')?.status, 'active')
+    assert.equal(connected.capabilities.some((item) => item.action.toLowerCase().includes('fetch')), false)
+  })
+
   it('D. calendar create is a first-class approval object', () => {
     const view = projectMissionControl(snapshot({
       pendingConfirmations: [{

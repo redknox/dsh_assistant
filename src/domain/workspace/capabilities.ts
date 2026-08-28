@@ -18,6 +18,7 @@ const CATALOG: readonly CatalogRow[] = [
   { area: 'Contacts', action: 'Find people', match: (id) => id.includes('contacts') },
   { area: 'Memory', action: 'Remember facts', match: (id) => id.includes('memory') },
   { area: 'Knowledge', action: 'Retrieve notes', match: (id) => id.includes('knowledge') },
+  { area: 'Web', action: 'Search public sources', match: (id) => id.includes('web') || id.includes('search') },
 ]
 
 function isWrite(id: string): boolean {

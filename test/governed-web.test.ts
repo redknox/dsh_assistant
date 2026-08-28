@@ -10,6 +10,8 @@ describe('governed web search', () => {
     try {
       assert.ok(control.ctx.tools.get('web_search'))
       assert.equal(control.ctx.tools.get('web_fetch'), undefined)
+      assert.equal(control.ctx.governedWeb.inspect().provider, 'deepseek')
+      assert.equal(control.ctx.governedWeb.inspect().configured, Boolean(process.env.DEEPSEEK_API_KEY?.trim()))
 
       const credential = await control.ctx.tools.execute({
         callId: CallId('web-secret-denial'),
@@ -41,6 +43,7 @@ describe('governed web search', () => {
     try {
       assert.equal(safe.ctx.tools.get('web_search'), undefined)
       assert.equal(safe.ctx.get('web'), undefined)
+      assert.equal(safe.ctx.get('governedWeb'), undefined)
     } finally {
       await safe.ctx.fiber.dispose()
     }

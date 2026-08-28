@@ -1,4 +1,4 @@
-import type { Context } from '@deepseek-ai/cordis'
+import { Service, type Context } from '@deepseek-ai/cordis'
 
 const MAX_QUERY_BYTES = 4 * 1024
 const SECRET_MATERIAL = /(?:bearer\s+[a-z0-9._~+/=-]{8,}|ya29\.[a-z0-9._-]+|sk-[a-z0-9_-]{8,}|(?:api[_-]?key|access[_-]?token|refresh[_-]?token|client[_-]?secret|authorization|password)\s*[:=]\s*\S+|-----BEGIN [A-Z ]*PRIVATE KEY-----)/i
@@ -6,7 +6,38 @@ const SECRET_MATERIAL = /(?:bearer\s+[a-z0-9._~+/=-]{8,}|ya29\.[a-z0-9._-]+|sk-[
 export const name = 'dsh-assistant-governed-web'
 export const inject = ['tools', 'systemPrompt']
 
-export function apply(ctx: Context): void {
+export interface GovernedWebStatus {
+  readonly available: boolean
+  readonly configured: boolean
+  readonly provider: 'deepseek'
+  readonly reason?: string
+}
+
+declare module '@deepseek-ai/cordis' {
+  interface Context {
+    governedWeb: GovernedWebStatusService
+  }
+}
+
+export class GovernedWebStatusService extends Service {
+  constructor(ctx: Context) {
+    super(ctx, 'governedWeb')
+  }
+
+  inspect(): GovernedWebStatus {
+    const configured = Boolean(process.env.DEEPSEEK_API_KEY?.trim())
+    return {
+      available: configured,
+      configured,
+      provider: 'deepseek',
+      ...(!configured ? { reason: 'DEEPSEEK_API_KEY is not configured' } : {}),
+    }
+  }
+}
+
+export async function apply(ctx: Context): Promise<void> {
+  await ctx.plugin(class extends GovernedWebStatusService {})
+
   ctx.systemPrompt.section({
     name: 'product:governed-web',
     order: 53,

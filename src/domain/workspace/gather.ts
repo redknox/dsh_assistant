@@ -94,7 +94,10 @@ export function gatherWorkspaceSnapshot(input: GatherWorkspaceInput): WorkspaceS
     toolEvents: agent ? toolEventsFromSession(agent.session.events) : [],
     conversation: agent ? conversationWithoutReasoning(agent.session.events) : [],
     executionLog: agent ? executionLogFromSession(agent.session.events) : [],
-    integrationStatus: Object.entries((ctx.get('integrations') as { hub: { status(): Record<string, { available: boolean; configured?: boolean; reason?: string; provider?: string }> } } | undefined)?.hub.status() ?? {})
+    integrationStatus: [
+      ...Object.entries((ctx.get('integrations') as { hub: { status(): Record<string, { available: boolean; configured?: boolean; reason?: string; provider?: string }> } } | undefined)?.hub.status() ?? {}),
+      ...webIntegrationStatus(ctx),
+    ]
       .map(([capability, availability]) => ({
         capability,
         available: availability.available,
@@ -177,6 +180,13 @@ export function gatherWorkspaceSnapshot(input: GatherWorkspaceInput): WorkspaceS
     ...(input.sessions ? { sessions: input.sessions } : {}),
     ...(input.approvalOrigins ? { approvalOrigins: input.approvalOrigins } : {}),
   }
+}
+
+function webIntegrationStatus(ctx: Context): readonly [string, { available: boolean; configured?: boolean; reason?: string; provider?: string }][] {
+  const status = (ctx.get('governedWeb') as {
+    inspect(): { available: boolean; configured: boolean; reason?: string; provider: string }
+  } | undefined)?.inspect()
+  return status ? [['web', status]] : []
 }
 
 function objectiveStatus(phase: NonNullable<NonNullable<WorkspaceSnapshotInput['taskControl']>['goal']>['phase']): ObjectiveView['status'] {
