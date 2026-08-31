@@ -16,10 +16,13 @@ import { AUTHORING_CONTRACT_STAMP, assertSupportedAuthoringContract, authoringCo
 import {
   CAPABILITY_SPECIFICATION_STAMP,
   capabilitySpecificationStamp,
+  compareCapabilitySpecifications,
   defineCapabilitySpecification,
   normalizeOperationalEffects,
+  reviseCapabilitySpecification,
   type CapabilitySpecification,
   type CapabilitySpecificationInput,
+  type CapabilitySpecificationPatch,
 } from './capability-specification.js'
 import { projectValidationDiagnostics } from './diagnostics.js'
 import { WorkbenchContractError, WorkbenchRepairRollbackError } from './errors.js'
@@ -102,6 +105,24 @@ export class WorkbenchService implements CandidateWorkbench {
     this.specifications.set(specification.id, specification)
     this.flush()
     return specification
+  }
+
+  reviseSpecification(specificationId: string, patch: CapabilitySpecificationPatch): CapabilitySpecification {
+    const previous = this.inspectSpecification(specificationId)
+    if ([...this.specifications.values()].some((item) => item.supersedesId === previous.id)) {
+      throw new WorkbenchContractError(`capability specification ${previous.id} is already superseded; revise its successor`)
+    }
+    const specification = reviseCapabilitySpecification(`spec-${this.nextSpecification++}`, previous, patch)
+    this.specifications.set(specification.id, specification)
+    this.flush()
+    return specification
+  }
+
+  compareSpecifications(fromSpecificationId: string, toSpecificationId: string) {
+    return compareCapabilitySpecifications(
+      this.inspectSpecification(fromSpecificationId),
+      this.inspectSpecification(toSpecificationId),
+    )
   }
 
   inspectSpecification(specificationId: string): CapabilitySpecification {
@@ -326,6 +347,15 @@ export class WorkbenchService implements CandidateWorkbench {
   list(input: WorkbenchListInput = {}): WorkbenchListView {
     const limit = boundListLimit(input.limit)
     const cursor = parseListCursor(input.cursor)
+    const specifications = [...this.specifications.values()].map((specification) => ({
+      id: specification.id,
+      revision: specification.revision,
+      supersedesId: specification.supersedesId,
+      capability: specification.capability,
+      goal: specification.goal,
+      status: specification.status,
+      digest: specification.digest,
+    }))
     const plans = [...this.plans.values()].map((plan) => ({
       planId: plan.id,
       specificationId: plan.specificationId,
@@ -355,17 +385,21 @@ export class WorkbenchService implements CandidateWorkbench {
         leftover: view.leftover,
       }
     })
+    const specificationSlice = specifications.slice(cursor.specifications, cursor.specifications + limit)
     const planSlice = plans.slice(cursor.plans, cursor.plans + limit)
     const candidateSlice = candidates.slice(cursor.candidates, cursor.candidates + limit)
+    const nextSpecifications = cursor.specifications + limit
     const nextPlans = cursor.plans + limit
     const nextCandidates = cursor.candidates + limit
-    const next = nextPlans < plans.length || nextCandidates < candidates.length
+    const next = nextSpecifications < specifications.length || nextPlans < plans.length || nextCandidates < candidates.length
       ? encodeListCursor({
+        specifications: Math.min(nextSpecifications, specifications.length),
         plans: Math.min(nextPlans, plans.length),
         candidates: Math.min(nextCandidates, candidates.length),
       })
       : undefined
     return {
+      specifications: specificationSlice,
       plans: planSlice,
       candidates: candidateSlice,
       ...(next === undefined ? {} : { nextCursor: next }),

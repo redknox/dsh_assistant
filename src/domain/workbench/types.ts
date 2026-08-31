@@ -3,7 +3,12 @@ import type { EligibilityResult } from '../governance/types.js'
 import type { ResolutionKind, ResolutionReview } from '../resolution/types.js'
 import type { ReviewReport, ReviewState } from '../review/types.js'
 import type { AuthoringContractV1 } from './authoring-contract.js'
-import type { CapabilitySpecification, CapabilitySpecificationInput } from './capability-specification.js'
+import type {
+  CapabilitySpecification,
+  CapabilitySpecificationDiff,
+  CapabilitySpecificationInput,
+  CapabilitySpecificationPatch,
+} from './capability-specification.js'
 import type { ValidationDiagnosticsView } from './diagnostics.js'
 import type { WorkbenchListView, WorkbenchStep } from './listing.js'
 
@@ -135,6 +140,8 @@ export interface WorkbenchServiceOptions {
 
 export interface CandidateWorkbench {
   defineSpecification(input: CapabilitySpecificationInput): CapabilitySpecification
+  reviseSpecification(specificationId: string, patch: CapabilitySpecificationPatch): CapabilitySpecification
+  compareSpecifications(fromSpecificationId: string, toSpecificationId: string): CapabilitySpecificationDiff
   inspectSpecification(specificationId: string): CapabilitySpecification
   plan(input: { capability: string; need: string; behavior?: string } | { specificationId: string }): WorkbenchPlanView
   rememberPlan(review: ResolutionReview): WorkbenchPlanView

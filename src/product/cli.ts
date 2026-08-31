@@ -758,6 +758,8 @@ export async function runProductCli(
           surface,
           recoveryRoot: booted.recoveryRoot,
           settings: new ProductSettings(layout.envFile),
+          workbench: booted.ctx.candidateWorkbench,
+          workbenchMutable: !booted.diagnostics.safeMode,
           ...(sessionHost ? { sessionHost } : {}),
           diagnostics: { persistence: booted.diagnostics.persistence, reasons: booted.diagnostics.reasons },
           runtimeControl: {

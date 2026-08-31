@@ -36,7 +36,7 @@ export function registerWorkbenchTools(
 
   const disposeListWorkbench = tools.register(defineTool({
     name: 'list_workbench',
-    description: 'List host-owned plans and candidates after context loss. No paths or source. Pagination is bounded.',
+    description: 'List host-owned Capability Specifications, Resolution Plans, and Candidates after context loss. No paths or source. Pagination is bounded.',
     parameters: {
       limit: { type: 'number' },
       cursor: { type: 'string' },
@@ -90,6 +90,22 @@ export function registerWorkbenchTools(
     },
   }))
 
+  const disposeCompareSpecifications = tools.register(defineTool({
+    name: 'compare_capability_specifications',
+    description: 'Compare two immutable revisions of the same Capability Specification. Read-only.',
+    parameters: {
+      fromSpecificationId: { type: 'string', required: true },
+      toSpecificationId: { type: 'string', required: true },
+    },
+    output: textOutput(),
+    async execute(args) {
+      return JSON.stringify(workbench.compareSpecifications(
+        String(args.fromSpecificationId),
+        String(args.toSpecificationId),
+      ))
+    },
+  }))
+
   if (options.inspectOnly) {
     return () => {
       disposeInspectContract()
@@ -98,53 +114,46 @@ export function registerWorkbenchTools(
       disposeInspect()
       disposeInspectReview()
       disposeInspectSpecification()
+      disposeCompareSpecifications()
     }
   }
 
 
-  const strings = { type: 'array' as const, items: { type: 'string' as const } }
   const disposeDefineSpecification = tools.register(defineTool({
     name: 'define_capability_specification',
     description: 'Define the host-owned business intent before resolution or code. A ready specification needs at least one business rule and one concrete acceptance example. Permissions must name exact host operations.',
     parameters: {
       capability: { type: 'string', required: true },
+      ...specificationPatchParameters(),
       goal: { type: 'string', required: true },
-      nonGoals: strings,
-      inputs: {
-        type: 'array' as const,
-        items: {
-          type: 'object' as const,
-          additionalProperties: false,
-          properties: {
-            name: { type: 'string' as const },
-            description: { type: 'string' as const },
-            required: { type: 'boolean' as const },
-          },
-        },
-      },
-      businessRules: strings,
-      permissions: strings,
-      effects: manifestParameters().effects,
-      acceptanceExamples: {
-        type: 'array' as const,
-        items: {
-          type: 'object' as const,
-          additionalProperties: false,
-          properties: {
-            name: { type: 'string' as const },
-            given: strings,
-            when: { type: 'string' as const },
-            then: strings,
-          },
-        },
-      },
-      unresolved: strings,
     },
     output: textOutput(),
     async execute(args) {
       return JSON.stringify(workbench.defineSpecification({
         capability: String(args.capability),
         goal: String(args.goal),
+        nonGoals: asStringList(args.nonGoals),
+        inputs: parseSpecificationInputs(args.inputs),
+        businessRules: asStringList(args.businessRules),
+        permissions: asStringList(args.permissions),
+        effects: parseEffects(args.effects),
+        acceptanceExamples: parseAcceptanceExamples(args.acceptanceExamples),
+        unresolved: asStringList(args.unresolved),
+      }))
+    },
+  }))
+
+  const disposeReviseSpecification = tools.register(defineTool({
+    name: 'revise_capability_specification',
+    description: 'Create a new immutable revision from an explicit Capability Specification. Omitted fields are inherited; the previous revision and its Candidate bindings remain unchanged.',
+    parameters: {
+      specificationId: { type: 'string', required: true },
+      ...specificationPatchParameters(),
+    },
+    output: textOutput(),
+    async execute(args) {
+      return JSON.stringify(workbench.reviseSpecification(String(args.specificationId), {
+        goal: optionalString(args.goal),
         nonGoals: asStringList(args.nonGoals),
         inputs: parseSpecificationInputs(args.inputs),
         businessRules: asStringList(args.businessRules),
@@ -324,7 +333,9 @@ export function registerWorkbenchTools(
     disposeInspect()
     disposeInspectReview()
     disposeInspectSpecification()
+    disposeCompareSpecifications()
     disposeDefineSpecification()
+    disposeReviseSpecification()
     disposePlan()
     disposeCreate()
     disposeScaffold()
@@ -339,11 +350,56 @@ export function registerWorkbenchTools(
   }
 }
 
+function specificationPatchParameters() {
+  const strings = { type: 'array' as const, items: { type: 'string' as const } }
+  return {
+    goal: { type: 'string' as const },
+    nonGoals: strings,
+    inputs: {
+      type: 'array' as const,
+      items: {
+        type: 'object' as const,
+        additionalProperties: false,
+        properties: {
+          name: { type: 'string' as const },
+          description: { type: 'string' as const },
+          required: { type: 'boolean' as const },
+        },
+      },
+    },
+    businessRules: strings,
+    permissions: strings,
+    effects: manifestParameters().effects,
+    acceptanceExamples: {
+      type: 'array' as const,
+      items: {
+        type: 'object' as const,
+        additionalProperties: false,
+        properties: {
+          name: { type: 'string' as const },
+          given: strings,
+          when: { type: 'string' as const },
+          then: strings,
+        },
+      },
+    },
+    unresolved: strings,
+  }
+}
+
+function optionalString(value: unknown): string | undefined {
+  return typeof value === 'string' ? value : undefined
+}
+
 function parseSpecificationInputs(value: unknown) {
   if (!Array.isArray(value)) return undefined
   return value.map((item) => {
     const input = item as Record<string, unknown>
-    return { name: String(input.name), description: String(input.description), required: input.required === true }
+    return {
+      name: typeof input.name === 'string' ? input.name : '',
+      description: typeof input.description === 'string' ? input.description : '',
+      required: input.required === true,
+    }
   })
 }
 
@@ -352,9 +408,9 @@ function parseAcceptanceExamples(value: unknown) {
   return value.map((item) => {
     const example = item as Record<string, unknown>
     return {
-      name: String(example.name),
+      name: typeof example.name === 'string' ? example.name : '',
       given: asStringList(example.given) ?? [],
-      when: String(example.when),
+      when: typeof example.when === 'string' ? example.when : '',
       then: asStringList(example.then) ?? [],
     }
   })

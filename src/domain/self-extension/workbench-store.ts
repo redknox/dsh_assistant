@@ -113,6 +113,20 @@ export function parseWorkbenchFile(parsed: unknown): WorkbenchFile {
   }
   const plans = parsed.plans.map((item, index) => parsePlan(item, index, specifications))
   const specificationById = new Map(specifications.map((item) => [item.id, item]))
+  const superseded = new Set<string>()
+  for (const specification of specifications) {
+    if (specification.revision === 1) continue
+    const previous = specification.supersedesId === undefined ? undefined : specificationById.get(specification.supersedesId)
+    if (!previous
+      || previous.source !== 'explicit'
+      || previous.capability !== specification.capability
+      || previous.revision + 1 !== specification.revision
+      || specification.source !== 'explicit'
+      || superseded.has(previous.id)) {
+      throw new PersistenceIntegrityError(`workbench capability specification ${specification.id} has invalid revision lineage`)
+    }
+    superseded.add(previous.id)
+  }
   for (const plan of plans) {
     const specification = specificationById.get(plan.specificationId)
     if (!specification || specification.digest !== plan.specificationDigest) {

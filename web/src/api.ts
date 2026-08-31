@@ -1,12 +1,20 @@
 import type { ActivationCard, ApprovalCard, MissionControlView, RollbackCard, SkillProjection, UserPluginView, WorkObjectKind } from '../../src/domain/workspace/types'
 import type { SettingsSnapshot, SettingsUpdate } from '../../src/product/settings-types'
 import type { FileReferenceCandidate } from '@deepseek-ai/dsh-file-reference'
+import type {
+  CapabilitySpecificationDiffView,
+  CapabilitySpecificationRevisionInput,
+  CapabilitySpecificationView,
+  WorkbenchSnapshotView,
+} from '../../src/product/web-ui-workbench-types'
 
 export interface UiEnvelope {
   readonly view: MissionControlView
   readonly webUi: string
   readonly acknowledgement?: { readonly text: string }
 }
+
+export type WorkbenchSnapshot = WorkbenchSnapshotView
 
 const include: RequestInit = { credentials: 'include', cache: 'no-store' }
 
@@ -62,6 +70,42 @@ export async function saveSettings(input: SettingsUpdate): Promise<SettingsSnaps
   })
   const body = await response.json() as SettingsSnapshot & { error?: string }
   if (!response.ok) throw new Error(body.error ?? `settings update failed (${response.status})`)
+  return body
+}
+
+export async function fetchWorkbench(): Promise<WorkbenchSnapshot> {
+  return parseJson<WorkbenchSnapshot>(await fetch('/api/workbench', include), 'workbench request')
+}
+
+export async function fetchCapabilitySpecification(id: string): Promise<CapabilitySpecificationView> {
+  return parseJson<CapabilitySpecificationView>(
+    await fetch(`/api/workbench/specification?id=${encodeURIComponent(id)}`, include),
+    'capability specification request',
+  )
+}
+
+export async function compareCapabilitySpecificationRevisions(from: string, to: string): Promise<CapabilitySpecificationDiffView> {
+  return parseJson<CapabilitySpecificationDiffView>(
+    await fetch(`/api/workbench/compare?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`, include),
+    'capability specification comparison',
+  )
+}
+
+export async function reviseCapabilitySpecification(
+  specificationId: string,
+  patch: CapabilitySpecificationRevisionInput,
+): Promise<CapabilitySpecificationView> {
+  return parseJson<CapabilitySpecificationView>(await fetch('/api/workbench/specification/revise', {
+    ...include,
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ specificationId, patch }),
+  }), 'capability specification revision')
+}
+
+async function parseJson<T>(response: Response, label: string): Promise<T> {
+  const body = await response.json() as T & { readonly error?: string }
+  if (!response.ok) throw new Error(body.error ?? `${label} failed (${response.status})`)
   return body
 }
 

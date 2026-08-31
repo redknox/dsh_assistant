@@ -16,6 +16,8 @@ import type { SkillControl } from './useSkillControl'
 import type { WorkspaceControl } from './useWorkspaceControl'
 import type { SettingsControl } from './useSettingsControl'
 import { answerTaskQuestion, controlGoal, controlPlan } from './api'
+import { CapabilitySpecificationsWorkspace } from './CapabilitySpecificationsWorkspace'
+import type { CapabilitySpecificationsControl } from './useCapabilitySpecifications'
 
 type CompactSurface = 'conversation' | 'navigation' | 'operations'
 
@@ -27,6 +29,7 @@ export interface MissionControlScreenProps {
   readonly workspace: WorkspaceControl
   readonly skill: SkillControl
   readonly settings: SettingsControl
+  readonly specifications: CapabilitySpecificationsControl
   readonly navigation: {
     readonly pane: WorkspacePane
     readonly navigate: (pane: WorkspacePane) => void
@@ -199,6 +202,8 @@ export function MissionControlScreen(input: MissionControlScreenProps) {
           <ExecutionLogWorkspace view={view} />
         ) : pane === 'settings' ? (
           <SettingsWorkspace control={input.settings} locked={locked} />
+        ) : pane === 'specifications' ? (
+          <CapabilitySpecificationsWorkspace control={input.specifications} locked={locked} />
         ) : (
         <ConversationWorkspace
           view={view}

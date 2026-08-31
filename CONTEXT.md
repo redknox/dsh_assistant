@@ -8,6 +8,10 @@ TARS-NG is a governed product layer for constructing and operating AI capabiliti
 A host-owned, user-readable statement of a capability's intended outcome, boundaries, evidence needs, permissions, effects, and acceptance examples before implementation.
 _Avoid_: Requirements blob, plugin prompt, implementation plan
 
+**Capability Specification Revision**:
+An immutable successor to one Capability Specification; it preserves the prior revision and receives its own identity and digest.
+_Avoid_: Edit, overwrite, latest spec
+
 **Resolution Plan**:
 A host-owned decision to reuse, configure, evolve, adopt, provide, or create a capability from one exact Capability Specification.
 _Avoid_: Plan, coding plan

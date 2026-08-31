@@ -114,7 +114,9 @@ A domain professional should not need to ask for a TypeScript plugin. They shoul
 
 The first slice is now implemented: `define_capability_specification` creates an immutable, host-owned specification with goal, boundaries, inputs, business rules, exact permissions/effects, acceptance examples, and unresolved questions. A specification with unresolved questions cannot enter Capability Resolution. The resulting Resolution Plan references its exact digest, and a created Candidate contains a read-only `capability-specification.json` snapshot that is included in validation, review, and approval digest evidence.
 
-Legacy concise resolution calls remain temporarily supported for compatibility, but the governed construction path is Specification → Resolution Plan → Candidate. The remaining product work is a domain-facing editor, specification revision/comparison, and executable evaluation fixtures derived from acceptance examples.
+Specifications are immutable. `revise_capability_specification` creates a successor revision without changing prior Resolution Plans or Candidate bindings, while `compare_capability_specifications` exposes a structured business-level diff before the new revision is selected for Resolution.
+
+Legacy concise resolution calls remain temporarily supported for compatibility, but the governed construction path is Specification → Resolution Plan → Candidate. The remaining product work is a domain-facing editor and executable evaluation fixtures derived from acceptance examples.
 
 ### 3. Host-rendered domain UI
 

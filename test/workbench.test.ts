@@ -168,12 +168,46 @@ describe('candidate workbench', () => {
       )
       assert.equal((await tool(ctx, 'validate_candidate', { candidateId: candidate.id })).isError, true)
 
+      const revised = parse(await tool(ctx, 'revise_capability_specification', {
+        specificationId: specification.id,
+        goal: 'Echo supplied text through the approved host broker with whitespace preserved.',
+        businessRules: ['Return exactly the supplied text, including surrounding whitespace.'],
+      }))
+      assert.equal(revised.revision, 2)
+      assert.equal(revised.supersedesId, specification.id)
+      assert.notEqual(revised.digest, specification.digest)
+      assert.equal((await tool(ctx, 'revise_capability_specification', {
+        specificationId: specification.id,
+        goal: 'Attempt to overwrite history.',
+      })).isError, true)
+      const comparison = parse(await tool(ctx, 'compare_capability_specifications', {
+        fromSpecificationId: specification.id,
+        toSpecificationId: revised.id,
+      }))
+      assert.deepEqual(comparison.changedFields, ['goal', 'businessRules'])
+      const revisedPlan = parse(await tool(ctx, 'plan_capability_change', { specificationId: revised.id }))
+      assert.equal((revisedPlan.specification as { id: string }).id, revised.id)
+      assert.equal((ctx.candidateWorkbench.inspect(String(candidate.id)).specification as { id: string }).id, specification.id)
+      const listed = parse(await tool(ctx, 'list_workbench', { limit: 50 }))
+      assert.ok((listed.specifications as { id: string }[]).some((item) => item.id === revised.id))
+
       const unresolved = parse(await tool(ctx, 'define_capability_specification', {
         capability: 'r0.spec.unclear',
         goal: 'Do something not yet specified.',
       }))
       assert.equal(unresolved.status, 'needs-clarification')
       assert.equal((await tool(ctx, 'plan_capability_change', { specificationId: unresolved.id })).isError, true)
+      const clarified = parse(await tool(ctx, 'revise_capability_specification', {
+        specificationId: unresolved.id,
+        businessRules: ['Return a bounded textual result.'],
+        acceptanceExamples: [{
+          name: 'bounded result',
+          given: ['A valid request.'],
+          when: 'The capability runs.',
+          then: ['A bounded textual result is returned.'],
+        }],
+      }))
+      assert.equal(clarified.status, 'ready')
     } finally {
       await ctx.fiber.dispose()
     }
@@ -1060,7 +1094,20 @@ describe('candidate workbench', () => {
     let planId = ''
     let candidateId = ''
     let parentDigest = ''
+    let specificationId = ''
+    let revisedSpecificationId = ''
     try {
+      const specification = first.ctx.candidateWorkbench.defineSpecification({
+        capability: 'r0.persisted.spec',
+        goal: 'Persist a specification.',
+        businessRules: ['Preserve the exact content.'],
+        acceptanceExamples: [{ name: 'restart', given: ['A saved specification.'], when: 'The host restarts.', then: ['The revision remains inspectable.'] }],
+      })
+      const revised = first.ctx.candidateWorkbench.reviseSpecification(specification.id, {
+        goal: 'Persist an immutable specification revision.',
+      })
+      specificationId = specification.id
+      revisedSpecificationId = revised.id
       candidateId = authorR0(first.ctx)
       planId = first.ctx.candidateWorkbench.inspect(candidateId).planId ?? ''
       first.ctx.candidateWorkbench.validate(candidateId)
@@ -1080,6 +1127,12 @@ describe('candidate workbench', () => {
       assert.equal(plan.review.capability, 'r0.workbench.ping')
       assert.equal(plan.review.kind, 'new-plugin')
       assert.notEqual(plan.review.registryFacts, undefined)
+      const revised = second.ctx.candidateWorkbench.inspectSpecification(revisedSpecificationId)
+      assert.equal(revised.supersedesId, specificationId)
+      assert.deepEqual(
+        second.ctx.candidateWorkbench.compareSpecifications(specificationId, revisedSpecificationId).changedFields,
+        ['goal'],
+      )
       const snapshot = gatherWorkspaceSnapshot({ ctx: second.ctx, sessionId: 'wb-restart' })
       const projected = projectMissionControl(snapshot).candidates?.find((item) => item.id === candidateId)
       assert.equal(projected?.owner, 'generated/r0-workbench-ping')

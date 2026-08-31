@@ -7,6 +7,7 @@ import { useMissionControlRuntime } from './useMissionControlRuntime'
 import { useSkillControl } from './useSkillControl'
 import { useWorkspaceControl } from './useWorkspaceControl'
 import { useSettingsControl } from './useSettingsControl'
+import { useCapabilitySpecifications } from './useCapabilitySpecifications'
 import { workspacePaneFromHash, workspacePaneHash } from './workspaceRoute'
 
 export { MissionControlScreen } from './MissionControlScreen'
@@ -19,6 +20,7 @@ export function App() {
   const workspace = useWorkspaceControl(runtime, conversation)
   const [pane, setPane] = useState<WorkspacePane>(() => workspacePaneFromHash(globalThis.location?.hash))
   const settings = useSettingsControl(pane === 'settings')
+  const specifications = useCapabilitySpecifications(pane === 'specifications')
 
   useEffect(() => {
     const sync = () => { setPane(workspacePaneFromHash(globalThis.location?.hash)) }
@@ -48,6 +50,7 @@ export function App() {
       workspace={workspace}
       skill={skillControl}
       settings={settings}
+      specifications={specifications}
       navigation={{ pane, navigate }}
     />
   )

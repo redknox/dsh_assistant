@@ -15,6 +15,12 @@ export class CandidateWorkbenchService extends Service implements CandidateWorkb
   }
 
   defineSpecification(input: Parameters<CandidateWorkbench['defineSpecification']>[0]) { return this.store.defineSpecification(input) }
+  reviseSpecification(specificationId: string, patch: Parameters<CandidateWorkbench['reviseSpecification']>[1]) {
+    return this.store.reviseSpecification(specificationId, patch)
+  }
+  compareSpecifications(fromSpecificationId: string, toSpecificationId: string) {
+    return this.store.compareSpecifications(fromSpecificationId, toSpecificationId)
+  }
   inspectSpecification(specificationId: string) { return this.store.inspectSpecification(specificationId) }
   plan(input: Parameters<CandidateWorkbench['plan']>[0]) { return this.store.plan(input) }
   rememberPlan(review: Parameters<CandidateWorkbench['rememberPlan']>[0]) { return this.store.rememberPlan(review) }
@@ -47,7 +53,7 @@ export interface WorkbenchPluginConfig extends WorkbenchServiceOptions {
 }
 
 export const WORKBENCH_CONVERSATION_GUIDANCE = [
-  'When the user asks to add a missing capability: define_capability_specification first, clarify unresolved questions, then resolve first with plan_capability_change and its specificationId.',
+  'When the user asks to add a missing capability: define_capability_specification first, clarify unresolved questions with immutable revisions, compare revisions when useful, then resolve first with plan_capability_change and the chosen specificationId.',
   'Prefer reuse, configure, or evolve an existing owner before new-plugin.',
   'Use Candidate Workbench tools. Read inspect_authoring_contract before scaffolding.',
   'Use scaffold_candidate, then bounded edits, then inspect_validation_diagnostics.',

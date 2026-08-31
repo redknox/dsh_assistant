@@ -22,6 +22,8 @@ import { WebUiHttpTransport } from './web-ui-http.js'
 import type { ProductSettings } from './settings.js'
 import { handleWebUiSettingsRequest } from './web-ui-settings.js'
 import { handleWebUiTaskControlRequest } from './web-ui-task-control.js'
+import { handleWebUiWorkbenchRequest } from './web-ui-workbench.js'
+import type { CandidateWorkbench } from '../domain/workbench/index.js'
 
 export type { WebUiRuntimeControl } from './web-ui-runtime-control.js'
 
@@ -33,6 +35,9 @@ export interface WebUiServerOptions extends WebUiListenOptions {
   readonly runtimeControl?: WebUiRuntimeControl
   readonly sessionHost?: LiveSessionHost
   readonly settings?: ProductSettings
+  readonly workbench?: Pick<CandidateWorkbench,
+    'list' | 'inspectSpecification' | 'defineSpecification' | 'reviseSpecification' | 'compareSpecifications'>
+  readonly workbenchMutable?: boolean
 }
 
 export interface WebUiServer {
@@ -163,6 +168,30 @@ export function startWebUiServer(options: WebUiServerOptions): Promise<WebUiServ
       if (req.method === 'GET' && requestUrl.pathname === '/api/session-search' && !transport.sessionTrusted(req.headers.cookie)) {
         sendJson(res, 403, { error: 'untrusted session' })
         return
+      }
+      if (requestUrl.pathname.startsWith('/api/workbench')) {
+        if (!transport.sessionTrusted(req.headers.cookie)) {
+          sendJson(res, 403, { error: 'untrusted session' })
+          return
+        }
+        if (!options.workbench) {
+          sendJson(res, 503, { error: 'workbench-unavailable' })
+          return
+        }
+        const workbench = await handleWebUiWorkbenchRequest({
+          method: req.method,
+          pathname: requestUrl.pathname,
+          query: (name) => requestUrl.searchParams.get(name) ?? undefined,
+          readJson: () => transport.readJson(req),
+        }, {
+          workbench: options.workbench,
+          mutable: options.workbenchMutable === true,
+        })
+        if (workbench) {
+          sendJson(res, workbench.status, workbench.body)
+          if (workbench.broadcast) broadcast()
+          return
+        }
       }
       const taskControl = await handleWebUiTaskControlRequest({
         method: req.method,

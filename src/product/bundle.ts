@@ -102,6 +102,7 @@ export const SAFE_MODE_TOOL_NAMES = [
   'inspect_candidate',
   'inspect_candidate_review',
   'inspect_capability_specification',
+  'compare_capability_specifications',
   'inspect_validation_diagnostics',
   'inspect_skill',
 ] as const
@@ -133,6 +134,7 @@ export const PRODUCT_TOOL_NAMES = [
   'files_delete',
   'confirm_action',
   'define_capability_specification',
+  'revise_capability_specification',
   'plan_capability_change',
   'create_candidate',
   'scaffold_candidate',
@@ -149,5 +151,6 @@ export const PRODUCT_TOOL_NAMES = [
   'review_candidate',
   'inspect_candidate_review',
   'inspect_capability_specification',
+  'compare_capability_specifications',
   'repair_candidate',
 ] as const
