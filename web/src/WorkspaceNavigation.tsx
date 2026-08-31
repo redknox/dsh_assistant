@@ -2,7 +2,7 @@ import React from 'react'
 import type { MissionControlView } from '../../src/domain/workspace/types'
 import { Glyph } from './icons'
 
-export type WorkspacePane = 'today' | 'extensions' | 'specifications' | 'memory' | 'logs' | 'settings'
+export type WorkspacePane = 'today' | 'expense-review' | 'extensions' | 'specifications' | 'memory' | 'logs' | 'settings'
 
 export interface WorkspaceNavigationActions {
   readonly navigate: (pane: WorkspacePane) => void
@@ -38,6 +38,15 @@ export function WorkspaceNavigation(props: {
           onClick={() => props.actions.navigate('today')}
         >
           <span className="control-lamp" aria-hidden="true" /><Glyph name="today" /><span>TODAY</span>
+        </button>
+        <button
+          type="button"
+          className={`nav-item${props.pane === 'expense-review' ? ' nav-item--active' : ''}`}
+          data-nav="expense-review"
+          aria-current={props.pane === 'expense-review' ? 'page' : undefined}
+          onClick={() => props.actions.navigate('expense-review')}
+        >
+          <span className="control-lamp" aria-hidden="true" /><Glyph name="shield" /><span>EXPENSE REVIEW</span>
         </button>
         <span className="nav-item nav-item--idle" aria-disabled="true" title="Calendar management is not available in this soak">
           <span className="control-lamp" aria-hidden="true" /><Glyph name="calendar" /><span>CALENDAR</span>

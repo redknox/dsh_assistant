@@ -95,6 +95,17 @@ export function MissionControlScreen(props: LegacyMissionControlScreenProps) {
         change() {},
         saveRevision() {},
       }}
+      expenseReview={{
+        draft: {
+          claimId: '', entity: '', employee: '', category: 'Travel', amount: 0,
+          currency: 'CNY', receiptAttached: false, purpose: '',
+        },
+        loading: false,
+        running: false,
+        load() {},
+        change() {},
+        submit() {},
+      }}
       navigation={{ pane: props.pane ?? 'today', navigate() {} }}
     />
   )

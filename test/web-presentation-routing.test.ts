@@ -7,6 +7,7 @@ describe('Web UI presentation routing', () => {
   it('maps canonical workspace hashes and preserves the conversations alias', () => {
     assert.equal(workspacePaneFromHash('#today'), 'today')
     assert.equal(workspacePaneFromHash('#extensions'), 'extensions')
+    assert.equal(workspacePaneFromHash('#expense-review'), 'expense-review')
     assert.equal(workspacePaneFromHash('#memory'), 'memory')
     assert.equal(workspacePaneFromHash('#logs'), 'logs')
     assert.equal(workspacePaneFromHash('#settings'), 'settings')
@@ -20,6 +21,7 @@ describe('Web UI presentation routing', () => {
     assert.equal(workspacePaneHash('today'), '#today')
     assert.equal(workspacePaneHash('memory'), '#memory')
     assert.equal(workspacePaneHash('extensions'), '#extensions')
+    assert.equal(workspacePaneHash('expense-review'), '#expense-review')
     assert.equal(workspacePaneHash('logs'), '#logs')
     assert.equal(workspacePaneHash('settings'), '#settings')
     assert.equal(workspacePaneHash('specifications'), '#specifications')

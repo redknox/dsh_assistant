@@ -52,6 +52,7 @@ import {
 import { catalogBindingOf, inspectSessionCatalog, inspectSessionJournal, migrateSessionCatalogProfileBinding, SessionCatalog, SessionCatalogError, type CatalogJournal } from './session-catalog.js'
 import { LiveSessionHost } from './session-lifecycle.js'
 import { attachWebUiBroadcast, startWebUiServer, type WebUiServer } from './web-ui-server.js'
+import { ExpenseRiskReviewModule } from '../domain/expense-review/index.js'
 
 export interface ProductCliOptions {
   readonly command: string
@@ -760,6 +761,7 @@ export async function runProductCli(
           settings: new ProductSettings(layout.envFile),
           workbench: booted.ctx.candidateWorkbench,
           workbenchMutable: !booted.diagnostics.safeMode,
+          expenseReview: new ExpenseRiskReviewModule(booted.ctx.capabilityRegistry, booted.ctx.tools),
           ...(sessionHost ? { sessionHost } : {}),
           diagnostics: { persistence: booted.diagnostics.persistence, reasons: booted.diagnostics.reasons },
           runtimeControl: {

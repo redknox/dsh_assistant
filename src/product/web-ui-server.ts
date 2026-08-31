@@ -24,6 +24,8 @@ import { handleWebUiSettingsRequest } from './web-ui-settings.js'
 import { handleWebUiTaskControlRequest } from './web-ui-task-control.js'
 import { handleWebUiWorkbenchRequest } from './web-ui-workbench.js'
 import type { CandidateWorkbench } from '../domain/workbench/index.js'
+import type { ExpenseRiskReviewModule } from '../domain/expense-review/index.js'
+import { handleWebUiExpenseReviewRequest } from './web-ui-expense-review.js'
 
 export type { WebUiRuntimeControl } from './web-ui-runtime-control.js'
 
@@ -38,6 +40,7 @@ export interface WebUiServerOptions extends WebUiListenOptions {
   readonly workbench?: Pick<CandidateWorkbench,
     'list' | 'inspectSpecification' | 'inspectSpecificationEvaluation' | 'defineSpecification' | 'reviseSpecification' | 'compareSpecifications'>
   readonly workbenchMutable?: boolean
+  readonly expenseReview?: Pick<ExpenseRiskReviewModule, 'inspect' | 'review'>
 }
 
 export interface WebUiServer {
@@ -192,6 +195,23 @@ export function startWebUiServer(options: WebUiServerOptions): Promise<WebUiServ
           if (workbench.broadcast) broadcast()
           return
         }
+      }
+      if (requestUrl.pathname === '/api/expense-review') {
+        if (!transport.sessionTrusted(req.headers.cookie)) {
+          sendJson(res, 403, { error: 'untrusted session' })
+          return
+        }
+        if (!options.expenseReview) {
+          sendJson(res, 503, { error: 'expense-review-unavailable' })
+          return
+        }
+        const expenseReview = await handleWebUiExpenseReviewRequest({
+          method: req.method,
+          pathname: requestUrl.pathname,
+          readJson: () => transport.readJson(req),
+        }, options.expenseReview)
+        if (expenseReview) sendJson(res, expenseReview.status, expenseReview.body)
+        return
       }
       const taskControl = await handleWebUiTaskControlRequest({
         method: req.method,

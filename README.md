@@ -128,6 +128,7 @@ See [ARCHITECTURE.md](./ARCHITECTURE.md) for layers. See [ENGINEERING.md](./ENGI
 | Capability Registry / Resolution / Discovery | no | **Verified** | See docs/capability-*.md |
 | Candidate workspace + reliability + independent review | no | **Verified** | `review-complete` is not approval |
 | Capability Evaluation fixtures | no | **Verified** by `test/capability-evaluation.test.ts` | Exact JSON input/output, pure single-tool Candidates, OS-isolated and digest-bound; not review or approval |
+| Expense Risk Review workspace | no | **Verified** by `test/expense-review.test.ts` and `test/expense-review-ui.test.tsx` | Host-rendered decision support over one active `finance.expense-risk.review` capability; no approval or posting authority |
 | Runtime Context (Profile / Workspace / Session) | yes (product start) | **Implemented** | [docs/runtime-context.md](./docs/runtime-context.md); packaged seal [docs/v0.4.0-seal.md](./docs/v0.4.0-seal.md) |
 | Topic conversations / Session Catalog | yes (product start) | **Implemented** | [docs/session-catalog.md](./docs/session-catalog.md) |
 | Generated authoring contract `generated-extension-api/v1` | no | **Implemented** | Host-owned; call-bound Broker supports the contract probe and bounded read-only Knowledge retrieval; [docs/generated-extension-api-v1.md](./docs/generated-extension-api-v1.md) |

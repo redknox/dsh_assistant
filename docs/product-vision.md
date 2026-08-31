@@ -128,6 +128,8 @@ Generated UI does not receive independent authority. It renders authoritative ru
 
 The product outcome is not merely that TARS-NG installs a plugin. It is that the system can grow a small, understandable professional application around that capability.
 
+The first bounded slice is implemented for `finance.expense-risk.review`. The host renders a structured claim form and a fixed evidence contract covering the decision, triggered rules, missing evidence, and recommended next action. The page resolves exactly one active Registry owner and invokes its mounted governed tool; it refuses registry conflicts, missing mounts, execution failures, and malformed results. It has no expense approval, posting, or payment authority. Real finance-system adapters and durable claim history remain future work.
+
 ### 4. Capability composition and dynamic Agent orchestration
 
 DSH is most valuable where the task path cannot be completely fixed in advance. TARS-NG should let the Agent dynamically choose and order governed capabilities, ask for missing evidence, react to partial results, and re-plan while remaining inside fixed authority boundaries.

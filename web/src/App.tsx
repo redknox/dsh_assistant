@@ -9,6 +9,7 @@ import { useWorkspaceControl } from './useWorkspaceControl'
 import { useSettingsControl } from './useSettingsControl'
 import { useCapabilitySpecifications } from './useCapabilitySpecifications'
 import { workspacePaneFromHash, workspacePaneHash } from './workspaceRoute'
+import { useExpenseReview } from './useExpenseReview'
 
 export { MissionControlScreen } from './MissionControlScreen'
 
@@ -21,6 +22,7 @@ export function App() {
   const [pane, setPane] = useState<WorkspacePane>(() => workspacePaneFromHash(globalThis.location?.hash))
   const settings = useSettingsControl(pane === 'settings')
   const specifications = useCapabilitySpecifications(pane === 'specifications')
+  const expenseReview = useExpenseReview(pane === 'expense-review')
 
   useEffect(() => {
     const sync = () => { setPane(workspacePaneFromHash(globalThis.location?.hash)) }
@@ -51,6 +53,7 @@ export function App() {
       skill={skillControl}
       settings={settings}
       specifications={specifications}
+      expenseReview={expenseReview}
       navigation={{ pane, navigate }}
     />
   )

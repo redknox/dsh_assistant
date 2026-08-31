@@ -1,5 +1,6 @@
 import type { ActivationCard, ApprovalCard, MissionControlView, RollbackCard, SkillProjection, UserPluginView, WorkObjectKind } from '../../src/domain/workspace/types'
 import type { SettingsSnapshot, SettingsUpdate } from '../../src/product/settings-types'
+import type { ExpenseReviewAvailability, ExpenseReviewInput, ExpenseReviewRecord } from '../../src/domain/expense-review/types'
 import type { FileReferenceCandidate } from '@deepseek-ai/dsh-file-reference'
 import type {
   CapabilitySpecificationDiffView,
@@ -72,6 +73,19 @@ export async function saveSettings(input: SettingsUpdate): Promise<SettingsSnaps
   const body = await response.json() as SettingsSnapshot & { error?: string }
   if (!response.ok) throw new Error(body.error ?? `settings update failed (${response.status})`)
   return body
+}
+
+export async function fetchExpenseReviewAvailability(): Promise<ExpenseReviewAvailability> {
+  return parseJson<ExpenseReviewAvailability>(await fetch('/api/expense-review', include), 'expense review availability')
+}
+
+export async function submitExpenseReview(input: ExpenseReviewInput): Promise<ExpenseReviewRecord> {
+  return parseJson<ExpenseReviewRecord>(await fetch('/api/expense-review', {
+    ...include,
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(input),
+  }), 'expense review')
 }
 
 export async function fetchWorkbench(): Promise<WorkbenchSnapshot> {
