@@ -97,6 +97,7 @@ cat > ~/.config/tars-ng/env <<'EOF'
 DEEPSEEK_API_KEY=...
 DSH_ASSISTANT_GOOGLE_CALENDAR_ACCESS_TOKEN=...
 DSH_ASSISTANT_SANDBOX_ROOT=~/tars-ng
+DSH_ASSISTANT_KNOWLEDGE_OBSIDIAN_VAULT=/absolute/path/to/Obsidian\ Vault
 GOOGLE_SEARCH_API_KEY=...
 GOOGLE_SEARCH_ENGINE_ID=...
 EOF
@@ -104,6 +105,8 @@ chmod 600 ~/.config/tars-ng/env
 ```
 
 `$TARS_NG_HOME/config/env` is also loaded. `tars-ng doctor` reports **which names are missing** and never prints values. An env file that is group/world-readable is flagged as insecure.
+
+When an Obsidian Vault is configured, TARS-NG indexes its Markdown notes and can propose either creating a new note or appending to an existing note. Every write is an L4 approval: the approval card shows the exact Vault-relative path and content, and an append is also bound to the note's current SHA-256 digest. A changed note must be proposed again. Overwrite and delete are intentionally unsupported, and hidden paths, symlinks, absolute paths, and Vault traversal are rejected.
 
 Do not invent an internal plaintext vault.
 

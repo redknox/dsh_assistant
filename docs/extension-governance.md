@@ -86,6 +86,8 @@ The first generated-plugin vertical slice is the governed Obsidian Vault path in
 
 The Recovery Core is not a second Assistant and does not need an LLM. It can inspect current/LKG/failure state, disable a version, revert to LKG, and enter Safe Mode.
 
+After a failed activation has already restored LKG and no recovery work remains, trusted UI control may abandon that exact failed attempt. Abandon clears the pending activation and supersedes its approval while retaining the sealed candidate, review, and `lastFailure` audit record. The model has no abandon authority.
+
 Safe Mode keeps DSH/runtime, governance/recovery, Registry diagnostics, and managed bootstrap owners. It disables `generated/*` and refuses to activate new generated candidates.
 
 `bootSafeModeRuntime()` and `profiles/assistant-safe` exclude optional integrations, jobs, and generated extensions **before they load**. Recovery inspect/request stay available. Safe Mode does not depend on the failed extension loading.

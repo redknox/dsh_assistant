@@ -14,7 +14,14 @@ export { DurableReviewLineage, parseReviewLineageFile } from './review-lineage.j
 export { DurableWorkbenchStore, parseWorkbenchFile } from './workbench-store.js'
 export { openDurableSelfExtension, hydrateFromAuthority, persistGovernance } from './durable.js'
 export { reconstructCommittedExtensions } from './reconstruct.js'
-export { operatorStatus, formatOperatorStatus, type OperatorStatus } from './status.js'
+export {
+  OPERATOR_STATUS_SCHEMA_VERSION,
+  operatorStatus,
+  formatOperatorStatus,
+  parseOperatorSkills,
+  parseOperatorStatus,
+  type OperatorStatus,
+} from './status.js'
 export {
   BACKUP_KIND,
   BACKUP_SCHEMA_VERSION,

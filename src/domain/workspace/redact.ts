@@ -13,6 +13,9 @@ const APPROVAL_PAYLOAD_ALLOWLIST = [
   'allDay',
   'id',
   'description',
+  'path',
+  'content',
+  'expectedDigest',
 ] as const
 
 export function isSensitiveKey(key: string): boolean {
@@ -53,6 +56,7 @@ export function allowedApprovalPayload(payload: Record<string, unknown>): Record
 export function sanitizeMissionControlView(view: MissionControlView): MissionControlView {
   return {
     ...view,
+    ...(view.objective ? { objective: { ...view.objective, text: redactText(view.objective.text) } } : {}),
     conversation: view.conversation.map((item) => ({ ...item, text: redactText(item.text) })),
     activity: view.activity.map((item) => ({ ...item, summary: redactText(item.summary) })),
     approvalResolutions: (view.approvalResolutions ?? []).map((item) => ({
@@ -100,6 +104,48 @@ export function sanitizeMissionControlView(view: MissionControlView): MissionCon
       ...(item.title ? { title: redactText(item.title) } : {}),
       ...(item.excerpt ? { excerpt: redactText(item.excerpt) } : {}),
     })),
+    ...(view.workBrief
+      ? {
+          workBrief: {
+            ...view.workBrief,
+            ...(view.workBrief.markdown ? { markdown: redactText(view.workBrief.markdown) } : {}),
+          },
+        }
+      : {}),
+    ...(view.taskControl
+      ? {
+          taskControl: {
+            ...view.taskControl,
+            ...(view.taskControl.goal
+              ? {
+                  goal: {
+                    ...view.taskControl.goal,
+                    objective: redactText(view.taskControl.goal.objective),
+                    ...(view.taskControl.goal.blockedReason
+                      ? { blockedReason: redactText(view.taskControl.goal.blockedReason) }
+                      : {}),
+                  },
+                }
+              : {}),
+            todos: view.taskControl.todos.map((todo) => ({ ...todo, content: redactText(todo.content) })),
+            ...(view.taskControl.question
+              ? {
+                  question: {
+                    ...view.taskControl.question,
+                    question: redactText(view.taskControl.question.question),
+                    ...(view.taskControl.question.header ? { header: redactText(view.taskControl.question.header) } : {}),
+                    ...(view.taskControl.question.detail ? { detail: redactText(view.taskControl.question.detail) } : {}),
+                    options: view.taskControl.question.options.map((option) => ({
+                      ...option,
+                      label: redactText(option.label),
+                      ...(option.description ? { description: redactText(option.description) } : {}),
+                    })),
+                  },
+                }
+              : {}),
+          },
+        }
+      : {}),
     ...(view.recovery
       ? { recovery: { ...view.recovery, why: redactText(view.recovery.why) } }
       : {}),

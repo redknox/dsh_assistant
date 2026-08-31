@@ -1,6 +1,7 @@
 import { defineTool, type ToolRuntime } from '@deepseek-ai/dsh-tools'
 import type { CandidateManifestInput, OperationalEffects } from '../domain/candidate/index.js'
 import { REMOTE_SIDE_EFFECTS } from '../domain/candidate/index.js'
+import { normalizeEvaluationFixture } from '../domain/evaluation/index.js'
 import { parseWorkbenchRiskModel, riskModelToolSchema, type CandidateWorkbench } from '../domain/workbench/index.js'
 
 function textOutput() {
@@ -24,7 +25,7 @@ export function registerWorkbenchTools(
 ): () => void {
   const disposeInspectContract = tools.register(defineTool({
     name: 'inspect_authoring_contract',
-    description: 'Read the host-owned generated-extension-api/v1 authoring contract. Unsupported versions fail closed.',
+    description: 'Read the host-owned generated-extension-api/v1 authoring contract. Omit version or pass the full contract id; the alias "v1" is unsupported. Broker operations used by source must also be declared in manifest.permissions.',
     parameters: { version: { type: 'string' } },
     output: textOutput(),
     async execute(args) {
@@ -36,7 +37,7 @@ export function registerWorkbenchTools(
 
   const disposeListWorkbench = tools.register(defineTool({
     name: 'list_workbench',
-    description: 'List host-owned plans and candidates after context loss. No paths or source. Pagination is bounded.',
+    description: 'List host-owned Capability Specifications, Resolution Plans, and Candidates after context loss. No paths or source. Pagination is bounded.',
     parameters: {
       limit: { type: 'number' },
       cursor: { type: 'string' },
@@ -80,6 +81,32 @@ export function registerWorkbenchTools(
     },
   }))
 
+  const disposeInspectSpecification = tools.register(defineTool({
+    name: 'inspect_capability_specification',
+    description: 'Inspect the host-owned business specification bound to a Resolution Plan or Candidate digest.',
+    parameters: { specificationId: { type: 'string', required: true } },
+    output: textOutput(),
+    async execute(args) {
+      return JSON.stringify(workbench.inspectSpecification(String(args.specificationId)))
+    },
+  }))
+
+  const disposeCompareSpecifications = tools.register(defineTool({
+    name: 'compare_capability_specifications',
+    description: 'Compare two immutable revisions of the same Capability Specification. Read-only.',
+    parameters: {
+      fromSpecificationId: { type: 'string', required: true },
+      toSpecificationId: { type: 'string', required: true },
+    },
+    output: textOutput(),
+    async execute(args) {
+      return JSON.stringify(workbench.compareSpecifications(
+        String(args.fromSpecificationId),
+        String(args.toSpecificationId),
+      ))
+    },
+  }))
+
   if (options.inspectOnly) {
     return () => {
       disposeInspectContract()
@@ -87,30 +114,82 @@ export function registerWorkbenchTools(
       disposeInspectValidation()
       disposeInspect()
       disposeInspectReview()
+      disposeInspectSpecification()
+      disposeCompareSpecifications()
     }
   }
 
-  const disposePlan = tools.register(defineTool({
-    name: 'plan_capability_change',
-    description: 'Host-owned Capability Resolution for a requested change. Stores a plan id. Does not create or approve a plugin.',
+
+  const disposeDefineSpecification = tools.register(defineTool({
+    name: 'define_capability_specification',
+    description: 'Define the host-owned business intent before resolution or code. A ready specification needs at least one business rule and one concrete acceptance example. Permissions must name exact host operations.',
     parameters: {
       capability: { type: 'string', required: true },
-      need: { type: 'string', required: true },
+      ...specificationPatchParameters(),
+      goal: { type: 'string', required: true },
+    },
+    output: textOutput(),
+    async execute(args) {
+      return JSON.stringify(workbench.defineSpecification({
+        capability: String(args.capability),
+        goal: String(args.goal),
+        nonGoals: asStringList(args.nonGoals),
+        inputs: parseSpecificationInputs(args.inputs),
+        businessRules: asStringList(args.businessRules),
+        permissions: asStringList(args.permissions),
+        effects: parseEffects(args.effects),
+        acceptanceExamples: parseAcceptanceExamples(args.acceptanceExamples),
+        unresolved: asStringList(args.unresolved),
+      }))
+    },
+  }))
+
+  const disposeReviseSpecification = tools.register(defineTool({
+    name: 'revise_capability_specification',
+    description: 'Create a new immutable revision from an explicit Capability Specification. Omitted fields are inherited; the previous revision and its Candidate bindings remain unchanged.',
+    parameters: {
+      specificationId: { type: 'string', required: true },
+      ...specificationPatchParameters(),
+    },
+    output: textOutput(),
+    async execute(args) {
+      return JSON.stringify(workbench.reviseSpecification(String(args.specificationId), {
+        goal: optionalString(args.goal),
+        nonGoals: asStringList(args.nonGoals),
+        inputs: parseSpecificationInputs(args.inputs),
+        businessRules: asStringList(args.businessRules),
+        permissions: asStringList(args.permissions),
+        effects: parseEffects(args.effects),
+        acceptanceExamples: parseAcceptanceExamples(args.acceptanceExamples),
+        unresolved: asStringList(args.unresolved),
+      }))
+    },
+  }))
+
+  const disposePlan = tools.register(defineTool({
+    name: 'plan_capability_change',
+    description: 'Run host-owned Capability Resolution from a ready Capability Specification. specificationId is the governed path; capability/need remain only for legacy callers.',
+    parameters: {
+      specificationId: { type: 'string' },
+      capability: { type: 'string' },
+      need: { type: 'string' },
       behavior: { type: 'string' },
     },
     output: textOutput(),
     async execute(args) {
-      return JSON.stringify(workbench.plan({
-        capability: String(args.capability),
-        need: String(args.need),
-        behavior: typeof args.behavior === 'string' && args.behavior !== '' ? args.behavior : undefined,
-      }))
+      return JSON.stringify(workbench.plan(typeof args.specificationId === 'string' && args.specificationId !== ''
+        ? { specificationId: args.specificationId }
+        : {
+          capability: String(args.capability),
+          need: String(args.need),
+          behavior: typeof args.behavior === 'string' && args.behavior !== '' ? args.behavior : undefined,
+        }))
     },
   }))
 
   const disposeCreate = tools.register(defineTool({
     name: 'create_candidate',
-    description: 'Create a candidate workspace from a host-owned plan. Owner, version, and provenance come from the plan.',
+    description: 'Create a candidate workspace from a host-owned plan. Owner, version, and provenance come from the plan. Declare every broker operation the source will use in permissions.',
     parameters: {
       planId: { type: 'string', required: true },
       ...manifestParameters(),
@@ -183,7 +262,7 @@ export function registerWorkbenchTools(
 
   const disposeManifest = tools.register(defineTool({
     name: 'set_candidate_manifest',
-    description: 'Update candidate manifest fields. Cannot change owner, provenance, or attach a shell/install runner.',
+    description: 'Update candidate manifest fields. Cannot change owner, provenance, or attach a shell/install runner. permissions must include every host broker operation used by candidate source.',
     parameters: {
       candidateId: { type: 'string', required: true },
       ...manifestParameters(),
@@ -240,7 +319,7 @@ export function registerWorkbenchTools(
 
   const disposeRepair = tools.register(defineTool({
     name: 'repair_candidate',
-    description: 'Create a new mutable revision from a sealed parent with changes-required review. Parent stays immutable.',
+    description: 'Create a new mutable revision from a sealed parent with changes-required review or a rejected human approval. Parent stays immutable.',
     parameters: { candidateId: { type: 'string', required: true } },
     output: textOutput(),
     async execute(args) {
@@ -254,6 +333,10 @@ export function registerWorkbenchTools(
     disposeInspectValidation()
     disposeInspect()
     disposeInspectReview()
+    disposeInspectSpecification()
+    disposeCompareSpecifications()
+    disposeDefineSpecification()
+    disposeReviseSpecification()
     disposePlan()
     disposeCreate()
     disposeScaffold()
@@ -268,11 +351,89 @@ export function registerWorkbenchTools(
   }
 }
 
+function specificationPatchParameters() {
+  const strings = { type: 'array' as const, items: { type: 'string' as const } }
+  return {
+    goal: { type: 'string' as const },
+    nonGoals: strings,
+    inputs: {
+      type: 'array' as const,
+      items: {
+        type: 'object' as const,
+        additionalProperties: false,
+        properties: {
+          name: { type: 'string' as const },
+          description: { type: 'string' as const },
+          required: { type: 'boolean' as const },
+        },
+      },
+    },
+    businessRules: strings,
+    permissions: strings,
+    effects: manifestParameters().effects,
+    acceptanceExamples: {
+      type: 'array' as const,
+      items: {
+        type: 'object' as const,
+        additionalProperties: false,
+        properties: {
+          name: { type: 'string' as const },
+          given: strings,
+          when: { type: 'string' as const },
+          then: strings,
+          fixture: {
+            type: 'object' as const,
+            additionalProperties: false,
+            properties: {
+              input: { type: 'object' as const, additionalProperties: true },
+              expected: { type: 'json' as const },
+            },
+          },
+        },
+      },
+    },
+    unresolved: strings,
+  }
+}
+
+function optionalString(value: unknown): string | undefined {
+  return typeof value === 'string' ? value : undefined
+}
+
+function parseSpecificationInputs(value: unknown) {
+  if (!Array.isArray(value)) return undefined
+  return value.map((item) => {
+    const input = item as Record<string, unknown>
+    return {
+      name: typeof input.name === 'string' ? input.name : '',
+      description: typeof input.description === 'string' ? input.description : '',
+      required: input.required === true,
+    }
+  })
+}
+
+function parseAcceptanceExamples(value: unknown) {
+  if (!Array.isArray(value)) return undefined
+  return value.map((item) => {
+    const example = item as Record<string, unknown>
+    return {
+      name: typeof example.name === 'string' ? example.name : '',
+      given: asStringList(example.given) ?? [],
+      when: typeof example.when === 'string' ? example.when : '',
+      then: asStringList(example.then) ?? [],
+      ...(example.fixture === undefined ? {} : { fixture: normalizeEvaluationFixture(example.fixture, 'acceptanceExample') }),
+    }
+  })
+}
+
 function manifestParameters() {
   const strings = { type: 'array' as const, items: { type: 'string' as const } }
   return {
     capabilities: strings,
-    permissions: strings,
+    permissions: {
+      ...strings,
+      description: 'Exact host broker operations requested by candidate source, for example host.text.echo or host.knowledge.retrieve. These are bound into review and human approval.',
+    },
     runtimeSeams: strings,
     tools: strings,
     services: strings,

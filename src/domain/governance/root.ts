@@ -108,6 +108,10 @@ export class RecoveryRoot {
     return this.service.activate(candidateId, credential)
   }
 
+  abandonFailedActivation(candidateId: string, fingerprint: string, credential: TrustedAuthorityCredential) {
+    return this.service.abandonFailedActivation(candidateId, fingerprint, credential)
+  }
+
   rollback(credential: TrustedAuthorityCredential) {
     return this.service.rollback(credential)
   }

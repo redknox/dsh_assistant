@@ -1,5 +1,7 @@
 import { existsSync, unlinkSync, writeFileSync } from 'node:fs'
-import { operatorStatus, type OperatorStatus } from '../domain/self-extension/status.js'
+import { request as requestHttp } from 'node:http'
+import { request as requestHttps } from 'node:https'
+import { formatOperatorStatus, operatorStatus, parseOperatorSkills, parseOperatorStatus, type OperatorStatus } from '../domain/self-extension/status.js'
 import { runSelfExtensionCli } from '../runtime/self-extension-cli.js'
 import { bootAssistantControl, createAssistantAgent, type AssistantControl } from '../runtime/boot.js'
 import { inspectCompatibility } from './compatibility.js'
@@ -18,6 +20,7 @@ import {
   type ProductHomeLayout,
 } from './home.js'
 import { appendProductLog } from './log.js'
+import { ProductSettings } from './settings.js'
 import {
   acquireRuntimeLease,
   inspectRuntimeLease,
@@ -32,6 +35,7 @@ import {
 import { AssistantControlSurface } from '../ui/controller.js'
 import { assertAssistantAdapterContract, assertRecoveryAdapterContract, assertSelectedProfile } from './profile-composition.js'
 import {
+  authorizeProfileIdentityMigration,
   claimSessionPartition,
   commitRuntimeContext,
   completeProfileIdentityMigration,
@@ -45,7 +49,7 @@ import {
   type RuntimeContext,
   type SessionPartitionHold,
 } from './runtime-context.js'
-import { catalogBindingOf, inspectSessionCatalog, inspectSessionJournal, SessionCatalog, SessionCatalogError, type CatalogJournal } from './session-catalog.js'
+import { catalogBindingOf, inspectSessionCatalog, inspectSessionJournal, migrateSessionCatalogProfileBinding, SessionCatalog, SessionCatalogError, type CatalogJournal } from './session-catalog.js'
 import { LiveSessionHost } from './session-lifecycle.js'
 import { attachWebUiBroadcast, startWebUiServer, type WebUiServer } from './web-ui-server.js'
 
@@ -68,6 +72,7 @@ function usage(): string {
   status [--home <dir>]
   doctor [--home <dir>] [--allow-fixtures] [--profile <name>] [--workspace <dir>] [--session-root <dir>] [--session-id <id>]
   stop [--home <dir>]
+  migrate-profile [--home <dir>]   authorize the stopped Home to migrate to the current governed Profile identity
   self-extension <subcommand>
     import-local <directory>   trusted operator only; no model or browser path
   skill <subcommand>
@@ -203,19 +208,32 @@ function removeOwnPidFile(layout: ProductHomeLayout): void {
 
 async function requestAuthenticatedStop(identity: RuntimeIdentity): Promise<'accepted' | 'mismatch' | 'unreachable'> {
   if (identity.controlEndpoint === undefined || !isLoopbackControlEndpoint(identity.controlEndpoint)) return 'unreachable'
-  try {
-    const response = await fetch(runtimeStopUrl(identity.controlEndpoint), {
+  const status = await postLoopbackJson(runtimeStopUrl(identity.controlEndpoint), { runId: identity.runId }, 2000)
+  if (status === 200) return 'accepted'
+  if (status === 403) return 'mismatch'
+  return 'unreachable'
+}
+
+/** Use the Node HTTP client for process-control requests so shutdown cannot strand Undici work. */
+function postLoopbackJson(url: string, body: unknown, timeoutMs: number): Promise<number | undefined> {
+  return new Promise((resolve) => {
+    const endpoint = new URL(url)
+    const payload = JSON.stringify(body)
+    const request = (endpoint.protocol === 'https:' ? requestHttps : requestHttp)(endpoint, {
       method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ runId: identity.runId }),
-      signal: AbortSignal.timeout(2000),
+      headers: {
+        'content-type': 'application/json',
+        'content-length': Buffer.byteLength(payload),
+        connection: 'close',
+      },
+    }, (response) => {
+      response.resume()
+      response.once('end', () => resolve(response.statusCode))
     })
-    if (response.status === 200) return 'accepted'
-    if (response.status === 403) return 'mismatch'
-    return 'unreachable'
-  } catch {
-    return 'unreachable'
-  }
+    request.setTimeout(timeoutMs, () => request.destroy(new Error('runtime control timeout')))
+    request.once('error', () => resolve(undefined))
+    request.end(payload)
+  })
 }
 
 function delay(ms: number): Promise<void> {
@@ -256,15 +274,19 @@ function lastStatusSnapshot(last: unknown): {
   readonly safeMode?: boolean
   readonly recoveryRequired?: boolean
   readonly persistence?: string
+  readonly operator?: OperatorStatus
   readonly skills?: OperatorStatus['skills']
 } {
   if (last === null || typeof last !== 'object') return {}
   const row = last as Record<string, unknown>
+  const operator = parseOperatorStatus(row.operator)
+  const skills = parseOperatorSkills(row.skills)
   return {
     ...(typeof row.safeMode === 'boolean' ? { safeMode: row.safeMode } : {}),
     ...(typeof row.recoveryRequired === 'boolean' ? { recoveryRequired: row.recoveryRequired } : {}),
     ...(typeof row.persistence === 'string' ? { persistence: row.persistence } : {}),
-    ...(row.skills !== null && typeof row.skills === 'object' ? { skills: row.skills as OperatorStatus['skills'] } : {}),
+    ...(operator ? { operator } : {}),
+    ...(skills ? { skills } : {}),
   }
 }
 
@@ -272,6 +294,7 @@ async function readLiveRuntimeDoctor(identity: RuntimeIdentity): Promise<{
   readonly safeMode: boolean
   readonly recoveryRequired: boolean
   readonly persistence?: string
+  readonly operator?: OperatorStatus
   readonly skills?: OperatorStatus['skills']
 } | undefined> {
   if (identity.controlEndpoint === undefined || !isLoopbackControlEndpoint(identity.controlEndpoint)) return undefined
@@ -287,14 +310,18 @@ async function readLiveRuntimeDoctor(identity: RuntimeIdentity): Promise<{
       safeMode?: unknown
       recoveryRequired?: unknown
       persistence?: unknown
-      skills?: OperatorStatus['skills']
+      operator?: unknown
+      skills?: unknown
     }
     if (typeof body.safeMode !== 'boolean') return undefined
+    const operator = parseOperatorStatus(body.operator)
+    const skills = parseOperatorSkills(body.skills)
     return {
       safeMode: body.safeMode,
       recoveryRequired: body.recoveryRequired === true,
       ...(typeof body.persistence === 'string' ? { persistence: body.persistence } : {}),
-      ...(body.skills ? { skills: body.skills } : {}),
+      ...(operator ? { operator } : {}),
+      ...(skills ? { skills } : {}),
     }
   } catch {
     return undefined
@@ -306,6 +333,11 @@ async function defaultBootProduct(layout: ProductHomeLayout, allowFixtures: bool
     home: layout.root,
     allowFixtures,
     memory: { persistence: 'json-file', jsonFilePath: layout.memoryFile },
+    knowledge: {
+      ...(process.env.DSH_ASSISTANT_KNOWLEDGE_OBSIDIAN_VAULT
+        ? { obsidianVaultPath: process.env.DSH_ASSISTANT_KNOWLEDGE_OBSIDIAN_VAULT }
+        : {}),
+    },
     sessionRoot: persistSessions ? context?.sessionPersistenceDir : undefined,
     sessionId: context?.sessionId.value,
     workspace: context?.workspace.value,
@@ -313,7 +345,7 @@ async function defaultBootProduct(layout: ProductHomeLayout, allowFixtures: bool
   })
 }
 
-async function operatorFromBoot(booted: Awaited<ReturnType<typeof bootAssistantControl>>) {
+function operatorFromBoot(booted: Awaited<ReturnType<typeof bootAssistantControl>>): OperatorStatus {
   const { ctx, recoveryRoot, diagnostics } = booted
   const approvals = new Map(ctx.candidateWorkspace.list().map((item) => [
     item.id,
@@ -388,6 +420,30 @@ export async function runProductCli(
     const { runSkillCli } = await import('../runtime/skill-cli-import.js')
     return runSkillCli([...parsed.rest], parsed.home)
   }
+  if (parsed.command === 'migrate-profile') {
+    const inspected = await inspectRuntimeLease(layout)
+    if (inspected.state === 'held') {
+      io.error('Profile migration requires the verified runtime to be stopped')
+      return 1
+    }
+    if (inspected.state === 'ambiguous') {
+      io.error(`home-ambiguous: ${inspected.detail}`)
+      return 1
+    }
+    try {
+      const migration = authorizeProfileIdentityMigration(layout)
+      io.log([
+        migration.alreadyAuthorized ? 'Profile migration was already authorized.' : 'Profile migration authorized.',
+        `from: ${migration.fromIdentity}`,
+        `to: ${migration.toIdentity}`,
+        'Run start to complete the journaled migration.',
+      ].join('\n'))
+      return 0
+    } catch (error) {
+      io.error(error instanceof Error ? error.message : 'Profile migration authorization failed')
+      return 1
+    }
+  }
   const envFiles = loadEnvFiles(layout)
   const userConfig = readProductUserConfig(layout)
   const allowFixtures = resolveAllowFixtures(parsed.allowFixtures, userConfig.config.allowFixtures)
@@ -451,6 +507,7 @@ export async function runProductCli(
     const recorded = lastStatusSnapshot(last)
     const safeMode = live?.safeMode ?? recorded.safeMode ?? runtimeContext?.safeMode === true
     const recoveryRequired = live?.recoveryRequired ?? recorded.recoveryRequired ?? runtimeContext?.profileCompositionError !== undefined
+    const operator = live?.operator ?? recorded.operator
     const webUi = running ? (inspected.identity.controlEndpoint ?? webUiFromLast(last)) : undefined
     io.log([
       `${PRODUCT_NAME} ${compatibility.productVersion}`,
@@ -467,6 +524,8 @@ export async function runProductCli(
       runtimeContext ? `session: ${runtimeContext.sessionId.value} (${runtimeContext.sessionId.source})` : 'session: unresolved',
       `safe-mode: ${safeMode}`,
       `recovery-required: ${recoveryRequired}`,
+      operator ? `operator-source: ${live?.operator ? 'live-runtime' : 'last-status'}` : 'operator-source: unavailable',
+      ...(operator ? formatOperatorStatus(operator).split('\n') : []),
       catalogStatusLine(runtimeContext),
       inspected.state === 'ambiguous' ? `lease: ambiguous` : `lease: ${inspected.state}`,
     ].join('\n'))
@@ -494,6 +553,7 @@ export async function runProductCli(
           persistence: live?.persistence ?? recorded.persistence ?? 'not-booted',
           safeMode,
           recoveryRequired,
+          ...(live?.operator ? { operator: live.operator } : {}),
           source: live ? 'live-runtime' : recorded.safeMode !== undefined ? 'last-status' : 'boot',
           ...(live?.skills ?? recorded.skills ? { skills: live?.skills ?? recorded.skills } : {}),
         })
@@ -624,6 +684,7 @@ export async function runProductCli(
         missingConfiguration: report.missingConfiguration,
         calendar: report.integrations.find((item) => item.capability === 'calendar')?.mode,
         llm: { provider: llm.provider, model: llm.model, routeAvailable: llm.routeAvailable, usable: llm.usable },
+        operator,
         ...(operator.skills ? { skills: operator.skills } : {}),
         ...(runtimeContext ? {
           profile: runtimeContext.profile.value,
@@ -651,7 +712,12 @@ export async function runProductCli(
       let catalog: SessionCatalog | undefined
       let recoveredJournal: CatalogJournal | undefined
       if (runtimeContext) {
-        catalog = new SessionCatalog(sessionPersistenceDirOf(runtimeContext), catalogBindingOf(runtimeContext))
+        const catalogDir = sessionPersistenceDirOf(runtimeContext)
+        const catalogBinding = catalogBindingOf(runtimeContext)
+        if (!runtimeContext.ephemeralRecovery) {
+          migrateSessionCatalogProfileBinding(catalogDir, catalogBinding)
+        }
+        catalog = new SessionCatalog(catalogDir, catalogBinding)
         if (!runtimeContext.ephemeralRecovery) {
           const started = catalog.resolveStartSession(sessionId)
           sessionId = started.sessionId
@@ -691,6 +757,9 @@ export async function runProductCli(
         web = await startWebUiServer({
           surface,
           recoveryRoot: booted.recoveryRoot,
+          settings: new ProductSettings(layout.envFile),
+          workbench: booted.ctx.candidateWorkbench,
+          workbenchMutable: !booted.diagnostics.safeMode,
           ...(sessionHost ? { sessionHost } : {}),
           diagnostics: { persistence: booted.diagnostics.persistence, reasons: booted.diagnostics.reasons },
           runtimeControl: {
@@ -702,10 +771,12 @@ export async function runProductCli(
             onStop: () => requestStop(),
             inspectLive: () => {
               const skills = booted?.ctx.get('skillLifecycle')?.health()
+              const operator = booted ? operatorFromBoot(booted) : undefined
               return {
                 safeMode: Boolean(booted?.diagnostics.safeMode || runtimeContext?.safeMode),
                 recoveryRequired: Boolean(booted?.diagnostics.recoveryRequired || runtimeContext?.profileCompositionError),
                 persistence: booted?.diagnostics.persistence,
+                ...(operator ? { operator } : {}),
                 ...(skills ? { skills } : {}),
               }
             },
@@ -730,6 +801,19 @@ export async function runProductCli(
       await hooks.afterWebUiBound?.(bound)
       io.log(`TARS-NG is running.\nWeb UI: ${bound.url}\nHome: ${layout.root}`)
       await stopped
+      try {
+        const finalOperator = operatorFromBoot(booted)
+        writeLastStatus(layout, {
+          ...snapshot,
+          webUi: bound.url,
+          safeMode: booted.diagnostics.safeMode || runtimeContext?.safeMode === true,
+          recoveryRequired: booted.diagnostics.recoveryRequired || runtimeContext?.profileCompositionError !== undefined,
+          operator: finalOperator,
+          skills: finalOperator.skills,
+        })
+      } catch (error) {
+        appendProductLog(layout.logFile, `lifecycle stop status-snapshot-failed ${error instanceof Error ? error.message : 'unknown error'}`)
+      }
       if (!await shutdownWriter()) {
         io.error('shutdown failed; retaining Home lease')
         appendProductLog(layout.logFile, 'lifecycle stop incomplete')

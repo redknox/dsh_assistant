@@ -95,7 +95,7 @@ describe('engineering reliability gate', () => {
     const store = workspace()
     const created = store.create({
       review: review(),
-      owner: 'generated/google-calendar',
+      owner: 'managed/google-calendar',
       version: '0.2.0',
       manifest: writeManifest(),
     })
@@ -114,7 +114,7 @@ describe('engineering reliability gate', () => {
     const store = workspace()
     const created = store.create({
       review: review({ capability: 'calendar.read', need: 'list events' }),
-      owner: 'generated/google-calendar',
+      owner: 'managed/google-calendar',
       version: '0.1.0',
       manifest: readManifest(model),
     })
@@ -128,7 +128,7 @@ describe('engineering reliability gate', () => {
     const store = workspace()
     const created = store.create({
       review: review({ capability: 'calendar.read', need: 'list events' }),
-      owner: 'generated/google-calendar',
+      owner: 'managed/google-calendar',
       version: '0.1.0',
       manifest: readManifest(googleCalendarReadRiskModel()),
     })
@@ -254,7 +254,7 @@ describe('engineering reliability gate', () => {
     const store = workspace()
     const created = store.create({
       review: review(),
-      owner: 'generated/google-calendar',
+      owner: 'managed/google-calendar',
       version: '0.2.0',
       manifest: writeManifest(googleCalendarWriteRiskModel()),
     })
@@ -271,8 +271,9 @@ describe('engineering reliability gate', () => {
     const store = workspace()
     const created = store.create({
       review: review({ kind: 'new-plugin', capability: 'obsidian.notes.create', need: 'vault', target: undefined }),
-      owner: 'generated/obsidian-vault',
+      owner: 'managed/obsidian-vault',
       version: '0.1.0',
+      provenance: { kind: 'managed', origin: 'assistant' },
       manifest: {
         capabilities: ['obsidian.notes.create'],
         permissions: ['filesystem.vault.write'],

@@ -1,5 +1,5 @@
 import type { Context } from '@deepseek-ai/cordis'
-import { SessionId } from '@deepseek-ai/dsh-session'
+import { SessionId, type Session, type SessionEvent } from '@deepseek-ai/dsh-session'
 import { createAssistantAgent } from '../runtime/boot.js'
 import { AssistantControlSurface } from '../ui/controller.js'
 import {
@@ -22,7 +22,7 @@ export type SessionLifecycleFault =
 
 export interface SessionHandle {
   dispose(): Promise<void>
-  readonly agent: { readonly session: unknown; readonly status?: string }
+  readonly agent: { readonly session: Session; readonly status?: string }
 }
 
 export class LiveSessionHost {
@@ -41,7 +41,12 @@ export class LiveSessionHost {
       failAt?: SessionLifecycleFault
       on?: Partial<Record<SessionLifecycleFault, () => void | Promise<void>>>
     } = {},
-  ) {}
+  ) {
+    if (!safeMode && ctx.get('sessionTitle')) {
+      ctx.effect(() => ctx.on('session/event', (session, event) => this.acceptTitleEvent(session, event)))
+      this.reconcileTitle(this.handle.agent.session)
+    }
+  }
 
   currentHandle(): SessionHandle {
     return this.handle
@@ -103,6 +108,10 @@ export class LiveSessionHost {
     return this.serialize(async () => {
       this.assertMutable()
       this.assertExpected(expected)
+      if (id === this.surface.sessionId && this.ctx.get('sessionTitle')) {
+        const accepted = this.ctx.sessionTitle.rename(this.handle.agent.session, title)
+        return this.catalog.syncTitle(id, accepted.title)
+      }
       return this.catalog.rename(id, title, expected)
     })
   }
@@ -256,11 +265,34 @@ export class LiveSessionHost {
     this.persistCurrent(id)
     this.surface.setSessionId(id)
     this.handle = next
+    this.reconcileTitle(next.agent.session)
     await outgoing.dispose()
   }
 
   private async flushCurrent(): Promise<void> {
-    await this.ctx.sessions.flush(this.handle.agent.session as never)
+    await this.ctx.sessions.flush(this.handle.agent.session)
+  }
+
+  private acceptTitleEvent(session: Session, event: SessionEvent): void {
+    if (event.type !== 'session/title') return
+    const title = (event.data as { readonly title?: unknown }).title
+    if (typeof title === 'string') {
+      void this.serialize(async () => this.catalog.syncTitle(String(session.id), title)).catch(() => undefined)
+    }
+  }
+
+  private reconcileTitle(session: Session): void {
+    const service = this.ctx.get('sessionTitle')
+    if (!service) return
+    const folded = service.get(session)
+    if (folded) {
+      this.catalog.syncTitle(String(session.id), folded.title)
+      return
+    }
+    const projected = this.catalog.inspect().sessions.find((item) => item.id === String(session.id))?.title
+    if (projected && projected !== 'New conversation' && projected !== 'Conversation') {
+      service.rename(session, projected)
+    }
   }
 
   private serialize<T>(work: () => Promise<T>): Promise<T> {

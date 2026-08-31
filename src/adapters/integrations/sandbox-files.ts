@@ -33,7 +33,7 @@ export function createSandboxFilesProvider(root: string): FilesProvider {
   return {
     capability: 'files',
     availability(): Availability {
-      return { available: true }
+      return { available: true, provider: 'sandbox' }
     },
     confinedAccesses() {
       return confined.confinedAccesses()

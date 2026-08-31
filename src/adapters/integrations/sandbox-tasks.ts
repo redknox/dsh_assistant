@@ -78,7 +78,7 @@ export function createSandboxTasksProvider(root: string): TasksProvider {
   return {
     capability: 'tasks',
     availability(): Availability {
-      return { available: true }
+      return { available: true, provider: 'sandbox' }
     },
     async listTasks(query: PageQuery): Promise<Page<TaskItem>> {
       throwIfAborted('tasks', query.signal)

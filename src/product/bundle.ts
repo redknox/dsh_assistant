@@ -1,4 +1,5 @@
 import type { Context } from '@deepseek-ai/cordis'
+import ApprovalService from '@deepseek-ai/dsh-user-approval'
 import * as assistantPlugin from '../plugins/assistant-plugin.js'
 import * as integrationsPlugin from '../plugins/integrations-plugin.js'
 import type { IntegrationsPluginConfig } from '../plugins/integrations-plugin.js'
@@ -25,6 +26,12 @@ import * as workbenchPlugin from '../plugins/workbench-plugin.js'
 import type { WorkbenchPluginConfig } from '../plugins/workbench-plugin.js'
 import * as skillPlugin from '../plugins/skill-plugin.js'
 import type { SkillPluginConfig } from '../plugins/skill-plugin.js'
+import * as dshApprovalBridgePlugin from '../plugins/dsh-approval-bridge-plugin.js'
+import { mountBoundedWorkbench } from './bounded-workbench.js'
+import * as registeredWorkflows from './registered-workflows.js'
+import * as governedSubagentProvider from './governed-subagent-provider.js'
+import * as governedSubagents from './governed-subagents.js'
+import * as governedWeb from './governed-web.js'
 
 export const name = 'dsh-assistant'
 export const inject = ['systemPrompt', 'agents']
@@ -45,6 +52,7 @@ export interface AssistantBundleConfig {
   readonly governance?: GovernancePluginConfig
   readonly workbench?: WorkbenchPluginConfig
   readonly skills?: SkillPluginConfig
+  readonly boundedWorkbenchRoot?: string
 }
 
 /** Bundle entry: compose product plugins through public Cordis lifecycle. */
@@ -67,11 +75,20 @@ export async function apply(ctx: Context, config: AssistantBundleConfig = {}) {
     inspectOnly: config.safeMode === true,
   })
   if (config.safeMode) return
+  // Official app-boot may already supply the native service even when the
+  // product patch marks its base row disabled; the manual adapter does not.
+  if (!ctx.get('approval')) await ctx.plugin(ApprovalService, { policy: 'ask' })
   await ctx.plugin(memoryPlugin, config.memory)
   await ctx.plugin(knowledgePlugin, config.knowledge)
   await ctx.plugin(integrationsPlugin, config.integrations)
+  await mountBoundedWorkbench(ctx, config.boundedWorkbenchRoot)
   await ctx.plugin(policyPlugin, config.policy)
+  await ctx.plugin(dshApprovalBridgePlugin)
   await ctx.plugin(jobsPlugin, config.jobs)
+  await ctx.plugin(governedSubagentProvider)
+  await ctx.plugin(registeredWorkflows)
+  await ctx.plugin(governedSubagents)
+  await ctx.plugin(governedWeb)
   await ctx.plugin(assistantPlugin)
 }
 
@@ -84,6 +101,8 @@ export const SAFE_MODE_TOOL_NAMES = [
   'list_workbench',
   'inspect_candidate',
   'inspect_candidate_review',
+  'inspect_capability_specification',
+  'compare_capability_specifications',
   'inspect_validation_diagnostics',
   'inspect_skill',
 ] as const
@@ -103,6 +122,8 @@ export const PRODUCT_TOOL_NAMES = [
   'calendar_freebusy',
   'calendar_propose_event',
   'mail_list_messages',
+  'mail_get_message',
+  'contacts_search',
   'tasks_propose_create',
   'files_list',
   'files_read',
@@ -112,6 +133,8 @@ export const PRODUCT_TOOL_NAMES = [
   'files_write',
   'files_delete',
   'confirm_action',
+  'define_capability_specification',
+  'revise_capability_specification',
   'plan_capability_change',
   'create_candidate',
   'scaffold_candidate',
@@ -127,5 +150,7 @@ export const PRODUCT_TOOL_NAMES = [
   'seal_candidate',
   'review_candidate',
   'inspect_candidate_review',
+  'inspect_capability_specification',
+  'compare_capability_specifications',
   'repair_candidate',
 ] as const

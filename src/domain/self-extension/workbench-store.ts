@@ -2,12 +2,19 @@ import { existsSync, readFileSync } from 'node:fs'
 import { writeJsonAtomic } from '../persistence/atomic.js'
 import { RESOLUTION_KINDS, type ResolutionReview } from '../resolution/types.js'
 import type { WorkbenchPersistState, WorkbenchPlan } from '../workbench/types.js'
+import {
+  assertCapabilitySpecification,
+  defineCapabilitySpecification,
+  type CapabilitySpecification,
+} from '../workbench/capability-specification.js'
 import { PersistenceIntegrityError, PersistenceSchemaError } from './errors.js'
 import { SELF_EXTENSION_SCHEMA_VERSION, type SelfExtensionHome } from './home.js'
 
 export interface WorkbenchFile {
   readonly schemaVersion: number
   readonly nextPlan: number
+  readonly nextSpecification?: number
+  readonly specifications?: readonly CapabilitySpecification[]
   readonly plans: readonly WorkbenchPlan[]
   readonly bindings: WorkbenchPersistState['bindings']
 }
@@ -35,12 +42,21 @@ function parseReview(value: unknown, planId: string): ResolutionReview {
   return value as unknown as ResolutionReview
 }
 
-function parsePlan(value: unknown, index: number): WorkbenchPlan {
+function parsePlan(value: unknown, index: number, specifications: CapabilitySpecification[]): WorkbenchPlan {
   if (!isObject(value)) throw new PersistenceIntegrityError(`workbench plan ${index} must be an object`)
   if (typeof value.id !== 'string' || value.id === '') {
     throw new PersistenceIntegrityError(`workbench plan ${index} is missing id`)
   }
-  return { id: value.id, review: parseReview(value.review, value.id) }
+  const review = parseReview(value.review, value.id)
+  if (typeof value.specificationId === 'string' && typeof value.specificationDigest === 'string') {
+    return { id: value.id, review, specificationId: value.specificationId, specificationDigest: value.specificationDigest }
+  }
+  const specification = defineCapabilitySpecification(`spec-legacy-${value.id}`, {
+    capability: review.capability,
+    goal: review.need,
+  }, 'legacy')
+  specifications.push(specification)
+  return { id: value.id, review, specificationId: specification.id, specificationDigest: specification.digest }
 }
 
 function parseBinding(value: unknown, index: number): WorkbenchPersistState['bindings'][number] {
@@ -60,6 +76,12 @@ function parseBinding(value: unknown, index: number): WorkbenchPersistState['bin
   if (value.runtimeContractVersion !== undefined && typeof value.runtimeContractVersion !== 'string') {
     throw new PersistenceIntegrityError(`workbench binding ${index} runtimeContractVersion is invalid`)
   }
+  if (value.specificationId !== undefined && typeof value.specificationId !== 'string') {
+    throw new PersistenceIntegrityError(`workbench binding ${index} specificationId is invalid`)
+  }
+  if (value.specificationDigest !== undefined && typeof value.specificationDigest !== 'string') {
+    throw new PersistenceIntegrityError(`workbench binding ${index} specificationDigest is invalid`)
+  }
   return {
     candidateId: value.candidateId,
     planId: value.planId,
@@ -67,6 +89,8 @@ function parseBinding(value: unknown, index: number): WorkbenchPersistState['bin
     ...(typeof value.parentDigest === 'string' ? { parentDigest: value.parentDigest } : {}),
     ...(value.leftover === true ? { leftover: true } : {}),
     ...(typeof value.runtimeContractVersion === 'string' ? { runtimeContractVersion: value.runtimeContractVersion } : {}),
+    ...(typeof value.specificationId === 'string' ? { specificationId: value.specificationId } : {}),
+    ...(typeof value.specificationDigest === 'string' ? { specificationDigest: value.specificationDigest } : {}),
   }
 }
 
@@ -81,17 +105,58 @@ export function parseWorkbenchFile(parsed: unknown): WorkbenchFile {
   if (!Array.isArray(parsed.plans) || !Array.isArray(parsed.bindings)) {
     throw new PersistenceIntegrityError('workbench plans and bindings must be arrays')
   }
-  const plans = parsed.plans.map((item, index) => parsePlan(item, index))
+  const specifications = Array.isArray(parsed.specifications)
+    ? parsed.specifications.map(assertCapabilitySpecification)
+    : []
+  if (new Set(specifications.map((item) => item.id)).size !== specifications.length) {
+    throw new PersistenceIntegrityError('workbench capability specification ids must be unique')
+  }
+  const plans = parsed.plans.map((item, index) => parsePlan(item, index, specifications))
+  const specificationById = new Map(specifications.map((item) => [item.id, item]))
+  const superseded = new Set<string>()
+  for (const specification of specifications) {
+    if (specification.revision === 1) continue
+    const previous = specification.supersedesId === undefined ? undefined : specificationById.get(specification.supersedesId)
+    if (!previous
+      || previous.source !== 'explicit'
+      || previous.capability !== specification.capability
+      || previous.revision + 1 !== specification.revision
+      || specification.source !== 'explicit'
+      || superseded.has(previous.id)) {
+      throw new PersistenceIntegrityError(`workbench capability specification ${specification.id} has invalid revision lineage`)
+    }
+    superseded.add(previous.id)
+  }
+  for (const plan of plans) {
+    const specification = specificationById.get(plan.specificationId)
+    if (!specification || specification.digest !== plan.specificationDigest) {
+      throw new PersistenceIntegrityError(`workbench plan ${plan.id} references an unknown or stale capability specification`)
+    }
+  }
   const planIds = new Set(plans.map((item) => item.id))
+  if (planIds.size !== plans.length) throw new PersistenceIntegrityError('workbench plan ids must be unique')
+  const planById = new Map(plans.map((item) => [item.id, item]))
   const bindings = parsed.bindings.map((item, index) => parseBinding(item, index))
   for (const binding of bindings) {
-    if (!planIds.has(binding.planId)) {
+    const plan = planById.get(binding.planId)
+    if (!plan) {
       throw new PersistenceIntegrityError(`workbench binding ${binding.candidateId} references unknown plan ${binding.planId}`)
     }
+    if ((binding.specificationId !== undefined && binding.specificationId !== plan.specificationId)
+      || (binding.specificationDigest !== undefined && binding.specificationDigest !== plan.specificationDigest)) {
+      throw new PersistenceIntegrityError(`workbench binding ${binding.candidateId} references a stale capability specification`)
+    }
+  }
+  const nextSpecification = nextSpecificationAfter(specifications)
+  if (parsed.nextSpecification !== undefined
+    && (typeof parsed.nextSpecification !== 'number' || !Number.isInteger(parsed.nextSpecification) || parsed.nextSpecification < nextSpecification)) {
+    throw new PersistenceIntegrityError('workbench nextSpecification must be greater than existing numeric specification ids')
   }
   return {
     schemaVersion: SELF_EXTENSION_SCHEMA_VERSION,
     nextPlan: parsed.nextPlan,
+    nextSpecification: (parsed.nextSpecification as number | undefined) ?? nextSpecification,
+    specifications,
     plans,
     bindings,
   }
@@ -99,7 +164,7 @@ export function parseWorkbenchFile(parsed: unknown): WorkbenchFile {
 
 /** Host-owned Workbench plans and lineage bindings. Corrupt files fail closed. */
 export class DurableWorkbenchStore {
-  private state: WorkbenchPersistState = { nextPlan: 1, plans: [], bindings: [] }
+  private state: WorkbenchPersistState = { nextPlan: 1, nextSpecification: 1, specifications: [], plans: [], bindings: [] }
 
   constructor(private readonly home: SelfExtensionHome) {
     if (!existsSync(home.workbenchPath)) return
@@ -119,6 +184,8 @@ export class DurableWorkbenchStore {
     const file: WorkbenchFile = {
       schemaVersion: SELF_EXTENSION_SCHEMA_VERSION,
       nextPlan: state.nextPlan,
+      nextSpecification: state.nextSpecification,
+      specifications: state.specifications,
       plans: state.plans,
       bindings: state.bindings,
     }
@@ -129,5 +196,15 @@ export class DurableWorkbenchStore {
 }
 
 function snapshotOf(file: WorkbenchFile): WorkbenchPersistState {
-  return { nextPlan: file.nextPlan, plans: file.plans, bindings: file.bindings }
+  return {
+    nextPlan: file.nextPlan,
+    nextSpecification: file.nextSpecification ?? nextSpecificationAfter(file.specifications ?? []),
+    specifications: file.specifications ?? [],
+    plans: file.plans,
+    bindings: file.bindings,
+  }
+}
+
+function nextSpecificationAfter(specifications: readonly CapabilitySpecification[]): number {
+  return Math.max(0, ...specifications.map((item) => /^spec-(\d+)$/.exec(item.id)?.[1]).filter((item): item is string => item !== undefined).map(Number)) + 1
 }

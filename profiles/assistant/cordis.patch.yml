@@ -10,12 +10,7 @@
   disabled: true
 - id: typert-gateway
   disabled: true
-- id: session-title
-  disabled: true
-- id: session-title-llm
-  disabled: true
 - id: user-questions
-  disabled: true
 - id: llm-retry
   disabled: true
 - id: settings
@@ -23,12 +18,6 @@
 - id: credentials
   disabled: true
 - id: llm-pi-ai
-  disabled: true
-- id: attachment-local
-  disabled: true
-- id: session-query-sqlite
-  disabled: true
-- id: session-projection
   disabled: true
 - id: session-telemetry-otel
   disabled: true
@@ -53,7 +42,11 @@
 - id: tool-pwsh
   disabled: true
 - id: tool-jobs
-  disabled: true
+  config:
+    waitTimeoutMs: 30000
+    maxWaitTimeoutMs: 120000
+    completionDelivery: quiet
+    maxConsecutiveWakes: 1
 - id: fs-observation-policy
   disabled: true
 - id: tool-fs
@@ -73,23 +66,21 @@
 - id: command-feedback
   disabled: true
 - id: goal
-  disabled: true
+  config:
+    defaultMaxGoalRounds: 8
 - id: goal-round-driver
-  disabled: true
 - id: command-goal
   disabled: true
 - id: plan-mode
-  disabled: true
-- id: token-meter
-  disabled: true
-- id: compaction-basic
-  disabled: true
+  config:
+    section: "Plan Mode is read-only exploration. Inspect current state, maintain todo_write, and present the complete plan through exit_plan_mode. Do not claim that changes were executed. TARS-NG enforces this restriction at tool dispatch."
 - id: command-compact
   disabled: true
 - id: subagent
-  disabled: true
+  config: {}
 - id: subagent-spawn-in-process
-  disabled: true
+  config:
+    providerName: tars-spawn
 - id: subagent-fork-in-process
   disabled: true
 - id: tool-subagent-control
@@ -103,23 +94,23 @@
 - id: tool-subagent-report
   disabled: true
 - id: workflow-worker-thread
-  disabled: true
+  config:
+    provider: tars-governed
+    maxConcurrentAgents: 2
+    maxTotalAgents: 4
+    maxItemsPerCall: 4
+    syncTimeoutMs: 1000
+    disposeGraceMs: 5000
 - id: tool-workflow
   disabled: true
 - id: timeout-policy
-  disabled: true
-- id: spill-local
-  disabled: true
-- id: spill-policy
-  disabled: true
-- id: session-checkpoint-policy
-  disabled: true
-- id: tool-result-pruner
-  disabled: true
+  config: {}
 - id: tool-todo
-  disabled: true
+  config:
+    allowParallelInProgress: false
 - id: tool-goal
-  disabled: true
+  config:
+    blockedAfterConsecutiveRounds: 3
 - id: tool-ralph
   disabled: true
 - id: tool-str-replace-editor
@@ -127,10 +118,19 @@
 - id: repeat-tool-reminder
   disabled: true
 - id: web
-  disabled: true
+  config:
+    searchProvider: deepseek
 - id: web-search-deepseek
-  disabled: true
+  config:
+    apiKeyEnv: DEEPSEEK_API_KEY
+    maxTokens: 2048
+    maxUses: 2
 - id: tool-web
-  disabled: true
+  config:
+    search: true
+    fetch: false
+    searchMaxResults: 6
+    searchMaxQueries: 2
+    searchTimeoutMs: 30000
 - id: fs-sandbox
   disabled: true

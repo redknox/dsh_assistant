@@ -205,12 +205,12 @@ describe('extension governance and recovery', () => {
 
   it('D. does not let an old approval authorize a permission expansion', () => {
     const { workspace, governance, human } = seeded()
-    const first = ready(workspace, { version: '0.2.0', permissions: ['local.fake.suite'] })
+    const first = ready(workspace, { version: '0.2.0', permissions: [] })
     const firstFp = governance.requestApproval(first.id).fingerprint
     governance.recordApproval(human, { candidateId: first.id, fingerprint: firstFp, decision: 'approved-for-exact-diff' })
     const expanded = ready(workspace, {
       version: '0.3.0',
-      permissions: ['local.fake.suite', 'local.fake.calendar.freebusy'],
+      permissions: ['host.text.echo'],
     })
     assert.throws(() => governance.recordApproval(human, {
       candidateId: expanded.id,

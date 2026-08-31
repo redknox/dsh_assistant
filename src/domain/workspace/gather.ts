@@ -6,8 +6,11 @@ import type { TarsPersonality } from '../personality/types.js'
 import { flattenEffects, summarizeCandidateEffects } from './effects.js'
 import { boundActivationDiagnostics } from './failure.js'
 import { activationViewOf, approvalStateOf, compareOwnerVersion, extensionLifecycleOf } from './lifecycle.js'
-import type { MissionControlView, ObjectiveView, WorkspaceSnapshotInput } from './types.js'
+import type { ExecutionLogEntry, MissionControlView, ObjectiveView, WorkspaceSnapshotInput } from './types.js'
 import { projectMissionControl } from './project.js'
+import { inspectContextEndurance } from '../../product/context-endurance.js'
+import { inspectMaterialInput } from '../../product/material-input.js'
+import { inspectAgentTaskControl } from '../../product/agent-task-control.js'
 
 export interface GatherWorkspaceInput {
   readonly ctx: Context
@@ -23,6 +26,15 @@ export function gatherWorkspaceSnapshot(input: GatherWorkspaceInput): WorkspaceS
   const { ctx, sessionId } = input
   const personality = readPersonality(ctx)
   const agent = ctx.agents.get(SessionId(sessionId))
+  const contextEndurance = inspectContextEndurance(ctx, agent?.session)
+  const materialInput = inspectMaterialInput(ctx)
+  const taskControl = inspectAgentTaskControl(ctx, agent)
+  const actionPolicy = ctx.get('actionPolicy') as {
+    policy: {
+      confirmations(): WorkspaceSnapshotInput['pendingConfirmations']
+      autoExecuteCapabilities(): readonly string[]
+    }
+  } | undefined
   const recovery = ctx.get('extensionRecovery') as {
     inspect(): {
       safeMode: boolean
@@ -72,17 +84,32 @@ export function gatherWorkspaceSnapshot(input: GatherWorkspaceInput): WorkspaceS
       : safeMode
         ? { recoveryWhy: 'Generated capabilities are disabled. Trusted core is available.' }
         : {}),
-    pendingConfirmations: (ctx.get('actionPolicy') as { policy: { confirmations(): WorkspaceSnapshotInput['pendingConfirmations'] } } | undefined)
-      ?.policy.confirmations() ?? [],
-    jobs: (ctx.get('assistantJobs') as { service: { list(): { name: string; lastRun?: { status: string } }[] } } | undefined)
-      ?.service.list().map((job) => ({ name: job.name, lastRunStatus: job.lastRun?.status })) ?? [],
+    pendingConfirmations: actionPolicy?.policy.confirmations() ?? [],
+    dshApprovals: (ctx.get('dshApprovalBridge') as {
+      broker: { list(): WorkspaceSnapshotInput['dshApprovals'] }
+    } | undefined)?.broker.list() ?? [],
+    autoExecuteCapabilities: actionPolicy?.policy.autoExecuteCapabilities() ?? [],
+    jobs: (ctx.get('assistantJobs') as { service: { list(): { name: string; lastRun?: { runId: string; status: string; summary?: string; finishedAt?: string } }[] } } | undefined)
+      ?.service.list().map((job) => ({
+        name: job.name,
+        ...(job.lastRun?.status ? { lastRunStatus: job.lastRun.status } : {}),
+        ...(job.lastRun?.runId ? { lastRunId: job.lastRun.runId } : {}),
+        ...(job.lastRun?.summary ? { lastRunSummary: job.lastRun.summary } : {}),
+        ...(job.lastRun?.finishedAt ? { lastRunFinishedAt: job.lastRun.finishedAt } : {}),
+      })) ?? [],
     toolEvents: agent ? toolEventsFromSession(agent.session.events) : [],
     conversation: agent ? conversationWithoutReasoning(agent.session.events) : [],
-    integrationStatus: Object.entries((ctx.get('integrations') as { hub: { status(): Record<string, { available: boolean; reason?: string }> } } | undefined)?.hub.status() ?? {})
+    executionLog: agent ? executionLogFromSession(agent.session.events) : [],
+    integrationStatus: [
+      ...Object.entries((ctx.get('integrations') as { hub: { status(): Record<string, { available: boolean; configured?: boolean; reason?: string; provider?: string }> } } | undefined)?.hub.status() ?? {}),
+      ...webIntegrationStatus(ctx),
+    ]
       .map(([capability, availability]) => ({
         capability,
         available: availability.available,
+        ...(availability.configured !== undefined ? { configured: availability.configured } : {}),
         ...(availability.reason ? { reason: availability.reason } : {}),
+        ...(availability.provider ? { provider: availability.provider } : {}),
       })),
     registry: (ctx.get('capabilityRegistry') as { list(): { owner: string; version: string; provenance: { kind: string }; status: string; capabilities: { id: string }[]; permissions?: readonly string[]; provider?: string; providers?: readonly string[]; tools?: readonly string[]; runtimeSeams?: readonly string[]; pluginDependencies?: readonly { capability: string; strength: 'hard' | 'optional' }[] }[] } | undefined)
       ?.list().map((record) => ({
@@ -140,7 +167,14 @@ export function gatherWorkspaceSnapshot(input: GatherWorkspaceInput): WorkspaceS
         sourceUri: document.sourceUri,
         ...(document.title ? { title: document.title } : {}),
       })) ?? [],
-    ...(input.objective ? { objective: input.objective } : {}),
+    ...(contextEndurance ? { contextEndurance } : {}),
+    materialInput,
+    ...(taskControl ? { taskControl } : {}),
+    ...(input.objective
+      ? { objective: input.objective }
+      : taskControl?.goal
+        ? { objective: { text: taskControl.goal.objective, status: objectiveStatus(taskControl.goal.phase) } }
+        : {}),
     personality: {
       humor: personality.humor,
       directness: personality.directness,
@@ -152,6 +186,20 @@ export function gatherWorkspaceSnapshot(input: GatherWorkspaceInput): WorkspaceS
     ...(input.sessions ? { sessions: input.sessions } : {}),
     ...(input.approvalOrigins ? { approvalOrigins: input.approvalOrigins } : {}),
   }
+}
+
+function webIntegrationStatus(ctx: Context): readonly [string, { available: boolean; configured?: boolean; reason?: string; provider?: string }][] {
+  const status = (ctx.get('governedWeb') as {
+    inspect(): { available: boolean; configured: boolean; reason?: string; provider: string }
+  } | undefined)?.inspect()
+  return status ? [['web', status]] : []
+}
+
+function objectiveStatus(phase: NonNullable<NonNullable<WorkspaceSnapshotInput['taskControl']>['goal']>['phase']): ObjectiveView['status'] {
+  if (phase === 'active') return 'active'
+  if (phase === 'paused') return 'waiting'
+  if (phase === 'blocked') return 'blocked'
+  return 'done'
 }
 
 export function projectWorkspace(input: GatherWorkspaceInput): MissionControlView {
@@ -193,24 +241,71 @@ function visibleText(blocks: readonly ContentBlock[]): string {
     .join('')
 }
 
-function conversationWithoutReasoning(events: readonly SessionEvent[]): WorkspaceSnapshotInput['conversation'] {
+function finalAssistantSeqs(events: readonly SessionEvent[]): ReadonlySet<number> {
+  const final = new Set<number>()
+  let assistantSeq: number | undefined
+  let executionSeq = -1
+  const flush = () => {
+    if (assistantSeq !== undefined && assistantSeq > executionSeq) final.add(assistantSeq)
+    assistantSeq = undefined
+    executionSeq = -1
+  }
+  for (const event of events) {
+    if (event.type === 'user/message' && isAppendSurfaceEvent(event) && isHumanUserMessage(event.data)) flush()
+    if (event.type === 'assistant/message' && isAppendSurfaceEvent(event) && visibleText(event.data.message.content).trim()) assistantSeq = event.seq
+    if (event.type === 'tool/call' || (event.type === 'tool/result' && isAppendSurfaceEvent(event))) executionSeq = event.seq
+  }
+  flush()
+  return final
+}
+
+export function conversationWithoutReasoning(events: readonly SessionEvent[]): WorkspaceSnapshotInput['conversation'] {
   const items: WorkspaceSnapshotInput['conversation'][number][] = []
+  const finalAssistant = finalAssistantSeqs(events)
   for (const event of events) {
     if (event.type === 'user/message' && isAppendSurfaceEvent(event)) {
       if (!isHumanUserMessage(event.data)) continue
       items.push({ kind: 'user', text: visibleText(event.data.content) })
     }
     if (event.type === 'assistant/message' && isAppendSurfaceEvent(event)) {
+      if (!finalAssistant.has(event.seq)) continue
       items.push({ kind: 'assistant', text: visibleText(event.data.message.content) })
-    }
-    if (event.type === 'tool/call') {
-      items.push({ kind: 'tool_call', text: event.data.name })
-    }
-    if (event.type === 'tool/result' && isAppendSurfaceEvent(event)) {
-      items.push({ kind: 'tool_result', text: visibleText(event.data.message.content) })
     }
   }
   return items
+}
+
+export function executionLogFromSession(events: readonly SessionEvent[]): readonly ExecutionLogEntry[] {
+  const entries: ExecutionLogEntry[] = []
+  const finalAssistant = finalAssistantSeqs(events)
+  let lastCall: { readonly id: string; readonly name: string } | undefined
+  for (const event of events) {
+    if (event.type === 'assistant/message' && isAppendSurfaceEvent(event) && !finalAssistant.has(event.seq)) {
+      const detail = visibleText(event.data.message.content).trim()
+      if (detail) entries.push({ id: `agent-${event.seq}`, seq: event.seq, time: event.time, kind: 'agent-note', label: 'AGENT', detail })
+      continue
+    }
+    if (event.type === 'tool/call') {
+      const callId = String(event.data.callId)
+      lastCall = { id: callId, name: event.data.name }
+      entries.push({ id: `call-${event.seq}`, seq: event.seq, time: event.time, kind: 'tool-call', label: event.data.name, detail: event.data.arguments, callId })
+      continue
+    }
+    if (event.type === 'tool/result' && isAppendSurfaceEvent(event)) {
+      const callId = lastCall?.id
+      entries.push({
+        id: `result-${event.seq}`,
+        seq: event.seq,
+        time: event.time,
+        kind: 'tool-result',
+        label: lastCall?.name ?? 'tool result',
+        detail: visibleText(event.data.message.content),
+        ...(callId ? { callId } : {}),
+        isError: event.data.error !== undefined,
+      })
+    }
+  }
+  return entries
 }
 
 function isHumanUserMessage(message: { readonly source: { readonly kind: string; readonly form?: string }; readonly content: readonly ContentBlock[] }): boolean {

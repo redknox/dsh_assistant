@@ -1,55 +1,31 @@
-import { createReadStream, existsSync, statSync } from 'node:fs'
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http'
-import path from 'node:path'
-import { fileURLToPath } from 'node:url'
-import { ActivationDeniedError, GovernanceContractError, RollbackDeniedError, UninstallDeniedError } from '../domain/governance/errors.js'
-import { SkillContractError } from '../domain/skill/errors.js'
-import { SimulatedCrashError } from '../domain/governance/service.js'
 import type { RecoveryRoot } from '../domain/governance/root.js'
 import { acknowledgementOf } from '../domain/workspace/approvals.js'
-import { runIdEquals } from './runtime-lease.js'
-import { boundActivationDiagnostics } from '../domain/workspace/failure.js'
 import { redactText } from '../domain/workspace/redact.js'
 import { AssistantControlSurface } from '../ui/controller.js'
-import type { ActivationCard, ApprovalCard, MissionControlView, RollbackCard, SkillProjection, UserPluginView } from '../domain/workspace/types.js'
+import type { MissionControlView } from '../domain/workspace/types.js'
 import { PRODUCT_UI_SESSION_ID } from './constants.js'
-import { SessionCatalogError } from './session-catalog.js'
 import type { LiveSessionHost } from './session-lifecycle.js'
 import {
-  assertSafePayload,
-  createUiSessionToken,
-  DESTRUCTIVE_RECOVERY_ACTIONS,
   originAllowed,
   resolveWebUiListen,
-  sessionCookieHeader,
-  sessionMatches,
-  SUPPORTED_RECOVERY_ACTIONS,
   type WebUiListenOptions,
 } from './web-ui-protocol.js'
+import { handleRuntimeControlRequest, type WebUiRuntimeControl } from './web-ui-runtime-control.js'
+import { handleWebUiConversationRequest } from './web-ui-conversations.js'
+import { handleWebUiApprovalRequest } from './web-ui-approvals.js'
+import { handleWebUiActivationRequest } from './web-ui-activations.js'
+import { handleWebUiGovernanceLifecycleRequest } from './web-ui-governance-lifecycle.js'
+import { WebUiGovernanceMutations } from './web-ui-governance-mutations.js'
+import { handleWebUiSkillRequest, type WebUiSkillCommand } from './web-ui-skills.js'
+import { WebUiHttpTransport } from './web-ui-http.js'
+import type { ProductSettings } from './settings.js'
+import { handleWebUiSettingsRequest } from './web-ui-settings.js'
+import { handleWebUiTaskControlRequest } from './web-ui-task-control.js'
+import { handleWebUiWorkbenchRequest } from './web-ui-workbench.js'
+import type { CandidateWorkbench } from '../domain/workbench/index.js'
 
-export interface WebUiRuntimeControl {
-  readonly pid: number
-  readonly startedAt: string
-  readonly productVersion: string
-  readonly normalizedHome: string
-  readonly runId: string
-  readonly onStop: () => void
-  readonly inspectLive?: () => {
-    readonly safeMode: boolean
-    readonly recoveryRequired: boolean
-    readonly persistence?: string
-    readonly skills?: {
-      readonly profile: string
-      readonly candidates: number
-      readonly active: readonly string[]
-      readonly disabled: readonly string[]
-      readonly failed: readonly string[]
-      readonly catalog: 'ok' | 'empty' | 'degraded' | 'withheld'
-      readonly recoveryRequired?: boolean
-      readonly catalogDetail?: string
-    }
-  }
-}
+export type { WebUiRuntimeControl } from './web-ui-runtime-control.js'
 
 export interface WebUiServerOptions extends WebUiListenOptions {
   readonly surface: AssistantControlSurface
@@ -58,6 +34,10 @@ export interface WebUiServerOptions extends WebUiListenOptions {
   readonly assetRoot?: string
   readonly runtimeControl?: WebUiRuntimeControl
   readonly sessionHost?: LiveSessionHost
+  readonly settings?: ProductSettings
+  readonly workbench?: Pick<CandidateWorkbench,
+    'list' | 'inspectSpecification' | 'inspectSpecificationEvaluation' | 'defineSpecification' | 'reviseSpecification' | 'compareSpecifications'>
+  readonly workbenchMutable?: boolean
 }
 
 export interface WebUiServer {
@@ -68,29 +48,11 @@ export interface WebUiServer {
   close(): Promise<void>
 }
 
-const MIME: Record<string, string> = {
-  '.html': 'text/html; charset=utf-8',
-  '.js': 'text/javascript; charset=utf-8',
-  '.css': 'text/css; charset=utf-8',
-  '.json': 'application/json; charset=utf-8',
-  '.svg': 'image/svg+xml',
-  '.ico': 'image/x-icon',
-  '.map': 'application/json; charset=utf-8',
-}
-
-const MUTATING = new Set(['POST', 'PUT', 'PATCH', 'DELETE'])
-
-export function defaultWebAssetRoot(): string {
-  return path.join(path.dirname(fileURLToPath(import.meta.url)), '../../dist/web')
-}
+export { defaultWebAssetRoot } from './web-ui-http.js'
 
 export function startWebUiServer(options: WebUiServerOptions): Promise<WebUiServer> {
   const listen = resolveWebUiListen(process.env, options)
-  const assetRoot = path.resolve(options.assetRoot ?? defaultWebAssetRoot())
-  const sessionToken = createUiSessionToken()
-  const clients = new Set<ServerResponse>()
   let url = ''
-  let lastPayload = ''
   let poll: ReturnType<typeof setInterval> | undefined
 
   const snapshot = (): MissionControlView => {
@@ -106,21 +68,13 @@ export function startWebUiServer(options: WebUiServerOptions): Promise<WebUiServ
     ...(extra.acknowledgement ? { acknowledgement: extra.acknowledgement } : {}),
   })
 
+  const transport = new WebUiHttpTransport(options.assetRoot, envelope)
+  const sendJson = transport.sendJson.bind(transport)
+  const broadcast = transport.broadcast.bind(transport)
+
   const acknowledgementFor = (confirmationId: string) => {
     const resolution = snapshot().approvalResolutions.find((item) => item.confirmationId === confirmationId)
     return resolution ? { text: redactText(acknowledgementOf(resolution).text) } : undefined
-  }
-
-  const sendJson = (res: ServerResponse, status: number, body: unknown, setSession = false) => {
-    const payload = assertSafePayload(JSON.stringify(body))
-    const headers: Record<string, string> = {
-      'content-type': 'application/json; charset=utf-8',
-      'cache-control': 'no-store',
-      connection: 'close',
-    }
-    if (setSession) headers['set-cookie'] = sessionCookieHeader(sessionToken)
-    res.writeHead(status, headers)
-    res.end(payload)
   }
 
   const rejectOrigin = (req: IncomingMessage, res: ServerResponse): boolean => {
@@ -131,8 +85,7 @@ export function startWebUiServer(options: WebUiServerOptions): Promise<WebUiServ
   }
 
   const rejectUntrustedMutation = (req: IncomingMessage, res: ServerResponse): boolean => {
-    if (!MUTATING.has(req.method ?? 'GET')) return false
-    if (sessionMatches(req.headers.cookie, sessionToken)) return false
+    if (transport.mutationTrusted(req.method, req.headers.cookie)) return false
     sendJson(res, 403, { error: 'untrusted session' })
     return true
   }
@@ -142,323 +95,26 @@ export function startWebUiServer(options: WebUiServerOptions): Promise<WebUiServ
     return typeof address === 'object' && address ? address.port : listen.port
   }
 
-  const broadcast = () => {
-    let payload: string
-    try {
-      payload = assertSafePayload(JSON.stringify(envelope()))
-    } catch {
-      return
-    }
-    if (payload === lastPayload) return
-    lastPayload = payload
-    for (const client of clients) {
-      client.write(`event: view\ndata: ${payload}\n\n`)
-    }
-  }
+  const mutations = new WebUiGovernanceMutations(() => options.recoveryRoot.inspect())
 
-  const readBody = async (req: IncomingMessage): Promise<string> => {
-    const chunks: Buffer[] = []
-    let size = 0
-    for await (const chunk of req) {
-      size += chunk.length
-      if (size > 65_536) throw new Error('request too large')
-      chunks.push(chunk)
-    }
-    return Buffer.concat(chunks).toString('utf8')
-  }
-
-  const handleRecovery = async (action: string, confirm: boolean) => {
-    if (!(SUPPORTED_RECOVERY_ACTIONS as readonly string[]).includes(action)) {
-      return { status: 409 as const, body: { error: 'unsupported', action } }
-    }
-    if ((DESTRUCTIVE_RECOVERY_ACTIONS as readonly string[]).includes(action) && confirm !== true) {
-      return { status: 409 as const, body: { error: 'confirmation-required', action } }
-    }
-    if (action === 'diagnostics') {
-      const inspected = options.recoveryRoot.inspect()
-      const boot = options.diagnostics && typeof options.diagnostics === 'object'
-        ? options.diagnostics as { persistence?: unknown; reasons?: unknown }
-        : {}
-      const parts: string[] = []
-      if (typeof boot.persistence === 'string') parts.push(`persistence ${boot.persistence}`)
-      if (Array.isArray(boot.reasons)) {
-        for (const reason of boot.reasons.slice(0, 4)) {
-          if (typeof reason === 'string' && reason.trim() !== '') parts.push(reason.trim().slice(0, 200))
-        }
-      }
-      const live = snapshot()
-      if (live.runtimeContext?.profileCompositionError) {
-        parts.push(`profile-composition ${live.runtimeContext.profileCompositionError.slice(0, 200)}`)
-      }
-      parts.push(inspected.safeMode ? 'safe-mode true' : 'safe-mode false')
-      return {
-        status: 200 as const,
-        body: {
-          action,
-          diagnostics: options.diagnostics ?? { activation: inspected },
-          acknowledgement: { text: redactText(parts.join(' · ') || 'Diagnostics available.') },
-        },
-      }
-    }
-    const busy = mutationInFlight()
-    if (busy !== undefined) {
-      return { status: 409 as const, body: { error: `${busy}-in-flight`, action } }
-    }
-    if (action === 'rollback') {
-      const inspected = options.recoveryRoot.inspect()
-      if (!inspected.safeMode && !inspected.recoveryRequired) {
-        return { status: 409 as const, body: { error: 'ready-state-rollback', action } }
-      }
-      const human = options.recoveryRoot.issueAuthority({ kind: 'human-control', source: 'application-ui' })
-      recoveryBusy = true
-      try {
-        return { status: 200 as const, body: { action, result: await options.recoveryRoot.rollback(human) } }
-      } catch (error) {
-        if (error instanceof RollbackDeniedError) {
-          return { status: 409 as const, body: { error: 'rollback-denied', denials: error.denials, action } }
-        }
-        if (error instanceof GovernanceContractError && /in-flight$/.test(error.message)) {
-          return { status: 409 as const, body: { error: error.message, action } }
-        }
-        throw error
-      } finally {
-        recoveryBusy = false
-      }
-    }
-    const status = options.recoveryRoot.inspect()
-    const live = snapshot()
-    if (action === 'exit-safe-mode' && (
-      live.runtimeContext?.profileCompositionError !== undefined
-      || (
-        live.runtimeContext?.safeMode === true
-        && !status.safeMode
-        && !status.recoveryRequired
-      )
-    )) {
-      return {
-        status: 409 as const,
-        body: {
-          error: 'profile-composition-recovery',
-          action: 'exit-safe-mode',
-          detail: 'Exit Safe Mode cannot repair a broken Profile. Restore profiles/assistant and restart TARS-NG.',
-        },
-      }
-    }
-    if (status.recoveryRequired) {
-      return {
-        status: 409 as const,
-        body: {
-          error: 'integrity-failure',
-          action: 'exit-safe-mode',
-          detail: 'Exit Safe Mode is refused while recovery is still required. Restore the selected Profile and restart; this button does not repair a broken Profile.',
-        },
-      }
-    }
+  const executeSkillCommand = (command: WebUiSkillCommand) => {
     const human = options.recoveryRoot.issueAuthority({ kind: 'human-control', source: 'application-ui' })
-    recoveryBusy = true
-    try {
-      return { status: 200 as const, body: { action, result: options.recoveryRoot.exitSafeMode(human) } }
-    } catch (error) {
-      if (error instanceof GovernanceContractError && /in-flight$/.test(error.message)) {
-        return { status: 409 as const, body: { error: error.message, action } }
-      }
-      throw error
-    } finally {
-      recoveryBusy = false
+    switch (command.action) {
+      case 'approve':
+        return options.recoveryRoot.approveSkill(command.id, command.fingerprint, human)
+      case 'reject':
+        return options.recoveryRoot.rejectSkill(command.id, command.fingerprint, human)
+      case 'activate':
+        return options.recoveryRoot.activateSkill(command.id, human)
+      case 'reactivate':
+        return options.recoveryRoot.reactivateSkill(command.name, command.version, human)
+      case 'disable':
+        return options.recoveryRoot.disableSkill(command.name, human, command.dependents)
+      case 'uninstall':
+        return options.recoveryRoot.uninstallSkill(command.id, human, command.dependents)
+      case 'rollback':
+        return options.recoveryRoot.rollbackSkill(human)
     }
-  }
-
-  const bindCard = (body: { id?: unknown; candidateId?: unknown; fingerprint?: unknown }, cards: readonly ApprovalCard[]) => {
-    if (typeof body.id !== 'string' || body.id === '') return { error: 'malformed' as const }
-    if (typeof body.fingerprint !== 'string' || body.fingerprint === '') return { error: 'malformed' as const }
-    const card = cards.find((item) => item.id === body.id)
-    if (!card) return { error: 'unknown-approval' as const }
-    if (card.fingerprint !== body.fingerprint) return { error: 'stale-fingerprint' as const }
-    if (card.kind === 'self-extension') {
-      if (typeof body.candidateId !== 'string' || body.candidateId === '' || body.candidateId !== card.candidateId) {
-        return { error: 'stale-candidate' as const }
-      }
-    }
-    if (card.status !== 'pending' && card.status !== 'approval-requested' && card.status !== 'unreviewed') {
-      return { error: 'stale-approval' as const }
-    }
-    return { card }
-  }
-
-  let activationBusy = false
-  let uninstallBusy = false
-  let recoveryBusy = false
-
-  const mutationInFlight = (): 'activation' | 'uninstall' | 'disable' | 'recovery' | undefined => {
-    if (uninstallBusy) return 'uninstall'
-    if (activationBusy) return 'activation'
-    if (recoveryBusy) return 'recovery'
-    const inspected = options.recoveryRoot.inspect()
-    if (inspected.lifecycleBusy !== undefined) return inspected.lifecycleBusy
-    if (inspected.state === 'activating' || inspected.state === 'activation-pending') return 'activation'
-    if (inspected.state === 'rollback-pending') return 'recovery'
-    return undefined
-  }
-
-  const bindActivation = (body: {
-    id?: unknown
-    candidateId?: unknown
-    digest?: unknown
-    fingerprint?: unknown
-  }, cards: readonly ActivationCard[]) => {
-    if (typeof body.id !== 'string' || body.id === '') return { error: 'malformed' as const }
-    if (typeof body.candidateId !== 'string' || body.candidateId === '') return { error: 'malformed' as const }
-    if (typeof body.digest !== 'string' || body.digest === '') return { error: 'malformed' as const }
-    if (typeof body.fingerprint !== 'string' || body.fingerprint === '') return { error: 'malformed' as const }
-    const card = cards.find((item) => item.id === body.id)
-    if (!card) return { error: 'unknown-activation' as const }
-    if (card.candidateId !== body.candidateId) return { error: 'stale-candidate' as const }
-    if (card.digest !== body.digest) return { error: 'stale-digest' as const }
-    if (card.fingerprint !== body.fingerprint) return { error: 'stale-fingerprint' as const }
-    if (card.status !== 'APPROVED_NOT_ACTIVE' && card.status !== 'DISABLED_REACTIVATABLE' && card.status !== 'ACTIVATION_FAILED') {
-      return { error: 'stale-activation' as const }
-    }
-    if (card.status === 'ACTIVATION_FAILED' && card.eligibilityOk !== true) {
-      return { error: 'stale-activation' as const }
-    }
-    return { card }
-  }
-
-  const bindUninstall = (body: {
-    id?: unknown
-    owner?: unknown
-    version?: unknown
-    candidateId?: unknown
-    digest?: unknown
-    registryGeneration?: unknown
-  }, cards: readonly UserPluginView[]) => {
-    if (typeof body.id !== 'string' || body.id === '') return { error: 'malformed' as const }
-    if (typeof body.owner !== 'string' || body.owner === '') return { error: 'malformed' as const }
-    if (typeof body.version !== 'string' || body.version === '') return { error: 'malformed' as const }
-    if (typeof body.registryGeneration !== 'number' || !Number.isInteger(body.registryGeneration)) {
-      return { error: 'malformed' as const }
-    }
-    const card = cards.find((item) => item.id === body.id)
-    if (!card) return { error: 'unknown-plugin' as const }
-    if (card.owner !== body.owner || card.version !== body.version) return { error: 'stale-plugin' as const }
-    if (card.registryGeneration !== body.registryGeneration) return { error: 'stale-registry' as const }
-    if (card.candidateId !== undefined) {
-      if (typeof body.candidateId !== 'string' || body.candidateId !== card.candidateId) {
-        return { error: 'stale-candidate' as const }
-      }
-    }
-    if (card.digest !== undefined) {
-      if (typeof body.digest !== 'string' || body.digest !== card.digest) {
-        return { error: 'stale-digest' as const }
-      }
-    }
-    return { card }
-  }
-
-  const bindSkillAction = (body: {
-    action?: unknown
-    id?: unknown
-    name?: unknown
-    version?: unknown
-    digest?: unknown
-    fingerprint?: unknown
-    generation?: unknown
-  }, view: MissionControlView): { error: string } | { skill: SkillProjection } => {
-    const action = String(body.action ?? '')
-    const allowed = new Set(['approve', 'reject', 'activate', 'disable', 'reactivate', 'uninstall', 'rollback'])
-    if (!allowed.has(action)) return { error: 'malformed' }
-    if (typeof body.generation !== 'number' || !Number.isInteger(body.generation)) return { error: 'malformed' }
-    if (action === 'rollback') {
-      const target = view.skillRollback
-      if (target === undefined) return { error: 'unknown-skill' }
-      if (typeof body.name !== 'string' || body.name !== target.name) return { error: 'stale-skill' }
-      if (typeof body.version !== 'string' || body.version !== target.version) return { error: 'stale-skill' }
-      if (typeof body.digest !== 'string' || body.digest !== target.digest) return { error: 'stale-digest' }
-      if (body.generation !== target.generation) return { error: 'stale-generation' }
-      const skill = (view.skills ?? []).find((item) => item.name === target.name && item.version === target.version)
-      if (skill === undefined) return { error: 'unknown-skill' }
-      return { skill }
-    }
-    if (typeof body.id !== 'string' || body.id === '') return { error: 'malformed' }
-    const skill = (view.skills ?? []).find((item) => item.id === body.id)
-    if (skill === undefined) return { error: 'unknown-skill' }
-    if (typeof body.name !== 'string' || body.name !== skill.name) return { error: 'stale-skill' }
-    if (typeof body.version !== 'string' || body.version !== skill.version) return { error: 'stale-skill' }
-    if (typeof body.digest !== 'string' || body.digest !== skill.digest) return { error: 'stale-digest' }
-    if (body.generation !== skill.generation) return { error: 'stale-generation' }
-    if (action === 'approve' || action === 'reject') {
-      if (skill.lifecycle !== 'approval-requested') return { error: 'stale-lifecycle' }
-      if (typeof body.fingerprint !== 'string' || body.fingerprint !== skill.approvalFingerprint) return { error: 'stale-fingerprint' }
-    }
-    if (action === 'activate' && skill.lifecycle !== 'approved') return { error: 'stale-lifecycle' }
-    if (action === 'disable' && skill.lifecycle !== 'active') return { error: 'stale-lifecycle' }
-    if (action === 'reactivate' && skill.lifecycle !== 'disabled') return { error: 'stale-lifecycle' }
-    if (action === 'uninstall' && skill.lifecycle === 'uninstalled') return { error: 'stale-lifecycle' }
-    return { skill }
-  }
-
-  const withheldSkillCatalogMutation = (action: string, view: MissionControlView): string | undefined => {
-    if (action !== 'activate' && action !== 'reactivate') return undefined
-    if (view.skillCatalog?.state === 'withheld') return 'catalog-withheld'
-    if (view.systemState === 'SAFE_MODE' || view.runtimeContext?.safeMode === true) return 'safe-mode'
-    return undefined
-  }
-
-  const sameStringSet = (left: readonly string[], right: readonly string[]) => (
-    left.length === right.length && left.every((item) => right.includes(item))
-  )
-
-  const bindRollback = (body: {
-    id?: unknown
-    fingerprint?: unknown
-    currentGeneration?: unknown
-    targetGeneration?: unknown
-  }, card: RollbackCard | undefined) => {
-    if (typeof body.id !== 'string' || body.id === '') return { error: 'malformed' as const }
-    if (typeof body.fingerprint !== 'string' || body.fingerprint === '') return { error: 'malformed' as const }
-    if (typeof body.currentGeneration !== 'number' || !Number.isInteger(body.currentGeneration)) {
-      return { error: 'malformed' as const }
-    }
-    if (typeof body.targetGeneration !== 'number' || !Number.isInteger(body.targetGeneration)) {
-      return { error: 'malformed' as const }
-    }
-    if (card === undefined) return { error: 'unknown-rollback' as const }
-    if (card.id !== body.id) return { error: 'stale-rollback' as const }
-    if (card.fingerprint !== body.fingerprint) return { error: 'stale-fingerprint' as const }
-    if (card.currentGeneration !== body.currentGeneration) return { error: 'stale-current' as const }
-    if (card.targetGeneration !== body.targetGeneration) return { error: 'stale-target' as const }
-    return { card }
-  }
-
-  const serveAsset = (reqPath: string, res: ServerResponse, setSession: boolean) => {
-    const relative = reqPath === '/' ? 'index.html' : reqPath.replace(/^\//, '')
-    const target = path.resolve(assetRoot, relative)
-    if (!target.startsWith(`${assetRoot}${path.sep}`) && target !== assetRoot) {
-      res.writeHead(403).end()
-      return
-    }
-    if (!existsSync(target) || !statSync(target).isFile()) {
-      if (reqPath === '/' || !path.extname(reqPath)) {
-        const index = path.join(assetRoot, 'index.html')
-        if (existsSync(index)) {
-          res.writeHead(200, {
-            'content-type': MIME['.html'],
-            ...(setSession ? { 'set-cookie': sessionCookieHeader(sessionToken) } : {}),
-          })
-          createReadStream(index).pipe(res)
-          return
-        }
-      }
-      res.writeHead(404, { 'content-type': 'text/plain; charset=utf-8' }).end('Web UI assets are not installed')
-      return
-    }
-    const mime = MIME[path.extname(target)] ?? 'application/octet-stream'
-    res.writeHead(200, {
-      'content-type': mime,
-      'cache-control': 'no-store',
-      ...(setSession && target.endsWith(`${path.sep}index.html`) ? { 'set-cookie': sessionCookieHeader(sessionToken) } : {}),
-    })
-    createReadStream(target).pipe(res)
   }
 
   const server: Server = createServer(async (req, res) => {
@@ -466,41 +122,14 @@ export function startWebUiServer(options: WebUiServerOptions): Promise<WebUiServ
       if (rejectOrigin(req, res)) return
       const hostHeader = req.headers.host ?? `${listen.host}:${boundPort()}`
       const requestUrl = new URL(req.url ?? '/', `http://${hostHeader}`)
-      if ((req.method === 'GET' || req.method === 'POST') && requestUrl.pathname === '/api/runtime-health') {
-        const control = options.runtimeControl
-        if (!control) {
-          sendJson(res, 404, { error: 'runtime-control-unavailable' })
-          return
-        }
-        if (req.method === 'POST') {
-          const body = JSON.parse(await readBody(req)) as { runId?: unknown }
-          if (typeof body.runId !== 'string' || !runIdEquals(body.runId, control.runId)) {
-            sendJson(res, 403, { error: 'identity-mismatch' })
-            return
-          }
-        }
-        sendJson(res, 200, {
-          pid: control.pid,
-          startedAt: control.startedAt,
-          productVersion: control.productVersion,
-          normalizedHome: control.normalizedHome,
-          ...(control.inspectLive ? control.inspectLive() : {}),
-        })
-        return
-      }
-      if (req.method === 'POST' && requestUrl.pathname === '/api/runtime-stop') {
-        const control = options.runtimeControl
-        if (!control) {
-          sendJson(res, 404, { error: 'runtime-control-unavailable' })
-          return
-        }
-        const body = JSON.parse(await readBody(req)) as { runId?: unknown }
-        if (typeof body.runId !== 'string' || !runIdEquals(body.runId, control.runId)) {
-          sendJson(res, 403, { error: 'identity-mismatch' })
-          return
-        }
-        sendJson(res, 200, { ok: true, pid: control.pid })
-        setImmediate(() => control.onStop())
+      const runtimeControl = await handleRuntimeControlRequest({
+        method: req.method,
+        pathname: requestUrl.pathname,
+        readJson: () => transport.readJson(req),
+      }, options.runtimeControl)
+      if (runtimeControl) {
+        sendJson(res, runtimeControl.status, runtimeControl.body)
+        if (runtimeControl.afterSend) setImmediate(runtimeControl.afterSend)
         return
       }
       if (rejectUntrustedMutation(req, res)) return
@@ -513,419 +142,177 @@ export function startWebUiServer(options: WebUiServerOptions): Promise<WebUiServ
         return
       }
       if (req.method === 'GET' && requestUrl.pathname === '/api/events') {
-        res.writeHead(200, {
-          'content-type': 'text/event-stream; charset=utf-8',
-          'cache-control': 'no-store',
-          connection: 'keep-alive',
+        transport.openEvents(req, res)
+        return
+      }
+      if (requestUrl.pathname === '/api/settings') {
+        if (!transport.sessionTrusted(req.headers.cookie)) {
+          sendJson(res, 403, { error: 'untrusted session' })
+          return
+        }
+        if (!options.settings) {
+          sendJson(res, 503, { error: 'settings-unavailable' })
+          return
+        }
+        const settings = await handleWebUiSettingsRequest({
+          method: req.method,
+          pathname: requestUrl.pathname,
+          readJson: () => transport.readJson(req),
+        }, {
+          inspect: () => options.settings!.inspect(),
+          update: (input) => options.settings!.update(input),
         })
-        clients.add(res)
-        const payload = assertSafePayload(JSON.stringify(envelope()))
-        lastPayload = payload
-        res.write(`event: view\ndata: ${payload}\n\n`)
-        req.on('close', () => {
-          clients.delete(res)
+        if (settings) sendJson(res, settings.status, settings.body)
+        return
+      }
+      if (req.method === 'GET' && requestUrl.pathname === '/api/session-search' && !transport.sessionTrusted(req.headers.cookie)) {
+        sendJson(res, 403, { error: 'untrusted session' })
+        return
+      }
+      if (requestUrl.pathname.startsWith('/api/workbench')) {
+        if (!transport.sessionTrusted(req.headers.cookie)) {
+          sendJson(res, 403, { error: 'untrusted session' })
+          return
+        }
+        if (!options.workbench) {
+          sendJson(res, 503, { error: 'workbench-unavailable' })
+          return
+        }
+        const workbench = await handleWebUiWorkbenchRequest({
+          method: req.method,
+          pathname: requestUrl.pathname,
+          query: (name) => requestUrl.searchParams.get(name) ?? undefined,
+          readJson: () => transport.readJson(req),
+        }, {
+          workbench: options.workbench,
+          mutable: options.workbenchMutable === true,
         })
+        if (workbench) {
+          sendJson(res, workbench.status, workbench.body)
+          if (workbench.broadcast) broadcast()
+          return
+        }
+      }
+      const taskControl = await handleWebUiTaskControlRequest({
+        method: req.method,
+        pathname: requestUrl.pathname,
+        readJson: () => transport.readJson(req),
+      }, {
+        controlGoal: (action, id, revision) => options.surface.controlGoal(action, id, revision),
+        controlPlan: (active) => options.surface.controlPlan(active),
+        answerQuestion: (id, selected, custom) => options.surface.answerTaskQuestion(id, selected, custom),
+        project: (acknowledgement) => envelope({ acknowledgement }),
+      })
+      if (taskControl) {
+        sendJson(res, taskControl.status, taskControl.body)
+        if (taskControl.broadcast) broadcast()
         return
       }
-      if (req.method === 'POST' && requestUrl.pathname === '/api/message') {
-        const body = JSON.parse(await readBody(req)) as { text?: unknown; sessionId?: unknown }
-        if (typeof body.text !== 'string' || body.text.trim() === '' || typeof body.sessionId !== 'string') {
-          sendJson(res, 400, { error: 'malformed' })
-          return
-        }
-        if (body.sessionId !== options.surface.sessionId) {
-          sendJson(res, 409, { error: 'stale-session', detail: 'request targeted a different current session', view: snapshot(), webUi: url })
-          return
-        }
-        try {
-          options.sessionHost?.assertAcceptingMessages()
-        } catch (error) {
-          if (error instanceof SessionCatalogError) {
-            sendJson(res, 409, { error: error.code, detail: error.message, view: snapshot(), webUi: url })
-            return
-          }
-          throw error
-        }
-        options.surface.sendMessage(body.text.trim())
-        options.sessionHost?.touchPreview(body.text.trim())
-        sendJson(res, 202, envelope())
-        broadcast()
+      const conversation = await handleWebUiConversationRequest({
+        method: req.method,
+        pathname: requestUrl.pathname,
+        query: requestUrl.searchParams.get('query') ?? undefined,
+        readJson: () => transport.readJson(req),
+      }, {
+        currentSessionId: () => options.surface.sessionId,
+        sendMessage: (text) => options.surface.sendMessage(text),
+        listFileReferences: (query, signal) => options.surface.listFileReferences(query, signal),
+        searchSessions: (query, signal) => options.surface.searchSessions(query, signal),
+        ...(options.sessionHost ? { sessionHost: options.sessionHost } : {}),
+        project: (acknowledgement) => envelope(acknowledgement ? { acknowledgement } : {}),
+      })
+      if (conversation) {
+        sendJson(res, conversation.status, conversation.body)
+        if (conversation.broadcast) broadcast()
         return
       }
-      if (req.method === 'POST' && requestUrl.pathname === '/api/conversations') {
-        const host = options.sessionHost
-        if (!host) {
-          sendJson(res, 409, { error: 'unavailable', detail: 'session catalog is unavailable' })
-          return
-        }
-        const body = JSON.parse(await readBody(req)) as {
-          action?: unknown
-          id?: unknown
-          title?: unknown
-          sessionId?: unknown
-          revision?: unknown
-          confirm?: unknown
-        }
-        if (typeof body.action !== 'string' || typeof body.sessionId !== 'string' || typeof body.revision !== 'number') {
-          sendJson(res, 400, { error: 'malformed' })
-          return
-        }
-        try {
-          const expected = { sessionId: body.sessionId, revision: body.revision }
-          let acknowledgement: { text: string } | undefined
-          if (body.action === 'create') {
-            await host.create(typeof body.title === 'string' ? body.title : undefined, expected)
-            acknowledgement = { text: 'Created a new conversation.' }
-          } else if (body.action === 'switch' && typeof body.id === 'string') {
-            await host.switchTo(body.id, expected)
-            acknowledgement = { text: 'Switched conversation.' }
-          } else if (body.action === 'rename' && typeof body.id === 'string' && typeof body.title === 'string') {
-            await host.rename(body.id, body.title, expected)
-            acknowledgement = { text: 'Renamed conversation.' }
-          } else if (body.action === 'archive' && typeof body.id === 'string') {
-            await host.archive(body.id, expected)
-            acknowledgement = { text: 'Archived conversation.' }
-          } else if (body.action === 'restore' && typeof body.id === 'string') {
-            await host.restore(body.id, expected)
-            acknowledgement = { text: 'Restored conversation.' }
-          } else if (body.action === 'delete' && typeof body.id === 'string') {
-            await host.delete(body.id, { ...expected, confirm: body.confirm === true })
-            acknowledgement = { text: 'Deleted conversation.' }
-          } else {
-            sendJson(res, 409, { error: 'unsupported', action: body.action })
-            return
-          }
-          sendJson(res, 200, envelope({ acknowledgement }))
-          broadcast()
-        } catch (error) {
-          if (error instanceof SessionCatalogError) {
-            sendJson(res, error.code === 'not-found' ? 404 : 409, {
-              error: error.code,
-              detail: error.message,
-              view: snapshot(),
-              webUi: url,
-            })
-            return
-          }
-          throw error
-        }
-        return
-      }
-      if (req.method === 'POST' && (requestUrl.pathname === '/api/approve' || requestUrl.pathname === '/api/deny' || requestUrl.pathname === '/api/cancel')) {
-        const body = JSON.parse(await readBody(req)) as { id?: unknown; candidateId?: unknown; fingerprint?: unknown }
-        const bound = bindCard(body, snapshot().approvals)
-        if ('error' in bound) {
-          sendJson(res, bound.error === 'malformed' ? 400 : 409, { error: bound.error })
-          return
-        }
-        const decision = requestUrl.pathname === '/api/approve' ? 'approve' : requestUrl.pathname === '/api/deny' ? 'deny' : 'cancel'
-        const { card } = bound
-        if (card.kind === 'self-extension') {
-          if (decision === 'cancel') {
-            sendJson(res, 409, { error: 'unsupported', action: 'cancel-self-extension' })
-            return
-          }
+      const approval = await handleWebUiApprovalRequest({
+        method: req.method,
+        pathname: requestUrl.pathname,
+        readJson: () => transport.readJson(req),
+      }, {
+        approvals: () => snapshot().approvals,
+        resolveApproval: (card, decision) => options.surface.resolveApproval(card, decision),
+        recordSelfExtensionApproval: (input) => {
           const human = options.recoveryRoot.issueAuthority({ kind: 'human-control', source: 'application-ui' })
-          options.recoveryRoot.recordApproval(human, {
-            candidateId: card.candidateId ?? '',
-            fingerprint: card.fingerprint,
-            decision: decision === 'approve' ? 'approved-for-exact-diff' : 'rejected',
-          })
-        } else if (decision === 'approve') {
-          await options.surface.approve(card.id)
-        } else if (decision === 'deny') {
-          await options.surface.deny(card.id)
-        } else {
-          await options.surface.cancelConfirmation(card.id)
-        }
-        sendJson(res, 200, envelope({ acknowledgement: acknowledgementFor(card.id) }))
-        broadcast()
+          options.recoveryRoot.recordApproval(human, input)
+        },
+        acknowledgementFor,
+        project: (acknowledgement) => envelope(acknowledgement ? { acknowledgement } : {}),
+      })
+      if (approval) {
+        sendJson(res, approval.status, approval.body)
+        if (approval.broadcast) broadcast()
         return
       }
-      if (req.method === 'POST' && requestUrl.pathname === '/api/activate') {
-        const body = JSON.parse(await readBody(req)) as {
-          id?: unknown
-          candidateId?: unknown
-          digest?: unknown
-          fingerprint?: unknown
-          confirm?: unknown
-        }
-        if (body.confirm !== true) {
-          sendJson(res, 409, { error: 'confirmation-required' })
-          return
-        }
-        if (mutationInFlight() !== undefined) {
-          sendJson(res, 409, { error: `${mutationInFlight()}-in-flight`, view: snapshot(), webUi: url })
-          return
-        }
-        const bound = bindActivation(body, snapshot().activations)
-        if ('error' in bound) {
-          sendJson(res, bound.error === 'malformed' ? 400 : 409, { error: bound.error })
-          return
-        }
-        const human = options.recoveryRoot.issueAuthority({ kind: 'human-control', source: 'application-ui' })
-        activationBusy = true
-        try {
-          const status = await options.recoveryRoot.activate(bound.card.candidateId, human)
-          if (status.state === 'activation-failed' || status.state === 'safe-mode') {
-            const failure = status.lastFailure
-            sendJson(res, 409, {
-              error: 'activation-failed',
-              phase: failure?.phase,
-              diagnostics: failure?.diagnostics ? boundActivationDiagnostics(failure.diagnostics) : 'activation failed',
-              rollbackSucceeded: failure?.rollbackSucceeded === true,
-              recoveryRequired: status.recoveryRequired,
-              safeMode: status.safeMode,
-              active: false,
-              view: snapshot(),
-              webUi: url,
-            })
-            broadcast()
-            return
-          }
-          sendJson(res, 200, envelope())
-          broadcast()
-        } catch (error) {
-          if (error instanceof ActivationDeniedError) {
-            sendJson(res, 409, { error: 'activation-denied', denials: error.denials, view: snapshot(), webUi: url })
-            broadcast()
-            return
-          }
-          if (error instanceof SimulatedCrashError) {
-            sendJson(res, 409, {
-              error: 'activation-interrupted',
-              phase: error.message.replace('simulated crash after ', ''),
-              diagnostics: boundActivationDiagnostics(error.message),
-              view: snapshot(),
-              webUi: url,
-            })
-            broadcast()
-            return
-          }
-          const message = error instanceof Error ? error.message : 'activation failed'
-          sendJson(res, 409, {
-            error: 'activation-error',
-            diagnostics: boundActivationDiagnostics(message),
-            view: snapshot(),
-            webUi: url,
-          })
-          broadcast()
-        } finally {
-          activationBusy = false
-        }
+      const activation = await handleWebUiActivationRequest({
+        method: req.method,
+        pathname: requestUrl.pathname,
+        readJson: () => transport.readJson(req),
+      }, {
+        authority: {
+          activate: (candidateId) => {
+            const human = options.recoveryRoot.issueAuthority({ kind: 'human-control', source: 'application-ui' })
+            return options.recoveryRoot.activate(candidateId, human)
+          },
+          abandon: (candidateId, fingerprint) => {
+            const human = options.recoveryRoot.issueAuthority({ kind: 'human-control', source: 'application-ui' })
+            options.recoveryRoot.abandonFailedActivation(candidateId, fingerprint, human)
+          },
+        },
+        mutations,
+        activations: () => snapshot().activations,
+        project: envelope,
+      })
+      if (activation) {
+        sendJson(res, activation.status, activation.body)
+        if (activation.broadcast) broadcast()
         return
       }
-      if (req.method === 'POST' && requestUrl.pathname === '/api/skill') {
-        const body = JSON.parse(await readBody(req)) as {
-          action?: unknown
-          id?: unknown
-          name?: unknown
-          version?: unknown
-          digest?: unknown
-          fingerprint?: unknown
-          generation?: unknown
-          confirm?: unknown
-          dependents?: unknown
-          acknowledgeDependents?: unknown
-        }
-        if (body.confirm !== true) {
-          sendJson(res, 409, { error: 'confirmation-required' })
-          return
-        }
-        const action = String(body.action ?? '')
-        const view = snapshot()
-        const withheld = withheldSkillCatalogMutation(action, view)
-        if (withheld !== undefined) {
-          sendJson(res, 409, { error: withheld, view, webUi: url })
-          return
-        }
-        const bound = bindSkillAction(body, view)
-        if ('error' in bound) {
-          sendJson(res, bound.error === 'malformed' ? 400 : 409, { error: bound.error })
-          return
-        }
-        const human = options.recoveryRoot.issueAuthority({ kind: 'human-control', source: 'application-ui' })
-        try {
-          if (action === 'approve') {
-            options.recoveryRoot.approveSkill(bound.skill.id, bound.skill.approvalFingerprint ?? '', human)
-          } else if (action === 'reject') {
-            options.recoveryRoot.rejectSkill(bound.skill.id, bound.skill.approvalFingerprint ?? '', human)
-          } else if (action === 'activate') {
-            options.recoveryRoot.activateSkill(bound.skill.id, human)
-          } else if (action === 'reactivate') {
-            options.recoveryRoot.reactivateSkill(bound.skill.name, bound.skill.version, human)
-          } else if (action === 'disable' || action === 'uninstall') {
-            const dependents = bound.skill.dependents
-            if (dependents.length > 0 && body.acknowledgeDependents !== true) {
-              sendJson(res, 409, {
-                error: 'dependents-required',
-                dependents,
-                detail: `hard dependents must be acknowledged: ${dependents.join(', ')}`,
-                view,
-                webUi: url,
-              })
-              return
-            }
-            const acknowledged = Array.isArray(body.dependents) ? body.dependents.map((item) => String(item)) : []
-            if (body.acknowledgeDependents === true && !sameStringSet(dependents, acknowledged)) {
-              sendJson(res, 409, { error: 'stale-dependents', dependents, view, webUi: url })
-              return
-            }
-            const ack = body.acknowledgeDependents === true ? acknowledged : []
-            if (action === 'disable') options.recoveryRoot.disableSkill(bound.skill.name, human, ack)
-            else options.recoveryRoot.uninstallSkill(bound.skill.id, human, ack)
-          } else if (action === 'rollback') {
-            options.recoveryRoot.rollbackSkill(human)
-          } else {
-            sendJson(res, 400, { error: 'malformed', detail: 'unknown skill action' })
-            return
-          }
-          sendJson(res, 200, envelope({ acknowledgement: { text: `Skill ${action} recorded.` } }))
-          broadcast()
-        } catch (error) {
-          const message = error instanceof Error ? error.message : 'skill action failed'
-          const code = error instanceof SkillContractError
-            && (error.code === 'catalog-degraded' || error.code === 'catalog-sync-failed')
-            ? error.code
-            : 'skill-action-denied'
-          sendJson(res, 409, { error: code, detail: redactText(message), view: snapshot(), webUi: url })
-        }
+      const skill = await handleWebUiSkillRequest({
+        method: req.method,
+        pathname: requestUrl.pathname,
+        readJson: () => transport.readJson(req),
+      }, {
+        authority: { execute: executeSkillCommand },
+        project: (acknowledgement) => envelope(acknowledgement ? { acknowledgement } : {}),
+      })
+      if (skill) {
+        sendJson(res, skill.status, skill.body)
+        if (skill.broadcast) broadcast()
         return
       }
-      if (req.method === 'POST' && requestUrl.pathname === '/api/uninstall') {
-        const body = JSON.parse(await readBody(req)) as {
-          id?: unknown
-          owner?: unknown
-          version?: unknown
-          candidateId?: unknown
-          digest?: unknown
-          registryGeneration?: unknown
-          confirm?: unknown
-          acknowledgeDependents?: unknown
-        }
-        if (body.confirm !== true) {
-          sendJson(res, 409, { error: 'confirmation-required' })
-          return
-        }
-        if (mutationInFlight() !== undefined) {
-          sendJson(res, 409, { error: `${mutationInFlight()}-in-flight`, view: snapshot(), webUi: url })
-          return
-        }
-        const bound = bindUninstall(body, snapshot().plugins)
-        if ('error' in bound) {
-          sendJson(res, bound.error === 'malformed' ? 400 : 409, { error: bound.error })
-          return
-        }
-        const human = options.recoveryRoot.issueAuthority({ kind: 'human-control', source: 'application-ui' })
-        uninstallBusy = true
-        try {
-          await options.recoveryRoot.uninstall(human, bound.card.owner, bound.card.version, {
-            acknowledgeDependents: body.acknowledgeDependents === true,
-          })
-          sendJson(res, 200, envelope())
-          broadcast()
-        } catch (error) {
-          if (error instanceof UninstallDeniedError) {
-            sendJson(res, 409, { error: 'uninstall-denied', denials: error.denials, view: snapshot(), webUi: url })
-            broadcast()
-            return
-          }
-          const message = error instanceof Error ? error.message : 'uninstall failed'
-          sendJson(res, 409, {
-            error: 'uninstall-failed',
-            diagnostics: boundActivationDiagnostics(message),
-            view: snapshot(),
-            webUi: url,
-          })
-          broadcast()
-        } finally {
-          uninstallBusy = false
-        }
-        return
-      }
-      if (req.method === 'POST' && requestUrl.pathname === '/api/rollback') {
-        const body = JSON.parse(await readBody(req)) as {
-          id?: unknown
-          fingerprint?: unknown
-          currentGeneration?: unknown
-          targetGeneration?: unknown
-          confirm?: unknown
-        }
-        if (body.confirm !== true) {
-          sendJson(res, 409, { error: 'confirmation-required' })
-          return
-        }
-        if (mutationInFlight() !== undefined) {
-          sendJson(res, 409, { error: `${mutationInFlight()}-in-flight`, view: snapshot(), webUi: url })
-          return
-        }
-        const bound = bindRollback(body, snapshot().rollback)
-        if ('error' in bound) {
-          sendJson(res, bound.error === 'malformed' ? 400 : 409, { error: bound.error })
-          return
-        }
-        const human = options.recoveryRoot.issueAuthority({ kind: 'human-control', source: 'application-ui' })
-        recoveryBusy = true
-        try {
-          const status = await options.recoveryRoot.rollback(human)
-          if (status.state === 'activation-failed' || status.safeMode) {
-            sendJson(res, 409, {
-              error: 'rollback-failed',
-              diagnostics: status.lastFailure?.diagnostics
-                ? boundActivationDiagnostics(status.lastFailure.diagnostics)
-                : 'rollback failed',
-              recoveryRequired: status.recoveryRequired,
-              safeMode: status.safeMode,
-              view: snapshot(),
-              webUi: url,
-            })
-            broadcast()
-            return
-          }
-          sendJson(res, 200, envelope())
-          broadcast()
-        } catch (error) {
-          if (error instanceof RollbackDeniedError) {
-            sendJson(res, 409, { error: 'rollback-denied', denials: error.denials, view: snapshot(), webUi: url })
-            broadcast()
-            return
-          }
-          if (error instanceof SimulatedCrashError) {
-            sendJson(res, 409, {
-              error: 'rollback-interrupted',
-              diagnostics: boundActivationDiagnostics(error.message),
-              view: snapshot(),
-              webUi: url,
-            })
-            broadcast()
-            return
-          }
-          const message = error instanceof Error ? error.message : 'rollback failed'
-          sendJson(res, 409, {
-            error: 'rollback-failed',
-            diagnostics: boundActivationDiagnostics(message),
-            view: snapshot(),
-            webUi: url,
-          })
-          broadcast()
-        } finally {
-          recoveryBusy = false
-        }
-        return
-      }
-      if (req.method === 'POST' && requestUrl.pathname === '/api/recovery') {
-        const body = JSON.parse(await readBody(req)) as { action?: unknown; confirm?: unknown }
-        if (typeof body.action !== 'string') {
-          sendJson(res, 400, { error: 'malformed' })
-          return
-        }
-        const result = await handleRecovery(body.action, body.confirm === true)
-        sendJson(res, result.status, { ...result.body, view: snapshot(), webUi: url })
-        broadcast()
+      const governanceLifecycle = await handleWebUiGovernanceLifecycleRequest({
+        method: req.method,
+        pathname: requestUrl.pathname,
+        readJson: () => transport.readJson(req),
+      }, {
+        authority: {
+          inspect: () => options.recoveryRoot.inspect(),
+          uninstall: (owner, version, acknowledgeDependents) => {
+            const human = options.recoveryRoot.issueAuthority({ kind: 'human-control', source: 'application-ui' })
+            return options.recoveryRoot.uninstall(human, owner, version, { acknowledgeDependents })
+          },
+          rollback: () => {
+            const human = options.recoveryRoot.issueAuthority({ kind: 'human-control', source: 'application-ui' })
+            return options.recoveryRoot.rollback(human)
+          },
+          exitSafeMode: () => {
+            const human = options.recoveryRoot.issueAuthority({ kind: 'human-control', source: 'application-ui' })
+            return options.recoveryRoot.exitSafeMode(human)
+          },
+        },
+        mutations,
+        diagnostics: options.diagnostics,
+        project: envelope,
+      })
+      if (governanceLifecycle) {
+        sendJson(res, governanceLifecycle.status, governanceLifecycle.body)
+        if (governanceLifecycle.broadcast) broadcast()
         return
       }
       if (req.method === 'GET' && !requestUrl.pathname.startsWith('/api/')) {
-        serveAsset(requestUrl.pathname, res, requestUrl.pathname === '/' || requestUrl.pathname === '/index.html')
+        transport.serveAsset(requestUrl.pathname, res, requestUrl.pathname === '/' || requestUrl.pathname === '/index.html')
         return
       }
       sendJson(res, 404, { error: 'not found' })
@@ -957,8 +344,7 @@ export function startWebUiServer(options: WebUiServerOptions): Promise<WebUiServ
         notify: broadcast,
         close: () => new Promise((done, fail) => {
           if (poll) clearInterval(poll)
-          for (const client of clients) client.end()
-          clients.clear()
+          transport.close()
           server.close((error) => error ? fail(error) : done())
           if (typeof server.closeAllConnections === 'function') server.closeAllConnections()
         }),

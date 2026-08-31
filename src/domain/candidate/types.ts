@@ -1,6 +1,7 @@
 import type { ReliabilityGateResult, RiskModel } from '../reliability/types.js'
 import type { EvidenceLevel, ExtensionProvenance } from '../registry/types.js'
 import type { ResolutionKind, ResolutionReview } from '../resolution/types.js'
+import type { CapabilityEvaluationReport } from '../evaluation/types.js'
 
 export const CANDIDATE_LIFECYCLES = [
   'planned',
@@ -25,6 +26,7 @@ export const ALLOWED_VALIDATION_TASKS = [
   'manifest.validate',
   'package.inspect',
   'runtime.contract',
+  'source.contract',
   'source.boundary',
   'typecheck',
   'tests',
@@ -165,6 +167,7 @@ export interface ValidationReport {
   readonly unresolved: readonly string[]
   readonly blocked: readonly string[]
   readonly reliability?: ReliabilityGateResult
+  readonly evaluation?: CapabilityEvaluationReport
 }
 
 export interface CreateCandidateInput {

@@ -29,10 +29,22 @@ export type WorkbenchStep =
 
 export interface WorkbenchListPlanItem {
   readonly planId: string
+  readonly specificationId: string
+  readonly specificationDigest: string
   readonly kind: string
   readonly capability: string
   readonly need: string
   readonly canCreate: boolean
+}
+
+export interface WorkbenchListSpecificationItem {
+  readonly id: string
+  readonly revision: number
+  readonly supersedesId?: string
+  readonly capability: string
+  readonly goal: string
+  readonly status: string
+  readonly digest: string
 }
 
 export interface WorkbenchListCandidateItem {
@@ -42,17 +54,20 @@ export interface WorkbenchListCandidateItem {
   readonly states: readonly WorkbenchCandidateState[]
   readonly step: WorkbenchStep
   readonly planId?: string
+  readonly specificationId?: string
   readonly parentId?: string
   readonly leftover: boolean
 }
 
 export interface WorkbenchListView {
+  readonly specifications: readonly WorkbenchListSpecificationItem[]
   readonly plans: readonly WorkbenchListPlanItem[]
   readonly candidates: readonly WorkbenchListCandidateItem[]
   readonly nextCursor?: string
 }
 
 export interface WorkbenchListCursor {
+  readonly specifications: number
   readonly plans: number
   readonly candidates: number
 }
@@ -66,15 +81,17 @@ export function boundListLimit(limit?: number): number {
 }
 
 export function parseListCursor(cursor?: string): WorkbenchListCursor {
-  if (cursor === undefined || cursor === '') return { plans: 0, candidates: 0 }
+  if (cursor === undefined || cursor === '') return { specifications: 0, plans: 0, candidates: 0 }
   try {
-    const parsed = JSON.parse(cursor) as { plans?: unknown; candidates?: unknown }
+    const parsed = JSON.parse(cursor) as { specifications?: unknown; plans?: unknown; candidates?: unknown }
+    const specifications = parsed.specifications ?? 0
     const plans = parsed.plans
     const candidates = parsed.candidates
-    if (!Number.isInteger(plans) || !Number.isInteger(candidates) || Number(plans) < 0 || Number(candidates) < 0) {
+    if (!Number.isInteger(specifications) || !Number.isInteger(plans) || !Number.isInteger(candidates)
+      || Number(specifications) < 0 || Number(plans) < 0 || Number(candidates) < 0) {
       throw new Error('invalid')
     }
-    return { plans: Number(plans), candidates: Number(candidates) }
+    return { specifications: Number(specifications), plans: Number(plans), candidates: Number(candidates) }
   } catch {
     throw new WorkbenchContractError('list cursor is invalid')
   }

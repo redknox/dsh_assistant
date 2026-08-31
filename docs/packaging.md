@@ -58,7 +58,11 @@ Precedence: CLI flag → environment → env file → `product.json` → default
 | `DEEPSEEK_API_KEY` | yes (for AI) | Secret. Official DeepSeek adapter; never commit |
 | `DSH_ASSISTANT_GOOGLE_CALENDAR_MODE` | no | `live` selects the host-bounded Google Calendar transport |
 | `DSH_ASSISTANT_GOOGLE_CALENDAR_ACCESS_TOKEN` | no | Secret. OAuth access token; expires; never commit |
+| `DSH_ASSISTANT_FEISHU_MODE` | no | `cli` enables read-only Feishu Mail/Contacts through the host `lark-cli` user identity |
+| `DSH_ASSISTANT_FEISHU_PROFILE` | no | Dedicated least-privilege `lark-cli` profile for Feishu Mail/Contacts (default `tars-ng`) |
+| `DSH_ASSISTANT_FEISHU_CALENDAR_MODE` | no | `cli` selects Feishu for Calendar through the same dedicated profile |
 | `DSH_ASSISTANT_SANDBOX_ROOT` | no | Existing directory for confined files/tasks (`~` allowed; not a symlink) |
+| `DSH_ASSISTANT_KNOWLEDGE_OBSIDIAN_VAULT` | no | Explicit Obsidian Vault root; indexes Markdown while skipping hidden directories and symlinks; enables governed create/append tools |
 | `GOOGLE_SEARCH_API_KEY` | no | Secret. Diagnosed by name; Search is not shipped |
 | `GOOGLE_SEARCH_ENGINE_ID` | no | Non-secret config. Diagnosed by name; Search is not shipped |
 | `DSH_ASSISTANT_MEMORY` | no | Contributor boot: `json-file` (product CLI already persists under home) |
@@ -73,7 +77,7 @@ Optional capability providers (replaceable, not required to boot):
 | LLM adapter | `deepseek-official` / `deepseek-v4-flash` via `@deepseek-ai/dsh-llm-deepseek` | **Implemented** in the product runtime; live calls need `DEEPSEEK_API_KEY`. Fake adapters remain for tests/`ui`/`slice` |
 | Calendar | **unavailable** unless live token+mode or explicit fixtures | Fake suite **Verified** for tests; product default does not return fixture events as live data |
 | Memory persistence | `$TARS_NG_HOME/data/memory.json` | JSON adapter **Verified**; hosted DB **Unsupported** |
-| Knowledge ingest | none, or explicit fixture paths | Local lexical index **Verified** |
+| Knowledge ingest | none, explicit fixture paths, or one Obsidian Vault | Local lexical index **Verified**; configured Vault is re-indexed at boot. Note creation and append are L4 actions bound to an exact path/content/version; overwrite and delete are unsupported |
 
 ## Lifecycle
 

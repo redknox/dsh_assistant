@@ -423,7 +423,7 @@ describe('local third-party import', () => {
     output: { schema: { type: 'string' }, render(_a, v) { return [{ type: 'text', text: String(v) }] } },
     async execute(args) { return \`v2:\${String(args.text ?? '')}\` },
   })
-  ctx.effect(() => { disposeReverse(); disposeMark() })
+  ctx.effect(() => () => { disposeReverse(); disposeMark() })
 }
 `,
       })

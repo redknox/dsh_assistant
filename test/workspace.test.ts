@@ -1,10 +1,13 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
+import { CallId, createAssistantMessage, createToolResultMessage, createUserMessage } from '@deepseek-ai/dsh-llm'
+import { Session, SessionId } from '@deepseek-ai/dsh-session'
 import { PERSONALITY_CORPUS } from '../src/domain/personality/index.js'
 import { googleCalendarReadRiskModel } from '../src/domain/reliability/index.js'
 import type { ResolutionReview } from '../src/domain/resolution/index.js'
 import { flattenEffects, projectMissionControl, type WorkspaceSnapshotInput } from '../src/domain/workspace/index.js'
 import { approvalStateOf, extensionLifecycleOf } from '../src/domain/workspace/lifecycle.js'
+import { conversationWithoutReasoning, executionLogFromSession } from '../src/domain/workspace/gather.js'
 import { bootAssistantControl, createAssistantAgent } from '../src/runtime/boot.js'
 import { AssistantControlSurface } from '../src/ui/controller.js'
 import { renderMissionControlAsHtml, renderMissionControlAsText } from '../src/ui/mission-control.js'
@@ -36,6 +39,38 @@ function snapshot(overrides: Partial<WorkspaceSnapshotInput> = {}): WorkspaceSna
 }
 
 describe('TARS-NG mission-control workspace', () => {
+  it('keeps only the final assistant answer in conversation and sends execution detail to the log', () => {
+    const session = Session.create(SessionId('workspace-execution-log'))
+    const callId = CallId('write-1')
+    session.append('user/message', createUserMessage({ content: [{ type: 'text', text: 'Build it.' }], source: { kind: 'user' } }), { surfaceOp: 'append' })
+    session.append('assistant/message', {
+      turn: 1,
+      step: 1,
+      message: createAssistantMessage({ content: [{ type: 'text', text: 'Writing the candidate now.' }], source: { provider: 'test', model: 'test' } }),
+    }, { surfaceOp: 'append' })
+    session.append('tool/call', { turn: 1, step: 1, callId, name: 'write_candidate_file', arguments: '{"path":"src/plugin.js"}' })
+    session.append('tool/result', {
+      turn: 1,
+      step: 1,
+      message: createToolResultMessage({ callId, content: [{ type: 'text', text: '{"lifecycle":"developing"}' }], isError: false }),
+    }, { surfaceOp: 'append' })
+    session.append('assistant/message', {
+      turn: 1,
+      step: 2,
+      message: createAssistantMessage({ content: [{ type: 'text', text: 'Candidate implementation is complete.' }], source: { provider: 'test', model: 'test' } }),
+    }, { surfaceOp: 'append' })
+
+    assert.deepEqual(conversationWithoutReasoning(session.events), [
+      { kind: 'user', text: 'Build it.' },
+      { kind: 'assistant', text: 'Candidate implementation is complete.' },
+    ])
+    const log = executionLogFromSession(session.events)
+    assert.deepEqual(log.map((entry) => entry.kind), ['agent-note', 'tool-call', 'tool-result'])
+    assert.equal(log[1]?.label, 'write_candidate_file')
+    assert.match(log[1]?.detail ?? '', /src\/plugin\.js/)
+    assert.match(log[2]?.detail ?? '', /developing/)
+  })
+
   it('A. shows today context and a concise objective without fake progress', () => {
     const view = projectMissionControl(snapshot({
       objective: { text: 'What matters today?', status: 'active' },
@@ -88,6 +123,110 @@ describe('TARS-NG mission-control workspace', () => {
     assert.equal(calendar.every((item) => item.status === 'unavailable'), true)
   })
 
+  it('projects auto-executing tasks as active while file writes stay governed', () => {
+    const view = projectMissionControl(snapshot({
+      integrationStatus: [
+        { capability: 'tasks', available: true },
+        { capability: 'files', available: true },
+      ],
+      autoExecuteCapabilities: ['tasks'],
+    }))
+
+    assert.ok(view.capabilities.some((item) => item.area === 'Tasks' && item.status === 'active'))
+    assert.ok(view.capabilities.some((item) => item.area === 'Files' && item.status === 'approval-required'))
+  })
+
+  it('does not degrade for optional integrations that were never connected', () => {
+    const view = projectMissionControl(snapshot({
+      integrationStatus: [
+        { capability: 'mail', available: false, configured: false, reason: 'mail is not connected' },
+        { capability: 'contacts', available: false, configured: false, reason: 'contacts are not connected' },
+      ],
+      registry: [],
+    }))
+
+    assert.equal(view.systemState, 'READY')
+    assert.equal(view.controlStrip.degradation, undefined)
+    assert.ok(view.capabilities.some((item) => item.area === 'Mail' && item.status === 'not-connected'))
+    assert.ok(view.capabilities.some((item) => item.area === 'Contacts' && item.status === 'not-connected'))
+  })
+
+  it('projects the live integration provider instead of the registry fixture default', () => {
+    const view = projectMissionControl(snapshot({
+      integrationStatus: [{ capability: 'mail', available: true, configured: true, provider: 'feishu' }],
+      registry: [{
+        owner: 'managed/integrations',
+        version: '0.1.0',
+        provenance: 'managed',
+        status: 'active',
+        capabilities: ['mail'],
+        provider: 'fake',
+      }],
+    }))
+
+    const mail = view.capabilities.find((item) => item.area === 'Mail')
+    assert.equal(mail?.status, 'active')
+    assert.equal(mail?.advanced?.provider, 'feishu')
+  })
+
+  it('preserves the provider for integration-only capability rows', () => {
+    const view = projectMissionControl(snapshot({
+      registry: [],
+      integrationStatus: [{ capability: 'contacts', available: true, configured: true, provider: 'feishu' }],
+    }))
+    const contacts = view.capabilities.find((item) => item.area === 'Contacts')
+    assert.equal(contacts?.status, 'active')
+    assert.equal(contacts?.advanced?.provider, 'feishu')
+  })
+
+  it('projects governed Web Search from its live provider status', () => {
+    const registry = [{
+      owner: 'managed/web-search',
+      version: '0.1.0',
+      provenance: 'managed',
+      status: 'active',
+      capabilities: ['web.search'],
+      provider: 'deepseek',
+    }] as const
+    const disconnected = projectMissionControl(snapshot({
+      registry,
+      integrationStatus: [{ capability: 'web', available: false, configured: false, provider: 'deepseek' }],
+    }))
+    const connected = projectMissionControl(snapshot({
+      registry,
+      integrationStatus: [{ capability: 'web', available: true, configured: true, provider: 'deepseek' }],
+    }))
+
+    assert.deepEqual(disconnected.capabilities.find((item) => item.area === 'Web'), {
+      area: 'Web',
+      action: 'Search public sources',
+      status: 'not-connected',
+      advanced: { owner: 'managed/web-search', version: '0.1.0', provenance: 'managed', provider: 'deepseek' },
+    })
+    assert.equal(connected.capabilities.find((item) => item.area === 'Web')?.status, 'active')
+    assert.equal(connected.capabilities.some((item) => item.action.toLowerCase().includes('fetch')), false)
+  })
+
+  it('projects only the latest completed work brief and redacts its text', () => {
+    const completed = projectMissionControl(snapshot({
+      jobs: [{
+        name: 'morning-brief',
+        lastRunStatus: 'completed',
+        lastRunId: 'run-7',
+        lastRunFinishedAt: '2026-08-28T08:00:00.000Z',
+        lastRunSummary: '# Work brief\nAuthorization: Bearer hidden.value',
+      }],
+    }))
+    const running = projectMissionControl(snapshot({
+      jobs: [{ name: 'morning-brief', lastRunStatus: 'running', lastRunSummary: 'stale brief' }],
+    }))
+
+    assert.equal(completed.workBrief?.runId, 'run-7')
+    assert.match(completed.workBrief?.markdown ?? '', /\[redacted\]/)
+    assert.doesNotMatch(completed.workBrief?.markdown ?? '', /Authorization: Bearer/)
+    assert.equal(running.workBrief?.markdown, undefined)
+  })
+
   it('D. calendar create is a first-class approval object', () => {
     const view = projectMissionControl(snapshot({
       pendingConfirmations: [{
@@ -113,6 +252,31 @@ describe('TARS-NG mission-control workspace', () => {
     assert.equal(card?.sideEffect, 'yes')
     assert.equal(card?.authorityChange, 'none')
     assert.match(renderMissionControlAsHtml(view), /CREATE CALENDAR EVENT/)
+  })
+
+  it('projects an exact Obsidian write as a reviewable approval card', () => {
+    const view = projectMissionControl(snapshot({
+      pendingConfirmations: [{
+        id: 'conf-obsidian',
+        capability: 'obsidian',
+        operation: 'append_note',
+        fingerprint: 'fp-obsidian',
+        status: 'pending',
+        level: 'L4',
+        payload: {
+          path: 'Projects/TARS-NG.md',
+          content: '## Decision\n\nUse [[Governed Tools]].\n',
+          expectedDigest: 'abc123',
+        },
+      }],
+    }))
+    const card = view.approvals[0]
+    assert.equal(view.systemState, 'NEEDS_APPROVAL')
+    assert.equal(card?.title, 'APPEND TO OBSIDIAN NOTE')
+    assert.equal(card?.target, 'Projects/TARS-NG.md')
+    assert.equal(card?.fingerprint, 'fp-obsidian')
+    assert.match(card?.details.join('\n') ?? '', /Use \[\[Governed Tools\]\]/)
+    assert.match(card?.details.join('\n') ?? '', /abc123/)
   })
 
   it('E. denied approval stays calm and does not re-queue the action', () => {
@@ -829,6 +993,27 @@ describe('TARS-NG mission-control workspace', () => {
     assert.ok(view.capabilities.some((item) => item.status === 'safe-mode-disabled'))
   })
 
+  it('marks Safe Mode ready to exit after recovery is complete', () => {
+    const entered = projectMissionControl(snapshot({ safeMode: true, recoveryRequired: false }))
+    assert.equal(entered.recovery?.exitReady, false)
+    const view = projectMissionControl(snapshot({
+      safeMode: true,
+      recoveryRequired: false,
+      activation: {
+        state: 'safe-mode',
+        rollbackPlan: {
+          id: 'rollback-10-7',
+          currentGeneration: 10,
+          targetGeneration: 7,
+          fingerprint: 'verified-rollback',
+          available: false,
+          denials: [{ reason: 'already-restored', detail: 'current owner set already matches the rollback target' }],
+        },
+      },
+    }))
+    assert.equal(view.recovery?.exitReady, true)
+  })
+
   it('I. personality tuning previews behavior without granting authority', () => {
     const view = projectMissionControl(snapshot({
       personality: { humor: 20, directness: 95, initiative: 80, verbosity: 'concise', humorSuppressed: false },
@@ -883,7 +1068,7 @@ describe('TARS-NG mission-control workspace', () => {
         version: '0.1.0',
         manifest: {
           capabilities: ['calendar.read', 'calendar.freebusy'],
-          permissions: ['local.fake.suite'],
+          permissions: ['host.text.echo'],
           secrets: ['google.calendar.oauth'],
           effects: {
             filesystem: [],

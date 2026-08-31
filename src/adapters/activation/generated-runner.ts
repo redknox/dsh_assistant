@@ -9,7 +9,7 @@ import { contractDigestExtras, digestFiles } from '../../domain/candidate/digest
 import { GENERATED_EXTENSION_API_V1 } from '../../domain/workbench/authoring-contract.js'
 import {
   approvedHostCapabilities,
-  executeHostBroker,
+  GeneratedHostBroker,
   generatedIsolation,
   GENERATED_CALL_TIMEOUT_MS,
   GENERATED_MAX_MESSAGE_BYTES,
@@ -19,6 +19,8 @@ import {
   recordGeneratedProcessStop,
   recordGeneratedRuntimeFailure,
   sanitizeGeneratedDiagnostic,
+  textEchoBrokerOperation,
+  type GeneratedBrokerExecution,
   type GeneratedPrepareInput,
   type GeneratedToolDescriptor,
 } from '../../domain/generated-runtime/index.js'
@@ -33,6 +35,7 @@ interface Pending {
 export class IsolatedGeneratedRunner {
   private child?: ChildProcessWithoutNullStreams
   private readonly pending = new Map<string, Pending>()
+  private readonly brokerExecutions = new Map<string, GeneratedBrokerExecution>()
   private nextId = 1
   private stderr = ''
   private started = false
@@ -48,7 +51,10 @@ export class IsolatedGeneratedRunner {
   readonly tools: string[] = []
   descriptors: GeneratedToolDescriptor[] = []
 
-  constructor(private readonly input: GeneratedPrepareInput) {}
+  constructor(
+    private readonly input: GeneratedPrepareInput,
+    private readonly broker = new GeneratedHostBroker([textEchoBrokerOperation]),
+  ) {}
 
   get owner(): string {
     return this.input.owner
@@ -166,9 +172,13 @@ export class IsolatedGeneratedRunner {
     return this.tools
   }
 
-  async call(tool: string, args: Record<string, unknown>, signal?: AbortSignal): Promise<unknown> {
+  async call(
+    tool: string,
+    args: Record<string, unknown>,
+    execution: GeneratedBrokerExecution = { signal: new AbortController().signal },
+  ): Promise<unknown> {
     try {
-      const reply = await this.request({ op: 'call', tool, args }, GENERATED_CALL_TIMEOUT_MS, signal)
+      const reply = await this.request({ op: 'call', tool, args }, GENERATED_CALL_TIMEOUT_MS, execution.signal, execution)
       if (reply.ok !== true) throw new Error(String(reply.error ?? 'generated tool failed'))
       return reply.value
     } catch (error) {
@@ -188,6 +198,19 @@ export class IsolatedGeneratedRunner {
       process.kill(-pid, 'SIGKILL')
     } catch {
       this.child?.kill('SIGKILL')
+    }
+  }
+
+  async shutdown(): Promise<void> {
+    if (this.child === undefined) return
+    try {
+      const reply = await this.request({ op: 'shutdown' }, GENERATED_CALL_TIMEOUT_MS)
+      if (reply.ok !== true) throw new Error(String(reply.error ?? 'generated cleanup failed'))
+      await this.waitForExit(1_000)
+      if (this.child !== undefined) this.kill()
+    } catch (error) {
+      this.kill()
+      throw error
     }
   }
 
@@ -294,10 +317,13 @@ export class IsolatedGeneratedRunner {
     if (message.op === 'broker-request') {
       const id = String(message.id ?? '')
       try {
-        const value = executeHostBroker({
+        const callId = String(message.callId ?? '')
+        const execution = this.brokerExecutions.get(callId)
+        if (!execution) throw new Error('broker request is not bound to an active generated tool call')
+        const value = await this.broker.request({
           capability: String(message.capability ?? ''),
           args: (message.args && typeof message.args === 'object') ? message.args as Record<string, unknown> : {},
-        }, approvedHostCapabilities(this.input.permissions))
+        }, approvedHostCapabilities(this.input.permissions), execution)
         this.write({ id, op: 'broker-result', ok: true, value })
       } catch (error) {
         this.write({
@@ -316,29 +342,39 @@ export class IsolatedGeneratedRunner {
     waiter.resolve(message)
   }
 
-  private request(body: Record<string, unknown>, timeoutMs: number, signal?: AbortSignal): Promise<Record<string, unknown>> {
+  private request(
+    body: Record<string, unknown>,
+    timeoutMs: number,
+    signal?: AbortSignal,
+    brokerExecution?: GeneratedBrokerExecution,
+  ): Promise<Record<string, unknown>> {
     if (this.child === undefined) return Promise.reject(new Error('generated process is not running'))
     const id = String(this.nextId++)
     return new Promise((resolve, reject) => {
       const timer = setTimeout(() => {
         this.pending.delete(id)
+        this.brokerExecutions.delete(id)
         reject(new Error('generated call timed out'))
         this.failClosed('generated call timed out')
       }, timeoutMs)
       const onAbort = () => {
         this.pending.delete(id)
+        this.brokerExecutions.delete(id)
         clearTimeout(timer)
         reject(new Error('generated call was cancelled'))
         this.failClosed('generated call was cancelled')
       }
       signal?.addEventListener('abort', onAbort, { once: true })
+      if (brokerExecution) this.brokerExecutions.set(id, brokerExecution)
       this.pending.set(id, {
         resolve: (value) => {
+          this.brokerExecutions.delete(id)
           clearTimeout(timer)
           signal?.removeEventListener('abort', onAbort)
           resolve(value)
         },
         reject: (error) => {
+          this.brokerExecutions.delete(id)
           clearTimeout(timer)
           signal?.removeEventListener('abort', onAbort)
           reject(error)
@@ -361,6 +397,7 @@ export class IsolatedGeneratedRunner {
     const error = new Error(sanitizeGeneratedDiagnostic(reason))
     for (const waiter of this.pending.values()) waiter.reject(error)
     this.pending.clear()
+    this.brokerExecutions.clear()
   }
 }
 

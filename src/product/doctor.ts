@@ -3,7 +3,7 @@ import { inspectSandboxRoot } from '../domain/files/sandbox-root.js'
 import { generatedRuntimeDiagnosis, type GeneratedRuntimeDiagnosis } from '../domain/generated-runtime/index.js'
 import type { OperatorStatus } from '../domain/self-extension/status.js'
 import { inspectCompatibility, type CompatibilityReport } from './compatibility.js'
-import { PRODUCT_NAME } from './constants.js'
+import { DEFAULT_FEISHU_PROFILE, PRODUCT_NAME } from './constants.js'
 import { credentialInventory, missingCredentialNames, type CredentialPresence, type EnvFileLoad } from './env.js'
 import type { ProductHomeLayout } from './home.js'
 import { publicRuntimeContextView, sessionPersistenceDirOf, type RuntimeContext } from './runtime-context.js'
@@ -44,6 +44,14 @@ export interface DoctorReport {
 }
 
 export function calendarDiagnosis(allowFixtures: boolean): IntegrationDiagnosis {
+  if (process.env.DSH_ASSISTANT_FEISHU_CALENDAR_MODE === 'cli') {
+    const profile = process.env.DSH_ASSISTANT_FEISHU_PROFILE ?? DEFAULT_FEISHU_PROFILE
+    return {
+      capability: 'calendar',
+      mode: 'live',
+      note: `Live Feishu Calendar through the least-privilege lark-cli profile ${profile}. Reads run directly; creates remain policy-confirmed.`,
+    }
+  }
   const mode = process.env.DSH_ASSISTANT_GOOGLE_CALENDAR_MODE
   const tokenPresent = Boolean(process.env.DSH_ASSISTANT_GOOGLE_CALENDAR_ACCESS_TOKEN)
   if (mode === 'live') {
@@ -78,6 +86,26 @@ export function searchDiagnosis(): IntegrationDiagnosis {
     mode: 'unavailable',
     missing,
     note: 'Google Search is not a shipped TARS-NG capability. Credentials are diagnosed by name only so soak config is visible; they are not used.',
+  }
+}
+
+export function feishuDiagnosis(allowFixtures: boolean): IntegrationDiagnosis {
+  if (process.env.DSH_ASSISTANT_FEISHU_MODE === 'cli') {
+    const profile = process.env.DSH_ASSISTANT_FEISHU_PROFILE ?? DEFAULT_FEISHU_PROFILE
+    return {
+      capability: 'feishu-mail-contacts',
+      mode: 'live',
+      note: `Uses the host lark-cli user identity from profile ${profile}. Runtime verifies authorization and keeps credentials outside the Agent context.`,
+    }
+  }
+  if (allowFixtures) {
+    return { capability: 'feishu-mail-contacts', mode: 'fake', note: 'Fixture mail and contacts are explicit test data.' }
+  }
+  return {
+    capability: 'feishu-mail-contacts',
+    mode: 'unavailable',
+    missing: ['DSH_ASSISTANT_FEISHU_MODE'],
+    note: 'Not connected. Configure a least-privilege lark-cli profile, then set DSH_ASSISTANT_FEISHU_MODE=cli.',
   }
 }
 
@@ -131,7 +159,7 @@ export function collectStaticDoctor(input: {
     credentials,
     missingConfiguration: missingCredentialNames(credentials),
     allowFixtures: input.allowFixtures,
-    integrations: [calendarDiagnosis(input.allowFixtures), sandboxDiagnosis(input.allowFixtures), searchDiagnosis()],
+    integrations: [calendarDiagnosis(input.allowFixtures), feishuDiagnosis(input.allowFixtures), sandboxDiagnosis(input.allowFixtures), searchDiagnosis()],
     lastStartup: input.lastStartup,
     logFile: input.layout.logFile,
     generatedRuntime: generatedRuntimeDiagnosis(),

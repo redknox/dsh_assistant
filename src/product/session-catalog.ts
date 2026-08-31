@@ -1,6 +1,7 @@
 import { existsSync, readFileSync, unlinkSync } from 'node:fs'
 import path from 'node:path'
 import { randomBytes } from 'node:crypto'
+import { normalizeSessionTitle } from '@deepseek-ai/dsh-session-title'
 import { writeJsonAtomic } from '../domain/persistence/atomic.js'
 import { redactText } from '../domain/workspace/redact.js'
 import { DEFAULT_SESSION_ID, parseSessionId, type RuntimeContext } from './runtime-context.js'
@@ -106,12 +107,8 @@ function sameBinding(left: SessionCatalogBinding, right: SessionCatalogBinding):
 }
 
 function parseTitle(value: string | undefined): string {
-  const title = (value ?? DEFAULT_CONVERSATION_TITLE).trim()
-  if (title === '') return DEFAULT_CONVERSATION_TITLE
-  if (title.includes('/') || title.includes('\\') || title.includes('..')) {
-    throw new SessionCatalogError('invalid-title', 'session title cannot contain path syntax')
-  }
-  return title.slice(0, 80)
+  const title = normalizeSessionTitle(value ?? DEFAULT_CONVERSATION_TITLE, 80)
+  return title === '' ? DEFAULT_CONVERSATION_TITLE : title
 }
 
 function nowIso(): string {
@@ -316,6 +313,49 @@ export function inspectSessionCatalog(
   }
   const stored = readCatalogFile(file, binding)
   return publicView(stored)
+}
+
+function profileOnlyBindingChange(from: SessionCatalogBinding, to: SessionCatalogBinding): boolean {
+  return from.home === to.home
+    && from.workspaceIdentity === to.workspaceIdentity
+    && from.sessionRootIdentity === to.sessionRootIdentity
+}
+
+export function migrateSessionCatalogProfileBinding(
+  sessionPersistenceDir: string,
+  binding: SessionCatalogBinding,
+): boolean {
+  const file = sessionCatalogFile(sessionPersistenceDir)
+  if (!existsSync(file)) return false
+  let raw: unknown
+  try {
+    raw = JSON.parse(readFileSync(file, 'utf8'))
+  } catch {
+    throw new SessionCatalogError('corrupt', 'session catalog is corrupt')
+  }
+  if (raw === null || typeof raw !== 'object') {
+    throw new SessionCatalogError('corrupt', 'session catalog is corrupt')
+  }
+  const storedBinding = (raw as Partial<SessionCatalogFile>).binding
+  if (storedBinding === undefined || !profileOnlyBindingChange(storedBinding, binding)) {
+    throw new SessionCatalogError('context-mismatch', 'session catalog is bound to another Home/Profile/Workspace')
+  }
+  const stored = parseCatalogRecord(raw, storedBinding)
+  if (sameBinding(storedBinding, binding)) return false
+
+  const journalFile = sessionCatalogJournalFile(sessionPersistenceDir)
+  if (existsSync(journalFile)) {
+    const journal = readCatalogJournal(journalFile, storedBinding)
+    if (journal !== undefined) {
+      writeJsonAtomic(journalFile, {
+        ...journal,
+        previous: { ...journal.previous, binding },
+        ...(journal.intended ? { intended: { ...journal.intended, binding } } : {}),
+      })
+    }
+  }
+  writeJsonAtomic(file, { ...stored, binding })
+  return true
 }
 
 function publicView(stored: SessionCatalogFile): PublicSessionCatalog {
@@ -561,6 +601,21 @@ export class SessionCatalog {
       throw new SessionCatalogError('not-found', `session ${target} is not in the catalog`)
     }
     const nextTitle = parseTitle(title)
+    this.write({
+      ...stored,
+      revision: stored.revision + 1,
+      sessions: stored.sessions.map((item) => item.id === target ? { ...item, title: nextTitle } : item),
+    })
+    return this.inspect()
+  }
+
+  /** Apply one accepted log-backed title to the UI projection without a stale-write check. */
+  syncTitle(id: string, title: string): PublicSessionCatalog {
+    const stored = this.load()
+    const target = parseSessionId(id)
+    const nextTitle = parseTitle(title)
+    const match = stored.sessions.find((item) => item.id === target)
+    if (!match || match.title === nextTitle) return publicView(stored)
     this.write({
       ...stored,
       revision: stored.revision + 1,

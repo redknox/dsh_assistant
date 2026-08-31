@@ -1,10 +1,21 @@
 import type { ActivationCard, ApprovalCard, MissionControlView, RollbackCard, SkillProjection, UserPluginView, WorkObjectKind } from '../../src/domain/workspace/types'
+import type { SettingsSnapshot, SettingsUpdate } from '../../src/product/settings-types'
+import type { FileReferenceCandidate } from '@deepseek-ai/dsh-file-reference'
+import type {
+  CapabilitySpecificationDiffView,
+  CapabilityEvaluationView,
+  CapabilitySpecificationRevisionInput,
+  CapabilitySpecificationView,
+  WorkbenchSnapshotView,
+} from '../../src/product/web-ui-workbench-types'
 
 export interface UiEnvelope {
   readonly view: MissionControlView
   readonly webUi: string
   readonly acknowledgement?: { readonly text: string }
 }
+
+export type WorkbenchSnapshot = WorkbenchSnapshotView
 
 const include: RequestInit = { credentials: 'include', cache: 'no-store' }
 
@@ -44,6 +55,68 @@ export async function fetchView(): Promise<UiEnvelope> {
   return parseEnvelope(await fetch('/api/view', include))
 }
 
+export async function fetchSettings(): Promise<SettingsSnapshot> {
+  const response = await fetch('/api/settings', include)
+  const body = await response.json() as SettingsSnapshot & { error?: string }
+  if (!response.ok) throw new Error(body.error ?? `settings request failed (${response.status})`)
+  return body
+}
+
+export async function saveSettings(input: SettingsUpdate): Promise<SettingsSnapshot> {
+  const response = await fetch('/api/settings', {
+    ...include,
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(input),
+  })
+  const body = await response.json() as SettingsSnapshot & { error?: string }
+  if (!response.ok) throw new Error(body.error ?? `settings update failed (${response.status})`)
+  return body
+}
+
+export async function fetchWorkbench(): Promise<WorkbenchSnapshot> {
+  return parseJson<WorkbenchSnapshot>(await fetch('/api/workbench', include), 'workbench request')
+}
+
+export async function fetchCapabilitySpecification(id: string): Promise<CapabilitySpecificationView> {
+  return parseJson<CapabilitySpecificationView>(
+    await fetch(`/api/workbench/specification?id=${encodeURIComponent(id)}`, include),
+    'capability specification request',
+  )
+}
+
+export async function fetchCapabilityEvaluation(id: string): Promise<CapabilityEvaluationView> {
+  return parseJson<CapabilityEvaluationView>(
+    await fetch(`/api/workbench/evaluation?id=${encodeURIComponent(id)}`, include),
+    'capability evaluation request',
+  )
+}
+
+export async function compareCapabilitySpecificationRevisions(from: string, to: string): Promise<CapabilitySpecificationDiffView> {
+  return parseJson<CapabilitySpecificationDiffView>(
+    await fetch(`/api/workbench/compare?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`, include),
+    'capability specification comparison',
+  )
+}
+
+export async function reviseCapabilitySpecification(
+  specificationId: string,
+  patch: CapabilitySpecificationRevisionInput,
+): Promise<CapabilitySpecificationView> {
+  return parseJson<CapabilitySpecificationView>(await fetch('/api/workbench/specification/revise', {
+    ...include,
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ specificationId, patch }),
+  }), 'capability specification revision')
+}
+
+async function parseJson<T>(response: Response, label: string): Promise<T> {
+  const body = await response.json() as T & { readonly error?: string }
+  if (!response.ok) throw new Error(body.error ?? `${label} failed (${response.status})`)
+  return body
+}
+
 export async function sendMessage(text: string, sessionId: string): Promise<UiEnvelope> {
   return parseEnvelope(await fetch('/api/message', {
     ...include,
@@ -51,6 +124,51 @@ export async function sendMessage(text: string, sessionId: string): Promise<UiEn
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ text, sessionId }),
   }))
+}
+
+export async function controlGoal(input: {
+  readonly action: 'pause' | 'resume'
+  readonly id: string
+  readonly revision: number
+}): Promise<UiEnvelope> {
+  return taskControlRequest(input)
+}
+
+export async function controlPlan(active: boolean): Promise<UiEnvelope> {
+  return taskControlRequest({ action: active ? 'enter-plan' : 'leave-plan' })
+}
+
+export async function answerTaskQuestion(id: string, selected: string, custom?: string): Promise<UiEnvelope> {
+  return taskControlRequest({ action: 'answer-question', id, selected, ...(custom ? { custom } : {}) })
+}
+
+async function taskControlRequest(input: Record<string, unknown>): Promise<UiEnvelope> {
+  return parseEnvelope(await fetch('/api/task-control', {
+    ...include,
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(input),
+  }))
+}
+
+export async function listFileReferences(query: string): Promise<readonly FileReferenceCandidate[]> {
+  const response = await fetch(`/api/file-references?query=${encodeURIComponent(query)}`, include)
+  const body = await response.json() as { readonly candidates?: readonly FileReferenceCandidate[]; readonly error?: string }
+  if (!response.ok) throw new Error(body.error ?? `file reference lookup failed (${response.status})`)
+  return body.candidates ?? []
+}
+
+export interface SessionSearchResult {
+  readonly id: string
+  readonly title: string
+  readonly snippet: string
+}
+
+export async function searchSessions(query: string): Promise<readonly SessionSearchResult[]> {
+  const response = await fetch(`/api/session-search?query=${encodeURIComponent(query)}`, include)
+  const body = await response.json() as { readonly results?: readonly SessionSearchResult[]; readonly error?: string }
+  if (!response.ok) throw new Error(body.error ?? `session search failed (${response.status})`)
+  return body.results ?? []
 }
 
 export async function runConversation(
@@ -109,6 +227,21 @@ export async function runSkillAction(input: {
 
 export async function activateCandidate(card: ActivationCard, confirm: boolean): Promise<UiEnvelope> {
   return parseEnvelope(await fetch('/api/activate', {
+    ...include,
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({
+      id: card.id,
+      candidateId: card.candidateId,
+      digest: card.digest,
+      fingerprint: card.fingerprint,
+      confirm,
+    }),
+  }))
+}
+
+export async function abandonCandidateActivation(card: ActivationCard, confirm: boolean): Promise<UiEnvelope> {
+  return parseEnvelope(await fetch('/api/activation/abandon', {
     ...include,
     method: 'POST',
     headers: { 'content-type': 'application/json' },
@@ -182,22 +315,6 @@ export function workTone(kind: WorkObjectKind): string {
   return 'message'
 }
 
-export function formatMarkdownLite(text: string): string {
-  return text
-    .replaceAll('&', '&amp;')
-    .replaceAll('<', '&lt;')
-    .replaceAll('>', '&gt;')
-    .replaceAll(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
-    .replaceAll(/`([^`]+)`/g, '<code>$1</code>')
-}
-
 export function approvalLabel(card: ApprovalCard): string {
   return `${card.title} · ${card.status}`
-}
-
-export function recoveryActionId(label: string): 'diagnostics' | 'rollback' | 'exit-safe-mode' | undefined {
-  if (label === 'Diagnostics') return 'diagnostics'
-  if (label === 'Rollback') return 'rollback'
-  if (label === 'Exit Safe Mode') return 'exit-safe-mode'
-  return undefined
 }

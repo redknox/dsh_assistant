@@ -8,6 +8,8 @@ export interface ProductHomeLayout {
   readonly root: string
   readonly config: string
   readonly data: string
+  readonly spill: string
+  readonly sessionQueryIndex: string
   readonly state: string
   readonly logs: string
   readonly backups: string
@@ -42,10 +44,13 @@ export function resolveProductHome(explicit?: string): string {
 export function productHomeLayout(root: string): ProductHomeLayout {
   const resolved = path.resolve(root)
   const config = path.join(resolved, 'config')
+  const data = path.join(resolved, 'data')
   return {
     root: resolved,
     config,
-    data: path.join(resolved, 'data'),
+    data,
+    spill: path.join(data, 'spill'),
+    sessionQueryIndex: path.join(data, 'session-query.sqlite'),
     state: path.join(resolved, 'state'),
     logs: path.join(resolved, 'logs'),
     backups: path.join(resolved, 'backups'),
@@ -84,7 +89,7 @@ export function xdgConfigEnvPath(): string {
 /** Create the product home with owner-only permissions. Does not delete existing state. */
 export function ensureProductHome(root: string): ProductHomeLayout {
   const initial = productHomeLayout(root)
-  for (const dir of [initial.root, initial.config, initial.data, initial.state, initial.logs, initial.backups, initial.generated]) {
+  for (const dir of [initial.root, initial.config, initial.data, initial.spill, initial.state, initial.logs, initial.backups, initial.generated]) {
     mkdirSync(dir, { recursive: true, mode: 0o700 })
     try {
       chmodSync(dir, 0o700)

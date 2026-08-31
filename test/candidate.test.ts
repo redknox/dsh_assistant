@@ -101,12 +101,12 @@ describe('candidate workspace and validation', () => {
       version: '0.1.0',
       manifest: {
         capabilities: ['r0.candidate.probe', 'calendar.freebusy'],
-        permissions: ['local.fake.calendar.freebusy'],
+        permissions: ['host.text.echo'],
       },
     })
     const diff = workspace.diff(candidate.id)
     assert.deepEqual(diff.capabilities.added, ['r0.candidate.probe', 'calendar.freebusy'])
-    assert.deepEqual(diff.permissions.added, ['local.fake.calendar.freebusy'])
+    assert.deepEqual(diff.permissions.added, ['host.text.echo'])
     assert.equal(workspace.get(candidate.id).lifecycle, 'planned')
     const report = workspace.validate(candidate.id)
     assert.equal(report.passed, true)

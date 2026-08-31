@@ -22,11 +22,12 @@ import {
 } from '../src/product/web-ui-protocol.js'
 import { ensureProductHome } from '../src/product/home.js'
 import { inspectRuntimeContext } from '../src/product/runtime-context.js'
+import { ProductSettings } from '../src/product/settings.js'
 import { catalogBindingOf, SessionCatalog } from '../src/product/session-catalog.js'
 import { LiveSessionHost } from '../src/product/session-lifecycle.js'
 import { attachWebUiBroadcast, startWebUiServer } from '../src/product/web-ui-server.js'
 import type { MissionControlView } from '../src/domain/workspace/types.js'
-import { MissionControlScreen } from '../web/src/App.tsx'
+import { MissionControlScreen } from './helpers/mission-control-screen.js'
 
 function fixtureView(overrides: Partial<MissionControlView> = {}): MissionControlView {
   return {
@@ -52,6 +53,7 @@ function fixtureView(overrides: Partial<MissionControlView> = {}): MissionContro
   }
 }
 
+
 async function withServer(
   boot: () => Promise<{ ctx: Awaited<ReturnType<typeof bootAssistantControl>>['ctx']; recoveryRoot: Awaited<ReturnType<typeof bootAssistantControl>>['recoveryRoot'] }>,
   sessionId: string,
@@ -63,6 +65,7 @@ async function withServer(
     recoveryRoot: Awaited<ReturnType<typeof bootAssistantControl>>['recoveryRoot'],
     adapter: FakeReplyAdapter,
   ) => Promise<void>,
+  settings?: ProductSettings,
 ) {
   const control = await boot()
   const adapter = new FakeReplyAdapter('ack')
@@ -77,6 +80,7 @@ async function withServer(
     diagnostics: { persistence: 'ok' },
     assetRoot: assets,
     port: 0,
+    ...(settings ? { settings } : {}),
   })
   const detach = attachWebUiBroadcast(control.ctx, () => web.notify())
   try {
@@ -251,6 +255,35 @@ describe('local Mission-Control Web UI', () => {
       })
       assert.equal(unknown.status, 404)
     })
+  })
+
+  it('keeps Settings behind the trusted local session and never returns secret values', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'tars-web-settings-'))
+    const envFile = join(root, 'env')
+    writeFileSync(envFile, 'DEEPSEEK_API_KEY=never-return-this\nDSH_ASSISTANT_FEISHU_MODE=cli\n')
+    const settings = new ProductSettings(envFile, {})
+    try {
+      await withServer(bootAssistantControl, 'web-ui-settings', async (url) => {
+        const denied = await fetch(`${url}/api/settings`)
+        assert.equal(denied.status, 403)
+        const cookie = await cookieHeader(url)
+        const response = await fetch(`${url}/api/settings`, { headers: authHeaders(cookie) })
+        assert.equal(response.status, 200)
+        const snapshot = await response.json() as { revision: string; fields: readonly { id: string; value?: string }[] }
+        assert.doesNotMatch(JSON.stringify(snapshot), /never-return-this/)
+        assert.equal(snapshot.fields.find((field) => field.id === 'DSH_ASSISTANT_FEISHU_MODE')?.value, 'cli')
+
+        const saved = await fetch(`${url}/api/settings`, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json', ...authHeaders(cookie) },
+          body: JSON.stringify({ revision: snapshot.revision, changes: [{ id: 'DSH_ASSISTANT_FEISHU_MODE', clear: true }] }),
+        })
+        assert.equal(saved.status, 200)
+        assert.doesNotMatch(readFileSync(envFile, 'utf8'), /DSH_ASSISTANT_FEISHU_MODE/)
+      }, settings)
+    } finally {
+      rmSync(root, { recursive: true, force: true })
+    }
   })
 
   it('keeps read-only tools executable after Web UI broadcast is attached', async () => {
@@ -706,7 +739,7 @@ export function apply(ctx) {
         version: '0.1.0',
         manifest: {
           capabilities: ['r0.webui.approval'],
-          permissions: ['local.fake.suite'],
+          permissions: ['host.text.echo'],
           secrets: ['google.calendar.oauth'],
           effects: {
             filesystem: [],
@@ -770,7 +803,7 @@ export function apply(ctx) {
         version: '0.1.0',
         manifest: {
           capabilities: ['r0.webui.approval'],
-          permissions: ['local.fake.suite'],
+          permissions: ['host.text.echo'],
           riskModel: googleCalendarReadRiskModel(),
         },
       })
@@ -1005,9 +1038,9 @@ export function apply(ctx) {
           onReject() {},
           onRecovery() {},
         }))
-        assert.match(markup, /Rollback system state/)
-        assert.match(markup, /not a single-plugin uninstall/)
-        assert.match(markup, /data-rollback-action="ask"/)
+        assert.doesNotMatch(markup, /Rollback system state/)
+        assert.doesNotMatch(markup, /not a single-plugin uninstall/)
+        assert.doesNotMatch(markup, /data-rollback-action="ask"/)
         const deferred = renderToStaticMarkup(createElement(MissionControlScreen, {
           view: ready.view,
           connected: true,
@@ -1864,9 +1897,13 @@ export function apply(ctx) {
         onApprove() {},
         onReject() {},
         onRecovery() {},
+        armedAbandonment: retryA.id,
+        onAbandonActivation() {},
       }))
       assert.match(markup, /data-extension-lifecycle="ACTIVATION_FAILED"/)
       assert.match(markup, /data-extension-action="retry"/)
+      assert.match(markup, /data-extension-action="abandon"/)
+      assert.match(markup, /CONFIRM ABANDON/)
       assert.equal((await fetch(`${url}/api/activate`, {
         method: 'POST',
         headers: { 'content-type': 'application/json', ...authHeaders(cookie) },
@@ -1932,6 +1969,62 @@ export function apply(ctx) {
       })).status, 200)
       assert.ok(ctx.tools.get('r0_wui_retry'))
       assert.equal(ctx.capabilityRegistry.get(prepared.owner, '0.1.0')?.status, 'active')
+    })
+  })
+
+  it('abandons a failed activation without deleting its audit history', async () => {
+    await withServer(bootAssistantControl, 'web-ui-abandon-activation', async (url, _surface, _agent, ctx, recoveryRoot) => {
+      const cookie = await cookieHeader(url)
+      const prepared = authorGenerated(ctx, 'r0.wui.abandon')
+      const first = await approveActivationCard(url, cookie, prepared.id)
+      recoveryRoot.service.failActivation = { phase: 'prepare', diagnostics: 'permanent prepare fault' }
+      assert.equal((await fetch(`${url}/api/activate`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', ...authHeaders(cookie) },
+        body: JSON.stringify({
+          id: first.id,
+          candidateId: first.candidateId,
+          digest: first.digest,
+          fingerprint: first.fingerprint,
+          confirm: true,
+        }),
+      })).status, 409)
+      const failed = await fetch(`${url}/api/view`).then((res) => res.json()) as { view: MissionControlView }
+      const retry = failed.view.activations.find((item) => item.candidateId === prepared.id)
+      assert.ok(retry)
+
+      const abandoned = await fetch(`${url}/api/activation/abandon`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', ...authHeaders(cookie) },
+        body: JSON.stringify({
+          id: retry.id,
+          candidateId: retry.candidateId,
+          digest: retry.digest,
+          fingerprint: retry.fingerprint,
+          confirm: true,
+        }),
+      })
+      assert.equal(abandoned.status, 200)
+      const body = await abandoned.json() as { view: MissionControlView }
+      assert.equal(body.view.activations.some((item) => item.candidateId === prepared.id), false)
+      assert.equal(body.view.extensions.find((item) => item.candidateId === prepared.id)?.lifecycle, 'SUPERSEDED')
+      assert.equal(recoveryRoot.inspect().state, 'rolled-back')
+      assert.equal(recoveryRoot.inspect().pendingCandidateId, undefined)
+      assert.equal(recoveryRoot.inspect().lastFailure?.candidateId, prepared.id)
+      assert.equal(ctx.extensionGovernance.inspectApproval(prepared.id)?.decision, 'superseded')
+      assert.equal(ctx.candidateWorkspace.get(prepared.id).sealed, true)
+
+      assert.equal((await fetch(`${url}/api/activation/abandon`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', ...authHeaders(cookie) },
+        body: JSON.stringify({
+          id: retry.id,
+          candidateId: retry.candidateId,
+          digest: retry.digest,
+          fingerprint: retry.fingerprint,
+          confirm: true,
+        }),
+      })).status, 409)
     })
   })
 
@@ -2201,7 +2294,28 @@ export function apply(ctx) {
 
   it('renders frontend scenarios from the authoritative view', () => {
     const ready = renderToStaticMarkup(createElement(MissionControlScreen, {
-      view: fixtureView(),
+      view: fixtureView({
+        contextEndurance: {
+          status: 'ready',
+          measuredTokens: 42_000,
+          contextWindow: 1_000_000,
+          occupancyPercent: 4.2,
+          compaction: 'automatic',
+          checkpoint: 'active',
+          outputRetention: { maxInlineBytes: 50_000, spill: 'ready' },
+        },
+        materialInput: {
+          fileReferences: 'active',
+          imageStore: 'ready',
+          imageInput: 'unsupported',
+        },
+        workBrief: {
+          status: 'completed',
+          runId: 'run-brief-1',
+          generatedAt: '2026-08-28T08:00:00.000Z',
+          markdown: '# Work brief — 2026-08-28\n\n## Calendar (1)\n- 10:00–11:00 · "Design review"',
+        },
+      }),
       connected: true,
       sending: false,
       draft: '',
@@ -2215,16 +2329,125 @@ export function apply(ctx) {
     assert.match(ready, /class="console"/)
     assert.match(ready, /Hello/)
     assert.match(ready, /TARS-NG/)
-    assert.match(ready, /COMPLETED/)
-    assert.match(ready, /Calendar inspected/)
+    assert.match(ready, /data-follow-tail="true"/)
+    assert.match(ready, /LIVE EXECUTION LOG/)
+    assert.match(ready, /OPEN FULL LOG/)
     assert.match(ready, /MEMORY|Memory/)
     assert.match(ready, /data-control-plane="user-workspace"/)
+    assert.match(ready, /CONTEXT ENDURANCE/)
+    assert.match(ready, /42\.0K \/ 1\.0M/)
+    assert.match(ready, /COMPACTION · AUTO/)
+    assert.match(ready, /CHECKPOINT · ACTIVE/)
+    assert.match(ready, /OUTPUT CAP · 50\.0KB/)
+    assert.match(ready, /SPILL · READY/)
+    assert.match(ready, /MATERIAL INPUT/)
+    assert.match(ready, /@FILE REFERENCES · ACTIVE/)
+    assert.match(ready, /IMAGE STORE · READY/)
+    assert.match(ready, /REFERENCE/)
+    assert.match(ready, /@FILE/)
+    assert.match(ready, /class="work-brief-card"/)
+    assert.match(ready, /DAILY WORK BRIEF/)
+    assert.match(ready, /Design review/)
     assert.doesNotMatch(ready, /reasoning_content|sk-secret|chain-of-thought/)
+
+    const emptyKnowledge = renderToStaticMarkup(createElement(MissionControlScreen, {
+      view: fixtureView({ capabilities: [{ area: 'Knowledge', action: 'Retrieve notes', status: 'active' }] }),
+      connected: true,
+      sending: false,
+      draft: '',
+      onDraft() {},
+      onSend() {},
+      onApprove() {},
+      onReject() {},
+      onRecovery() {},
+    }))
+    assert.match(emptyKnowledge, /0 sources indexed/)
+    assert.match(emptyKnowledge, />EMPTY</)
+
+    const governed = renderToStaticMarkup(createElement(MissionControlScreen, {
+      view: fixtureView({
+        capabilities: [{ area: 'Files', action: 'Manage files', status: 'approval-required' }],
+      }),
+      pane: 'today',
+      connected: true,
+      sending: false,
+      draft: '',
+      onDraft() {},
+      onSend() {},
+      onApprove() {},
+      onReject() {},
+      onRecovery() {},
+    }))
+    assert.match(governed, />CONFIRM TO USE</)
+    assert.doesNotMatch(governed, />APPROVAL</)
+
+    const memory = renderToStaticMarkup(createElement(MissionControlScreen, {
+      view: fixtureView({
+        memory: [{ id: 'm1', topicKey: 'preferences', statement: 'Prefers concise summaries.', status: 'active', origin: 'conversation' }],
+        knowledge: [{ sourceUri: 'file:///notes/project.md', title: 'Project notes', excerpt: 'Local product context.' }],
+        sessions: {
+          schemaVersion: 1,
+          revision: 2,
+          currentSessionId: 's1',
+          health: 'ok',
+          activeCount: 2,
+          archivedCount: 0,
+          sessions: [
+            { id: 's1', title: 'Current work', lifecycle: 'active', createdAt: '2026-08-20T00:00:00.000Z', lastActivityAt: '2026-08-27T00:00:00.000Z', preview: 'Review the latest changes', persistence: 'persistent', current: true },
+            { id: 's2', title: 'Product direction', lifecycle: 'active', createdAt: '2026-08-19T00:00:00.000Z', lastActivityAt: '2026-08-26T00:00:00.000Z', preview: 'Plan the next milestone', persistence: 'persistent', current: false },
+          ],
+        },
+      }),
+      pane: 'memory',
+      connected: true,
+      sending: false,
+      draft: '',
+      onDraft() {},
+      onSend() {},
+      onApprove() {},
+      onReject() {},
+      onRecovery() {},
+    }))
+    assert.match(memory, /data-workspace-pane="memory"/)
+    assert.match(memory, /data-memory-cards="conversations"/)
+    assert.match(memory, /conversation-card--current/)
+    assert.match(memory, /Remembered facts/)
+    assert.match(memory, /Knowledge sources/)
+
+    const logs = renderToStaticMarkup(createElement(MissionControlScreen, {
+      view: fixtureView({
+        executionLog: [
+          { id: 'call-10', seq: 10, kind: 'tool-call', label: 'write_candidate_file', detail: '{"path":"src/plugin.js"}', callId: 'call-1' },
+          { id: 'result-11', seq: 11, kind: 'tool-result', label: 'write_candidate_file', detail: '{"lifecycle":"developing"}', callId: 'call-1' },
+        ],
+      }),
+      pane: 'logs',
+      connected: true,
+      sending: false,
+      draft: '',
+      onDraft() {},
+      onSend() {},
+      onApprove() {},
+      onReject() {},
+      onRecovery() {},
+    }))
+    assert.match(logs, /data-workspace-pane="logs"/)
+    assert.match(logs, /write_candidate_file/)
+    assert.match(logs, /src\/plugin\.js/)
+    assert.match(logs, /lifecycle/)
+    assert.match(logs, /data-nav="logs"[^>]*aria-current="page"/)
 
     const working = renderToStaticMarkup(createElement(MissionControlScreen, {
       view: fixtureView({
         systemState: 'WORKING',
-        activity: [{ id: 'run', kind: 'RUNNING', summary: 'Calendar inspected', source: 'calendar' }],
+        executionLog: [{
+          id: 'run',
+          seq: 12,
+          kind: 'tool-call',
+          label: 'calendar_list_events',
+          detail: '{"date":"2026-08-28"}',
+          callId: 'run',
+        }],
         controlStrip: { pendingApprovals: 0, backgroundJobs: 0, mode: 'WORKING' },
       }),
       connected: true,
@@ -2237,7 +2460,8 @@ export function apply(ctx) {
       onRecovery() {},
     }))
     assert.match(working, /WORKING/)
-    assert.match(working, /RUNNING/)
+    assert.match(working, /calendar_list_events/)
+    assert.match(working, /1 EVENTS/)
 
     const approval = renderToStaticMarkup(createElement(MissionControlScreen, {
       view: fixtureView({
@@ -2750,16 +2974,12 @@ export function apply(ctx) {
     assert.match(workbench, /data-candidate-id="cand-wb"/)
     assert.match(workbench, /generated\/r0-workbench-ping@0.1.0/)
     assert.match(workbench, /r0.workbench.ping/)
-    assert.match(workbench, /can request approval/)
-    assert.match(workbench, /step request/)
-    assert.match(workbench, /ready for approval/)
+    assert.match(workbench, /HUMAN APPROVAL AVAILABLE/)
+    assert.match(workbench, /CURRENT STEP · REQUEST/)
+    assert.match(workbench, /READY FOR APPROVAL/)
     assert.match(workbench, /\+r0.workbench.ping/)
-    assert.match(workbench, /remote-side-effect mutate/)
-    assert.match(workbench, /workspace\/notes/)
-    assert.match(workbench, /https:\/\/example.com/)
-    assert.match(workbench, /child_process/)
-    assert.match(workbench, /secret-access CALENDAR_TOKEN/)
-    assert.match(workbench, /calendar.google/)
+    assert.doesNotMatch(workbench, /remote-side-effect mutate/)
+    assert.doesNotMatch(workbench, /secret-access CALENDAR_TOKEN/)
 
     const degraded = renderToStaticMarkup(createElement(MissionControlScreen, {
       view: fixtureView({
@@ -2786,6 +3006,7 @@ export function apply(ctx) {
           why: 'Generated Calendar artifact failed integrity verification.',
           disabled: ['generated/google-calendar@0.1.0'],
           actions: ['Diagnostics', 'Rollback', 'Exit Safe Mode', 'Disable candidate'],
+          exitReady: true,
         },
         personality: { humor: 90, directness: 70, initiative: 50, verbosity: 'normal', humorSuppressed: true },
         controlStrip: { pendingApprovals: 0, backgroundJobs: 0, mode: 'SAFE_MODE' },
@@ -2801,6 +3022,9 @@ export function apply(ctx) {
     }))
     assert.match(safe, /SAFE_MODE/)
     assert.match(safe, /integrity/)
+    assert.match(safe, /data-attention="required"/)
+    assert.doesNotMatch(safe, /ALL CORE SYSTEMS NOMINAL/)
+    assert.match(safe, /ROLLBACK COMPLETE · EXIT SAFE MODE TO RESUME/)
     assert.match(safe, /disabled/)
     assert.match(safe, /data-recovery="true"/)
     assert.match(safe, /data-recovery-action="diagnostics"/)
@@ -2897,8 +3121,45 @@ export function apply(ctx) {
     }))
     assert.ok(longForm.includes('Paragraph'))
     assert.doesNotMatch(longForm, /chain-of-thought|sk-secret/)
-    assert.match(ready, /href="#memory"/)
-    assert.match(ready, /id="memory"/)
+    assert.match(ready, /data-nav="memory"/)
+    assert.match(ready, /class="view-all-conversations"/)
+    assert.match(ready, /RECENT CONVERSATIONS/)
+    assert.match(ready, /aria-label="System"/)
+    assert.match(ready, /data-nav="capabilities"/)
+    assert.doesNotMatch(ready, /LOG 02|data-nav="conversations"/)
+  })
+
+  it('renders complete GFM tables without truncating cell content', () => {
+    const fullCell = 'This complete table cell must remain visible even when it contains a long explanation and one_unbroken_value_that_needs_emergency_wrapping_without_being_truncated.'
+    const markdown = `## Result
+
+- one
+- two
+
+| Name | Details | Status |
+| --- | --- | --- |
+| Alpha | ${fullCell} | ready |
+
+\`\`\`ts
+const complete = true
+\`\`\`
+`
+    const markup = renderToStaticMarkup(createElement(MissionControlScreen, {
+      view: fixtureView({ conversation: [{ kind: 'assistant-response', text: markdown }] }),
+      pane: 'today',
+      connected: true,
+      sending: false,
+      draft: '',
+      onDraft() {},
+      onSend() {},
+      onApprove() {},
+      onReject() {},
+      onRecovery() {},
+    }))
+    assert.match(markup, /class="markdown-table-scroll"/)
+    assert.match(markup, /<table>/)
+    assert.ok(markup.includes(fullCell.replaceAll('&', '&amp;')))
+    assert.match(markup, /<pre><code class="language-ts">/)
   })
 
   it('approves and activates Skills only through /api/skill', async () => {
@@ -3145,6 +3406,7 @@ export function apply(ctx) {
     const css = readFileSync(join(import.meta.dirname, '../web/src/styles.css'), 'utf8')
     assert.match(css, /--muted:\s*#4f4a40/)
     assert.match(css, /--text-amber:\s*#7a4500/)
+    assert.match(css, /--font-instrument:[^;]*"ZCOOL QingKe HuangYou"/)
     assert.match(css, /\.approval-facts dt \{[^}]*font:[^;]*14px/)
     assert.match(css, /\.activity-item \{[^}]*font:[^;]*14px/)
     assert.match(css, /\.activity-item \.activity-summary \{[^}]*font-size:\s*14px/)
@@ -3154,9 +3416,30 @@ export function apply(ctx) {
     assert.match(css, /\.control-strip strong \{[^}]*font-size:\s*14px/)
     assert.match(css, /\.nav-item:focus-visible \{[^}]*outline:\s*2px solid/)
     assert.doesNotMatch(css, /\.nav-item:focus-visible \{[^}]*outline:\s*none/)
+    assert.doesNotMatch(css, /button\.nav-item \{[^}]*font:\s*inherit/)
+    assert.match(css, /button:active > \.control-lamp \{[^}]*background:\s*var\(--signal-amber\)/)
+    assert.match(css, /\.nav-item--idle > \.control-lamp \{[^}]*background:\s*var\(--fault-red\)/)
+    assert.match(css, /\.button:active::before,[\s\S]*?background:\s*var\(--signal-amber\)/)
+    assert.match(css, /\.button:disabled::before,[\s\S]*?background:\s*var\(--fault-red\)/)
+    assert.match(css, /\.composer-button-label \{ font-size:\s*14px/)
     const narrow = css.slice(css.indexOf('@media (max-width: 820px)'))
     assert.match(narrow, /\.nav-item \{[^}]*font-size:\s*14px/)
     assert.doesNotMatch(narrow, /\.recent[^{]*\{/)
     assert.match(narrow, /\.panel-coordinates, \.nav-panel \.panel-code \{ display: none; \}/)
+    assert.match(css, /\.compact-workspace-nav \{ display: none; \}/)
+    assert.match(css, /\.workspace-grid\[data-compact-surface="conversation"\] > \.conversation-panel \{ display: grid; \}/)
+    assert.match(css, /\.workspace-grid\[data-compact-surface="navigation"\] > \.nav-panel \{ display: flex;/)
+    assert.match(css, /\.workspace-grid\[data-compact-surface="operations"\] > \.ops-panel \{ display: flex;/)
+    assert.match(css, /\.markdown-table-scroll \{[^}]*overflow-x:\s*auto/)
+    assert.match(css, /\.markdown-table-scroll th,[\s\S]*?\.markdown-table-scroll td \{[^}]*white-space:\s*normal;[^}]*overflow-wrap:\s*anywhere;/)
+    const markdownTableCss = css.slice(css.indexOf('.markdown-table-scroll'), css.indexOf('.acknowledgement'))
+    assert.doesNotMatch(markdownTableCss, /text-overflow:\s*ellipsis|-webkit-line-clamp|overflow:\s*hidden/)
+    const app = readFileSync(join(import.meta.dirname, '../web/src/App.tsx'), 'utf8')
+    const screen = readFileSync(join(import.meta.dirname, '../web/src/MissionControlScreen.tsx'), 'utf8')
+    const conversation = readFileSync(join(import.meta.dirname, '../web/src/ConversationWorkspace.tsx'), 'utf8')
+    assert.match(conversation, /className="conversation-empty"/)
+    assert.match(screen, /aria-label="Compact workspace"/)
+    assert.match(screen, /className="control-lamp" aria-hidden="true"/)
+    assert.doesNotMatch(`${app}\n${screen}`, /ShuttlePrototypeSwitcher|prototype=shuttle|prototypeVariant/)
   })
 })

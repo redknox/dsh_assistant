@@ -14,6 +14,15 @@ export class CandidateWorkbenchService extends Service implements CandidateWorkb
     super(ctx, 'candidateWorkbench')
   }
 
+  defineSpecification(input: Parameters<CandidateWorkbench['defineSpecification']>[0]) { return this.store.defineSpecification(input) }
+  reviseSpecification(specificationId: string, patch: Parameters<CandidateWorkbench['reviseSpecification']>[1]) {
+    return this.store.reviseSpecification(specificationId, patch)
+  }
+  compareSpecifications(fromSpecificationId: string, toSpecificationId: string) {
+    return this.store.compareSpecifications(fromSpecificationId, toSpecificationId)
+  }
+  inspectSpecification(specificationId: string) { return this.store.inspectSpecification(specificationId) }
+  inspectSpecificationEvaluation(specificationId: string) { return this.store.inspectSpecificationEvaluation(specificationId) }
   plan(input: Parameters<CandidateWorkbench['plan']>[0]) { return this.store.plan(input) }
   rememberPlan(review: Parameters<CandidateWorkbench['rememberPlan']>[0]) { return this.store.rememberPlan(review) }
   getPlan(planId: string) { return this.store.getPlan(planId) }
@@ -45,10 +54,11 @@ export interface WorkbenchPluginConfig extends WorkbenchServiceOptions {
 }
 
 export const WORKBENCH_CONVERSATION_GUIDANCE = [
-  'When the user asks to add a missing capability: resolve first with plan_capability_change.',
+  'When the user asks to add a missing capability: define_capability_specification first, clarify unresolved questions with immutable revisions, compare revisions when useful, then resolve first with plan_capability_change and the chosen specificationId.',
   'Prefer reuse, configure, or evolve an existing owner before new-plugin.',
   'Use Candidate Workbench tools. Read inspect_authoring_contract before scaffolding.',
   'Use scaffold_candidate, then bounded edits, then inspect_validation_diagnostics.',
+  'Add machine-readable input and expected output to representative Acceptance Examples so Candidate validation can produce Capability Evaluation evidence.',
   'Repair only by creating a new revision; never mutate a sealed parent.',
   'Request approval only after Independent Review is review-complete for the current digest.',
   'Tell the user Independent Review review-complete is not a governance approval.',

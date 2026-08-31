@@ -24,6 +24,7 @@ export const inject = ['systemPrompt', 'tools', 'integrations']
 export async function apply(ctx: Context, config: PolicyPluginConfig = {}) {
   const policy = new PolicyService(config.config ?? EXAMPLE_PERSONAL_POLICY)
   const hub = ctx.integrations.hub
+  const obsidian = ctx.get('obsidianVault')?.access
   policy.registerExecutor('calendar', 'create_event', (payload, signal) => hub.calendar().createEvent({
     title: String(payload.title ?? ''),
     start: String(payload.start ?? ''),
@@ -44,6 +45,14 @@ export async function apply(ctx: Context, config: PolicyPluginConfig = {}) {
     content: String(payload.content ?? ''),
   }))
   policy.registerExecutor('files', 'delete', (payload, signal) => hub.files().deleteFile(String(payload.id ?? ''), signal))
+  if (obsidian) {
+    policy.registerExecutor('obsidian', 'create_note', async (payload) => obsidian.create(String(payload.path ?? ''), String(payload.content ?? '')))
+    policy.registerExecutor('obsidian', 'append_note', async (payload) => obsidian.append(
+      String(payload.path ?? ''),
+      String(payload.content ?? ''),
+      String(payload.expectedDigest ?? ''),
+    ))
+  }
 
   await ctx.plugin(class extends ActionPolicyService {
     constructor(scope: Context) {
@@ -62,5 +71,5 @@ export async function apply(ctx: Context, config: PolicyPluginConfig = {}) {
     if (decision.kind === 'deny') return { kind: 'deny', reason: decision.reason }
     return next()
   }))
-  ctx.effect(() => registerPolicyTools(ctx.tools, policy))
+  ctx.effect(() => registerPolicyTools(ctx.tools, policy, obsidian !== undefined))
 }

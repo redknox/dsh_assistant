@@ -17,6 +17,11 @@ function emitFontLicenses() {
         fileName: 'licenses/Barlow-OFL.txt',
         source: readFileSync(path.resolve(import.meta.dirname, 'src/fonts/Barlow-OFL.txt'), 'utf8'),
       })
+      this.emitFile({
+        type: 'asset',
+        fileName: 'licenses/ZCOOL-QingKe-HuangYou-OFL.txt',
+        source: readFileSync(path.resolve(import.meta.dirname, '../node_modules/@fontsource/zcool-qingke-huangyou/LICENSE'), 'utf8'),
+      })
     },
   }
 }

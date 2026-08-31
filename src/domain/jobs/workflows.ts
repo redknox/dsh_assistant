@@ -2,15 +2,10 @@ import type { IntegrationHub } from '../integrations/hub.js'
 import type { PersonalKnowledge } from '../knowledge/types.js'
 import type { PolicyService } from '../policy/service.js'
 import type { WorkflowDefinition } from './types.js'
+import { buildWorkBrief } from './work-brief.js'
 
 export interface MorningBriefClock {
   now(): Date
-}
-
-function dayRange(now: Date): { from: string; to: string } {
-  const from = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()))
-  const to = new Date(from.getTime() + 24 * 60 * 60 * 1000 - 1)
-  return { from: from.toISOString(), to: to.toISOString() }
 }
 
 export function morningBriefWorkflow(
@@ -24,17 +19,7 @@ export function morningBriefWorkflow(
     schedule: { kind: 'every', everyMs: 24 * 60 * 60 * 1000 },
     intent: 'read',
     async run({ signal }) {
-      if (signal.aborted) throw new Error('cancelled')
-      const range = dayRange(clock.now())
-      const events = await hub.calendar().listEvents({ ...range, signal })
-      const tasks = await hub.tasks().listTasks({ signal })
-      const notes = knowledge?.retrieve({ text: 'office hours', limit: 1 })
-      return [
-        `Morning brief for ${range.from.slice(0, 10)}`,
-        `calendarEvents: ${events.items.length}`,
-        `openTasks: ${tasks.items.filter((item) => item.status === 'open').length}`,
-        `knowledgeHits: ${notes?.hits.length ?? 0}`,
-      ].join('\n')
+      return buildWorkBrief({ hub, knowledge, now: clock.now(), signal })
     },
   }
 }

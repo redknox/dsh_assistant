@@ -17,19 +17,22 @@ export function projectMissionControl(input: WorkspaceSnapshotInput): MissionCon
   const approvalResolutions = projectApprovalResolutions(input)
   const activations = projectActivationCards(input)
   const jobsRunning = input.jobs.filter((job) => job.lastRunStatus === 'running' || job.lastRunStatus === 'pending').length
-  const degraded = input.integrationStatus.filter((item) => !item.available).map((item) => item.capability)
+  const degraded = input.integrationStatus.filter((item) => !item.available && item.configured !== false).map((item) => item.capability)
   if (input.skillCatalog?.state === 'degraded') degraded.push('skill catalog')
   const activationFailure = projectActivationFailure(input)
   const rollback = projectRollbackCard(input, systemState)
+  const brief = input.jobs.find((job) => job.name === 'morning-brief')
   return sanitizeMissionControlView({
     identity: 'TARS-NG',
     systemState,
     ...(input.objective ? { objective: input.objective } : {}),
-    conversation: input.conversation.map((item) => ({
+    ...(input.taskControl ? { taskControl: input.taskControl } : {}),
+    conversation: input.conversation.filter(isDialogueItem).map((item) => ({
       kind: workKind(item.kind),
       text: item.text,
     })),
     activity: projectActivity(input),
+    executionLog: input.executionLog ?? [],
     approvals,
     approvalResolutions,
     activations,
@@ -42,17 +45,33 @@ export function projectMissionControl(input: WorkspaceSnapshotInput): MissionCon
     capabilities: projectUserCapabilities(input),
     memory: input.memory,
     knowledge: input.knowledge,
+    ...(brief
+      ? {
+          workBrief: {
+            status: brief.lastRunStatus ?? 'idle',
+            ...(brief.lastRunId ? { runId: brief.lastRunId } : {}),
+            ...(brief.lastRunFinishedAt ? { generatedAt: brief.lastRunFinishedAt } : {}),
+            ...(brief.lastRunStatus === 'completed' && brief.lastRunSummary ? { markdown: brief.lastRunSummary } : {}),
+          },
+        }
+      : {}),
+    ...(input.contextEndurance ? { contextEndurance: input.contextEndurance } : {}),
+    ...(input.materialInput ? { materialInput: input.materialInput } : {}),
     ...(systemState === 'SAFE_MODE' || systemState === 'RECOVERY'
       ? {
           recovery: {
             why: input.recoveryWhy ?? 'Trusted core is available; generated capabilities are disabled.',
             disabled: generatedDisabled(input),
             actions: ['Diagnostics', 'Rollback', 'Exit Safe Mode', 'Disable candidate', 'Restore backup'],
+            exitReady: input.safeMode
+              && !input.recoveryRequired
+              && input.activation?.rollbackPlan?.denials.some((item) => item.reason === 'already-restored') === true,
           },
         }
       : {}),
     controlStrip: {
-      pendingApprovals: input.pendingConfirmations.filter((item) => item.status === 'pending').length,
+      pendingApprovals: input.pendingConfirmations.filter((item) => item.status === 'pending').length
+        + (input.dshApprovals ?? []).filter((item) => item.status === 'pending').length,
       backgroundJobs: jobsRunning,
       ...(input.objective ? { objective: input.objective.text } : {}),
       ...(degraded.length > 0 ? { degradation: `${degraded.join(', ')} unavailable` } : {}),
@@ -90,11 +109,13 @@ function projectActivationFailure(input: WorkspaceSnapshotInput): MissionControl
   }
 }
 
-function workKind(kind: 'user' | 'assistant' | 'tool_call' | 'tool_result'): WorkObjectKind {
+function isDialogueItem(item: WorkspaceSnapshotInput['conversation'][number]): item is WorkspaceSnapshotInput['conversation'][number] & { readonly kind: 'user' | 'assistant' } {
+  return item.kind === 'user' || item.kind === 'assistant'
+}
+
+function workKind(kind: 'user' | 'assistant'): WorkObjectKind {
   if (kind === 'user') return 'user-message'
-  if (kind === 'assistant') return 'assistant-response'
-  if (kind === 'tool_call') return 'tool-summary'
-  return 'evidence'
+  return 'assistant-response'
 }
 
 function generatedDisabled(input: WorkspaceSnapshotInput): readonly string[] {

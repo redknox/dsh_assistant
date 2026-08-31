@@ -1,4 +1,5 @@
 import type { CandidateDiff } from '../candidate/types.js'
+import type { DshApprovalTicket } from '../approval/types.js'
 import type { SkillRevisionDiff } from '../skill/diff.js'
 import type { SystemState } from '../personality/types.js'
 import type { ActivationViewState, ExtensionLifecycleState } from './lifecycle.js'
@@ -35,15 +36,76 @@ export const WORK_OBJECT_KINDS = [
 ] as const
 export type WorkObjectKind = (typeof WORK_OBJECT_KINDS)[number]
 
-export const USER_CAPABILITY_AREAS = ['Calendar', 'Tasks', 'Files', 'Memory', 'Knowledge', 'Mail'] as const
+export const USER_CAPABILITY_AREAS = ['Calendar', 'Tasks', 'Files', 'Memory', 'Knowledge', 'Mail', 'Contacts', 'Web'] as const
 export type UserCapabilityArea = (typeof USER_CAPABILITY_AREAS)[number]
 
-export const USER_CAPABILITY_STATUSES = ['active', 'approval-required', 'unavailable', 'safe-mode-disabled'] as const
+export const USER_CAPABILITY_STATUSES = ['active', 'approval-required', 'not-connected', 'unavailable', 'safe-mode-disabled'] as const
 export type UserCapabilityStatus = (typeof USER_CAPABILITY_STATUSES)[number]
 
 export interface ObjectiveView {
   readonly text: string
   readonly status: ObjectiveStatus
+}
+
+export interface AgentTaskControlView {
+  readonly maxAutonomousRounds: number
+  readonly driver: 'active' | 'held'
+  readonly goal?: {
+    readonly id: string
+    readonly revision: number
+    readonly objective: string
+    readonly phase: 'active' | 'paused' | 'blocked' | 'complete'
+    readonly roundsStarted: number
+    readonly maxGoalRounds: number
+    readonly activation: 'armed' | 'disarmed'
+    readonly blockedReason?: string
+  }
+  readonly todos: readonly {
+    readonly content: string
+    readonly status: 'pending' | 'in_progress' | 'completed'
+  }[]
+  readonly plan: {
+    readonly active: boolean
+    readonly pending?: boolean
+  }
+  readonly question?: {
+    readonly id: string
+    readonly header?: string
+    readonly question: string
+    readonly detail?: string
+    readonly options: readonly { readonly label: string; readonly description?: string }[]
+  }
+}
+
+export interface ContextEnduranceView {
+  readonly status: 'ready' | 'degraded'
+  readonly measuredTokens?: number
+  readonly pressureTokens?: number
+  readonly contextWindow?: number
+  readonly occupancyPercent?: number
+  readonly breakdown?: {
+    readonly systemTokens: number
+    readonly toolsTokens: number
+    readonly messageTokens: number
+  }
+  readonly cumulativeUsage?: {
+    readonly inputTokens: number
+    readonly outputTokens: number
+    readonly cacheReadTokens: number
+    readonly cacheWriteTokens: number
+  }
+  readonly compaction: 'automatic' | 'unavailable'
+  readonly checkpoint: 'active' | 'unavailable'
+  readonly outputRetention?: {
+    readonly maxInlineBytes: number
+    readonly spill: 'ready' | 'unavailable'
+  }
+}
+
+export interface MaterialInputView {
+  readonly fileReferences: 'active' | 'unavailable'
+  readonly imageStore: 'ready' | 'unavailable'
+  readonly imageInput: 'unsupported'
 }
 
 export interface ActivityItem {
@@ -54,11 +116,24 @@ export interface ActivityItem {
   readonly sessionId?: string
 }
 
+export type ExecutionLogKind = 'agent-note' | 'tool-call' | 'tool-result' | 'command-run' | 'command-result'
+
+export interface ExecutionLogEntry {
+  readonly id: string
+  readonly seq: number
+  readonly time?: number
+  readonly kind: ExecutionLogKind
+  readonly label: string
+  readonly detail: string
+  readonly callId?: string
+  readonly isError?: boolean
+}
+
 export interface ApprovalResolution {
   readonly type: 'approval/resolved'
   readonly confirmationId: string
   readonly decision: 'approve' | 'deny' | 'cancel'
-  readonly outcome: 'completed' | 'denied' | 'cancelled' | 'failed'
+  readonly outcome: 'completed' | 'resumed' | 'denied' | 'cancelled' | 'failed'
   readonly capability?: string
   readonly operation?: string
   readonly occurredAt?: string
@@ -66,7 +141,7 @@ export interface ApprovalResolution {
 
 export interface ApprovalCard {
   readonly id: string
-  readonly kind: 'calendar-create' | 'self-extension' | 'other-side-effect'
+  readonly kind: 'calendar-create' | 'self-extension' | 'other-side-effect' | 'dsh-tool'
   readonly title: string
   readonly target: string
   readonly sideEffect: string
@@ -166,6 +241,7 @@ export interface RecoveryView {
   readonly why: string
   readonly disabled: readonly string[]
   readonly actions: readonly string[]
+  readonly exitReady?: boolean
 }
 
 export interface RollbackOwnerChange {
@@ -216,12 +292,21 @@ export interface WorkspaceKnowledgeItem {
   readonly excerpt?: string
 }
 
+export interface WorkBriefView {
+  readonly status: string
+  readonly runId?: string
+  readonly generatedAt?: string
+  readonly markdown?: string
+}
+
 export interface MissionControlView {
   readonly identity: 'TARS-NG'
   readonly systemState: SystemState
   readonly objective?: ObjectiveView
+  readonly taskControl?: AgentTaskControlView
   readonly conversation: readonly { readonly kind: WorkObjectKind; readonly text: string }[]
   readonly activity: readonly ActivityItem[]
+  readonly executionLog?: readonly ExecutionLogEntry[]
   readonly approvals: readonly ApprovalCard[]
   readonly skills?: readonly SkillProjection[]
   readonly skillCatalog?: {
@@ -239,6 +324,9 @@ export interface MissionControlView {
   readonly capabilities: readonly UserCapabilityView[]
   readonly memory: readonly WorkspaceMemoryItem[]
   readonly knowledge: readonly WorkspaceKnowledgeItem[]
+  readonly workBrief?: WorkBriefView
+  readonly contextEndurance?: ContextEnduranceView
+  readonly materialInput?: MaterialInputView
   readonly recovery?: RecoveryView
   readonly controlStrip: ControlStrip
   readonly personality: {
@@ -372,7 +460,14 @@ export interface WorkspaceSnapshotInput {
     readonly status: string
     readonly level: string
   }[]
-  readonly jobs: readonly { readonly name: string; readonly lastRunStatus?: string }[]
+  readonly dshApprovals?: readonly DshApprovalTicket[]
+  readonly jobs: readonly {
+    readonly name: string
+    readonly lastRunStatus?: string
+    readonly lastRunId?: string
+    readonly lastRunSummary?: string
+    readonly lastRunFinishedAt?: string
+  }[]
   readonly toolEvents: readonly {
     readonly type: 'tool/call' | 'tool/result'
     readonly name?: string
@@ -380,8 +475,10 @@ export interface WorkspaceSnapshotInput {
     readonly isError?: boolean
     readonly seq: number
   }[]
+  readonly executionLog?: readonly ExecutionLogEntry[]
   readonly conversation: readonly { readonly kind: 'user' | 'assistant' | 'tool_call' | 'tool_result'; readonly text: string }[]
-  readonly integrationStatus: readonly { readonly capability: string; readonly available: boolean; readonly reason?: string }[]
+  readonly integrationStatus: readonly { readonly capability: string; readonly available: boolean; readonly configured?: boolean; readonly reason?: string; readonly provider?: string }[]
+  readonly autoExecuteCapabilities?: readonly string[]
   readonly registry: readonly {
     readonly owner: string
     readonly version: string
@@ -446,7 +543,10 @@ export interface WorkspaceSnapshotInput {
   readonly candidates?: readonly WorkbenchProjection[]
   readonly memory: readonly WorkspaceMemoryItem[]
   readonly knowledge: readonly WorkspaceKnowledgeItem[]
+  readonly contextEndurance?: ContextEnduranceView
+  readonly materialInput?: MaterialInputView
   readonly objective?: ObjectiveView
+  readonly taskControl?: AgentTaskControlView
   readonly personality: MissionControlView['personality']
   readonly blockedReason?: string
   readonly runtimeContext?: MissionControlView['runtimeContext']

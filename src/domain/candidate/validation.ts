@@ -1,12 +1,16 @@
 import { existsSync, readFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import path from 'node:path'
+import { parse } from 'acorn'
 import { contractDigestExtras, digestFiles } from './digest.js'
 import { listSourceFiles } from './files.js'
 import { detectOsNetworkSandbox } from './os-sandbox.js'
 import { runRestrictedCandidateTests, runnerUnavailable } from './restricted-runner.js'
 import { evaluateActivationCompatibility } from '../activation-compatibility/index.js'
 import { evaluateReliability, reliabilitySummary } from '../reliability/index.js'
+import { normalizeRegisterInput } from '../registry/normalize.js'
+import { assertGeneratedBrokerPermissions } from '../generated-runtime/broker.js'
+import { CapabilityEvaluationHarness } from '../evaluation/index.js'
 import type { OwnerExecutionFacts } from '../activation-compatibility/index.js'
 import type { CandidateRecord, ValidationReport, ValidationStageResult, ValidationStageStatus } from './types.js'
 import { ALLOWED_VALIDATION_TASKS } from './types.js'
@@ -130,6 +134,15 @@ function inspectRuntimeContract(record: CandidateRecord): ValidationStageResult 
         { diagnostics: 'unsupported-or-missing-contract-version' },
       )
     }
+    try {
+      assertGeneratedBrokerPermissions(record.manifest.permissions)
+    } catch (error) {
+      return stage(
+        'runtime.contract',
+        'failed',
+        error instanceof Error ? error.message : 'Generated Broker permissions are unsupported.',
+      )
+    }
     return stage('runtime.contract', 'passed', 'Host authoring contract generated-extension-api/v1.')
   }
   if (version !== undefined && version !== 'generated-extension-api/v1') {
@@ -138,6 +151,32 @@ function inspectRuntimeContract(record: CandidateRecord): ValidationStageResult 
     })
   }
   return stage('runtime.contract', 'not-applicable', 'Host authoring contract is not required for this provenance.')
+}
+
+function inspectManifest(record: CandidateRecord): ValidationStageResult {
+  try {
+    normalizeRegisterInput({
+      owner: record.owner,
+      version: record.version,
+      provenance: record.provenance,
+      status: 'candidate',
+      evidence: 'Verified',
+      capabilities: record.manifest.capabilities.map((id) => ({ id, permissions: [] })),
+      permissions: record.manifest.permissions,
+      runtimeSeams: record.manifest.runtimeSeams,
+      tools: record.manifest.tools,
+      services: record.manifest.services,
+      providers: record.manifest.providers,
+      pluginDependencies: record.manifest.pluginDependencies,
+    })
+    return stage('manifest.validate', 'passed', `Manifest for ${record.owner}@${record.version} is well-formed.`)
+  } catch (error) {
+    return stage(
+      'manifest.validate',
+      'failed',
+      error instanceof Error ? error.message : 'Manifest is not compatible with the Registry contract.',
+    )
+  }
 }
 
 function inspectBoundary(root: string, files: readonly string[]): ValidationStageResult {
@@ -153,6 +192,124 @@ function inspectBoundary(root: string, files: readonly string[]): ValidationStag
   return hits.length === 0
     ? stage('source.boundary', 'passed', 'No DSH package-internal src imports.')
     : stage('source.boundary', 'failed', 'Candidate sources import DSH package internals.', { diagnostics: hits.join(', ') })
+}
+
+function inspectGeneratedSourceContract(record: CandidateRecord, root: string, files: readonly string[]): ValidationStageResult {
+  if (record.manifest.runtimeContractVersion !== 'generated-extension-api/v1') {
+    return stage('source.contract', 'not-applicable', 'Generated source contract is not required for this provenance.')
+  }
+  const invalidEffects: string[] = []
+  const undeclaredBrokerPermissions: string[] = []
+  const sources = files.filter((file) => /\.(?:js|mjs|cjs)$/.test(file))
+  for (const file of sources) {
+    const text = readFileSync(path.join(root, file), 'utf8')
+    try {
+      const source = parse(text, { ecmaVersion: 'latest', sourceType: 'module', allowHashBang: true }) as unknown as SyntaxNode
+      walkSyntax(source, (node) => {
+        if (isCtxEffectCall(node)) {
+          const argument = node.arguments[0]
+          if (node.arguments.length !== 1 || argument === undefined || !CALLBACK_NODE_TYPES.has(argument.type)) {
+            invalidEffects.push(file)
+          }
+        }
+        const brokerRequest = brokerRequestCapability(node)
+        if (brokerRequest === undefined) return
+        if (brokerRequest === null) {
+          if (record.manifest.permissions.length === 0) undeclaredBrokerPermissions.push(`dynamic (${file})`)
+          return
+        }
+        if (!record.manifest.permissions.includes(brokerRequest)) {
+          undeclaredBrokerPermissions.push(`${brokerRequest} (${file})`)
+        }
+      })
+    } catch {
+      invalidEffects.push(file)
+    }
+  }
+  if (invalidEffects.length > 0) {
+    return stage(
+      'source.contract',
+      'failed',
+      'generated-extension-api/v1 ctx.effect accepts only a cleanup setup callback.',
+      { diagnostics: [...new Set(invalidEffects)].join(', ') },
+    )
+  }
+  if (undeclaredBrokerPermissions.length > 0) {
+    const operations = [...new Set(undeclaredBrokerPermissions)]
+    return stage(
+      'source.contract',
+      'failed',
+      `Generated source uses undeclared Broker permission ${operations.join(', ')}.`,
+      { diagnostics: 'Add each broker operation used by source to manifest.permissions before validation.' },
+    )
+  }
+  return stage(
+    'source.contract',
+    'passed',
+    'Generated ctx.effect calls and Broker permission declarations match the host contract.',
+  )
+}
+
+interface SyntaxNode {
+  readonly type: string
+  readonly [key: string]: unknown
+}
+
+const CALLBACK_NODE_TYPES = new Set([
+  'ArrowFunctionExpression',
+  'FunctionExpression',
+  'Identifier',
+  'MemberExpression',
+])
+
+function isSyntaxNode(value: unknown): value is SyntaxNode {
+  return value !== null && typeof value === 'object' && typeof (value as { type?: unknown }).type === 'string'
+}
+
+function walkSyntax(node: SyntaxNode, visit: (node: SyntaxNode) => void): void {
+  visit(node)
+  for (const [key, value] of Object.entries(node)) {
+    if (key === 'type' || key === 'start' || key === 'end') continue
+    if (isSyntaxNode(value)) {
+      walkSyntax(value, visit)
+      continue
+    }
+    if (Array.isArray(value)) {
+      for (const item of value) if (isSyntaxNode(item)) walkSyntax(item, visit)
+    }
+  }
+}
+
+function isCtxEffectCall(node: SyntaxNode): node is SyntaxNode & { readonly arguments: readonly SyntaxNode[] } {
+  if (node.type !== 'CallExpression' || !Array.isArray(node.arguments) || !isSyntaxNode(node.callee)) return false
+  const callee = node.callee
+  if (callee.type !== 'MemberExpression' || callee.computed === true) return false
+  if (!isSyntaxNode(callee.object) || !isSyntaxNode(callee.property)) return false
+  return callee.object.type === 'Identifier'
+    && callee.object.name === 'ctx'
+    && callee.property.type === 'Identifier'
+    && callee.property.name === 'effect'
+}
+
+function brokerRequestCapability(node: SyntaxNode): string | null | undefined {
+  if (node.type !== 'CallExpression' || !Array.isArray(node.arguments) || !isSyntaxNode(node.callee)) return undefined
+  const request = node.callee
+  if (request.type !== 'MemberExpression' || request.computed === true) return undefined
+  if (!isSyntaxNode(request.object) || !isSyntaxNode(request.property)) return undefined
+  const broker = request.object
+  if (broker.type !== 'MemberExpression' || broker.computed === true) return undefined
+  if (!isSyntaxNode(broker.object) || !isSyntaxNode(broker.property)) return undefined
+  const isBrokerRequest = broker.object.type === 'Identifier'
+    && broker.object.name === 'ctx'
+    && broker.property.type === 'Identifier'
+    && broker.property.name === 'broker'
+    && request.property.type === 'Identifier'
+    && request.property.name === 'request'
+  if (!isBrokerRequest) return undefined
+  const capability = node.arguments[0]
+  return capability?.type === 'Literal' && typeof capability.value === 'string'
+    ? capability.value
+    : null
 }
 
 function inspectBundle(root: string): ValidationStageResult {
@@ -252,7 +409,7 @@ export function runValidation(record: CandidateRecord, activeOwner?: OwnerExecut
       { diagnostics: blocked.join(', ') },
     ))
   }
-  stages.push(stage('manifest.validate', 'passed', `Manifest for ${record.owner}@${record.version} is well-formed.`))
+  stages.push(inspectManifest(record))
   const reliability = evaluateReliability(record.manifest)
   stages.push(stage(
     'reliability.gate',
@@ -266,9 +423,20 @@ export function runValidation(record: CandidateRecord, activeOwner?: OwnerExecut
   ))
   stages.push(inspectRuntimeContract(record))
   stages.push(inspectActivationCompatibility(record, activeOwner))
+  stages.push(inspectGeneratedSourceContract(record, record.workspaceRoot, files))
   stages.push(inspectBoundary(record.workspaceRoot, files))
   stages.push(runTypecheck(record.workspaceRoot, files))
   stages.push(runTests(record.workspaceRoot, files))
+  const evaluation = new CapabilityEvaluationHarness().evaluate({
+    candidateId: record.id,
+    workspaceRoot: record.workspaceRoot,
+  })
+  stages.push(stage(
+    'business.acceptance',
+    evaluation.status,
+    evaluation.summary,
+    { diagnostics: JSON.stringify(evaluation).slice(0, 32 * 1024) },
+  ))
   stages.push(inspectBundle(record.workspaceRoot))
   const digest = digestFiles(record.workspaceRoot, files, contractDigestExtras(record.manifest.runtimeContractVersion))
   stages.push(stage('digest', 'passed', `Bound validation evidence to digest ${digest.slice(0, 12)}.`))
@@ -282,6 +450,7 @@ export function runValidation(record: CandidateRecord, activeOwner?: OwnerExecut
     unresolved,
     blocked,
     reliability,
+    evaluation,
   }
 }
 

@@ -16,6 +16,7 @@ const strokes: Record<string, readonly string[]> = {
   warn: ['M12 4.2l8.4 15.1H3.6z', 'M12 10v4', 'M12 16.6h.01'],
   trash: ['M5 7h14', 'M9 7V5h6v2', 'M7 7l1 13h8l1-13', 'M10 11v6', 'M14 11v6'],
   info: ['M12 4a8 8 0 1 1 0 16 8 8 0 0 1 0-16z', 'M12 11v5', 'M12 8h.01'],
+  settings: ['M12 8.5a3.5 3.5 0 1 1 0 7 3.5 3.5 0 0 1 0-7z', 'M12 3v2', 'M12 19v2', 'M3 12h2', 'M19 12h2', 'M5.6 5.6L7 7', 'M17 17l1.4 1.4', 'M18.4 5.6L17 7', 'M7 17l-1.4 1.4'],
 }
 
 export type GlyphName = keyof typeof strokes

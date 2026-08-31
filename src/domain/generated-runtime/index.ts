@@ -1,4 +1,16 @@
-export { approvedHostCapabilities, assertBrokerAllowed, executeHostBroker, GeneratedBrokerError } from './broker.js'
+export {
+  approvedHostCapabilities,
+  assertBrokerAllowed,
+  executeHostBroker,
+  GeneratedBrokerError,
+  GeneratedHostBroker,
+  GENERATED_BROKER_OPS,
+  HOST_KNOWLEDGE_RETRIEVE,
+  HOST_TEXT_ECHO,
+  textEchoBrokerOperation,
+  type GeneratedBrokerOperation,
+} from './broker.js'
+export type { GeneratedBrokerExecution } from './types.js'
 export { projectParameterSchema, projectValueSchema } from './schema.js'
 export { isolatedRuntimeOwner, isImportedThirdParty, requiresIsolatedGeneratedRuntime } from './trust.js'
 export {

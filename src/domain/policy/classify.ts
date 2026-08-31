@@ -49,6 +49,18 @@ export const TOOL_ACTIONS: Record<string, ToolActionSpec> = {
     intent: 'read',
     payload: (args) => pick(args, ['query', 'limit', 'cursor']),
   },
+  mail_get_message: {
+    capability: 'mail',
+    operation: 'get_message',
+    intent: 'read',
+    payload: (args) => pick(args, ['id']),
+  },
+  contacts_search: {
+    capability: 'contacts',
+    operation: 'search',
+    intent: 'read',
+    payload: (args) => pick(args, ['query', 'limit', 'cursor']),
+  },
   tasks_propose_create: {
     capability: 'tasks',
     operation: 'propose_create',
@@ -84,6 +96,30 @@ export const TOOL_ACTIONS: Record<string, ToolActionSpec> = {
     operation: 'delete',
     intent: 'execute',
     payload: (args) => pick(args, ['id']),
+  },
+  obsidian_propose_create_note: {
+    capability: 'obsidian',
+    operation: 'propose_create_note',
+    intent: 'propose',
+    payload: (args) => pick(args, ['path', 'content']),
+  },
+  obsidian_propose_append_note: {
+    capability: 'obsidian',
+    operation: 'propose_append_note',
+    intent: 'propose',
+    payload: (args) => pick(args, ['path', 'content']),
+  },
+  obsidian_create_note: {
+    capability: 'obsidian',
+    operation: 'create_note',
+    intent: 'execute',
+    payload: (args) => pick(args, ['path', 'content']),
+  },
+  obsidian_append_note: {
+    capability: 'obsidian',
+    operation: 'append_note',
+    intent: 'execute',
+    payload: (args) => pick(args, ['path', 'content', 'expectedDigest']),
   },
 }
 

@@ -5,6 +5,7 @@ import path from 'node:path'
 import { describe, it } from 'node:test'
 import { CallId } from '@deepseek-ai/dsh-llm'
 import { CandidateService } from '../src/domain/candidate/index.js'
+import { CAPABILITY_EVALUATION_SUITE_STAMP } from '../src/domain/evaluation/index.js'
 import {
   GENERATED_EXTENSION_API_V1,
   WORKBENCH_MAX_FILE_BYTES,
@@ -111,6 +112,116 @@ describe('candidate workbench', () => {
       assert.equal(generated.owner, 'generated/r0-workbench-ping')
       assert.equal(generated.provenance.kind, 'generated')
       assert.equal(generated.provenance.origin, 'assistant')
+    } finally {
+      await ctx.fiber.dispose()
+    }
+  })
+
+  it('A2. binds an explicit capability specification into plan, candidate, and digest input', async () => {
+    const { ctx } = await bootAssistantControl()
+    try {
+      const specification = parse(await tool(ctx, 'define_capability_specification', {
+        capability: 'r0.spec.echo',
+        goal: 'Echo supplied text through the approved host broker.',
+        nonGoals: ['No filesystem, process, or network access.'],
+        inputs: [{ name: 'text', description: 'Text to echo.', required: true }],
+        businessRules: ['Return exactly the supplied text.'],
+        permissions: ['host.text.echo'],
+        acceptanceExamples: [{
+          name: 'plain text',
+          given: ['The user supplies hello.'],
+          when: 'The tool runs.',
+          then: ['The result is hello.'],
+          fixture: { input: { text: 'hello' }, expected: 'hello' },
+        }],
+      }))
+      assert.equal(specification.status, 'ready')
+      const plan = parse(await tool(ctx, 'plan_capability_change', { specificationId: specification.id }))
+      assert.equal((plan.specification as { digest: string }).digest, specification.digest)
+      const denied = await tool(ctx, 'create_candidate', { planId: plan.planId })
+      assert.equal(denied.isError, true)
+      const candidate = parse(await tool(ctx, 'create_candidate', {
+        planId: plan.planId,
+        permissions: ['host.text.echo'],
+      }))
+      assert.equal((candidate.specification as { id: string }).id, specification.id)
+      const stamp = await tool(ctx, 'read_candidate_file', {
+        candidateId: candidate.id,
+        path: 'capability-specification.json',
+      })
+      assert.equal(JSON.parse(String(stamp.value)).digest, specification.digest)
+      const evaluation = JSON.parse(ctx.candidateWorkspace.readFile(String(candidate.id), CAPABILITY_EVALUATION_SUITE_STAMP)) as {
+        specificationDigest: string
+        cases: readonly unknown[]
+      }
+      assert.equal(evaluation.specificationDigest, specification.digest)
+      assert.equal(evaluation.cases.length, 1)
+      assert.equal(ctx.candidateWorkbench.listFiles(String(candidate.id)).includes(CAPABILITY_EVALUATION_SUITE_STAMP), false)
+      assert.equal((await tool(ctx, 'write_candidate_file', {
+        candidateId: candidate.id,
+        path: CAPABILITY_EVALUATION_SUITE_STAMP,
+        content: '{}',
+      })).isError, true)
+      assert.equal((await tool(ctx, 'write_candidate_file', {
+        candidateId: candidate.id,
+        path: 'capability-specification.json',
+        content: '{}',
+      })).isError, true)
+      assert.equal((await tool(ctx, 'set_candidate_manifest', {
+        candidateId: candidate.id,
+        permissions: [],
+      })).isError, true)
+      assert.equal((await tool(ctx, 'set_candidate_manifest', {
+        candidateId: candidate.id,
+        effects: { filesystem: ['outside-workspace'] },
+      })).isError, true)
+
+      writeFileSync(
+        path.join(ctx.candidateWorkspace.get(String(candidate.id)).workspaceRoot, 'capability-specification.json'),
+        '{}\n',
+      )
+      assert.equal((await tool(ctx, 'validate_candidate', { candidateId: candidate.id })).isError, true)
+
+      const revised = parse(await tool(ctx, 'revise_capability_specification', {
+        specificationId: specification.id,
+        goal: 'Echo supplied text through the approved host broker with whitespace preserved.',
+        businessRules: ['Return exactly the supplied text, including surrounding whitespace.'],
+      }))
+      assert.equal(revised.revision, 2)
+      assert.equal(revised.supersedesId, specification.id)
+      assert.notEqual(revised.digest, specification.digest)
+      assert.equal((await tool(ctx, 'revise_capability_specification', {
+        specificationId: specification.id,
+        goal: 'Attempt to overwrite history.',
+      })).isError, true)
+      const comparison = parse(await tool(ctx, 'compare_capability_specifications', {
+        fromSpecificationId: specification.id,
+        toSpecificationId: revised.id,
+      }))
+      assert.deepEqual(comparison.changedFields, ['goal', 'businessRules'])
+      const revisedPlan = parse(await tool(ctx, 'plan_capability_change', { specificationId: revised.id }))
+      assert.equal((revisedPlan.specification as { id: string }).id, revised.id)
+      assert.equal((ctx.candidateWorkbench.inspect(String(candidate.id)).specification as { id: string }).id, specification.id)
+      const listed = parse(await tool(ctx, 'list_workbench', { limit: 50 }))
+      assert.ok((listed.specifications as { id: string }[]).some((item) => item.id === revised.id))
+
+      const unresolved = parse(await tool(ctx, 'define_capability_specification', {
+        capability: 'r0.spec.unclear',
+        goal: 'Do something not yet specified.',
+      }))
+      assert.equal(unresolved.status, 'needs-clarification')
+      assert.equal((await tool(ctx, 'plan_capability_change', { specificationId: unresolved.id })).isError, true)
+      const clarified = parse(await tool(ctx, 'revise_capability_specification', {
+        specificationId: unresolved.id,
+        businessRules: ['Return a bounded textual result.'],
+        acceptanceExamples: [{
+          name: 'bounded result',
+          given: ['A valid request.'],
+          when: 'The capability runs.',
+          then: ['A bounded textual result is returned.'],
+        }],
+      }))
+      assert.equal(clarified.status, 'ready')
     } finally {
       await ctx.fiber.dispose()
     }
@@ -269,6 +380,27 @@ describe('candidate workbench', () => {
     assert.equal(closed.state, 'review-complete')
     assert.equal(closed.findings.some((item) => item.claim === 'invalid-parent-revision'), false)
     assert.equal(closed.findings.some((item) => item.claim === 'needs-repair' && item.status === 'open'), false)
+  })
+
+  it('D2. a human-rejected sealed candidate can be repaired without reopening Independent Review', () => {
+    const setup = isolatedWorkbench()
+    const parent = authorIsolated(setup)
+    const report = setup.workbench.review(parent)
+    assert.equal(report.state, 'review-complete')
+
+    const requested = setup.governance.requestApproval(parent)
+    const human = setup.root.issueAuthority({ kind: 'human-control', source: 'application-ui' })
+    setup.root.recordApproval(human, {
+      candidateId: parent,
+      fingerprint: requested.fingerprint,
+      decision: 'rejected',
+    })
+    assert.equal(setup.governance.inspectApproval(parent)?.decision, 'rejected')
+
+    const repaired = setup.workbench.repair(parent)
+    assert.equal(repaired.parentId, parent)
+    assert.equal(repaired.parentDigest, setup.workspace.get(parent).digest)
+    assert.equal(repaired.sealed, false)
   })
 
   it('E. scripted slice reaches an Approval Card, isolated activation, and rollback', async () => {
@@ -705,6 +837,170 @@ describe('candidate workbench', () => {
     }
   })
 
+  it('rejects manifest permissions that cannot reach Registry activation', () => {
+    const setup = isolatedWorkbench()
+    const plan = setup.workbench.rememberPlan(setup.review)
+
+    assert.throws(() => setup.workbench.create({
+      planId: plan.planId,
+      manifest: {
+        capabilities: ['r0.workbench.ping'],
+        permissions: ['network.connect:redpica.top:22'],
+      },
+    }), /malformed permission/)
+    assert.equal(setup.workspace.list().length, 0)
+  })
+
+  it('fails validation for a restored candidate with Registry-invalid permissions', () => {
+    const setup = isolatedWorkbench()
+    const id = draftIsolated(setup)
+    const record = setup.workspace.get(id)
+    const restored = new CandidateService(setup.registry, path.dirname(record.workspaceRoot), {
+      restore: [{
+        ...record,
+        manifest: {
+          ...record.manifest,
+          permissions: ['network.connect:redpica.top:22'],
+        },
+      }],
+    })
+
+    const report = restored.validate(id)
+    assert.equal(report.passed, false)
+    assert.equal(report.stages.find((item) => item.name === 'manifest.validate')?.status, 'failed')
+    assert.match(report.stages.find((item) => item.name === 'manifest.validate')?.summary ?? '', /malformed permission/)
+  })
+
+  it('rejects generated Broker permissions the host does not expose', () => {
+    const setup = isolatedWorkbench()
+    const plan = setup.workbench.rememberPlan(setup.review)
+
+    assert.throws(() => setup.workbench.create({
+      planId: plan.planId,
+      manifest: {
+        capabilities: ['r0.workbench.ping'],
+        permissions: ['host.ssh.exec'],
+      },
+    }), /unsupported generated Broker permission/)
+    assert.equal(setup.workspace.list().length, 0)
+  })
+
+  it('rejects unsupported Broker permissions when a generated Manifest is updated', () => {
+    const setup = isolatedWorkbench()
+    const created = setup.workbench.create({
+      planId: setup.workbench.rememberPlan(setup.review).planId,
+      manifest: { capabilities: ['r0.workbench.ping'] },
+    })
+
+    assert.throws(() => setup.workbench.setManifest(created.id, {
+      permissions: ['host.ssh.exec'],
+    }), /unsupported generated Broker permission/)
+    assert.deepEqual(setup.workspace.get(created.id).manifest.permissions, [])
+  })
+
+  it('fails validation for a restored candidate that requests an unavailable Broker operation', () => {
+    const setup = isolatedWorkbench()
+    const id = draftIsolated(setup)
+    const record = setup.workspace.get(id)
+    const restored = new CandidateService(setup.registry, path.dirname(record.workspaceRoot), {
+      restore: [{
+        ...record,
+        manifest: {
+          ...record.manifest,
+          permissions: ['host.ssh.exec'],
+        },
+      }],
+    })
+
+    const report = restored.validate(id)
+    assert.equal(report.passed, false)
+    assert.equal(report.stages.find((item) => item.name === 'runtime.contract')?.status, 'failed')
+    assert.match(report.stages.find((item) => item.name === 'runtime.contract')?.summary ?? '', /unsupported generated Broker permission/)
+  })
+
+  it('fails validation when generated code uses an undeclared Broker operation', () => {
+    const setup = isolatedWorkbench()
+    const id = draftIsolated(setup)
+    setup.workbench.writeFile(id, 'src/plugin.js', `export function apply(ctx) {
+  ctx.tools.register({
+    name: 'r0_workbench_ping',
+    parameters: { text: { type: 'string' } },
+    output: { schema: { type: 'string' }, render(_args, value) { return [{ type: 'text', text: String(value) }] } },
+    async execute(args) {
+      return ctx.broker.request('host.text.echo', { text: args.text })
+    },
+  })
+}
+`)
+
+    const validated = setup.workbench.validate(id)
+    assert.equal(validated.validation?.passed, false)
+    assert.equal(validated.validation?.failed.includes('source.contract'), true)
+    assert.match(
+      setup.workspace.get(id).validation?.stages.find((item) => item.name === 'source.contract')?.summary ?? '',
+      /undeclared Broker permission host\.text\.echo/,
+    )
+
+    setup.workbench.setManifest(id, { permissions: ['host.text.echo'] })
+    const repaired = setup.workbench.validate(id)
+    assert.equal(repaired.validation?.passed, true)
+    assert.equal(
+      setup.workspace.get(id).validation?.stages.find((item) => item.name === 'source.contract')?.status,
+      'passed',
+    )
+  })
+
+  it('fails validation when generated code treats ctx.effect as an I/O operation', () => {
+    const setup = isolatedWorkbench()
+    const id = draftIsolated(setup)
+    setup.workbench.writeFile(id, 'src/plugin.js', `export function apply(ctx) {
+  ctx.effect({ type: 'process.exec', command: 'ssh' })
+}
+`)
+
+    const validated = setup.workbench.validate(id)
+    assert.equal(validated.validation?.passed, false)
+    assert.equal(validated.validation?.failed.includes('source.contract'), true)
+    assert.match(
+      setup.workspace.get(id).validation?.stages.find((item) => item.name === 'source.contract')?.summary ?? '',
+      /cleanup setup callback/,
+    )
+  })
+
+  it('accepts a named cleanup setup callback', () => {
+    const setup = isolatedWorkbench()
+    const id = draftIsolated(setup)
+    setup.workbench.writeFile(id, 'src/plugin.js', `export function apply(ctx) {
+  const registerCleanup = () => () => {}
+  ctx.effect(registerCleanup)
+}
+`)
+
+    setup.workbench.validate(id)
+    assert.equal(
+      setup.workspace.get(id).validation?.stages.find((item) => item.name === 'source.contract')?.status,
+      'passed',
+    )
+  })
+
+  it('exposes the cleanup-only ctx.effect signature to candidate authors', async () => {
+    const { ctx } = await bootAssistantControl()
+    try {
+      const contract = parse(await tool(ctx, 'inspect_authoring_contract', {}))
+      assert.equal(
+        (contract.ctxSemantics as { effect?: string }).effect,
+        'cleanup registration only: effect(setup: () => (() => void) | void): () => void',
+      )
+      assert.match(
+        String((contract.ctxSemantics as { brokerPermissions?: string }).brokerPermissions),
+        /manifest\.permissions.*exact diff/,
+      )
+      assert.deepEqual(contract.brokerOps, ['host.text.echo', 'host.knowledge.retrieve'])
+    } finally {
+      await ctx.fiber.dispose()
+    }
+  })
+
   it('patches allowlisted manifest fields without wiping omitted governance declarations', async () => {
     const { ctx } = await bootAssistantControl()
     try {
@@ -723,7 +1019,7 @@ describe('candidate workbench', () => {
       stampContract(ctx.candidateWorkspace, id)
       parse(await tool(ctx, 'set_candidate_manifest', {
         candidateId: id,
-        permissions: ['local.fake.suite'],
+        permissions: ['host.text.echo'],
         runtimeSeams: ['integrations.calendar'],
         services: ['calendar'],
         providers: ['google-calendar'],
@@ -812,7 +1108,20 @@ describe('candidate workbench', () => {
     let planId = ''
     let candidateId = ''
     let parentDigest = ''
+    let specificationId = ''
+    let revisedSpecificationId = ''
     try {
+      const specification = first.ctx.candidateWorkbench.defineSpecification({
+        capability: 'r0.persisted.spec',
+        goal: 'Persist a specification.',
+        businessRules: ['Preserve the exact content.'],
+        acceptanceExamples: [{ name: 'restart', given: ['A saved specification.'], when: 'The host restarts.', then: ['The revision remains inspectable.'] }],
+      })
+      const revised = first.ctx.candidateWorkbench.reviseSpecification(specification.id, {
+        goal: 'Persist an immutable specification revision.',
+      })
+      specificationId = specification.id
+      revisedSpecificationId = revised.id
       candidateId = authorR0(first.ctx)
       planId = first.ctx.candidateWorkbench.inspect(candidateId).planId ?? ''
       first.ctx.candidateWorkbench.validate(candidateId)
@@ -832,6 +1141,12 @@ describe('candidate workbench', () => {
       assert.equal(plan.review.capability, 'r0.workbench.ping')
       assert.equal(plan.review.kind, 'new-plugin')
       assert.notEqual(plan.review.registryFacts, undefined)
+      const revised = second.ctx.candidateWorkbench.inspectSpecification(revisedSpecificationId)
+      assert.equal(revised.supersedesId, specificationId)
+      assert.deepEqual(
+        second.ctx.candidateWorkbench.compareSpecifications(specificationId, revisedSpecificationId).changedFields,
+        ['goal'],
+      )
       const snapshot = gatherWorkspaceSnapshot({ ctx: second.ctx, sessionId: 'wb-restart' })
       const projected = projectMissionControl(snapshot).candidates?.find((item) => item.id === candidateId)
       assert.equal(projected?.owner, 'generated/r0-workbench-ping')
@@ -920,7 +1235,7 @@ describe('candidate workbench', () => {
       assert.equal(bad.isError, true)
       const contract = parse(await tool(ctx, 'inspect_authoring_contract', {}))
       assert.equal(contract.id, GENERATED_EXTENSION_API_V1)
-      assert.deepEqual(contract.brokerOps, [])
+      assert.deepEqual(contract.brokerOps, ['host.text.echo', 'host.knowledge.retrieve'])
       const plan = parse(await tool(ctx, 'plan_capability_change', {
         capability: 'text.slugify',
         need: 'lowercase URL-safe slug',

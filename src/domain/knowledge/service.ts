@@ -18,6 +18,7 @@ export interface KnowledgeServiceOptions {
 export class KnowledgeService implements PersonalKnowledge {
   private readonly now: () => string
   private readonly id: () => string
+  private readonly documentIdBySource = new Map<string, string>()
 
   constructor(
     private readonly index: KnowledgeIndex = new InMemoryKeywordIndex(),
@@ -29,8 +30,9 @@ export class KnowledgeService implements PersonalKnowledge {
 
   ingest(input: KnowledgeIngestInput): KnowledgeDocument {
     const normalized = normalizeIngestInput(input)
+    const existingId = this.documentIdBySource.get(normalized.sourceUri)
     const document: KnowledgeDocument = {
-      id: this.id(),
+      id: existingId ?? this.id(),
       sourceUri: normalized.sourceUri,
       sourceKind: normalized.sourceKind,
       ingestedAt: this.now(),
@@ -43,6 +45,7 @@ export class KnowledgeService implements PersonalKnowledge {
       text,
     }))
     this.index.upsert(document, chunks)
+    this.documentIdBySource.set(document.sourceUri, document.id)
     return document
   }
 

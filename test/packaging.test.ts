@@ -13,8 +13,12 @@ import LlmRuntime from '@deepseek-ai/dsh-llm'
 import SessionStore from '@deepseek-ai/dsh-session'
 import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
 import ToolRuntime from '@deepseek-ai/dsh-tools'
+import SubagentRuntime from '@deepseek-ai/dsh-subagent'
+import * as SpawnSubagent from '@deepseek-ai/dsh-subagent-spawn-in-process'
+import WorkerThreadWorkflowEngine from '@deepseek-ai/dsh-workflow-worker-thread'
 import * as assistantProduct from '../src/product/bundle.js'
 import { PRODUCT_TOOL_NAMES } from '../src/product/bundle.js'
+import { GOVERNED_SUBAGENT_PROVIDER, MAX_ACTIVE_DELEGATIONS } from '../src/product/governed-subagent-provider.js'
 import { bootAssistantRuntime, createAssistantAgent } from '../src/runtime/boot.js'
 import { SAFE_MODE_PROFILE_PATCH, withDshAssistantProfile } from './helpers/dsh-profile-loader.js'
 
@@ -30,6 +34,14 @@ async function bootHarness() {
   await ctx.plugin(ToolRuntime)
   await ctx.plugin(LocalJobRegistry)
   await ctx.plugin(AgentLoop, { agents: [] })
+  await ctx.plugin(SubagentRuntime)
+  await ctx.plugin(SpawnSubagent, { providerName: 'tars-spawn' })
+  await ctx.plugin(WorkerThreadWorkflowEngine, {
+    provider: GOVERNED_SUBAGENT_PROVIDER,
+    maxConcurrentAgents: 2,
+    maxTotalAgents: MAX_ACTIVE_DELEGATIONS,
+    maxItemsPerCall: MAX_ACTIVE_DELEGATIONS,
+  })
   return ctx
 }
 
@@ -57,6 +69,17 @@ describe('product package and profile', () => {
     assert.equal(pkg.dependencies['@deepseek-ai/dsh-agent-default-model'], '0.1.0-rc.8')
     assert.equal(pkg.dependencies['@deepseek-ai/dsh-app-boot'], '0.1.0-rc.8')
     assert.equal(pkg.dependencies['@deepseek-ai/dsh-base'], '0.1.0-rc.8')
+    assert.equal(pkg.dependencies['@deepseek-ai/dsh-token-meter'], '0.1.0-rc.8')
+    assert.equal(pkg.dependencies['@deepseek-ai/dsh-compaction-basic'], '0.1.0-rc.8')
+    assert.equal(pkg.dependencies['@deepseek-ai/dsh-output-retention'], '0.1.0-rc.8')
+    assert.equal(pkg.dependencies['@deepseek-ai/dsh-spill-local'], '0.1.0-rc.8')
+    assert.equal(pkg.dependencies['@deepseek-ai/dsh-spill-policy'], '0.1.0-rc.8')
+    assert.equal(pkg.dependencies['@deepseek-ai/dsh-session-checkpoint-policy'], '0.1.0-rc.8')
+    assert.equal(pkg.dependencies['@deepseek-ai/dsh-attachment-local'], '0.1.0-rc.8')
+    assert.equal(pkg.dependencies['@deepseek-ai/dsh-file-reference'], '0.1.0-rc.8')
+    assert.equal(pkg.dependencies['@deepseek-ai/dsh-workflow'], '0.1.0-rc.8')
+    assert.equal(pkg.dependencies['@deepseek-ai/dsh-workflow-worker-thread'], '0.1.0-rc.8')
+    assert.equal(pkg.dependencies['@deepseek-ai/dsh-tool-workflow'], undefined)
     assert.match(readFileSync(join(root, 'cordis.patch.yml'), 'utf8'), /id: dsh-assistant/)
 
     const profile = JSON.parse(readFileSync(join(root, 'profiles/assistant/package.json'), 'utf8')) as {
@@ -256,10 +279,13 @@ describe('product package and profile', () => {
     assert.match(packedCss, /--text-amber:\s*#7a4500/)
     const interLicense = readFileSync(join(pkgRoot, 'dist', 'web', 'licenses', 'Inter-OFL.txt'), 'utf8')
     const barlowLicense = readFileSync(join(pkgRoot, 'dist', 'web', 'licenses', 'Barlow-OFL.txt'), 'utf8')
+    const zcoolLicense = readFileSync(join(pkgRoot, 'dist', 'web', 'licenses', 'ZCOOL-QingKe-HuangYou-OFL.txt'), 'utf8')
     assert.match(interLicense, /SIL Open Font License/)
     assert.match(interLicense, /Inter Project Authors/)
     assert.match(barlowLicense, /SIL Open Font License/)
     assert.match(barlowLicense, /Barlow Project Authors/)
+    assert.match(zcoolLicense, /SIL Open Font License/)
+    assert.match(zcoolLicense, /ZCOOL QingKe HuangYou Project Authors/)
     assert.equal(existsSync(join(installDir, 'node_modules', '@deepseek-ai', 'dsh-llm-deepseek')), true)
     assert.equal(existsSync(join(installDir, 'node_modules', '@deepseek-ai', 'dsh-agent-default-model')), true)
     const binSource = readFileSync(join(pkgRoot, 'dist', 'product', 'bin.js'), 'utf8')

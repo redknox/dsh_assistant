@@ -92,7 +92,7 @@ export const ASSISTANT_OFFICIAL_COMPOSED_IDS = Object.freeze([
   'dsh-assistant',
 ] as const)
 
-export type AdapterWhen = 'always' | 'ready' | 'session-persistence'
+export type AdapterWhen = 'always' | 'ready' | 'session-persistence' | 'bounded-workbench'
 
 export type OfficialRuntimeMount = {
   readonly official: string
@@ -117,7 +117,32 @@ export const OFFICIAL_RUNTIME_MOUNTS = Object.freeze([
   { official: 'skill-filesystem', runtime: 'skill-filesystem', when: 'ready' },
   { official: 'tool-skill', runtime: 'tool-skill', when: 'ready' },
   { official: 'jobs', runtime: 'LocalJobRegistry', when: 'ready' },
+  { official: 'tool-jobs', runtime: 'tool-jobs', when: 'ready' },
+  { official: 'timeout-policy', runtime: 'timeout-policy', when: 'ready' },
+  { official: 'web', runtime: 'WebRuntime', when: 'ready' },
+  { official: 'web-search-deepseek', runtime: 'web-search-deepseek', when: 'ready' },
+  { official: 'tool-web', runtime: 'tool-web', when: 'ready' },
+  { official: 'subagent', runtime: 'SubagentRuntime', when: 'ready' },
+  { official: 'subagent-spawn-in-process', runtime: 'subagent-spawn-in-process', when: 'ready' },
+  { official: 'workflow-worker-thread', runtime: 'WorkerThreadWorkflowEngine', when: 'ready' },
   { official: 'session-persistence-jsonl', runtime: 'JsonlSessionPersistence', when: 'session-persistence' },
+  { official: 'session-title', runtime: 'SessionTitleService', when: 'ready' },
+  { official: 'session-title-llm', runtime: 'session-title-first-prompt-llm', when: 'ready' },
+  { official: 'session-query-sqlite', runtime: 'SqliteSessionQueryEngine', when: 'ready' },
+  { official: 'session-projection', runtime: 'SessionProjectionRegistry', when: 'ready' },
+  { official: 'token-meter', runtime: 'TokenMeter', when: 'ready' },
+  { official: 'tool-result-pruner', runtime: 'ToolResultPruner', when: 'ready' },
+  { official: 'compaction-basic', runtime: 'BasicCompactionEngine', when: 'ready' },
+  { official: 'spill-local', runtime: 'LocalSpillStore', when: 'ready' },
+  { official: 'spill-policy', runtime: 'spill-policy', when: 'ready' },
+  { official: 'session-checkpoint-policy', runtime: 'session-checkpoint-policy', when: 'session-persistence' },
+  { official: 'attachment-local', runtime: 'LocalAttachmentStore', when: 'ready' },
+  { official: 'goal', runtime: 'GoalService', when: 'ready' },
+  { official: 'goal-round-driver', runtime: 'goal-round-driver', when: 'ready' },
+  { official: 'tool-goal', runtime: 'tool-goal', when: 'ready' },
+  { official: 'tool-todo', runtime: 'tool-todo', when: 'ready' },
+  { official: 'user-questions', runtime: 'UserQuestionService', when: 'ready' },
+  { official: 'plan-mode', runtime: 'PlanModeController', when: 'ready' },
 ] as const satisfies readonly OfficialRuntimeMount[])
 
 export const PRODUCT_ONLY_SEAMS = Object.freeze([
@@ -131,9 +156,24 @@ export const PRODUCT_ONLY_SEAMS = Object.freeze([
   { runtime: 'dsh-assistant-workbench', when: 'always', reason: 'Candidate Workbench' },
   { runtime: 'dsh-assistant-integrations', when: 'ready', reason: 'product integration hub' },
   { runtime: 'dsh-assistant-jobs', when: 'ready', reason: 'assistant job workflows' },
+  { runtime: 'dsh-assistant-governed-subagent-provider', when: 'ready', reason: 'shared depth, concurrency, persona, and tool authority for direct delegation and Workflow' },
+  { runtime: 'dsh-assistant-registered-workflows', when: 'ready', reason: 'host-registered native DSH Workflow catalog and foreground launcher' },
+  { runtime: 'dsh-assistant-governed-subagents', when: 'ready', reason: 'bounded one-shot delegation policy' },
+  { runtime: 'activationOwner', when: 'ready', reason: 'SubagentRuntime one-shot child lifecycle ownership' },
+  { runtime: 'dsh-assistant-governed-web', when: 'ready', reason: 'bounded outbound search and untrusted-source policy' },
   { runtime: 'dsh-assistant-knowledge', when: 'ready', reason: 'personal knowledge' },
   { runtime: 'dsh-assistant-memory', when: 'ready', reason: 'personal memory' },
   { runtime: 'dsh-assistant-policy', when: 'ready', reason: 'product trust policy' },
+  { runtime: 'ApprovalService', when: 'ready', reason: 'DSH one-shot approval service' },
+  { runtime: 'dsh-assistant-approval-bridge', when: 'ready', reason: 'unified DSH approval control surface' },
+  { runtime: 'SandboxFileReferenceService', when: 'ready', reason: 'browser-safe references aligned to governed Files' },
+  { runtime: 'DshApprovalBridgeService', when: 'ready', reason: 'pending DSH approval broker' },
+  { runtime: 'SandboxPolicyService', when: 'bounded-workbench', reason: 'single Files workspace policy owner' },
+  { runtime: 'BoundedWorkspaceFileSystemPlugin', when: 'bounded-workbench', reason: 'read-and-write confinement to the Files root' },
+  { runtime: 'fs-observation-policy', when: 'bounded-workbench', reason: 'read-before-edit and stale-write protection' },
+  { runtime: 'tool-fs', when: 'bounded-workbench', reason: 'native bounded read/write/edit tools' },
+  { runtime: 'LocalSubprocessRuntime', when: 'bounded-workbench', reason: 'managed packaged-ripgrep process owner' },
+  { runtime: 'tool-fs-search', when: 'bounded-workbench', reason: 'native bounded glob and grep tools' },
   { runtime: 'dsh-assistant-skills', when: 'always', reason: 'profile-scoped Skill lifecycle' },
 ] as const satisfies readonly ProductOnlySeam[])
 
@@ -145,15 +185,16 @@ export interface ProfilePatchRow {
   readonly config?: unknown
 }
 
-function mappingApplies(when: AdapterWhen, options: { readonly safeMode?: boolean; readonly sessionPersistence?: boolean }): boolean {
+function mappingApplies(when: AdapterWhen, options: { readonly safeMode?: boolean; readonly sessionPersistence?: boolean; readonly boundedWorkbench?: boolean }): boolean {
   if (when === 'ready') return options.safeMode !== true
   if (when === 'session-persistence') return options.sessionPersistence === true
+  if (when === 'bounded-workbench') return options.safeMode !== true && options.boundedWorkbench === true
   return true
 }
 
 export function expectedProductionAdapterIds(
   activeOfficialIds: readonly string[],
-  options: { readonly safeMode?: boolean; readonly sessionPersistence?: boolean } = {},
+  options: { readonly safeMode?: boolean; readonly sessionPersistence?: boolean; readonly boundedWorkbench?: boolean } = {},
 ): readonly string[] {
   const active = new Set(activeOfficialIds)
   const ids = new Set<string>()
@@ -229,7 +270,7 @@ export function assertGovernedActiveComposition(entries: readonly ComposedProfil
 export function assertOfficialEquivalentToAdapter(
   composedIds: readonly string[],
   mountedIds: readonly string[],
-  options: { readonly safeMode?: boolean; readonly sessionPersistence?: boolean } = {},
+  options: { readonly safeMode?: boolean; readonly sessionPersistence?: boolean; readonly boundedWorkbench?: boolean } = {},
 ): void {
   const composition = loadGovernedAssistantComposition({ recovery: options.safeMode === true })
   assertOfficialComposedIds(composedIds)
@@ -239,7 +280,7 @@ export function assertOfficialEquivalentToAdapter(
 export function assertActiveProfileMatchesAdapter(
   composition: GovernedProfileComposition,
   mountedIds: readonly string[],
-  options: { readonly safeMode?: boolean; readonly sessionPersistence?: boolean } = {},
+  options: { readonly safeMode?: boolean; readonly sessionPersistence?: boolean; readonly boundedWorkbench?: boolean } = {},
 ): void {
   assertAssistantBundles(composition.bundles)
   assertProfilePatchSafe(composition.patches)
@@ -253,7 +294,7 @@ export function assertActiveProfileMatchesAdapter(
 
 export function assertMountedAdapterContract(
   ctx: Context,
-  options: { readonly safeMode?: boolean; readonly sessionPersistence?: boolean } = {},
+  options: { readonly safeMode?: boolean; readonly sessionPersistence?: boolean; readonly boundedWorkbench?: boolean } = {},
 ): void {
   assertActiveProfileMatchesAdapter(loadGovernedAssistantComposition({ recovery: options.safeMode === true }), mountedAdapterPluginIds(ctx), options)
 }

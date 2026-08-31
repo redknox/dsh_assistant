@@ -346,6 +346,38 @@ export class GovernanceService implements ExtensionGovernance, ExtensionActivati
     }
   }
 
+  abandonFailedActivation(
+    candidateId: string,
+    fingerprint: string,
+    credential: TrustedAuthorityCredential,
+  ): ActivationStatus {
+    this.assertCredential(credential)
+    this.assertMutationIdle('recovery')
+    if (
+      this.state !== 'activation-failed'
+      || this.pendingCandidateId !== candidateId
+      || this.lastFailure?.candidateId !== candidateId
+    ) {
+      throw new GovernanceContractError('no matching failed activation to abandon')
+    }
+    if (this.safeMode || this.isRecoveryRequired()) {
+      throw new GovernanceContractError('failed activation still requires recovery')
+    }
+    const approval = this.approvals.get(candidateId)
+    if (
+      approval?.decision !== 'approved-for-exact-diff'
+      || approval.fingerprint !== fingerprint
+    ) {
+      throw new GovernanceContractError('activation approval is stale')
+    }
+    this.approvals.set(candidateId, { ...approval, decision: 'superseded' })
+    this.state = 'rolled-back'
+    this.pendingCandidateId = undefined
+    this.phase = undefined
+    this.flush()
+    return this.status()
+  }
+
   async rollback(credential: TrustedAuthorityCredential): Promise<ActivationStatus> {
     this.assertCredential(credential)
     this.assertMutationIdle('recovery')

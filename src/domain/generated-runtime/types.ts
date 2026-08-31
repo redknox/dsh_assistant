@@ -17,6 +17,12 @@ export interface GeneratedBrokerRequest {
   readonly args: Record<string, unknown>
 }
 
+/** Host facts bound to one active generated proxy-tool invocation. */
+export interface GeneratedBrokerExecution {
+  readonly signal: AbortSignal
+  readonly sessionId?: string
+}
+
 export interface GeneratedToolDescriptor {
   readonly name: string
   readonly description: string

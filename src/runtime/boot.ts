@@ -4,6 +4,7 @@ import AgentDefaultModel from '@deepseek-ai/dsh-agent-default-model'
 import AgentLoop from '@deepseek-ai/dsh-agent-loop'
 import InvariantRegistry from '@deepseek-ai/dsh-invariants'
 import LocalJobRegistry from '@deepseek-ai/dsh-jobs-local'
+import * as ToolJobs from '@deepseek-ai/dsh-tool-jobs'
 import LlmRuntime from '@deepseek-ai/dsh-llm'
 import * as DeepSeekLlm from '@deepseek-ai/dsh-llm-deepseek'
 import SessionStore, { SessionId } from '@deepseek-ai/dsh-session'
@@ -12,6 +13,17 @@ import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
 import SkillRegistry from '@deepseek-ai/dsh-skill'
 import * as toolSkill from '@deepseek-ai/dsh-tool-skill'
 import ToolRuntime from '@deepseek-ai/dsh-tools'
+import SubagentRuntime from '@deepseek-ai/dsh-subagent'
+import * as SpawnSubagent from '@deepseek-ai/dsh-subagent-spawn-in-process'
+import WorkerThreadWorkflowEngine from '@deepseek-ai/dsh-workflow-worker-thread'
+import WebRuntime from '@deepseek-ai/dsh-web'
+import * as DeepSeekWebSearch from '@deepseek-ai/dsh-web-search-deepseek'
+import * as ToolWeb from '@deepseek-ai/dsh-tool-web'
+import * as ToolTimeoutPolicy from '@deepseek-ai/dsh-tool-call-timeout-policy'
+import { mountContextEndurance } from '../product/context-endurance.js'
+import { mountMaterialInput } from '../product/material-input.js'
+import { mountSessionIntelligence } from '../product/session-intelligence.js'
+import { mountAgentTaskControl } from '../product/agent-task-control.js'
 import type { RecoveryRoot } from '../domain/governance/root.js'
 import { SkillService } from '../domain/skill/index.js'
 import { mountGovernedSkillFilesystem } from './skill-filesystem-mount.js'
@@ -26,6 +38,9 @@ import { appendProductLog } from '../product/log.js'
 import { mkdirSync } from 'node:fs'
 import path from 'node:path'
 import type { MemoryPluginConfig } from '../plugins/memory-plugin.js'
+import type { KnowledgePluginConfig } from '../plugins/knowledge-plugin.js'
+import { boundedWorkspaceRoot } from '../product/bounded-workbench.js'
+import { GOVERNED_SUBAGENT_PROVIDER, MAX_ACTIVE_DELEGATIONS } from '../product/governed-subagent-provider.js'
 
 /**
  * Minimal public DSH plugin stack for this product layer.
@@ -36,6 +51,7 @@ import type { MemoryPluginConfig } from '../plugins/memory-plugin.js'
  */
 export interface BootOptions {
   knowledgeFixturePaths?: string[]
+  knowledge?: KnowledgePluginConfig
   memory?: MemoryPluginConfig
   safeMode?: boolean
   /** Durable Self-Extension home. Falls back to TARS_NG_HOME, then DSH_ASSISTANT_HOME. */
@@ -48,6 +64,8 @@ export interface BootOptions {
   sessionId?: string
   /** Operator workspace directory. Context only; not a filesystem grant. */
   workspace?: string
+  /** Explicit Files authority for embedded/test hosts; product CLI normally uses DSH_ASSISTANT_SANDBOX_ROOT. */
+  sandboxRoot?: string
 }
 
 export interface BootDiagnostics {
@@ -87,14 +105,52 @@ async function bootStack(options: BootOptions = {}): Promise<AssistantControl> {
   await ctx.plugin(AgentDefaultModel, { provider: DEFAULT_LLM_PROVIDER, model: DEFAULT_LLM_MODEL })
   await ctx.plugin(SystemPrompt, {})
   await ctx.plugin(ToolRuntime)
+  if (!safeMode) {
+    await ctx.plugin(ToolTimeoutPolicy)
+    await ctx.plugin(WebRuntime, { searchProvider: 'deepseek' })
+    await ctx.plugin(DeepSeekWebSearch, { apiKeyEnv: 'DEEPSEEK_API_KEY', maxTokens: 2048, maxUses: 2 })
+    await ctx.plugin(ToolWeb, {
+      search: true,
+      fetch: false,
+      searchMaxResults: 6,
+      searchMaxQueries: 2,
+      searchTimeoutMs: 30_000,
+    })
+  }
+  if (!safeMode) await mountContextEndurance(ctx, {
+    ...(options.home ? { spillRoot: productHomeLayout(options.home).spill } : {}),
+    checkpoints: options.sessionRoot !== undefined,
+  })
+  if (!safeMode) await mountSessionIntelligence(ctx, options.home ? { home: options.home } : {})
+  if (!safeMode) await mountAgentTaskControl(ctx)
   await ctx.plugin(SkillRegistry)
-  if (!safeMode) await ctx.plugin(LocalJobRegistry)
+  if (!safeMode) {
+    await ctx.plugin(LocalJobRegistry)
+    await ctx.plugin(ToolJobs, {
+      waitTimeoutMs: 30_000,
+      maxWaitTimeoutMs: 120_000,
+      completionDelivery: 'quiet',
+      maxConsecutiveWakes: 1,
+    })
+  }
   await ctx.plugin(AgentLoop, { agents: [] })
+  if (!safeMode) {
+    await ctx.plugin(SubagentRuntime)
+    await ctx.plugin(SpawnSubagent, { providerName: 'tars-spawn' })
+    await ctx.plugin(WorkerThreadWorkflowEngine, {
+      provider: GOVERNED_SUBAGENT_PROVIDER,
+      maxConcurrentAgents: 2,
+      maxTotalAgents: MAX_ACTIVE_DELEGATIONS,
+      maxItemsPerCall: MAX_ACTIVE_DELEGATIONS,
+      syncTimeoutMs: 1_000,
+      disposeGraceMs: 5_000,
+    })
+  }
   let recoveryRoot: RecoveryRoot | undefined
   const skillHome = resolveAssistantHome(options.home)
   await ctx.plugin(assistantProduct, {
     memory: options.memory,
-    knowledge: { fixturePaths: options.knowledgeFixturePaths },
+    knowledge: options.knowledge ?? { fixturePaths: options.knowledgeFixturePaths },
     integrations: options.allowFixtures === undefined ? undefined : { allowFixtures: options.allowFixtures },
     safeMode,
     jobs: safeMode ? { autoTickMs: null } : undefined,
@@ -142,7 +198,9 @@ async function bootStack(options: BootOptions = {}): Promise<AssistantControl> {
         holder.skills = store
       },
     },
+    boundedWorkbenchRoot: options.sandboxRoot ?? process.env.DSH_ASSISTANT_SANDBOX_ROOT,
   })
+  if (!safeMode) await mountMaterialInput(ctx, options.home ? { home: options.home } : {})
   if (!safeMode) {
     const mounted = await mountGovernedSkillFilesystem(ctx, {
       includeDefaultRoots: false,
@@ -175,6 +233,7 @@ async function bootStack(options: BootOptions = {}): Promise<AssistantControl> {
     assertMountedAdapterContract(ctx, {
       safeMode,
       sessionPersistence: Boolean(options.sessionRoot),
+      boundedWorkbench: Boolean(ctx.get('fs')),
     })
   } catch (error) {
     await ctx.fiber.dispose()
@@ -227,9 +286,10 @@ export async function createAssistantAgent(
       })
     }
   }
+  const sessionWorkspace = boundedWorkspaceRoot(ctx) ?? workspace
   return ctx.agents.create({
     sessionId: SessionId(sessionId),
-    ...(workspace === undefined ? {} : { meta: { cwd: workspace } }),
+    ...(sessionWorkspace === undefined ? {} : { meta: { cwd: sessionWorkspace } }),
     agentOptions: options,
   })
 }
