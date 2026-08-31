@@ -95,12 +95,28 @@ export function CapabilitySpecificationsWorkspace(props: {
                 <SpecBlock title="ACCEPTANCE EXAMPLES">
                   {selected.acceptanceExamples.map((example) => (
                     <details key={example.name}>
-                      <summary>{example.name}</summary>
+                      <summary>{example.name}{example.fixture ? <span>EXECUTABLE</span> : null}</summary>
                       <p><strong>GIVEN</strong> {example.given.join(' · ') || 'No precondition'}</p>
                       <p><strong>WHEN</strong> {example.when}</p>
                       <p><strong>THEN</strong> {example.then.join(' · ')}</p>
+                      {example.fixture ? <pre>INPUT {pretty(example.fixture.input)}{`\n`}EXPECTED {pretty(example.fixture.expected)}</pre> : null}
                     </details>
                   ))}
+                </SpecBlock>
+                <SpecBlock title="EVALUATION EVIDENCE">
+                  {control.evaluation?.report ? (
+                    <div className="specification-evaluation" data-evaluation-status={control.evaluation.report.status}>
+                      <p><strong>{control.evaluation.report.status.toUpperCase()}</strong><span>{control.evaluation.report.executed} CASES</span><small>{control.evaluation.report.summary}</small></p>
+                      <p>Candidate · <code>{control.evaluation.candidateId}</code></p>
+                      {control.evaluation.report.cases.map((item) => (
+                        <details key={item.name}>
+                          <summary>{item.name}<span>{item.status.toUpperCase()}</span></summary>
+                          <pre>EXPECTED {pretty(item.expected)}{item.actual === undefined ? '' : `\nACTUAL ${pretty(item.actual)}`}</pre>
+                          {item.error ? <p>{item.error}</p> : null}
+                        </details>
+                      ))}
+                    </div>
+                  ) : <span className="specification-none">{control.evaluation?.candidateId ? 'CANDIDATE NOT EVALUATED' : 'NO CANDIDATE BOUND'}</span>}
                 </SpecBlock>
               </div>
               <footer className="specification-footer">
@@ -140,4 +156,8 @@ function effectLines(effects: NonNullable<CapabilitySpecificationsControl['selec
     if (effects[key].length) out.push(`${key} · ${effects[key].join(', ')}`)
   }
   return out
+}
+
+function pretty(value: unknown): string {
+  return JSON.stringify(value, null, 2)
 }

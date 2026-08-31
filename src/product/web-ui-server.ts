@@ -36,7 +36,7 @@ export interface WebUiServerOptions extends WebUiListenOptions {
   readonly sessionHost?: LiveSessionHost
   readonly settings?: ProductSettings
   readonly workbench?: Pick<CandidateWorkbench,
-    'list' | 'inspectSpecification' | 'defineSpecification' | 'reviseSpecification' | 'compareSpecifications'>
+    'list' | 'inspectSpecification' | 'inspectSpecificationEvaluation' | 'defineSpecification' | 'reviseSpecification' | 'compareSpecifications'>
   readonly workbenchMutable?: boolean
 }
 

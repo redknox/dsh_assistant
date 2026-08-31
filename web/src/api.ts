@@ -3,6 +3,7 @@ import type { SettingsSnapshot, SettingsUpdate } from '../../src/product/setting
 import type { FileReferenceCandidate } from '@deepseek-ai/dsh-file-reference'
 import type {
   CapabilitySpecificationDiffView,
+  CapabilityEvaluationView,
   CapabilitySpecificationRevisionInput,
   CapabilitySpecificationView,
   WorkbenchSnapshotView,
@@ -81,6 +82,13 @@ export async function fetchCapabilitySpecification(id: string): Promise<Capabili
   return parseJson<CapabilitySpecificationView>(
     await fetch(`/api/workbench/specification?id=${encodeURIComponent(id)}`, include),
     'capability specification request',
+  )
+}
+
+export async function fetchCapabilityEvaluation(id: string): Promise<CapabilityEvaluationView> {
+  return parseJson<CapabilityEvaluationView>(
+    await fetch(`/api/workbench/evaluation?id=${encodeURIComponent(id)}`, include),
+    'capability evaluation request',
   )
 }
 

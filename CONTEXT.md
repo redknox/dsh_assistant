@@ -24,6 +24,14 @@ _Avoid_: Plugin, installed extension
 A concrete situation, action, and expected outcome that makes the business meaning of a Capability Specification reviewable.
 _Avoid_: Unit test, validation result
 
+**Evaluation Fixture**:
+The machine-readable input and expected output attached to an Acceptance Example so its business claim can be executed exactly.
+_Avoid_: Test file, mock, prompt example
+
+**Capability Evaluation**:
+A host-run, digest-bound execution of a Candidate against the Evaluation Fixtures in one exact Capability Specification.
+_Avoid_: Unit test, Independent Review, approval
+
 **Runtime Permission**:
 An exact named host operation requested by a Capability Specification and bound into Candidate review and approval.
 _Avoid_: Access, capability, blanket permission

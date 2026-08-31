@@ -30,6 +30,9 @@ describe('Web UI Capability Workbench adapter', () => {
     const inspected = await handleWebUiWorkbenchRequest(request('GET', '/api/workbench/specification', { id: 'spec-1' }), context)
     assert.deepEqual(inspected?.body, SPECIFICATION)
 
+    const evaluation = await handleWebUiWorkbenchRequest(request('GET', '/api/workbench/evaluation', { id: 'spec-1' }), context)
+    assert.equal((evaluation?.body as { report: { status: string } }).report.status, 'passed')
+
     const compared = await handleWebUiWorkbenchRequest(request('GET', '/api/workbench/compare', { from: 'spec-1', to: 'spec-2' }), context)
     assert.deepEqual((compared?.body as { changedFields: string[] }).changedFields, ['goal'])
   })
@@ -60,6 +63,22 @@ function fakeContext(onRevise: () => void = () => {}): WebUiWorkbenchContext {
     workbench: {
       list: () => ({ specifications: [SPECIFICATION], plans: [], candidates: [] }) as never,
       inspectSpecification: () => SPECIFICATION as never,
+      inspectSpecificationEvaluation: () => ({
+        specificationId: 'spec-1',
+        specificationDigest: 'digest-1',
+        candidateId: 'generated--text-echo@0.1.0',
+        report: {
+          version: 'capability-evaluation-report/v1',
+          candidateId: 'generated--text-echo@0.1.0',
+          specificationId: 'spec-1',
+          specificationDigest: 'digest-1',
+          capability: 'text.echo',
+          status: 'passed',
+          executed: 1,
+          cases: [],
+          summary: 'Passed 1 business acceptance case.',
+        },
+      }),
       defineSpecification: () => SPECIFICATION as never,
       reviseSpecification: () => {
         onRevise()

@@ -10,6 +10,7 @@ import type {
   CapabilitySpecificationPatch,
 } from './capability-specification.js'
 import type { ValidationDiagnosticsView } from './diagnostics.js'
+import type { CapabilityEvaluationReport } from '../evaluation/types.js'
 import type { WorkbenchListView, WorkbenchStep } from './listing.js'
 
 export const WORKBENCH_CHANGE_KINDS = [
@@ -85,6 +86,7 @@ export interface WorkbenchCandidateView {
     readonly lifecycle: CandidateLifecycle
     readonly failed: readonly string[]
     readonly unresolved: readonly string[]
+    readonly evaluation?: CapabilityEvaluationReport
   }
   readonly review?: {
     readonly state: ReviewState
@@ -143,6 +145,12 @@ export interface CandidateWorkbench {
   reviseSpecification(specificationId: string, patch: CapabilitySpecificationPatch): CapabilitySpecification
   compareSpecifications(fromSpecificationId: string, toSpecificationId: string): CapabilitySpecificationDiff
   inspectSpecification(specificationId: string): CapabilitySpecification
+  inspectSpecificationEvaluation(specificationId: string): {
+    readonly specificationId: string
+    readonly specificationDigest: string
+    readonly candidateId?: string
+    readonly report?: CapabilityEvaluationReport
+  }
   plan(input: { capability: string; need: string; behavior?: string } | { specificationId: string }): WorkbenchPlanView
   rememberPlan(review: ResolutionReview): WorkbenchPlanView
   getPlan(planId: string): WorkbenchPlan

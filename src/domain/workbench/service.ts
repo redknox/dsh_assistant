@@ -5,6 +5,11 @@ import { contractDigestExtras } from '../candidate/digest.js'
 import { defaultProvenance } from '../candidate/manifest.js'
 import { isImportedThirdParty } from '../generated-runtime/trust.js'
 import { assertGeneratedBrokerPermissions } from '../generated-runtime/broker.js'
+import {
+  CAPABILITY_EVALUATION_RUNNER,
+  CAPABILITY_EVALUATION_SUITE_STAMP,
+  CapabilityEvaluationHarness,
+} from '../evaluation/index.js'
 import { parsePermission } from '../registry/normalize.js'
 import { resolveInsideRoot } from '../candidate/paths.js'
 import { SealedCandidateError } from '../candidate/errors.js'
@@ -72,6 +77,7 @@ export class WorkbenchService implements CandidateWorkbench {
   private readonly specifications = new Map<string, CapabilitySpecification>()
   private readonly plans = new Map<string, WorkbenchPlan>()
   private readonly bindings = new Map<string, Binding>()
+  private readonly evaluation = new CapabilityEvaluationHarness()
 
   constructor(
     private readonly resolution: CapabilityResolution,
@@ -129,6 +135,19 @@ export class WorkbenchService implements CandidateWorkbench {
     const specification = this.specifications.get(specificationId)
     if (!specification) throw new WorkbenchContractError(`unknown capability specification: ${specificationId}`)
     return specification
+  }
+
+  inspectSpecificationEvaluation(specificationId: string) {
+    const specification = this.inspectSpecification(specificationId)
+    const candidate = [...this.workspace.list()].reverse().find((record: CandidateRecord) => this.bindings.get(record.id)?.specificationId === specification.id)
+    return {
+      specificationId: specification.id,
+      specificationDigest: specification.digest,
+      ...(candidate === undefined ? {} : {
+        candidateId: candidate.id,
+        ...(candidate.validation?.evaluation === undefined ? {} : { report: candidate.validation.evaluation }),
+      }),
+    }
   }
 
   plan(input: { capability: string; need: string; behavior?: string } | { specificationId: string }): WorkbenchPlanView {
@@ -200,6 +219,9 @@ export class WorkbenchService implements CandidateWorkbench {
       manifest: { ...input.manifest, runtimeContractVersion: '' },
     })
     this.workspace.writeFile(record.id, CAPABILITY_SPECIFICATION_STAMP, capabilitySpecificationStamp(specification))
+    for (const [relativePath, content] of Object.entries(this.evaluation.prepare(specification))) {
+      this.workspace.writeFile(record.id, relativePath, content)
+    }
     this.bindings.set(record.id, {
       planId: plan.id,
       specificationId: specification.id,
@@ -271,6 +293,7 @@ export class WorkbenchService implements CandidateWorkbench {
           lifecycle: record.lifecycle,
           failed: record.validation.stages.filter((item) => item.status === 'failed' || item.status === 'blocked').map((item) => item.name),
           unresolved: [...record.validation.unresolved],
+          ...(record.validation.evaluation === undefined ? {} : { evaluation: record.validation.evaluation }),
         },
       review: {
         state: reviewState,
@@ -659,6 +682,14 @@ export class WorkbenchService implements CandidateWorkbench {
     if (actual !== capabilitySpecificationStamp(specification)) {
       throw new WorkbenchContractError(`candidate ${candidateId} capability specification stamp does not match host authority`)
     }
+    const prepared = this.evaluation.prepare(specification)
+    for (const relativePath of [CAPABILITY_EVALUATION_SUITE_STAMP, CAPABILITY_EVALUATION_RUNNER]) {
+      const expected = prepared[relativePath]
+      const evaluationAsset = tryRead(this.workspace, candidateId, relativePath)
+      if (evaluationAsset !== expected) {
+        throw new WorkbenchContractError(`candidate ${candidateId} Capability Evaluation assets do not match host authority`)
+      }
+    }
   }
 
   requestApproval(candidateId: string) {
@@ -836,7 +867,7 @@ function snapshotRepairParent(parent: CandidateRecord): RepairSnapshot {
   if (parent.digest === undefined) {
     throw new WorkbenchContractError('repair requires a sealed parent with a host digest')
   }
-  const names = listBoundedFiles(parent.workspaceRoot)
+  const names = listBoundedFiles(parent.workspaceRoot, true)
   const files: { relative: string; bytes: Buffer }[] = []
   const hash = createHash('sha256')
   let total = 0
@@ -920,7 +951,7 @@ function assertWorkspaceBudget(record: CandidateRecord, relativePath: string, co
   }
 }
 
-function listBoundedFiles(root: string): string[] {
+function listBoundedFiles(root: string, includeHostAssets = false): string[] {
   const files: string[] = []
   let visited = 0
   const walk = (dirPath: string, rel: string, depth: number) => {
@@ -934,7 +965,7 @@ function listBoundedFiles(root: string): string[] {
         if (visited > WORKBENCH_MAX_TRAVERSAL_ENTRIES) {
           throw new WorkbenchContractError(`candidate listing exceeded the traversal bound of ${WORKBENCH_MAX_TRAVERSAL_ENTRIES}`)
         }
-        if (entry.name === '.dsh') continue
+        if (!includeHostAssets && entry.name === '.dsh') continue
         const relative = rel === '' ? entry.name : `${rel}/${entry.name}`
         const full = path.join(dirPath, entry.name)
         if (entry.isSymbolicLink() || (existsSync(full) && lstatSync(full).isSymbolicLink())) {

@@ -116,7 +116,9 @@ The first slice is now implemented: `define_capability_specification` creates an
 
 Specifications are immutable. `revise_capability_specification` creates a successor revision without changing prior Resolution Plans or Candidate bindings, while `compare_capability_specifications` exposes a structured business-level diff before the new revision is selected for Resolution.
 
-Legacy concise resolution calls remain temporarily supported for compatibility, but the governed construction path is Specification → Resolution Plan → Candidate. The remaining product work is a domain-facing editor and executable evaluation fixtures derived from acceptance examples.
+Legacy concise resolution calls remain temporarily supported for compatibility, but the governed construction path is Specification → Resolution Plan → Candidate.
+
+The next slice is also implemented: an Acceptance Example may carry an Evaluation Fixture with JSON input and exact expected output. The host compiles those fixtures into immutable Candidate assets, executes the declared tool inside the existing OS-isolated validation runner, persists case-level expected/actual evidence in the Candidate Validation Report, and projects the result in the Capability Specifications workspace. Candidate code cannot rewrite the fixture suite or runner through Workbench tools. This first contract deliberately covers one pure, single-tool capability; Broker-backed and multi-tool evaluations remain future domain-driven extensions rather than a generic execution escape hatch.
 
 ### 3. Host-rendered domain UI
 
@@ -191,7 +193,7 @@ Later work should be driven by one bounded real domain slice rather than specula
 2. An explicit specification separating goals, rules, permissions, and acceptance examples.
 3. Domain primitives and adapters that are safer than arbitrary code generation.
 4. Reuse/evolve/new-capability resolution visible to the user.
-5. Generated tests, fixtures, dry runs, and failure examples understandable to the domain professional.
+5. Broader generation of fixtures, dry runs, and failure examples for Broker-backed and multi-tool capabilities; the pure single-tool Evaluation Fixture path is implemented.
 6. UI or interaction generation from authoritative runtime projections, not frontend-invented state.
 7. Publication, versioning, monitoring, and rollback appropriate to the domain risk.
 

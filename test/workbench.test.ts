@@ -5,6 +5,7 @@ import path from 'node:path'
 import { describe, it } from 'node:test'
 import { CallId } from '@deepseek-ai/dsh-llm'
 import { CandidateService } from '../src/domain/candidate/index.js'
+import { CAPABILITY_EVALUATION_SUITE_STAMP } from '../src/domain/evaluation/index.js'
 import {
   GENERATED_EXTENSION_API_V1,
   WORKBENCH_MAX_FILE_BYTES,
@@ -131,6 +132,7 @@ describe('candidate workbench', () => {
           given: ['The user supplies hello.'],
           when: 'The tool runs.',
           then: ['The result is hello.'],
+          fixture: { input: { text: 'hello' }, expected: 'hello' },
         }],
       }))
       assert.equal(specification.status, 'ready')
@@ -148,6 +150,18 @@ describe('candidate workbench', () => {
         path: 'capability-specification.json',
       })
       assert.equal(JSON.parse(String(stamp.value)).digest, specification.digest)
+      const evaluation = JSON.parse(ctx.candidateWorkspace.readFile(String(candidate.id), CAPABILITY_EVALUATION_SUITE_STAMP)) as {
+        specificationDigest: string
+        cases: readonly unknown[]
+      }
+      assert.equal(evaluation.specificationDigest, specification.digest)
+      assert.equal(evaluation.cases.length, 1)
+      assert.equal(ctx.candidateWorkbench.listFiles(String(candidate.id)).includes(CAPABILITY_EVALUATION_SUITE_STAMP), false)
+      assert.equal((await tool(ctx, 'write_candidate_file', {
+        candidateId: candidate.id,
+        path: CAPABILITY_EVALUATION_SUITE_STAMP,
+        content: '{}',
+      })).isError, true)
       assert.equal((await tool(ctx, 'write_candidate_file', {
         candidateId: candidate.id,
         path: 'capability-specification.json',

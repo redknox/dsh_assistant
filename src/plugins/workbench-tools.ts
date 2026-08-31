@@ -1,6 +1,7 @@
 import { defineTool, type ToolRuntime } from '@deepseek-ai/dsh-tools'
 import type { CandidateManifestInput, OperationalEffects } from '../domain/candidate/index.js'
 import { REMOTE_SIDE_EFFECTS } from '../domain/candidate/index.js'
+import { normalizeEvaluationFixture } from '../domain/evaluation/index.js'
 import { parseWorkbenchRiskModel, riskModelToolSchema, type CandidateWorkbench } from '../domain/workbench/index.js'
 
 function textOutput() {
@@ -380,6 +381,14 @@ function specificationPatchParameters() {
           given: strings,
           when: { type: 'string' as const },
           then: strings,
+          fixture: {
+            type: 'object' as const,
+            additionalProperties: false,
+            properties: {
+              input: { type: 'object' as const, additionalProperties: true },
+              expected: { type: 'json' as const },
+            },
+          },
         },
       },
     },
@@ -412,6 +421,7 @@ function parseAcceptanceExamples(value: unknown) {
       given: asStringList(example.given) ?? [],
       when: typeof example.when === 'string' ? example.when : '',
       then: asStringList(example.then) ?? [],
+      ...(example.fixture === undefined ? {} : { fixture: normalizeEvaluationFixture(example.fixture, 'acceptanceExample') }),
     }
   })
 }

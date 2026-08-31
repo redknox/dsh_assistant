@@ -29,8 +29,28 @@ export interface CapabilitySpecificationView extends CapabilitySpecificationSumm
     readonly given: readonly string[]
     readonly when: string
     readonly then: readonly string[]
+    readonly fixture?: { readonly input: Readonly<Record<string, unknown>>; readonly expected: unknown }
   }[]
   readonly unresolved: readonly string[]
+}
+
+export interface CapabilityEvaluationView {
+  readonly specificationId: string
+  readonly specificationDigest: string
+  readonly candidateId?: string
+  readonly report?: {
+    readonly status: 'passed' | 'failed' | 'unresolved' | 'not-applicable'
+    readonly executed: number
+    readonly summary: string
+    readonly cases: readonly {
+      readonly name: string
+      readonly status: 'passed' | 'failed'
+      readonly input: Readonly<Record<string, unknown>>
+      readonly expected: unknown
+      readonly actual?: unknown
+      readonly error?: string
+    }[]
+  }
 }
 
 export interface CapabilitySpecificationDiffView {

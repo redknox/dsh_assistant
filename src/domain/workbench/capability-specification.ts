@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto'
 import { parseCapabilityId, parsePermission } from '../registry/normalize.js'
 import { REMOTE_SIDE_EFFECTS, type OperationalEffects } from '../candidate/types.js'
+import { normalizeEvaluationFixture, type EvaluationFixture } from '../evaluation/index.js'
 import { WorkbenchContractError } from './errors.js'
 
 export const CAPABILITY_SPECIFICATION_STAMP = 'capability-specification.json'
@@ -43,6 +44,7 @@ export interface CapabilityAcceptanceExample {
   readonly given: readonly string[]
   readonly when: string
   readonly then: readonly string[]
+  readonly fixture?: EvaluationFixture
 }
 
 export interface CapabilitySpecification {
@@ -111,6 +113,7 @@ export function defineCapabilitySpecification(
       given: uniqueTexts(example.given, `acceptanceExamples[${index}].given`),
       when: boundedText(example.when, `acceptanceExamples[${index}].when`),
       then,
+      ...(example.fixture === undefined ? {} : { fixture: normalizeFixture(example.fixture, `acceptanceExamples[${index}]`) }),
     }
   })
   const unresolved = uniqueTexts(input.unresolved ?? [], 'unresolved')
@@ -137,6 +140,14 @@ export function defineCapabilitySpecification(
     throw new WorkbenchContractError(`capability specification exceeds ${CAPABILITY_SPECIFICATION_MAX_BYTES} bytes`)
   }
   return { ...body, digest: digestSpecification(body) }
+}
+
+function normalizeFixture(value: unknown, label: string): EvaluationFixture {
+  try {
+    return normalizeEvaluationFixture(value, label)
+  } catch (error) {
+    throw new WorkbenchContractError(error instanceof Error ? error.message : `${label} fixture is invalid`)
+  }
 }
 
 export function reviseCapabilitySpecification(

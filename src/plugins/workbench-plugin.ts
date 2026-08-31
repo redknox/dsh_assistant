@@ -22,6 +22,7 @@ export class CandidateWorkbenchService extends Service implements CandidateWorkb
     return this.store.compareSpecifications(fromSpecificationId, toSpecificationId)
   }
   inspectSpecification(specificationId: string) { return this.store.inspectSpecification(specificationId) }
+  inspectSpecificationEvaluation(specificationId: string) { return this.store.inspectSpecificationEvaluation(specificationId) }
   plan(input: Parameters<CandidateWorkbench['plan']>[0]) { return this.store.plan(input) }
   rememberPlan(review: Parameters<CandidateWorkbench['rememberPlan']>[0]) { return this.store.rememberPlan(review) }
   getPlan(planId: string) { return this.store.getPlan(planId) }
@@ -57,6 +58,7 @@ export const WORKBENCH_CONVERSATION_GUIDANCE = [
   'Prefer reuse, configure, or evolve an existing owner before new-plugin.',
   'Use Candidate Workbench tools. Read inspect_authoring_contract before scaffolding.',
   'Use scaffold_candidate, then bounded edits, then inspect_validation_diagnostics.',
+  'Add machine-readable input and expected output to representative Acceptance Examples so Candidate validation can produce Capability Evaluation evidence.',
   'Repair only by creating a new revision; never mutate a sealed parent.',
   'Request approval only after Independent Review is review-complete for the current digest.',
   'Tell the user Independent Review review-complete is not a governance approval.',

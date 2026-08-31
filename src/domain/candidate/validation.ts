@@ -10,6 +10,7 @@ import { evaluateActivationCompatibility } from '../activation-compatibility/ind
 import { evaluateReliability, reliabilitySummary } from '../reliability/index.js'
 import { normalizeRegisterInput } from '../registry/normalize.js'
 import { assertGeneratedBrokerPermissions } from '../generated-runtime/broker.js'
+import { CapabilityEvaluationHarness } from '../evaluation/index.js'
 import type { OwnerExecutionFacts } from '../activation-compatibility/index.js'
 import type { CandidateRecord, ValidationReport, ValidationStageResult, ValidationStageStatus } from './types.js'
 import { ALLOWED_VALIDATION_TASKS } from './types.js'
@@ -426,6 +427,16 @@ export function runValidation(record: CandidateRecord, activeOwner?: OwnerExecut
   stages.push(inspectBoundary(record.workspaceRoot, files))
   stages.push(runTypecheck(record.workspaceRoot, files))
   stages.push(runTests(record.workspaceRoot, files))
+  const evaluation = new CapabilityEvaluationHarness().evaluate({
+    candidateId: record.id,
+    workspaceRoot: record.workspaceRoot,
+  })
+  stages.push(stage(
+    'business.acceptance',
+    evaluation.status,
+    evaluation.summary,
+    { diagnostics: JSON.stringify(evaluation).slice(0, 32 * 1024) },
+  ))
   stages.push(inspectBundle(record.workspaceRoot))
   const digest = digestFiles(record.workspaceRoot, files, contractDigestExtras(record.manifest.runtimeContractVersion))
   stages.push(stage('digest', 'passed', `Bound validation evidence to digest ${digest.slice(0, 12)}.`))
@@ -439,6 +450,7 @@ export function runValidation(record: CandidateRecord, activeOwner?: OwnerExecut
     unresolved,
     blocked,
     reliability,
+    evaluation,
   }
 }
 

@@ -13,7 +13,7 @@ export interface WebUiWorkbenchRequest {
 
 export interface WebUiWorkbenchContext {
   readonly workbench: Pick<CandidateWorkbench,
-    'list' | 'inspectSpecification' | 'defineSpecification' | 'reviseSpecification' | 'compareSpecifications'>
+    'list' | 'inspectSpecification' | 'inspectSpecificationEvaluation' | 'defineSpecification' | 'reviseSpecification' | 'compareSpecifications'>
   readonly mutable: boolean
 }
 
@@ -35,6 +35,11 @@ export async function handleWebUiWorkbenchRequest(
     const to = request.query('to')
     if (!from || !to) return { status: 400, body: { error: 'missing-comparison-id' } }
     return { status: 200, body: context.workbench.compareSpecifications(from, to) }
+  }
+  if (request.method === 'GET' && request.pathname === '/api/workbench/evaluation') {
+    const id = request.query('id')
+    if (!id) return { status: 400, body: { error: 'missing-specification-id' } }
+    return { status: 200, body: context.workbench.inspectSpecificationEvaluation(id) }
   }
   if (request.method !== 'POST') return { status: 405, body: { error: 'method-not-allowed' } }
   if (!context.mutable) return { status: 409, body: { error: 'workbench-read-only' } }

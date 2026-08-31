@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useState } from 'react'
-import type { CapabilitySpecificationDiffView, CapabilitySpecificationView } from '../../src/product/web-ui-workbench-types'
+import type { CapabilityEvaluationView, CapabilitySpecificationDiffView, CapabilitySpecificationView } from '../../src/product/web-ui-workbench-types'
 import {
   compareCapabilitySpecificationRevisions,
+  fetchCapabilityEvaluation,
   fetchCapabilitySpecification,
   fetchWorkbench,
   reviseCapabilitySpecification,
@@ -19,6 +20,7 @@ export interface CapabilitySpecificationsControl {
   readonly snapshot?: WorkbenchSnapshot
   readonly selected?: CapabilitySpecificationView
   readonly comparison?: CapabilitySpecificationDiffView
+  readonly evaluation?: CapabilityEvaluationView
   readonly draft: CapabilitySpecificationDraft
   readonly loading: boolean
   readonly saving: boolean
@@ -37,6 +39,7 @@ export function useCapabilitySpecifications(active: boolean): CapabilitySpecific
   const [snapshot, setSnapshot] = useState<WorkbenchSnapshot>()
   const [selected, setSelected] = useState<CapabilitySpecificationView>()
   const [comparison, setComparison] = useState<CapabilitySpecificationDiffView>()
+  const [evaluation, setEvaluation] = useState<CapabilityEvaluationView>()
   const [draft, setDraft] = useState<CapabilitySpecificationDraft>(EMPTY_DRAFT)
   const [loading, setLoading] = useState(false)
   const [saving, setSaving] = useState(false)
@@ -48,6 +51,8 @@ export function useCapabilitySpecifications(active: boolean): CapabilitySpecific
     setSelected(specification)
     setDraft(draftOf(specification))
     setComparison(undefined)
+    setEvaluation(undefined)
+    void fetchCapabilityEvaluation(specification.id).then(setEvaluation, () => undefined)
     if (specification.supersedesId) {
       void compareCapabilitySpecificationRevisions(specification.supersedesId, specification.id).then(setComparison, () => undefined)
     }
@@ -74,6 +79,7 @@ export function useCapabilitySpecifications(active: boolean): CapabilitySpecific
       setSelected(undefined)
       setDraft(EMPTY_DRAFT)
       setComparison(undefined)
+      setEvaluation(undefined)
       return undefined
     }).catch(fail(setError, 'unable to load capability specifications')).finally(() => setLoading(false))
   }
@@ -105,7 +111,7 @@ export function useCapabilitySpecifications(active: boolean): CapabilitySpecific
     })).catch(fail(setError, 'unable to revise capability specification')).finally(() => setSaving(false))
   }
 
-  return { snapshot, selected, comparison, draft, loading, saving, error, notice, dirty, load, select, change, saveRevision }
+  return { snapshot, selected, comparison, evaluation, draft, loading, saving, error, notice, dirty, load, select, change, saveRevision }
 }
 
 function draftOf(specification: CapabilitySpecificationView): CapabilitySpecificationDraft {
