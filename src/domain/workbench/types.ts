@@ -3,6 +3,7 @@ import type { EligibilityResult } from '../governance/types.js'
 import type { ResolutionKind, ResolutionReview } from '../resolution/types.js'
 import type { ReviewReport, ReviewState } from '../review/types.js'
 import type { AuthoringContractV1 } from './authoring-contract.js'
+import type { CapabilitySpecification, CapabilitySpecificationInput } from './capability-specification.js'
 import type { ValidationDiagnosticsView } from './diagnostics.js'
 import type { WorkbenchListView, WorkbenchStep } from './listing.js'
 
@@ -24,6 +25,8 @@ export const WORKBENCH_MAX_LIST_DEPTH = 8
 export interface WorkbenchPlan {
   readonly id: string
   readonly review: ResolutionReview
+  readonly specificationId: string
+  readonly specificationDigest: string
 }
 
 export interface WorkbenchBinding {
@@ -33,10 +36,14 @@ export interface WorkbenchBinding {
   readonly parentDigest?: string
   readonly leftover?: boolean
   readonly runtimeContractVersion?: string
+  readonly specificationId?: string
+  readonly specificationDigest?: string
 }
 
 export interface WorkbenchPersistState {
   readonly nextPlan: number
+  readonly nextSpecification: number
+  readonly specifications: readonly CapabilitySpecification[]
   readonly plans: readonly WorkbenchPlan[]
   readonly bindings: readonly WorkbenchBinding[]
 }
@@ -51,6 +58,7 @@ export interface WorkbenchPlanView {
   readonly target?: ResolutionReview['target']
   readonly canCreate: boolean
   readonly unresolved: readonly string[]
+  readonly specification: CapabilitySpecification
 }
 
 export interface WorkbenchCandidateView {
@@ -85,6 +93,7 @@ export interface WorkbenchCandidateView {
   readonly step: WorkbenchStep
   readonly leftover: boolean
   readonly contractVersion?: string
+  readonly specification?: CapabilitySpecification
 }
 
 export interface WorkbenchCreateInput {
@@ -125,7 +134,9 @@ export interface WorkbenchServiceOptions {
 }
 
 export interface CandidateWorkbench {
-  plan(input: { capability: string; need: string; behavior?: string }): WorkbenchPlanView
+  defineSpecification(input: CapabilitySpecificationInput): CapabilitySpecification
+  inspectSpecification(specificationId: string): CapabilitySpecification
+  plan(input: { capability: string; need: string; behavior?: string } | { specificationId: string }): WorkbenchPlanView
   rememberPlan(review: ResolutionReview): WorkbenchPlanView
   getPlan(planId: string): WorkbenchPlan
   create(input: WorkbenchCreateInput): WorkbenchCandidateView

@@ -29,6 +29,7 @@ import type { SkillPluginConfig } from '../plugins/skill-plugin.js'
 import * as dshApprovalBridgePlugin from '../plugins/dsh-approval-bridge-plugin.js'
 import { mountBoundedWorkbench } from './bounded-workbench.js'
 import * as registeredWorkflows from './registered-workflows.js'
+import * as governedSubagentProvider from './governed-subagent-provider.js'
 import * as governedSubagents from './governed-subagents.js'
 import * as governedWeb from './governed-web.js'
 
@@ -84,6 +85,7 @@ export async function apply(ctx: Context, config: AssistantBundleConfig = {}) {
   await ctx.plugin(policyPlugin, config.policy)
   await ctx.plugin(dshApprovalBridgePlugin)
   await ctx.plugin(jobsPlugin, config.jobs)
+  await ctx.plugin(governedSubagentProvider)
   await ctx.plugin(registeredWorkflows)
   await ctx.plugin(governedSubagents)
   await ctx.plugin(governedWeb)
@@ -99,6 +101,7 @@ export const SAFE_MODE_TOOL_NAMES = [
   'list_workbench',
   'inspect_candidate',
   'inspect_candidate_review',
+  'inspect_capability_specification',
   'inspect_validation_diagnostics',
   'inspect_skill',
 ] as const
@@ -129,6 +132,7 @@ export const PRODUCT_TOOL_NAMES = [
   'files_write',
   'files_delete',
   'confirm_action',
+  'define_capability_specification',
   'plan_capability_change',
   'create_candidate',
   'scaffold_candidate',
@@ -144,5 +148,6 @@ export const PRODUCT_TOOL_NAMES = [
   'seal_candidate',
   'review_candidate',
   'inspect_candidate_review',
+  'inspect_capability_specification',
   'repair_candidate',
 ] as const

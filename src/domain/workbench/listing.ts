@@ -29,6 +29,8 @@ export type WorkbenchStep =
 
 export interface WorkbenchListPlanItem {
   readonly planId: string
+  readonly specificationId: string
+  readonly specificationDigest: string
   readonly kind: string
   readonly capability: string
   readonly need: string
@@ -42,6 +44,7 @@ export interface WorkbenchListCandidateItem {
   readonly states: readonly WorkbenchCandidateState[]
   readonly step: WorkbenchStep
   readonly planId?: string
+  readonly specificationId?: string
   readonly parentId?: string
   readonly leftover: boolean
 }

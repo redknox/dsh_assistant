@@ -16,6 +16,8 @@ Examples include a finance professional defining an invoice anomaly check, an HR
 
 DSH owns the generic Harness concerns: Agent Loop, sessions, model and tool execution, events, providers, jobs, lifecycle, and plugin composition. Its dynamic Agent Loop is useful when the path cannot be fully written as a fixed workflow: the system may need to discover available information, choose tools, ask for missing input, react to tool results, and re-plan.
 
+The complementary path is a host-registered DSH Workflow: once an orchestration pattern is stable, TARS-NG may run its fixed script through governed child agents while retaining the same Runtime Context, tool policy, approval, cancellation, and delegation limits. In the current runtime, these workflows are foreground and non-resumable. Arbitrary model-authored Workflow JavaScript is not an authority boundary and is not exposed.
+
 TARS-NG builds above those public seams. It adds the product and governance concerns needed to turn dynamic generation into an operable system:
 
 - capability discovery and reuse before generation
@@ -93,11 +95,11 @@ The roadmap after v0.4.0 is a product hypothesis, not a sequence of committed re
 
 ### 1. Typed Capability Broker
 
-The current generated-extension contract proves low-risk R0 capabilities that run without host I/O. The next runtime step is a typed, policy-gated broker through which a generated capability may request narrowly scoped host operations.
+The generated-extension contract first proved low-risk R0 capabilities without host I/O. TARS-NG now has the first narrow, exactly approved read-only operation, `host.knowledge.retrieve`, in addition to the context-free contract probe. This establishes the Typed Capability Broker seam; it does not complete the broader domain capability set.
 
 For example, a candidate may declare that it needs `files.read`, `files.write`, or `knowledge.retrieve`, while still receiving no arbitrary `fs`, network, process, secret, or live Cordis access. Broker dependencies, permissions, effects, and failure semantics must be visible in the candidate diff and bound to the exact approval.
 
-This is the bridge from pure transformations such as slug generation to useful local and domain capabilities. It must not become a generic escape hatch around the generated-runtime sandbox.
+This is the bridge from pure transformations such as slug generation to useful local and domain capabilities. Further operations should be added only when required by a bounded domain proof, with typed arguments, result bounds, cancellation, exact permission review, and an active-call binding. It must not become a generic escape hatch around the generated-runtime sandbox.
 
 ### 2. Domain Construction Workbench
 
@@ -110,7 +112,9 @@ A domain professional should not need to ask for a TypeScript plugin. They shoul
 - representative examples, edge cases, and failure cases;
 - human review and mandatory approval points.
 
-The output is an inspectable capability specification before it is code. TARS-NG may then resolve whether to reuse, configure, evolve, or create a capability and generate the implementation and tests from that approved specification.
+The first slice is now implemented: `define_capability_specification` creates an immutable, host-owned specification with goal, boundaries, inputs, business rules, exact permissions/effects, acceptance examples, and unresolved questions. A specification with unresolved questions cannot enter Capability Resolution. The resulting Resolution Plan references its exact digest, and a created Candidate contains a read-only `capability-specification.json` snapshot that is included in validation, review, and approval digest evidence.
+
+Legacy concise resolution calls remain temporarily supported for compatibility, but the governed construction path is Specification → Resolution Plan → Candidate. The remaining product work is a domain-facing editor, specification revision/comparison, and executable evaluation fixtures derived from acceptance examples.
 
 ### 3. Host-rendered domain UI
 

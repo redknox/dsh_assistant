@@ -4,6 +4,8 @@ Status: **Implemented**. This is the host-owned authoring contract for assistant
 
 Inspect it at runtime with `inspect_authoring_contract`. The version is host authority on the candidate manifest, Workbench binding, digest, approval fingerprint, and generated activation. Workspace `generated-extension-api.json` is a read-only mirror. Model writes cannot change it. Unsupported or missing versions fail validation and activation.
 
+The governed construction path also writes `capability-specification.json`. It is a host-owned, read-only snapshot of the exact Capability Specification used by the Resolution Plan. Its digest, requested Broker permissions, and operational effects must match host state and the Candidate manifest; mismatch fails before candidate validation.
+
 ## Entry
 
 - Module: `src/plugin.js`
@@ -14,7 +16,12 @@ Inspect it at runtime with `inspect_authoring_contract`. The version is host aut
 
 - `ctx.tools.register` / `ctx.tools.get`
 - `ctx.effect(setup)` runs a zero-argument setup callback and registers the cleanup function it returns. It is not an I/O, process, filesystem, or network API.
-- `ctx.broker.request(capability, args)` may call only operations listed by the runtime `brokerOps` contract. Every operation used by candidate source must also be declared in `candidate.manifest.json` as a `permissions` entry so it is included in the exact-diff review and human approval. The current R0 operation is `host.text.echo`; SSH, process, filesystem, and network operations are not available.
+- `ctx.broker.request(capability, args)` may call only operations listed by the runtime `brokerOps` contract. Every operation used by candidate source must also be declared in `candidate.manifest.json` as a `permissions` entry so it is included in the exact-diff review and human approval.
+- `host.text.echo` is the context-free R0 contract probe.
+- `host.knowledge.retrieve` is a read-only, call-bound retrieval operation: `{ query, limit? }`, with a 2 KiB query, 1–5 hits, bounded citations, cancellation, and JSON result limits. It is available only during an active generated proxy-tool call and only when Personal Knowledge is mounted.
+- SSH, process, arbitrary filesystem, arbitrary network, secrets, and write operations are not available.
+
+Broker requests are bound to the active proxy-tool invocation. Candidate startup, cleanup, health checks, and detached asynchronous work cannot use a permission merely because it appears in the approved manifest.
 
 ## Forbidden host APIs
 

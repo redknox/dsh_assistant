@@ -116,6 +116,69 @@ describe('candidate workbench', () => {
     }
   })
 
+  it('A2. binds an explicit capability specification into plan, candidate, and digest input', async () => {
+    const { ctx } = await bootAssistantControl()
+    try {
+      const specification = parse(await tool(ctx, 'define_capability_specification', {
+        capability: 'r0.spec.echo',
+        goal: 'Echo supplied text through the approved host broker.',
+        nonGoals: ['No filesystem, process, or network access.'],
+        inputs: [{ name: 'text', description: 'Text to echo.', required: true }],
+        businessRules: ['Return exactly the supplied text.'],
+        permissions: ['host.text.echo'],
+        acceptanceExamples: [{
+          name: 'plain text',
+          given: ['The user supplies hello.'],
+          when: 'The tool runs.',
+          then: ['The result is hello.'],
+        }],
+      }))
+      assert.equal(specification.status, 'ready')
+      const plan = parse(await tool(ctx, 'plan_capability_change', { specificationId: specification.id }))
+      assert.equal((plan.specification as { digest: string }).digest, specification.digest)
+      const denied = await tool(ctx, 'create_candidate', { planId: plan.planId })
+      assert.equal(denied.isError, true)
+      const candidate = parse(await tool(ctx, 'create_candidate', {
+        planId: plan.planId,
+        permissions: ['host.text.echo'],
+      }))
+      assert.equal((candidate.specification as { id: string }).id, specification.id)
+      const stamp = await tool(ctx, 'read_candidate_file', {
+        candidateId: candidate.id,
+        path: 'capability-specification.json',
+      })
+      assert.equal(JSON.parse(String(stamp.value)).digest, specification.digest)
+      assert.equal((await tool(ctx, 'write_candidate_file', {
+        candidateId: candidate.id,
+        path: 'capability-specification.json',
+        content: '{}',
+      })).isError, true)
+      assert.equal((await tool(ctx, 'set_candidate_manifest', {
+        candidateId: candidate.id,
+        permissions: [],
+      })).isError, true)
+      assert.equal((await tool(ctx, 'set_candidate_manifest', {
+        candidateId: candidate.id,
+        effects: { filesystem: ['outside-workspace'] },
+      })).isError, true)
+
+      writeFileSync(
+        path.join(ctx.candidateWorkspace.get(String(candidate.id)).workspaceRoot, 'capability-specification.json'),
+        '{}\n',
+      )
+      assert.equal((await tool(ctx, 'validate_candidate', { candidateId: candidate.id })).isError, true)
+
+      const unresolved = parse(await tool(ctx, 'define_capability_specification', {
+        capability: 'r0.spec.unclear',
+        goal: 'Do something not yet specified.',
+      }))
+      assert.equal(unresolved.status, 'needs-clarification')
+      assert.equal((await tool(ctx, 'plan_capability_change', { specificationId: unresolved.id })).isError, true)
+    } finally {
+      await ctx.fiber.dispose()
+    }
+  })
+
   it('B. model-like tools stay inside the candidate workspace and reject unsafe writes', async () => {
     const { ctx } = await bootAssistantControl()
     try {
@@ -884,7 +947,7 @@ describe('candidate workbench', () => {
         String((contract.ctxSemantics as { brokerPermissions?: string }).brokerPermissions),
         /manifest\.permissions.*exact diff/,
       )
-      assert.deepEqual(contract.brokerOps, ['host.text.echo'])
+      assert.deepEqual(contract.brokerOps, ['host.text.echo', 'host.knowledge.retrieve'])
     } finally {
       await ctx.fiber.dispose()
     }
@@ -1105,7 +1168,7 @@ describe('candidate workbench', () => {
       assert.equal(bad.isError, true)
       const contract = parse(await tool(ctx, 'inspect_authoring_contract', {}))
       assert.equal(contract.id, GENERATED_EXTENSION_API_V1)
-      assert.deepEqual(contract.brokerOps, ['host.text.echo'])
+      assert.deepEqual(contract.brokerOps, ['host.text.echo', 'host.knowledge.retrieve'])
       const plan = parse(await tool(ctx, 'plan_capability_change', {
         capability: 'text.slugify',
         need: 'lowercase URL-safe slug',

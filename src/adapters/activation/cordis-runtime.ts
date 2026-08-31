@@ -8,6 +8,7 @@ import { requiresIsolatedGeneratedRuntime } from '../../domain/generated-runtime
 import type { GeneratedToolDescriptor } from '../../domain/generated-runtime/types.js'
 import { resolveCandidateEntry } from './candidate-entry.js'
 import { IsolatedGeneratedRunner } from './generated-runner.js'
+import { createGeneratedHostBroker } from './generated-broker-operations.js'
 
 interface SurfaceSnapshot {
   readonly tools: readonly string[]
@@ -104,8 +105,10 @@ export class CordisActivationRuntime implements ActivationRuntime {
   private readonly inProcessPlugins = new Map<string, PriorOwnerMount>()
   private readonly parkedBy = new Map<string, Array<{ id: string; runner: IsolatedGeneratedRunner }>>()
   private readonly isolatedRecipes = new Map<string, ActivationPrepareContext>()
+  private readonly generatedBroker
 
   constructor(private readonly ctx: Context) {
+    this.generatedBroker = createGeneratedHostBroker(ctx)
     ctx.effect(() => () => {
       this.unloadGenerated()
     })
@@ -282,7 +285,7 @@ export class CordisActivationRuntime implements ActivationRuntime {
       tools: context.tools,
       permissions: context.permissions ?? [],
       runtimeContractVersion: context.runtimeContractVersion,
-    })
+    }, this.generatedBroker)
     const fail = async (diagnostics: string) => {
       runner.kill()
       await runner.waitForExit()
@@ -471,7 +474,10 @@ function defineProxyTool(descriptor: GeneratedToolDescriptor, runner: IsolatedGe
       },
     },
     async execute(args, exec) {
-      return await runner.call(descriptor.name, (args ?? {}) as Record<string, unknown>, exec.signal) as never
+      return await runner.call(descriptor.name, (args ?? {}) as Record<string, unknown>, {
+        signal: exec.signal,
+        ...(exec.agent ? { sessionId: String(exec.agent.id) } : {}),
+      }) as never
     },
   })
 }

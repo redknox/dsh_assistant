@@ -1,4 +1,5 @@
 import { createInterface } from 'node:readline'
+import { AsyncLocalStorage } from 'node:async_hooks'
 import { pathToFileURL } from 'node:url'
 import path from 'node:path'
 
@@ -13,6 +14,8 @@ type Tool = {
 const tools = new Map<string, Tool>()
 const pending = new Map<string, { resolve: (value: unknown) => void; reject: (error: Error) => void }>()
 const disposers: Array<() => Promise<unknown> | unknown> = []
+const callScope = new AsyncLocalStorage<string>()
+const activeCalls = new Set<string>()
 let nextHostId = 1
 
 function send(message: Record<string, unknown>): void {
@@ -21,9 +24,13 @@ function send(message: Record<string, unknown>): void {
 
 function brokerRequest(capability: string, args: Record<string, unknown>): Promise<unknown> {
   const id = `h${nextHostId++}`
+  const callId = callScope.getStore()
+  if (callId === undefined || !activeCalls.has(callId)) {
+    return Promise.reject(new Error('broker request is not bound to an active generated tool call'))
+  }
   return new Promise((resolve, reject) => {
     pending.set(id, { resolve, reject })
-    send({ id, op: 'broker-request', capability, args })
+    send({ id, op: 'broker-request', callId, capability, args })
   })
 }
 
@@ -134,7 +141,16 @@ async function handle(message: Record<string, unknown>): Promise<void> {
       const name = String(message.tool ?? '')
       const tool = tools.get(name) ?? tools.get('*')
       if (tool?.execute === undefined) throw new Error(`unknown generated tool: ${name}`)
-      const value = await tool.execute({ ...(message.args as Record<string, unknown> ?? {}), tool: name })
+      activeCalls.add(id)
+      let value: unknown
+      try {
+        value = await callScope.run(id, () => tool.execute!({
+          ...(message.args as Record<string, unknown> ?? {}),
+          tool: name,
+        }))
+      } finally {
+        activeCalls.delete(id)
+      }
       send({ id, ok: true, value })
       return
     }

@@ -350,6 +350,123 @@ describe('isolated generated-extension runtime', () => {
     }
   })
 
+  it('F2. retrieves bounded Personal Knowledge through an exactly approved read-only Broker operation', async () => {
+    const fixtureRoot = mkdtempSync(path.join(tmpdir(), 'tars-ng-generated-knowledge-'))
+    const fixture = path.join(fixtureRoot, 'expense-policy.md')
+    writeFileSync(fixture, '# Expense Policy\n\nHotel claims above 800 CNY require a written exception.\n')
+    const source = `export function apply(ctx) {
+  ctx.tools.register({
+    name: 'r0_knowledge',
+    parameters: { query: { type: 'string', required: true }, limit: { type: 'integer' } },
+    output: { schema: { type: 'string' }, render(_a, v) { return [{ type: 'text', text: String(v) }] } },
+    async execute(args) {
+      const result = await ctx.broker.request('host.knowledge.retrieve', { query: args.query, limit: args.limit })
+      return JSON.stringify(result)
+    },
+  })
+}
+`
+    const { ctx, recoveryRoot } = await bootAssistantControl({ knowledgeFixturePaths: [fixture] })
+    try {
+      const { status } = await activateGenerated(ctx, recoveryRoot, {
+        owner: 'generated/r0-knowledge',
+        tool: 'r0_knowledge',
+        source,
+        permissions: ['host.knowledge.retrieve'],
+      })
+      assert.equal(status.state, 'active', status.lastFailure?.diagnostics)
+      const retrieved = await execTool(ctx, 'r0_knowledge', { query: 'hotel claims exception', limit: 2 })
+      assert.equal(retrieved.isError, false)
+      assert.match(String(retrieved.value), /Hotel claims above 800 CNY/)
+      assert.match(String(retrieved.value), /expense-policy\.md/)
+
+      const invalid = await execTool(ctx, 'r0_knowledge', { query: 'hotel', limit: 20 })
+      assert.equal(invalid.isError, true)
+      assert.match(JSON.stringify(invalid), /limit must be an integer from 1 to 5/)
+    } finally {
+      await ctx.fiber.dispose()
+      rmSync(fixtureRoot, { recursive: true, force: true })
+    }
+  })
+
+  it('F3. denies Broker use outside an active generated proxy-tool invocation', async () => {
+    const root = mkdtempSync(path.join(tmpdir(), 'tars-ng-generated-detached-broker-'))
+    mkdirSync(path.join(root, 'src'), { recursive: true })
+    writeFileSync(path.join(root, 'package.json'), JSON.stringify({ name: 'detached-broker', type: 'module', main: 'src/plugin.js' }))
+    writeFileSync(path.join(root, 'src/plugin.js'), `export async function apply(ctx) {
+  await ctx.broker.request('host.text.echo', { text: 'startup is not an invocation' })
+}
+`)
+    const runner = new IsolatedGeneratedRunner({
+      candidateId: 'generated--detached-broker@0.1.0',
+      workspaceRoot: root,
+      entryPoints: ['src/plugin.js'],
+      owner: 'generated/detached-broker',
+      tools: [],
+      permissions: ['host.text.echo'],
+      runtimeContractVersion: GENERATED_EXTENSION_API_V1,
+    })
+    try {
+      const started = await runner.start()
+      assert.equal(started.ok, false)
+      assert.match(started.diagnostics ?? '', /not bound to an active generated tool call/)
+    } finally {
+      runner.kill()
+      await runner.waitForExit()
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
+
+  it('F4. denies a detached Broker request after its originating tool has returned', async () => {
+    const source = `let late = 'pending'
+export function apply(ctx) {
+  ctx.tools.register({
+    name: 'r0_schedule_broker',
+    parameters: {},
+    output: { schema: { type: 'string' }, render(_a, v) { return [{ type: 'text', text: String(v) }] } },
+    execute() {
+      setTimeout(async () => {
+        try {
+          await ctx.broker.request('host.text.echo', { text: 'must not run' })
+          late = 'unexpectedly allowed'
+        } catch (error) {
+          late = error instanceof Error ? error.message : String(error)
+        }
+      }, 0)
+      return 'scheduled'
+    },
+  })
+  ctx.tools.register({
+    name: 'r0_late_status',
+    parameters: {},
+    output: { schema: { type: 'string' }, render(_a, v) { return [{ type: 'text', text: String(v) }] } },
+    async execute() {
+      await new Promise((resolve) => setTimeout(resolve, 25))
+      return late
+    },
+  })
+}
+`
+    const { ctx, recoveryRoot } = await bootAssistantControl()
+    try {
+      const { status } = await activateGenerated(ctx, recoveryRoot, {
+        owner: 'generated/r0-detached-broker',
+        tool: 'r0_schedule_broker',
+        tools: ['r0_schedule_broker', 'r0_late_status'],
+        source,
+        permissions: ['host.text.echo'],
+      })
+      assert.equal(status.state, 'active', status.lastFailure?.diagnostics)
+      const scheduled = await execTool(ctx, 'r0_schedule_broker')
+      assert.equal(scheduled.isError, false)
+      const late = await execTool(ctx, 'r0_late_status')
+      assert.equal(late.isError, false)
+      assert.match(String(late.value), /not bound to an active generated tool call/)
+    } finally {
+      await ctx.fiber.dispose()
+    }
+  })
+
   it('H. refuses activation when the sealed digest no longer matches', async () => {
     const { ctx, recoveryRoot } = await bootAssistantControl()
     try {

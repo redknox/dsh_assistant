@@ -62,12 +62,16 @@ A governed AI-native product layer and reference assistant: TARS-NG personality,
 
 DSH owns agent loop, sessions, tool execution, events, LLM/provider seams, jobs, lifecycle, and plugin composition. This project **composes and extends** those public APIs. It does not reimplement them.
 
+TARS-NG mounts the native DSH worker-thread Workflow engine for a small catalog of host-registered, fixed orchestration scripts. Both native Workflow children and direct `delegate_task` children pass through one governed Subagent Provider, which fixes recursion depth, total concurrency, persona, tool allowlist, workspace/session lineage, cancellation, and token budget. Child tool calls still traverse the ordinary TARS-NG policy and approval pipeline. The raw `dsh-tool-workflow` surface is intentionally not mounted: the current worker/VM contains synchronous execution but is not a security boundary for arbitrary model-authored JavaScript.
+
 The current product validates the lower half of a future domain-professional authoring stack:
 
 ```text
 Natural-language intent
         ↓
-Specification / capability construction       (future domain-facing layer)
+Capability Specification                      (current host-owned intent layer)
+        ↓
+Capability Resolution                         (reuse / configure / evolve / create)
         ↓
 Candidate authoring / validation / review      (current Workbench)
         ↓
@@ -115,6 +119,7 @@ See [ARCHITECTURE.md](./ARCHITECTURE.md) for layers. See [ENGINEERING.md](./ENGI
 | Integration seams | product default: unavailable | **Verified** (fake providers in tests; product CLI disables fixtures) | Live vendor OAuth refresh **Unsupported** |
 | Trust/policy L0–L4 | yes | **Verified** by `npm test` | Confirmation binds fingerprint |
 | Process-local jobs / morning brief | yes | **Verified** by `npm test` | Cross-restart durability **Unsupported** |
+| Host-registered native DSH Workflow | no | **Verified** by `test/registered-workflows.test.ts` | Foreground fixed scripts only; arbitrary model-authored scripts and restart resume **Unsupported** |
 | UI projection + control surface | no | **Verified** by `npm test` | Framework-independent DTOs remain |
 | Local Mission-Control Web UI | no | **Verified** by `test/web-ui.test.ts` and packaging | Loopback-only; pixel/mobile **Unsupported** |
 | Plan My Day vertical slice | no | **Verified** by `test/vertical-slice.test.ts` | Scripted adapter + fake calendar |
@@ -124,13 +129,13 @@ See [ARCHITECTURE.md](./ARCHITECTURE.md) for layers. See [ENGINEERING.md](./ENGI
 | Candidate workspace + reliability + independent review | no | **Verified** | `review-complete` is not approval |
 | Runtime Context (Profile / Workspace / Session) | yes (product start) | **Implemented** | [docs/runtime-context.md](./docs/runtime-context.md); packaged seal [docs/v0.4.0-seal.md](./docs/v0.4.0-seal.md) |
 | Topic conversations / Session Catalog | yes (product start) | **Implemented** | [docs/session-catalog.md](./docs/session-catalog.md) |
-| Generated authoring contract `generated-extension-api/v1` | no | **Implemented** | Host-owned; [docs/generated-extension-api-v1.md](./docs/generated-extension-api-v1.md) |
+| Generated authoring contract `generated-extension-api/v1` | no | **Implemented** | Host-owned; call-bound Broker supports the contract probe and bounded read-only Knowledge retrieval; [docs/generated-extension-api-v1.md](./docs/generated-extension-api-v1.md) |
 | Local third-party import (`import-local`) | no | **Implemented** | CLI-only quarantine into an inactive `third-party/import` candidate. Marketplace is out of scope. |
 | DSH-native Skill lifecycle | no | **Implemented** | Profile-scoped; [docs/skills.md](./docs/skills.md). Feature soak: [docs/skill-lifecycle-soak.md](./docs/skill-lifecycle-soak.md) |
 | TARS-NG personality + Mission-Control workspace | no | **Verified** | [docs/tars-ng-personality.md](./docs/tars-ng-personality.md) |
 | Production persistence, public npm publish | no | **Unsupported** | Package is `private` |
 
-Known limitations: no OAuth refresh, no production security certification, no durable user-level Schedule, no mobile distribution, no public or LAN Web UI, no marketplace or remote Skill/plugin install. Release status: [docs/RELEASE.md](./docs/RELEASE.md). Current seal: [docs/v0.4.0-seal.md](./docs/v0.4.0-seal.md) (prepared / release candidate).
+Known limitations: no OAuth refresh, no production security certification, no durable user-level Schedule, no persisted/resumable native Workflow runs, no mobile distribution, no public or LAN Web UI, no marketplace or remote Skill/plugin install. Release status: [docs/RELEASE.md](./docs/RELEASE.md). Current seal: [docs/v0.4.0-seal.md](./docs/v0.4.0-seal.md) (prepared / release candidate).
 
 ## Develop
 

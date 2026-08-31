@@ -14,6 +14,8 @@ export class CandidateWorkbenchService extends Service implements CandidateWorkb
     super(ctx, 'candidateWorkbench')
   }
 
+  defineSpecification(input: Parameters<CandidateWorkbench['defineSpecification']>[0]) { return this.store.defineSpecification(input) }
+  inspectSpecification(specificationId: string) { return this.store.inspectSpecification(specificationId) }
   plan(input: Parameters<CandidateWorkbench['plan']>[0]) { return this.store.plan(input) }
   rememberPlan(review: Parameters<CandidateWorkbench['rememberPlan']>[0]) { return this.store.rememberPlan(review) }
   getPlan(planId: string) { return this.store.getPlan(planId) }
@@ -45,7 +47,7 @@ export interface WorkbenchPluginConfig extends WorkbenchServiceOptions {
 }
 
 export const WORKBENCH_CONVERSATION_GUIDANCE = [
-  'When the user asks to add a missing capability: resolve first with plan_capability_change.',
+  'When the user asks to add a missing capability: define_capability_specification first, clarify unresolved questions, then resolve first with plan_capability_change and its specificationId.',
   'Prefer reuse, configure, or evolve an existing owner before new-plugin.',
   'Use Candidate Workbench tools. Read inspect_authoring_contract before scaffolding.',
   'Use scaffold_candidate, then bounded edits, then inspect_validation_diagnostics.',

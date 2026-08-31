@@ -94,7 +94,13 @@
 - id: tool-subagent-report
   disabled: true
 - id: workflow-worker-thread
-  disabled: true
+  config:
+    provider: tars-governed
+    maxConcurrentAgents: 2
+    maxTotalAgents: 4
+    maxItemsPerCall: 4
+    syncTimeoutMs: 1000
+    disposeGraceMs: 5000
 - id: tool-workflow
   disabled: true
 - id: timeout-policy
