@@ -13,6 +13,7 @@ export interface CapabilityPortfolioCard {
   readonly id: string
   readonly title: string
   readonly purpose: string
+  readonly usage: string
   readonly status: CapabilityPortfolioStatus
   readonly implementation: readonly CapabilityImplementationKind[]
   readonly owner?: string
@@ -63,10 +64,12 @@ export function projectCapabilityPortfolio(input: {
     representedOwners.add(ownerKey(plugin.owner, plugin.version))
     const extension = input.view.extensions?.find((item) => item.owner === plugin.owner && item.version === plugin.version)
     const workflows = workflowsFor(input.workflows, plugin.owner)
+    const tools = toolsFor(input.tools, plugin.owner, plugin.capabilities)
     cards.push({
       id: `extension:${ownerKey(plugin.owner, plugin.version)}`,
       title: friendlyOwner(plugin.owner),
-      purpose: capabilityPurpose(plugin.capabilities, plugin.tools, workflows),
+      purpose: capabilityPurpose(plugin.capabilities, tools, workflows),
+      usage: usageOf(input.tools, input.workflows, plugin.owner, plugin.tools, workflows),
       status: 'active',
       implementation: unique<CapabilityImplementationKind>([
         'extension',
@@ -91,10 +94,12 @@ export function projectCapabilityPortfolio(input: {
     if (representedOwners.has(ownerKey(extension.owner, extension.version))) continue
     representedOwners.add(ownerKey(extension.owner, extension.version))
     const workflows = workflowsFor(input.workflows, extension.owner)
+    const tools = toolsFor(input.tools, extension.owner, extension.capabilities)
     cards.push({
       id: `extension:${ownerKey(extension.owner, extension.version)}`,
       title: friendlyOwner(extension.owner),
-      purpose: capabilityPurpose(extension.capabilities, extension.tools, workflows),
+      purpose: capabilityPurpose(extension.capabilities, tools, workflows),
+      usage: usageOf(input.tools, input.workflows, extension.owner, extension.tools, workflows),
       status: extension.lifecycle === 'ACTIVE' ? 'active' : 'disabled',
       implementation: unique<CapabilityImplementationKind>([
         'extension',
@@ -118,6 +123,7 @@ export function projectCapabilityPortfolio(input: {
       id: `skill:${skill.id}`,
       title: skill.name,
       purpose: skill.description || skill.whenToUse || 'Reusable Agent instructions.',
+      usage: skill.whenToUse || 'Describe the relevant task in conversation; TARS-NG can apply this Skill when its instructions match your request.',
       status: skill.lifecycle === 'active' ? 'active' : 'disabled',
       implementation: ['skill'],
       owner: `skill/${skill.name}`,
@@ -148,7 +154,7 @@ export function projectCapabilityPortfolio(input: {
       total: cards.length,
       active: cards.filter((item) => item.status === 'active').length,
       attention: cards.filter((item) => item.status !== 'active').length,
-      unplugReady: cards.filter((item) => item.unplug && item.dependency.severity !== 'unresolved').length,
+      unplugReady: cards.filter((item) => item.unplug && item.dependency.severity === 'none').length,
     },
   }
 }
@@ -206,6 +212,22 @@ function capabilityPurpose(capabilities: readonly string[], tools: readonly stri
   if (workflows.length > 0) return workflows.join(' · ')
   if (tools.length > 0) return tools.join(' · ')
   return 'Governed user-added capability.'
+}
+
+function usageOf(
+  tools: ToolCatalogView | undefined,
+  workflows: WorkflowCatalogView | undefined,
+  owner: string,
+  declaredTools: readonly string[],
+  workflowNames: readonly string[],
+): string {
+  const workflow = workflows?.workflows.find((item) => item.owner === owner && workflowNames.includes(item.name))
+  if (workflow) return workflow.whenToUse || `Ask TARS-NG to run “${workflow.title}” when you need: ${workflow.description}`
+  const tool = tools?.tools.find((item) => item.owner === owner && declaredTools.includes(item.name))
+  if (tool) return `Describe the outcome in conversation. TARS-NG can call ${tool.name}: ${tool.description}`
+  if (workflowNames.length > 0) return `Ask TARS-NG to run the ${workflowNames.join(', ')} workflow.`
+  if (declaredTools.length > 0) return `Describe the outcome in conversation. TARS-NG can select ${declaredTools.join(', ')} when appropriate.`
+  return 'Describe the desired outcome in conversation; TARS-NG will use this capability when it matches the request.'
 }
 
 function friendlyOwner(owner: string): string {

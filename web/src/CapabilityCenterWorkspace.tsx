@@ -128,7 +128,7 @@ function CapabilityCard(props: {
 }) {
   const { card } = props
   const blocked = card.dependency.severity === 'unresolved'
-    || (card.dependency.severity === 'hard' && card.unplug?.kind === 'plugin')
+    || card.dependency.severity === 'hard'
   return (
     <article ref={props.cardRef} tabIndex={-1} className={`capability-card${props.focused ? ' capability-card--focused' : ''}`} data-capability-id={card.id} data-capability-focus={props.focused ? 'target' : undefined} data-capability-status={card.status} data-dependency={card.dependency.severity}>
       <header>
@@ -148,15 +148,24 @@ function CapabilityCard(props: {
       </div>
       {props.open ? (
         <div className="capability-card-details">
-          <Contract label="CAPABILITIES" values={card.capabilities} empty="No separate capability claims" />
-          <Contract label="TOOLS" values={card.tools} empty="No callable tools" />
-          <Contract label="WORKFLOWS" values={card.workflows} empty="No registered workflows" />
-          <Contract label="DELIVERY EVIDENCE" values={deliveryEvidence(card)} empty="No lifecycle evidence recorded" />
-          <Contract label="EXACT REVISION" values={card.assurance.digest ? [card.assurance.digest] : []} empty="Digest not recorded" />
-          <Contract label="PROVIDER" values={card.provider ? [card.provider] : []} empty="Local or host runtime" />
-          <Contract label="SOURCE" values={[`${card.owner ?? 'user-added'}${card.version ? `@${card.version}` : ''}`]} empty="Unknown" />
-          <Contract label="UNPLUG IMPACT" values={card.dependency.dependents} empty={unplugImpact(card)} />
-          {props.manage ? <button type="button" className="capability-open-implementation" onClick={props.manage}>{implementationLabel(card)} →</button> : null}
+          <section className="capability-user-guide" aria-label="Capability usage and safety">
+            <div><strong>HOW TO USE</strong><p>{card.usage}</p></div>
+            <div data-dependency-severity={card.dependency.severity}><strong>IF YOU UNPLUG IT</strong><p>{unplugImpact(card)}</p></div>
+            {card.dependency.dependents.length > 0 ? <div><strong>AFFECTED CAPABILITIES</strong><ul>{card.dependency.dependents.map((item) => <li key={item}>{item}</li>)}</ul></div> : null}
+          </section>
+          <details className="capability-technical-details">
+            <summary>IMPLEMENTATION &amp; GOVERNANCE <span>Technical record</span></summary>
+            <div>
+              <Contract label="CAPABILITIES" values={card.capabilities} empty="No separate capability claims" />
+              <Contract label="TOOLS" values={card.tools} empty="No callable tools" />
+              <Contract label="WORKFLOWS" values={card.workflows} empty="No registered workflows" />
+              <Contract label="DELIVERY EVIDENCE" values={deliveryEvidence(card)} empty="No lifecycle evidence recorded" />
+              <Contract label="EXACT REVISION" values={card.assurance.digest ? [card.assurance.digest] : []} empty="Digest not recorded" />
+              <Contract label="PROVIDER" values={card.provider ? [card.provider] : []} empty="Local or host runtime" />
+              <Contract label="SOURCE" values={[`${card.owner ?? 'user-added'}${card.version ? `@${card.version}` : ''}`]} empty="Unknown" />
+              {props.manage ? <button type="button" className="capability-open-implementation" onClick={props.manage}>{implementationLabel(card)} →</button> : null}
+            </div>
+          </details>
         </div>
       ) : null}
       {props.confirming && card.unplug ? (
@@ -186,10 +195,10 @@ function statusLabel(status: CapabilityPortfolioCard['status']): string {
 }
 
 function unplugImpact(card: CapabilityPortfolioCard): string {
-  if (card.dependency.severity === 'hard') return 'Blocked: active capabilities have hard dependencies on this capability.'
-  if (card.dependency.severity === 'optional') return 'Optional dependents will continue in a degraded state.'
-  if (card.dependency.severity === 'unresolved') return 'Blocked: the dependency graph could not be verified.'
-  return 'No active dependents were found.'
+  if (card.dependency.severity === 'hard') return 'Cannot unplug now. Another active capability requires this one.'
+  if (card.dependency.severity === 'optional') return 'You can unplug it, but optional dependents will continue with reduced functionality.'
+  if (card.dependency.severity === 'unresolved') return 'Cannot unplug safely because TARS-NG could not verify the dependency graph.'
+  return 'Safe to unplug. No active capability depends on it.'
 }
 
 export function implementationPane(card: CapabilityPortfolioCard): WorkspacePane | undefined {

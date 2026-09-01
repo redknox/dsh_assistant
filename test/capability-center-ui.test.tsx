@@ -75,6 +75,9 @@ describe('Capability Center workspace', () => {
     assert.match(markup, /TOOL/)
     assert.match(markup, /SKILL/)
     assert.match(markup, /UNPLUG/)
+    assert.match(markup, /HOW TO USE/)
+    assert.match(markup, /Safe to unplug/)
+    assert.match(markup, /IMPLEMENTATION &amp; GOVERNANCE/)
     assert.match(markup, /DELIVERY EVIDENCE/)
     assert.match(markup, /VALIDATED · INDEPENDENT REVIEW COMPLETE · HUMAN APPROVED · ACTIVE/)
     assert.match(markup, /EXACT REVISION/)
@@ -123,5 +126,23 @@ describe('Capability Center workspace', () => {
     assert.equal(workflow && implementationPane(workflow), 'workflows')
     assert.equal(tool && implementationPane(tool), 'tools')
     assert.equal(skill && implementationPane(skill), 'extensions')
+    assert.equal(portfolio.summary.unplugReady, 3)
+  })
+
+  it('does not call hard or optional dependency impact safe to unplug', () => {
+    const portfolio = projectCapabilityPortfolio({
+      view: {
+        extensions: [], skills: [],
+        plugins: [{
+          id: 'optional-plugin', owner: 'generated/optional', version: '0.1.0', provenance: 'generated',
+          capabilities: ['optional.read'], tools: ['optional_read'], mounted: true, registryGeneration: 1,
+          dependency: { severity: 'optional', dependents: [{ owner: 'generated/report', version: '0.1.0', requiredCapability: 'optional.read', kind: 'optional' }] },
+          uninstallable: true,
+        }],
+      },
+    })
+
+    assert.equal(portfolio.cards[0]?.dependency.severity, 'optional')
+    assert.equal(portfolio.summary.unplugReady, 0)
   })
 })

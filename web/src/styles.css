@@ -1719,10 +1719,20 @@ button.nav-item::after { content: "›"; color: #7f857f; font: 500 22px/1 var(--
 .capability-card-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 11px; }
 .capability-card-actions .button { width: 100%; }
 .capability-card-actions .button:only-child { grid-column: 1 / -1; }
-.capability-card-details { display: grid; gap: 0; margin-top: 11px; border: 1px solid #918675; background: #d9cebc; }
-.capability-card-details > div { display: grid; grid-template-columns: 105px minmax(0, 1fr); gap: 9px; padding: 7px 9px; border-bottom: 1px solid #aca08e; }
-.capability-card-details strong { font: 750 7px/1.25 var(--font-instrument); letter-spacing: .08em; }
-.capability-card-details span { overflow-wrap: anywhere; color: #514b42; font: 8px/1.35 var(--font-mono); }
+.capability-card-details { display: grid; gap: 8px; margin-top: 11px; }
+.capability-user-guide { display: grid; gap: 1px; border: 1px solid #918675; background: #9f9585; }
+.capability-user-guide > div { padding: 9px 10px; background: #ded3c1; }
+.capability-user-guide strong { display: block; margin-bottom: 4px; color: #6c4a20; font: 750 8px/1.2 var(--font-instrument); letter-spacing: .09em; }
+.capability-user-guide p, .capability-user-guide ul { margin: 0; color: #474239; font-size: 10px; line-height: 1.5; }
+.capability-user-guide ul { padding-left: 17px; }
+.capability-user-guide [data-dependency-severity="hard"], .capability-user-guide [data-dependency-severity="unresolved"] { background: #e5c8bc; }
+.capability-user-guide [data-dependency-severity="none"] { background: #d4dec9; }
+.capability-technical-details { border: 1px solid #918675; background: #d9cebc; }
+.capability-technical-details > summary { display: flex; justify-content: space-between; gap: 8px; padding: 8px 9px; cursor: pointer; font: 750 8px/1.2 var(--font-instrument); letter-spacing: .08em; }
+.capability-technical-details > summary span { color: #6d6559; font: 8px/1.2 var(--font-mono); letter-spacing: 0; }
+.capability-technical-details > div > div { display: grid; grid-template-columns: 105px minmax(0, 1fr); gap: 9px; padding: 7px 9px; border-top: 1px solid #aca08e; }
+.capability-technical-details strong { font: 750 7px/1.25 var(--font-instrument); letter-spacing: .08em; }
+.capability-technical-details span { overflow-wrap: anywhere; color: #514b42; font: 8px/1.35 var(--font-mono); }
 .capability-open-implementation { padding: 8px 9px; border: 0; background: transparent; color: #66441f; text-align: right; font: 750 8px/1 var(--font-instrument); cursor: pointer; }
 .capability-unplug-dialog { margin-top: 11px; padding: 10px; border: 2px solid #8b6230; background: #ead7b8; }
 .capability-unplug-dialog h3 { margin: 0 0 6px; font: 750 11px/1 var(--font-instrument); letter-spacing: .07em; }
