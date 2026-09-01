@@ -22,7 +22,10 @@ export function CapabilitySpecificationsWorkspace(props: {
           <h1>CAPABILITY SPECIFICATIONS</h1>
           <p>Business intent before code. Every revision is immutable and binds Resolution, Candidate review, and approval to one digest.</p>
         </div>
-        <button type="button" className="button button--secondary" disabled={control.loading} onClick={control.load}>REFRESH</button>
+        <div className="specification-title-actions">
+          <button type="button" className="button button--approval" disabled={props.locked || control.loading} onClick={control.beginCreate}>NEW SPECIFICATION</button>
+          <button type="button" className="button button--secondary" disabled={control.loading} onClick={control.load}>REFRESH</button>
+        </div>
       </header>
       {control.error ? <p className="settings-alert" role="alert">{control.error}</p> : null}
       {control.notice ? <p className="settings-notice" role="status">{control.notice}</p> : null}
@@ -52,7 +55,7 @@ export function CapabilitySpecificationsWorkspace(props: {
           {control.snapshot && control.snapshot.specifications.length === 0 ? <p className="specification-empty">No specifications yet. TARS-NG will create one before the next governed capability change.</p> : null}
         </aside>
         <section className="specification-detail" aria-live="polite">
-          {!selected ? <div className="specification-placeholder"><Glyph name="hex" /><p>Select a Capability Specification revision.</p></div> : (
+          {control.creating ? <NewSpecificationForm control={control} locked={props.locked} /> : !selected ? <div className="specification-placeholder"><Glyph name="hex" /><p>Select a Capability Specification revision.</p></div> : (
             <>
               <header className="specification-detail-header">
                 <div>
@@ -131,6 +134,76 @@ export function CapabilitySpecificationsWorkspace(props: {
       </div>
     </main>
   )
+}
+
+function NewSpecificationForm(props: { readonly control: CapabilitySpecificationsControl; readonly locked: boolean }) {
+  const { control } = props
+  const draft = control.createDraft
+  const editable = control.snapshot?.mutable === true && !props.locked && !control.saving
+  const field = (name: keyof typeof draft) => (event: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) => {
+    control.changeCreate(name, event.target.value)
+  }
+  return (
+    <section className="specification-create" aria-label="Define a missing capability">
+      <header className="specification-detail-header">
+        <div>
+          <span className="eyebrow">CAPABILITY GAP / NO TOOL CREATED YET</span>
+          <h2>DEFINE THE MISSING CAPABILITY</h2>
+          <p>This records business intent only. Resolution must still prove reuse, configuration, adoption, provider implementation, owner evolution, or a new Candidate.</p>
+        </div>
+        <div className="specification-badges"><span>HOST OWNED</span><span>REV 1</span></div>
+      </header>
+      <div className="specification-form">
+        <div className="specification-form-grid">
+          <label><span>CAPABILITY ID<small>Stable dotted identity</small></span><input value={draft.capability} disabled={!editable} placeholder="finance.exchange-rate.query" onChange={field('capability')} /></label>
+          <label><span>REMOTE SIDE EFFECT<small>Declare the strongest external effect</small></span><select value={draft.remoteSideEffect} disabled={!editable} onChange={field('remoteSideEffect')}><option value="none">NONE</option><option value="read-only">READ ONLY</option><option value="mutate">MUTATE</option></select></label>
+        </div>
+        <label><span>GOAL</span><textarea value={draft.goal} disabled={!editable} rows={3} placeholder="What outcome must this capability reliably produce?" onChange={field('goal')} /></label>
+        <div className="specification-form-grid">
+          <CreateLines label="BUSINESS RULES" help="Required · one rule per line" value={draft.businessRules} editable={editable} onChange={field('businessRules')} />
+          <CreateLines label="NON-GOALS" help="Explicit boundaries" value={draft.nonGoals} editable={editable} onChange={field('nonGoals')} />
+        </div>
+        <fieldset className="specification-create-group">
+          <legend>INITIAL ACCEPTANCE EXAMPLE</legend>
+          <label><span>NAME</span><input value={draft.acceptanceName} disabled={!editable} onChange={field('acceptanceName')} /></label>
+          <CreateLines label="GIVEN" help="One precondition per line" value={draft.acceptanceGiven} editable={editable} onChange={field('acceptanceGiven')} />
+          <label><span>WHEN</span><textarea value={draft.acceptanceWhen} disabled={!editable} rows={2} placeholder="The user or Agent performs…" onChange={field('acceptanceWhen')} /></label>
+          <CreateLines label="THEN" help="Required · observable outcomes" value={draft.acceptanceThen} editable={editable} onChange={field('acceptanceThen')} />
+        </fieldset>
+        <fieldset className="specification-create-group">
+          <legend>RUNTIME AUTHORITY</legend>
+          <CreateLines label="RUNTIME PERMISSIONS" help="Exact Broker operations, one per line" value={draft.permissions} editable={editable} onChange={field('permissions')} />
+          <div className="specification-form-grid">
+            <CreateLines label="FILESYSTEM EFFECTS" help="Governed paths or operations" value={draft.filesystem} editable={editable} onChange={field('filesystem')} />
+            <CreateLines label="NETWORK EFFECTS" help="Hosts or providers" value={draft.network} editable={editable} onChange={field('network')} />
+            <CreateLines label="PROCESS EFFECTS" help="Process authority" value={draft.process} editable={editable} onChange={field('process')} />
+            <CreateLines label="SECRET ACCESS" help="Secret names only; never values" value={draft.secrets} editable={editable} onChange={field('secrets')} />
+          </div>
+          <CreateLines label="EXTERNAL SYSTEMS" help="Named external systems" value={draft.externalSystems} editable={editable} onChange={field('externalSystems')} />
+        </fieldset>
+        <CreateLines label="UNRESOLVED QUESTIONS" help="Any entry keeps Resolution blocked" value={draft.unresolved} editable={editable} onChange={field('unresolved')} />
+      </div>
+      <footer className="specification-footer">
+        <p><Glyph name="shield" /> Creating this record grants no Tool, permission, installation, or activation authority.</p>
+        <div>
+          <button type="button" className="button button--secondary" disabled={control.saving} onClick={control.cancelCreate}>CANCEL</button>
+          <button type="button" className="button button--approval" data-specification-action="create" disabled={!editable || !control.canCreate} onClick={control.createSpecification}>
+            {control.saving ? 'RECORDING…' : 'CREATE SPECIFICATION'}
+          </button>
+        </div>
+      </footer>
+    </section>
+  )
+}
+
+function CreateLines(props: {
+  readonly label: string
+  readonly help: string
+  readonly value: string
+  readonly editable: boolean
+  readonly onChange: (event: React.ChangeEvent<HTMLTextAreaElement>) => void
+}) {
+  return <label><span>{props.label}<small>{props.help}</small></span><textarea value={props.value} disabled={!props.editable} rows={3} onChange={props.onChange} /></label>
 }
 
 function LineEditor(props: {

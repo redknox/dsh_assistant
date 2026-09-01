@@ -67,6 +67,29 @@ export interface CapabilitySpecificationRevisionInput {
   readonly unresolved?: readonly string[]
 }
 
+export interface CapabilitySpecificationCreateInput {
+  readonly capability: string
+  readonly goal: string
+  readonly nonGoals?: readonly string[]
+  readonly businessRules?: readonly string[]
+  readonly permissions?: readonly string[]
+  readonly effects?: {
+    readonly filesystem?: readonly string[]
+    readonly network?: readonly string[]
+    readonly process?: readonly string[]
+    readonly secrets?: readonly string[]
+    readonly externalSystems?: readonly string[]
+    readonly remoteSideEffect?: 'none' | 'read-only' | 'mutate'
+  }
+  readonly acceptanceExamples?: readonly {
+    readonly name: string
+    readonly given: readonly string[]
+    readonly when: string
+    readonly then: readonly string[]
+  }[]
+  readonly unresolved?: readonly string[]
+}
+
 export interface WorkbenchSnapshotView {
   readonly specifications: readonly CapabilitySpecificationSummaryView[]
   readonly plans: readonly unknown[]

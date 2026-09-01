@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import type { CapabilityEvaluationView, CapabilitySpecificationDiffView, CapabilitySpecificationView } from '../../src/product/web-ui-workbench-types'
 import {
   compareCapabilitySpecificationRevisions,
+  defineCapabilitySpecification,
   fetchCapabilityEvaluation,
   fetchCapabilitySpecification,
   fetchWorkbench,
@@ -16,12 +17,34 @@ export interface CapabilitySpecificationDraft {
   readonly unresolved: string
 }
 
+export interface NewCapabilitySpecificationDraft {
+  readonly capability: string
+  readonly goal: string
+  readonly nonGoals: string
+  readonly businessRules: string
+  readonly permissions: string
+  readonly remoteSideEffect: 'none' | 'read-only' | 'mutate'
+  readonly filesystem: string
+  readonly network: string
+  readonly process: string
+  readonly secrets: string
+  readonly externalSystems: string
+  readonly acceptanceName: string
+  readonly acceptanceGiven: string
+  readonly acceptanceWhen: string
+  readonly acceptanceThen: string
+  readonly unresolved: string
+}
+
 export interface CapabilitySpecificationsControl {
   readonly snapshot?: WorkbenchSnapshot
   readonly selected?: CapabilitySpecificationView
   readonly comparison?: CapabilitySpecificationDiffView
   readonly evaluation?: CapabilityEvaluationView
   readonly draft: CapabilitySpecificationDraft
+  readonly creating: boolean
+  readonly createDraft: NewCapabilitySpecificationDraft
+  readonly canCreate: boolean
   readonly loading: boolean
   readonly saving: boolean
   readonly error?: string
@@ -31,9 +54,31 @@ export interface CapabilitySpecificationsControl {
   readonly select: (id: string) => void
   readonly change: (field: keyof CapabilitySpecificationDraft, value: string) => void
   readonly saveRevision: () => void
+  readonly beginCreate: () => void
+  readonly cancelCreate: () => void
+  readonly changeCreate: (field: keyof NewCapabilitySpecificationDraft, value: string) => void
+  readonly createSpecification: () => void
 }
 
 const EMPTY_DRAFT: CapabilitySpecificationDraft = { goal: '', nonGoals: '', businessRules: '', unresolved: '' }
+const EMPTY_CREATE_DRAFT: NewCapabilitySpecificationDraft = {
+  capability: '',
+  goal: '',
+  nonGoals: '',
+  businessRules: '',
+  permissions: '',
+  remoteSideEffect: 'none',
+  filesystem: '',
+  network: '',
+  process: '',
+  secrets: '',
+  externalSystems: '',
+  acceptanceName: 'Initial acceptance',
+  acceptanceGiven: '',
+  acceptanceWhen: '',
+  acceptanceThen: '',
+  unresolved: '',
+}
 
 export function useCapabilitySpecifications(active: boolean): CapabilitySpecificationsControl {
   const [snapshot, setSnapshot] = useState<WorkbenchSnapshot>()
@@ -41,6 +86,8 @@ export function useCapabilitySpecifications(active: boolean): CapabilitySpecific
   const [comparison, setComparison] = useState<CapabilitySpecificationDiffView>()
   const [evaluation, setEvaluation] = useState<CapabilityEvaluationView>()
   const [draft, setDraft] = useState<CapabilitySpecificationDraft>(EMPTY_DRAFT)
+  const [creating, setCreating] = useState(false)
+  const [createDraft, setCreateDraft] = useState<NewCapabilitySpecificationDraft>(EMPTY_CREATE_DRAFT)
   const [loading, setLoading] = useState(false)
   const [saving, setSaving] = useState(false)
   const [attempted, setAttempted] = useState(false)
@@ -89,6 +136,13 @@ export function useCapabilitySpecifications(active: boolean): CapabilitySpecific
   }, [active, attempted])
 
   const dirty = useMemo(() => selected !== undefined && JSON.stringify(draft) !== JSON.stringify(draftOf(selected)), [selected, draft])
+  const canCreate = useMemo(() => (
+    createDraft.capability.trim() !== ''
+    && createDraft.goal.trim() !== ''
+    && lines(createDraft.businessRules).length > 0
+    && createDraft.acceptanceWhen.trim() !== ''
+    && lines(createDraft.acceptanceThen).length > 0
+  ), [createDraft])
 
   const change = (field: keyof CapabilitySpecificationDraft, value: string) => {
     setNotice(undefined)
@@ -111,7 +165,62 @@ export function useCapabilitySpecifications(active: boolean): CapabilitySpecific
     })).catch(fail(setError, 'unable to revise capability specification')).finally(() => setSaving(false))
   }
 
-  return { snapshot, selected, comparison, evaluation, draft, loading, saving, error, notice, dirty, load, select, change, saveRevision }
+  const beginCreate = () => {
+    setCreating(true)
+    setCreateDraft(EMPTY_CREATE_DRAFT)
+    setError(undefined)
+    setNotice(undefined)
+  }
+
+  const cancelCreate = () => {
+    setCreating(false)
+    setCreateDraft(EMPTY_CREATE_DRAFT)
+  }
+
+  const changeCreate = (field: keyof NewCapabilitySpecificationDraft, value: string) => {
+    setNotice(undefined)
+    setCreateDraft((current) => ({ ...current, [field]: value }))
+  }
+
+  const createSpecification = () => {
+    if (!snapshot?.mutable || !canCreate || saving) return
+    setSaving(true)
+    setError(undefined)
+    void defineCapabilitySpecification({
+      capability: createDraft.capability,
+      goal: createDraft.goal,
+      nonGoals: lines(createDraft.nonGoals),
+      businessRules: lines(createDraft.businessRules),
+      permissions: lines(createDraft.permissions),
+      effects: {
+        filesystem: lines(createDraft.filesystem),
+        network: lines(createDraft.network),
+        process: lines(createDraft.process),
+        secrets: lines(createDraft.secrets),
+        externalSystems: lines(createDraft.externalSystems),
+        remoteSideEffect: createDraft.remoteSideEffect,
+      },
+      acceptanceExamples: [{
+        name: createDraft.acceptanceName,
+        given: lines(createDraft.acceptanceGiven),
+        when: createDraft.acceptanceWhen,
+        then: lines(createDraft.acceptanceThen),
+      }],
+      unresolved: lines(createDraft.unresolved),
+    }).then((created) => fetchWorkbench().then((next) => {
+      setSnapshot(next)
+      applySpecification(created)
+      setCreating(false)
+      setCreateDraft(EMPTY_CREATE_DRAFT)
+      setNotice(`Specification ${created.id} created. Capability Resolution must run before any Candidate or Tool can exist.`)
+    })).catch(fail(setError, 'unable to create capability specification')).finally(() => setSaving(false))
+  }
+
+  return {
+    snapshot, selected, comparison, evaluation, draft, creating, createDraft, canCreate,
+    loading, saving, error, notice, dirty, load, select, change, saveRevision,
+    beginCreate, cancelCreate, changeCreate, createSpecification,
+  }
 }
 
 function draftOf(specification: CapabilitySpecificationView): CapabilitySpecificationDraft {

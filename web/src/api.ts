@@ -3,10 +3,12 @@ import type { SettingsSnapshot, SettingsUpdate } from '../../src/product/setting
 import type { ExpenseReviewAvailability, ExpenseReviewInput, ExpenseReviewRecord } from '../../src/domain/expense-review/types'
 import type { FileReferenceCandidate } from '@deepseek-ai/dsh-file-reference'
 import type { CommandDescriptor } from '@deepseek-ai/dsh-commands'
+import type { ToolCatalogView } from '../../src/domain/tool-catalog/index'
 import type {
   CapabilitySpecificationDiffView,
   CapabilityEvaluationView,
   CapabilitySpecificationRevisionInput,
+  CapabilitySpecificationCreateInput,
   CapabilitySpecificationView,
   WorkbenchSnapshotView,
 } from '../../src/product/web-ui-workbench-types'
@@ -15,6 +17,7 @@ export interface UiEnvelope {
   readonly view: MissionControlView
   readonly webUi: string
   readonly commands?: readonly CommandDescriptor[]
+  readonly toolCatalog?: ToolCatalogView
   readonly acknowledgement?: { readonly text: string }
 }
 
@@ -125,6 +128,17 @@ export async function reviseCapabilitySpecification(
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ specificationId, patch }),
   }), 'capability specification revision')
+}
+
+export async function defineCapabilitySpecification(
+  input: CapabilitySpecificationCreateInput,
+): Promise<CapabilitySpecificationView> {
+  return parseJson<CapabilitySpecificationView>(await fetch('/api/workbench/specification/define', {
+    ...include,
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(input),
+  }), 'capability specification creation')
 }
 
 async function parseJson<T>(response: Response, label: string): Promise<T> {

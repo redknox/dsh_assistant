@@ -41,4 +41,32 @@ describe('Capability Specifications workspace', () => {
     assert.match(markup, /data-specification-action="revise"/)
     assert.doesNotMatch(markup, /data-specification-action="revise" disabled/)
   })
+
+  it('makes a capability gap explicit without claiming a Tool was created', () => {
+    const markup = renderToStaticMarkup(createElement(CapabilitySpecificationsWorkspace, {
+      locked: false,
+      control: {
+        snapshot: { mutable: true, plans: [], candidates: [], specifications: [] },
+        draft: { goal: '', nonGoals: '', businessRules: '', unresolved: '' },
+        creating: true,
+        createDraft: {
+          capability: 'finance.exchange-rate.query', goal: 'Return a current exchange rate.', nonGoals: '',
+          businessRules: 'Cite the rate source.', permissions: 'host.finance.rate.read', remoteSideEffect: 'read-only',
+          filesystem: '', network: 'approved provider', process: '', secrets: 'FX_API_KEY', externalSystems: 'FX provider',
+          acceptanceName: 'USD to CNY', acceptanceGiven: 'A supported currency pair', acceptanceWhen: 'The Agent requests USD/CNY',
+          acceptanceThen: 'Return the rate and source timestamp', unresolved: '',
+        },
+        canCreate: true,
+        loading: false, saving: false, dirty: false,
+        load() {}, select() {}, change() {}, saveRevision() {}, beginCreate() {}, cancelCreate() {}, changeCreate() {}, createSpecification() {},
+      },
+    }))
+
+    assert.match(markup, /CAPABILITY GAP \/ NO TOOL CREATED YET/)
+    assert.match(markup, /finance\.exchange-rate\.query/)
+    assert.match(markup, /RUNTIME AUTHORITY/)
+    assert.match(markup, /INITIAL ACCEPTANCE EXAMPLE/)
+    assert.match(markup, /data-specification-action="create"/)
+    assert.match(markup, /grants no Tool, permission, installation, or activation authority/)
+  })
 })
