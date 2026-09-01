@@ -1,4 +1,5 @@
 import type { MissionControlView } from '../domain/workspace/types.js'
+import type { CommandDescriptor, CommandExecution } from '@deepseek-ai/dsh-commands'
 import { SessionCatalogError } from './session-catalog.js'
 
 interface ConversationSessionHost {
@@ -27,6 +28,8 @@ export interface WebUiConversationRequest {
 export interface WebUiConversationContext {
   readonly currentSessionId: () => string
   readonly sendMessage: (text: string) => void
+  readonly listCommands?: () => readonly CommandDescriptor[]
+  readonly executeCommand?: (line: string, signal: AbortSignal) => Promise<CommandExecution | undefined>
   readonly listFileReferences?: (query: string, signal: AbortSignal) => Promise<readonly { readonly path: string; readonly kind: 'file' | 'directory' }[]>
   readonly searchSessions?: (query: string, signal: AbortSignal) => Promise<readonly { readonly id: string; readonly title: string; readonly snippet: string }[]>
   readonly sessionHost?: ConversationSessionHost
@@ -61,13 +64,16 @@ export async function handleWebUiConversationRequest(
     const results = await context.searchSessions(query, controller.signal)
     return { status: 200, body: { results } }
   }
+  if (request.method === 'GET' && request.pathname === '/api/commands') {
+    return { status: 200, body: { commands: context.listCommands?.() ?? [] } }
+  }
   if (request.method !== 'POST') return undefined
   if (request.pathname === '/api/message') return handleMessage(await request.readJson(), context)
   if (request.pathname === '/api/conversations') return handleConversation(await request.readJson(), context)
   return undefined
 }
 
-function handleMessage(body: unknown, context: WebUiConversationContext): WebUiConversationResponse {
+async function handleMessage(body: unknown, context: WebUiConversationContext): Promise<WebUiConversationResponse> {
   if (!isRecord(body) || typeof body.text !== 'string' || body.text.trim() === '' || typeof body.sessionId !== 'string') {
     return { status: 400, body: { error: 'malformed' } }
   }
@@ -81,6 +87,19 @@ function handleMessage(body: unknown, context: WebUiConversationContext): WebUiC
     throw error
   }
   const text = body.text.trim()
+  if (text.startsWith('/')) {
+    if (!context.executeCommand) return { status: 503, body: { error: 'commands-unavailable' } }
+    const execution = await context.executeCommand(text, new AbortController().signal)
+    if (!execution) {
+      const name = text.split(/\s/, 1)[0] ?? text
+      return { status: 404, body: { error: 'unknown-command', detail: `Unknown command: ${name}` } }
+    }
+    if (execution.result.kind === 'error') {
+      return { status: 409, body: { error: 'command-failed', detail: execution.result.text } }
+    }
+    const acknowledgement = { text: execution.result.text ?? 'Command completed.' }
+    return { status: 200, body: context.project(acknowledgement), broadcast: true }
+  }
   context.sendMessage(text)
   context.sessionHost?.touchPreview(text)
   return { status: 202, body: context.project(), broadcast: true }

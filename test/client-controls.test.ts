@@ -154,6 +154,68 @@ describe('client control hooks', () => {
     assert.equal(viewport.scrollTop, 300)
   })
 
+  it('discovers slash commands in the composer and executes an exact no-argument command', async () => {
+    const container = dom.window.document.createElement('div')
+    dom.window.document.body.append(container)
+    const root = createRoot(container)
+    mounted.push(root)
+    let sends = 0
+    let selected = ''
+    const actions: ConversationWorkspaceActions = {
+      draft(value) { selected = value },
+      send() { sends += 1 },
+      approve() {},
+      reject() {},
+      activate() {},
+      abandonActivation() {},
+      deferActivation() {},
+    }
+    const commands = [{ name: 'compact', description: 'Compact older session history.' }, {
+      name: 'plan',
+      description: 'Control Plan Mode.',
+      input: { hint: 'on | off', images: false },
+    }]
+
+    await act(async () => root.render(createElement(ConversationWorkspace, {
+      view: fixtureView(),
+      state: { connected: true, sending: false, draft: '/', commands, activations: [] },
+      actions,
+    })))
+    assert.match(container.textContent ?? '', /COMMAND CONTROL/)
+    assert.match(container.textContent ?? '', /\/compact/)
+    assert.match(container.textContent ?? '', /\/plan/)
+
+    await act(async () => root.render(createElement(ConversationWorkspace, {
+      view: fixtureView(),
+      state: { connected: true, sending: false, draft: '/compact', commands, activations: [] },
+      actions,
+    })))
+    const form = container.querySelector('form')
+    assert.ok(form)
+    await act(async () => form.dispatchEvent(new dom.window.Event('submit', { bubbles: true, cancelable: true })))
+    assert.equal(sends, 1)
+
+    await act(async () => root.render(createElement(ConversationWorkspace, {
+      view: fixtureView(),
+      state: { connected: true, sending: true, executingCommand: '/compact', draft: '', commands, activations: [] },
+      actions,
+    })))
+    assert.match(container.querySelector('[role="status"]')?.textContent ?? '', /EXECUTING \/compact/)
+    assert.equal(container.querySelector<HTMLTextAreaElement>('textarea')?.disabled, true)
+    assert.equal(container.querySelector('[aria-label="Slash commands"]'), null)
+
+    await act(async () => root.render(createElement(ConversationWorkspace, {
+      view: fixtureView(),
+      state: { connected: true, sending: false, draft: '/plan', commands, activations: [] },
+      actions,
+    })))
+    const planOption = [...container.querySelectorAll('button')].find((button) => button.textContent?.includes('/plan'))
+    assert.ok(planOption)
+    await act(async () => planOption.dispatchEvent(new dom.window.MouseEvent('click', { bubbles: true })))
+    assert.equal(selected, '/plan ')
+    assert.equal(sends, 1)
+  })
+
   it('locks duplicate sends and preserves input typed while the request is pending', async () => {
     const calls: { readonly url: string; readonly init?: RequestInit }[] = []
     let resolveResponse: ((response: Response) => void) | undefined
@@ -161,8 +223,9 @@ describe('client control hooks', () => {
       calls.push({ url: String(input), init })
       return new Promise<Response>((resolve) => { resolveResponse = resolve })
     }
-    const runtime: Pick<MissionControlRuntime, 'view' | 'perform'> = {
+    const runtime: Pick<MissionControlRuntime, 'view' | 'commands' | 'perform'> = {
       view: fixtureView(),
+      commands: [],
       perform: async (operation) => operation(),
     }
     const hook = mountHook<ConversationControl>(() => useConversationControl(runtime))
@@ -188,6 +251,32 @@ describe('client control hooks', () => {
     })
     assert.equal(hook.current().sending, false)
     assert.equal(hook.current().draft, 'new message')
+  })
+
+  it('immediately acknowledges a slash command while host execution is pending', async () => {
+    let resolveResponse: ((response: Response) => void) | undefined
+    globalThis.fetch = () => new Promise<Response>((resolve) => { resolveResponse = resolve })
+    const runtime: Pick<MissionControlRuntime, 'view' | 'commands' | 'perform'> = {
+      view: fixtureView(),
+      commands: [{ name: 'compact', description: 'Compact older session history.' }],
+      perform: async (operation) => operation(),
+    }
+    const hook = mountHook<ConversationControl>(() => useConversationControl(runtime))
+
+    act(() => hook.current().dispatch({ action: 'draft', value: '/compact' }))
+    await act(async () => {
+      hook.current().dispatch({ action: 'send' })
+      await flush()
+    })
+
+    assert.equal(hook.current().sending, true)
+    assert.equal(hook.current().draft, '', 'the accepted command should leave editing mode immediately')
+
+    await act(async () => {
+      assert.ok(resolveResponse)
+      resolveResponse(jsonResponse(envelope()))
+      await flush()
+    })
   })
 
   it('owns session bootstrap, SSE status, action feedback, and stream cleanup', async (context) => {

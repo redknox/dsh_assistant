@@ -62,7 +62,6 @@
 - id: skill-badge
   disabled: true
 - id: commands
-  disabled: true
 - id: command-feedback
   disabled: true
 - id: goal
@@ -75,7 +74,6 @@
   config:
     section: "Plan Mode is read-only exploration. Inspect current state, maintain todo_write, and present the complete plan through exit_plan_mode. Do not claim that changes were executed. TARS-NG enforces this restriction at tool dispatch."
 - id: command-compact
-  disabled: true
 - id: subagent
   config: {}
 - id: subagent-spawn-in-process

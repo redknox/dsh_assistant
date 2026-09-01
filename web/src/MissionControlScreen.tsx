@@ -47,6 +47,7 @@ function projectScreenControls(input: MissionControlScreenProps) {
     acknowledgement: input.runtime.acknowledgement,
     onDismissAcknowledgement: input.runtime.dismissAcknowledgement,
     sending: input.conversation.sending,
+    executingCommand: input.conversation.executingCommand,
     draft: input.conversation.draft,
     onDraft: (value: string) => input.conversation.dispatch({ action: 'draft', value }),
     onSend: () => input.conversation.dispatch({ action: 'send' }),
@@ -220,7 +221,9 @@ export function MissionControlScreen(input: MissionControlScreenProps) {
           state={{
             connected: props.connected,
             sending: props.sending,
+            executingCommand: props.executingCommand,
             draft: props.draft,
+            commands: input.conversation.commands,
             error: props.error,
             activations: (view.activations ?? []).filter((card) => (
               card.eligibilityOk

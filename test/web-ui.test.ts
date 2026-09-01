@@ -198,11 +198,12 @@ describe('local Mission-Control Web UI', () => {
 
   it('serves an authoritative snapshot, conversation, and live update', async () => {
     await withServer(bootAssistantControl, 'web-ui-ready', async (url, surface, agent) => {
-      const first = await fetch(`${url}/api/view`).then((res) => res.json()) as { view: MissionControlView; webUi: string }
+      const first = await fetch(`${url}/api/view`).then((res) => res.json()) as { view: MissionControlView; webUi: string; commands: readonly { readonly name: string }[] }
       assert.equal(first.view.identity, 'TARS-NG')
       assert.equal(first.view.systemState, 'READY')
       assert.ok(Array.isArray(first.view.skills))
       assert.match(first.webUi, /^http:\/\/127\.0\.0\.1:\d+$/)
+      assert.deepEqual(first.commands.map((item) => item.name), ['compact', 'plan'])
       assert.doesNotMatch(JSON.stringify(first), /reasoning_content|"type":"reasoning"/)
 
       const page = await fetch(`${url}/`)
@@ -218,6 +219,19 @@ describe('local Mission-Control Web UI', () => {
       const firstEvent = new TextDecoder().decode((await reader?.read())?.value)
       assert.match(firstEvent, /TARS-NG/)
       await reader?.cancel()
+
+      const commandCookie = await cookieHeader(url)
+      const compacted = await fetch(`${url}/api/message`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', ...authHeaders(commandCookie) },
+        body: JSON.stringify({ text: '/compact', sessionId: 'web-ui-ready' }),
+      })
+      assert.equal(compacted.status, 200)
+      const compactedBody = await compacted.json() as { acknowledgement?: { readonly text?: string } }
+      assert.match(compactedBody.acknowledgement?.text ?? '', /No compactable history yet/)
+      assert.equal(agent.agent.session.events.some((event) => event.type === 'command/run' && event.data.name === 'compact'), true)
+      assert.equal(agent.agent.session.events.some((event) => event.type === 'command/done' && event.data.kind === 'success'), true)
+      assert.equal(agent.agent.session.events.some((event) => event.type === 'user/message' && JSON.stringify(event.data).includes('/compact')), false)
 
       const sent = await fetch(`${url}/api/message`, {
         method: 'POST',

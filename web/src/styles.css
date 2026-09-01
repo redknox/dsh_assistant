@@ -756,6 +756,52 @@ button.nav-item::after { content: "›"; color: #7f857f; font: 500 22px/1 var(--
   gap: 8px;
   margin: 0 clamp(26px, 4vw, 58px) 8px;
 }
+.command-palette {
+  margin: 0 clamp(26px, 4vw, 58px) 8px;
+  overflow: hidden;
+  border: 2px solid var(--line);
+  border-radius: 8px;
+  background: #d8cbb6;
+  box-shadow: 0 5px 0 rgb(47 49 46 / 28%), inset 0 0 0 1px rgb(255 255 255 / 35%);
+}
+.command-palette header { display: flex; justify-content: space-between; gap: 12px; padding: 9px 11px; border-bottom: 1px solid var(--line-soft); font-family: var(--font-instrument); letter-spacing: .08em; }
+.command-palette header strong { font-size: 13px; }
+.command-palette header span { color: var(--muted); font-size: 9px; }
+.command-palette [role="listbox"] { max-height: 240px; overflow-y: auto; }
+.command-palette button { width: 100%; display: grid; grid-template-columns: 100px minmax(0, 1fr) auto; align-items: center; gap: 12px; padding: 10px 12px; border: 0; border-bottom: 1px solid var(--line-soft); background: transparent; color: var(--ink); text-align: left; cursor: pointer; }
+.command-palette button:last-child { border-bottom: 0; }
+.command-palette button:hover, .command-palette button.is-selected { background: #242824; color: #f1d59b; outline: 0; }
+.command-palette button strong { font: 700 15px/1 var(--font-instrument); letter-spacing: .04em; }
+.command-palette button span { font-size: 12px; }
+.command-palette button small { color: inherit; opacity: .72; font: 600 9px/1 var(--font-instrument); letter-spacing: .08em; }
+.command-progress {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  margin: 0 0 8px;
+  padding: 10px 13px;
+  border: 1px solid #766f61;
+  border-radius: 7px;
+  background: var(--instrument-black);
+  color: #f1d59b;
+  box-shadow: inset 0 0 0 1px rgb(255 255 255 / 5%);
+  font-family: var(--font-instrument);
+}
+.command-progress-lamp {
+  width: 10px;
+  height: 10px;
+  flex: 0 0 auto;
+  border: 1px solid #f5cf79;
+  border-radius: 50%;
+  background: var(--signal-amber);
+  box-shadow: 0 0 9px rgb(238 177 52 / 85%);
+  animation: command-pulse 1.1s ease-in-out infinite;
+}
+.command-progress div { display: grid; gap: 4px; }
+.command-progress strong { font-size: 13px; letter-spacing: .07em; }
+.command-progress small { color: #bbb5a8; font-size: 9px; letter-spacing: .11em; }
+@keyframes command-pulse { 50% { opacity: .42; box-shadow: 0 0 3px rgb(238 177 52 / 45%); } }
+@media (prefers-reduced-motion: reduce) { .command-progress-lamp { animation: none; } }
 .file-reference-picker {
   margin: 0 clamp(26px, 4vw, 58px) 8px;
   padding: 10px;

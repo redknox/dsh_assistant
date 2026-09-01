@@ -1,5 +1,6 @@
 import React, { type FormEvent, useEffect, useMemo, useRef, useState } from 'react'
 import { formatFileMention, type FileReferenceCandidate } from '@deepseek-ai/dsh-file-reference'
+import type { CommandDescriptor } from '@deepseek-ai/dsh-commands'
 import type { ActivationCard, ApprovalCard, MissionControlView, SkillProjection, WorkObjectKind } from '../../src/domain/workspace/types'
 import { Glyph } from './icons'
 import { MarkdownMessage } from './MarkdownMessage'
@@ -9,7 +10,9 @@ import { listFileReferences } from './api'
 export interface ConversationWorkspaceState {
   readonly connected: boolean
   readonly sending: boolean
+  readonly executingCommand?: string
   readonly draft: string
+  readonly commands?: readonly CommandDescriptor[]
   readonly error?: string
   readonly activations: readonly ActivationCard[]
   readonly armedActivation?: string
@@ -137,13 +140,22 @@ export function ConversationWorkspace(props: {
     && state.activations.length === 0
     && !props.view.workBrief?.markdown
   const scrollViewport = useRef<HTMLDivElement>(null)
+  const composerInput = useRef<HTMLTextAreaElement>(null)
   const followingTail = useRef(true)
   const [referenceOpen, setReferenceOpen] = useState(false)
   const [referenceQuery, setReferenceQuery] = useState('')
   const [referenceCandidates, setReferenceCandidates] = useState<readonly FileReferenceCandidate[]>([])
   const [referenceLoading, setReferenceLoading] = useState(false)
   const [referenceError, setReferenceError] = useState<string>()
+  const [commandIndex, setCommandIndex] = useState(0)
   const referencesReady = props.view.materialInput?.fileReferences === 'active'
+  const commandMatch = /^\/([^\s]*)$/.exec(state.draft)
+  const commandQuery = commandMatch?.[1]?.toLowerCase()
+  const commandMatches = useMemo(() => commandQuery === undefined
+    ? []
+    : (state.commands ?? []).filter((command) => command.name.startsWith(commandQuery)), [commandQuery, state.commands])
+  const commandMenuOpen = commandMatches.length > 0
+  const commandExecuting = state.sending && state.executingCommand !== undefined
   const tailRevision = `${props.view.conversation.length}:${props.view.conversation.at(-1)?.text.length ?? 0}:${pendingApprovals.length}:${state.activations.length}:${state.sending ? 1 : 0}`
   useEffect(() => {
     if (props.active === false || !followingTail.current) return
@@ -175,6 +187,15 @@ export function ConversationWorkspace(props: {
       globalThis.clearTimeout(timer)
     }
   }, [referenceOpen, referenceQuery, referencesReady])
+  useEffect(() => {
+    setCommandIndex(0)
+  }, [commandQuery, commandMatches.length])
+  useEffect(() => {
+    if (commandExecuting) composerInput.current?.blur()
+  }, [commandExecuting])
+  const chooseCommand = (command: CommandDescriptor) => {
+    actions.draft(`/${command.name}${command.input ? ' ' : ''}`)
+  }
   const chooseReference = (candidate: FileReferenceCandidate) => {
     if (candidate.kind === 'directory') {
       setReferenceQuery(`${candidate.path}/`)
@@ -240,6 +261,28 @@ export function ConversationWorkspace(props: {
         ))}
       </div>
       <div>
+        {commandMenuOpen ? (
+          <section className="command-palette" aria-label="Slash commands">
+            <header><strong>COMMAND CONTROL</strong><span>HOST EXECUTION · NO MODEL TURN</span></header>
+            <div role="listbox" aria-label="Available slash commands">
+              {commandMatches.map((command, index) => (
+                <button
+                  key={command.name}
+                  type="button"
+                  role="option"
+                  aria-selected={index === commandIndex}
+                  className={index === commandIndex ? 'is-selected' : ''}
+                  onMouseDown={(event) => event.preventDefault()}
+                  onClick={() => chooseCommand(command)}
+                >
+                  <strong>/{command.name}</strong>
+                  <span>{command.description}</span>
+                  <small>{command.input?.hint ?? 'NO ARGUMENTS'}</small>
+                </button>
+              ))}
+            </div>
+          </section>
+        ) : null}
         {skillInvocationSurfaceOpen(props.view) && (props.view.skills ?? []).some((skill) => skill.userInvocable && skill.lifecycle === 'active') ? (
           <div className="composer-chips" data-skill-chips="true">
             {(props.view.skills ?? []).filter((skill) => skill.userInvocable && skill.lifecycle === 'active').map((skill) => (
@@ -265,17 +308,49 @@ export function ConversationWorkspace(props: {
             </div>
           </section>
         ) : null}
+        {commandExecuting ? (
+          <section className="command-progress" role="status" aria-live="polite">
+            <span className="command-progress-lamp" aria-hidden="true" />
+            <div><strong>EXECUTING {state.executingCommand}</strong><small>HOST COMMAND ACCEPTED · WAITING FOR RESULT</small></div>
+          </section>
+        ) : null}
         <form className="composer" aria-label="Send a message" onSubmit={(event: FormEvent) => { event.preventDefault(); actions.send() }}>
           <label className="sr-only" htmlFor="message">Message TARS-NG</label>
           <textarea
+            ref={composerInput}
             id="message"
             rows={2}
-            placeholder="Message TARS-NG…"
+            placeholder={commandExecuting ? `Executing ${state.executingCommand}…` : 'Message TARS-NG…'}
             value={state.draft}
+            disabled={commandExecuting}
             onChange={(event) => actions.draft(event.target.value)}
             onKeyDown={(event) => {
+              if (commandMenuOpen && event.key === 'ArrowDown') {
+                event.preventDefault()
+                setCommandIndex((current) => (current + 1) % commandMatches.length)
+                return
+              }
+              if (commandMenuOpen && event.key === 'ArrowUp') {
+                event.preventDefault()
+                setCommandIndex((current) => (current - 1 + commandMatches.length) % commandMatches.length)
+                return
+              }
+              if (commandMenuOpen && event.key === 'Tab') {
+                event.preventDefault()
+                const selected = commandMatches[commandIndex]
+                if (selected) chooseCommand(selected)
+                return
+              }
               if (event.key !== 'Enter' || event.shiftKey || event.nativeEvent.isComposing) return
               event.preventDefault()
+              if (commandMenuOpen) {
+                const exact = commandMatches.find((command) => `/${command.name}` === state.draft)
+                if (!exact || exact.input) {
+                  const selected = exact ?? commandMatches[commandIndex]
+                  if (selected) chooseCommand(selected)
+                  return
+                }
+              }
               if (!sendDisabled) actions.send()
             }}
           />
@@ -283,7 +358,7 @@ export function ConversationWorkspace(props: {
             <Glyph name="attach" /><span className="composer-button-label">REFERENCE</span><small>{referencesReady ? '@FILE' : 'INOP'}</small>
           </button>
           <button className="send-button" type="submit" aria-label="Send message" disabled={sendDisabled}>
-            <Glyph name="send" /><span className="composer-button-label">{state.sending ? 'SENDING' : 'SEND'}</span>
+            <Glyph name="send" /><span className="composer-button-label">{commandExecuting ? 'EXECUTING' : state.sending ? 'SENDING' : 'SEND'}</span>
           </button>
         </form>
         {state.error ? <p className="error" role="alert">{state.error}</p> : null}

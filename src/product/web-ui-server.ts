@@ -68,6 +68,7 @@ export function startWebUiServer(options: WebUiServerOptions): Promise<WebUiServ
   const envelope = (extra: { readonly acknowledgement?: { readonly text: string } } = {}) => ({
     view: snapshot(),
     webUi: url,
+    commands: options.surface.listCommands(),
     ...(extra.acknowledgement ? { acknowledgement: extra.acknowledgement } : {}),
   })
 
@@ -236,6 +237,8 @@ export function startWebUiServer(options: WebUiServerOptions): Promise<WebUiServ
       }, {
         currentSessionId: () => options.surface.sessionId,
         sendMessage: (text) => options.surface.sendMessage(text),
+        listCommands: () => options.surface.listCommands(),
+        executeCommand: (line, signal) => options.surface.executeCommand(line, signal),
         listFileReferences: (query, signal) => options.surface.listFileReferences(query, signal),
         searchSessions: (query, signal) => options.surface.searchSessions(query, signal),
         ...(options.sessionHost ? { sessionHost: options.sessionHost } : {}),

@@ -279,6 +279,7 @@ export function executionLogFromSession(events: readonly SessionEvent[]): readon
   const entries: ExecutionLogEntry[] = []
   const finalAssistant = finalAssistantSeqs(events)
   let lastCall: { readonly id: string; readonly name: string } | undefined
+  const commands = new Map<string, string>()
   for (const event of events) {
     if (event.type === 'assistant/message' && isAppendSurfaceEvent(event) && !finalAssistant.has(event.seq)) {
       const detail = visibleText(event.data.message.content).trim()
@@ -302,6 +303,35 @@ export function executionLogFromSession(events: readonly SessionEvent[]): readon
         detail: visibleText(event.data.message.content),
         ...(callId ? { callId } : {}),
         isError: event.data.error !== undefined,
+      })
+      continue
+    }
+    if (event.type === 'command/run') {
+      const commandId = String(event.data.commandId)
+      commands.set(commandId, event.data.name)
+      entries.push({
+        id: `command-run-${event.seq}`,
+        seq: event.seq,
+        time: event.time,
+        kind: 'command-run',
+        label: `/${event.data.name}`,
+        detail: event.data.args?.trim() || 'No arguments',
+        callId: commandId,
+      })
+      continue
+    }
+    if (event.type === 'command/done') {
+      const commandId = String(event.data.commandId)
+      const name = commands.get(commandId)
+      entries.push({
+        id: `command-result-${event.seq}`,
+        seq: event.seq,
+        time: event.time,
+        kind: 'command-result',
+        label: name ? `/${name}` : 'command result',
+        detail: event.data.text ?? (event.data.kind === 'success' ? 'Command completed.' : 'Command failed.'),
+        callId: commandId,
+        isError: event.data.kind === 'error',
       })
     }
   }

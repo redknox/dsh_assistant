@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import type { MissionControlView } from '../../src/domain/workspace/types'
+import type { CommandDescriptor } from '@deepseek-ai/dsh-commands'
 import {
   establishSession,
   fetchView,
@@ -10,6 +11,7 @@ import {
 export interface MissionControlRuntime {
   readonly view?: MissionControlView
   readonly connected: boolean
+  readonly commands: readonly CommandDescriptor[]
   readonly error?: string
   readonly acknowledgement?: { readonly text: string }
   readonly perform: (
@@ -74,6 +76,7 @@ export function useMissionControlRuntime(): MissionControlRuntime {
 
   return {
     view: envelope?.view,
+    commands: envelope?.commands ?? [],
     connected,
     error,
     acknowledgement,

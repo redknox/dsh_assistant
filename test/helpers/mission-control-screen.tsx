@@ -41,6 +41,7 @@ export function MissionControlScreen(props: LegacyMissionControlScreenProps) {
       conversation={{
         sending: props.sending ?? false,
         draft: props.draft ?? '',
+        commands: [],
         dispatch() {},
       }}
       governance={{

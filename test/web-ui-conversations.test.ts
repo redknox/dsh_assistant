@@ -51,6 +51,43 @@ describe('Web UI conversations', () => {
     })
   })
 
+  it('discovers and executes slash commands without sending them to the model', async () => {
+    let sends = 0
+    const commands = [{ name: 'compact', description: 'Compact older session history.' }]
+    const base = context({
+      sendMessage: () => { sends += 1 },
+      listCommands: () => commands,
+      executeCommand: async (line) => line === '/compact'
+        ? { result: { kind: 'success', text: 'Compacted 12 history items.' } }
+        : undefined,
+    })
+    const discovered = await handleWebUiConversationRequest({
+      method: 'GET',
+      pathname: '/api/commands',
+      readJson: async () => ({}),
+    }, base)
+    assert.deepEqual(discovered, { status: 200, body: { commands } })
+
+    const executed = await handleWebUiConversationRequest(request('/api/message', {
+      text: '/compact',
+      sessionId: 'current',
+    }), base)
+    assert.equal(executed?.status, 200)
+    assert.equal(executed?.broadcast, true)
+    assert.deepEqual((executed?.body as { acknowledgement?: unknown }).acknowledgement, {
+      text: 'Compacted 12 history items.',
+    })
+    assert.equal(sends, 0)
+
+    const unknown = await handleWebUiConversationRequest(request('/api/message', {
+      text: '/missing',
+      sessionId: 'current',
+    }), base)
+    assert.equal(unknown?.status, 404)
+    assert.deepEqual(unknown?.body, { error: 'unknown-command', detail: 'Unknown command: /missing' })
+    assert.equal(sends, 0)
+  })
+
   it('trims and submits a message to the current session', async () => {
     const sent: string[] = []
     const previews: string[] = []

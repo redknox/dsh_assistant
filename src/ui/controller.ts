@@ -1,4 +1,5 @@
 import type { Context } from '@deepseek-ai/cordis'
+import type { CommandDescriptor, CommandExecution } from '@deepseek-ai/dsh-commands'
 import type { FileReferenceCandidate } from '@deepseek-ai/dsh-file-reference'
 import { createUserMessage } from '@deepseek-ai/dsh-llm'
 import { SessionId } from '@deepseek-ai/dsh-session'
@@ -102,6 +103,18 @@ export class AssistantControlSurface {
       source: { kind: 'user' },
     })
     agent.followup(message)
+  }
+
+  listCommands(): readonly CommandDescriptor[] {
+    const commands = this.ctx.get('commands')
+    const agent = this.findAgent()
+    return commands && agent ? commands.list(agent) : []
+  }
+
+  executeCommand(line: string, signal: AbortSignal): Promise<CommandExecution | undefined> {
+    const commands = this.ctx.get('commands')
+    if (!commands) throw new Error('slash commands are unavailable')
+    return commands.execute(this.requireAgent(), line, [], signal)
   }
 
   controlGoal(action: 'pause' | 'resume', id: string, revision: number) {
@@ -244,9 +257,13 @@ export class AssistantControlSurface {
   }
 
   private requireAgent() {
-    const agent = this.ctx.agents.get(SessionId(this.sessionId))
+    const agent = this.findAgent()
     if (!agent) throw new Error(`no live agent for session ${this.sessionId}`)
     return agent
+  }
+
+  private findAgent() {
+    return this.ctx.agents.get(SessionId(this.sessionId))
   }
 }
 

@@ -1,4 +1,5 @@
 import { useRef, useState } from 'react'
+import type { CommandDescriptor } from '@deepseek-ai/dsh-commands'
 import { runConversation, sendMessage } from './api'
 import type { MissionControlRuntime } from './useMissionControlRuntime'
 
@@ -16,31 +17,38 @@ export type ConversationEvent =
 export interface ConversationControl {
   readonly draft: string
   readonly sending: boolean
+  readonly executingCommand?: string
+  readonly commands: readonly CommandDescriptor[]
   readonly dispatch: (event: ConversationEvent) => void
 }
 
 export function useConversationControl(
-  runtime: Pick<MissionControlRuntime, 'view' | 'perform'>,
+  runtime: Pick<MissionControlRuntime, 'view' | 'commands' | 'perform'>,
 ): ConversationControl {
   const [draft, setDraft] = useState('')
   const [sending, setSending] = useState(false)
+  const [executingCommand, setExecutingCommand] = useState<string>()
   const sendLocked = useRef(false)
 
   const send = async () => {
     const text = draft.trim()
     if (sendLocked.current || text === '') return
+    const commandLine = text.startsWith('/') ? text : undefined
     sendLocked.current = true
     setSending(true)
+    setExecutingCommand(commandLine)
+    if (commandLine) setDraft((current) => current.trim() === text ? '' : current)
     try {
       const next = await runtime.perform(() => {
         const sessionId = runtime.view?.runtimeContext?.sessionId ?? runtime.view?.sessions?.currentSessionId
         if (!sessionId) throw new Error('current session is unknown')
         return sendMessage(text, sessionId)
       }, 'send failed')
-      if (next) setDraft((current) => current.trim() === text ? '' : current)
+      if (next && !commandLine) setDraft((current) => current.trim() === text ? '' : current)
     } finally {
       sendLocked.current = false
       setSending(false)
+      setExecutingCommand(undefined)
     }
   }
 
@@ -67,6 +75,8 @@ export function useConversationControl(
   return {
     draft,
     sending,
+    executingCommand,
+    commands: runtime.commands,
     dispatch: (event) => {
       if (event.action === 'draft') {
         setDraft(event.value)

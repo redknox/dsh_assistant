@@ -2,6 +2,8 @@ import { Context } from '@deepseek-ai/cordis'
 import AgentRegistry, { type AgentOptions } from '@deepseek-ai/dsh-agent'
 import AgentDefaultModel from '@deepseek-ai/dsh-agent-default-model'
 import AgentLoop from '@deepseek-ai/dsh-agent-loop'
+import * as CommandCompact from '@deepseek-ai/dsh-command-compact'
+import CommandRuntime from '@deepseek-ai/dsh-commands'
 import InvariantRegistry from '@deepseek-ai/dsh-invariants'
 import LocalJobRegistry from '@deepseek-ai/dsh-jobs-local'
 import * as ToolJobs from '@deepseek-ai/dsh-tool-jobs'
@@ -105,6 +107,7 @@ async function bootStack(options: BootOptions = {}): Promise<AssistantControl> {
   await ctx.plugin(AgentDefaultModel, { provider: DEFAULT_LLM_PROVIDER, model: DEFAULT_LLM_MODEL })
   await ctx.plugin(SystemPrompt, {})
   await ctx.plugin(ToolRuntime)
+  if (!safeMode) await ctx.plugin(CommandRuntime)
   if (!safeMode) {
     await ctx.plugin(ToolTimeoutPolicy)
     await ctx.plugin(WebRuntime, { searchProvider: 'deepseek' })
@@ -121,6 +124,7 @@ async function bootStack(options: BootOptions = {}): Promise<AssistantControl> {
     ...(options.home ? { spillRoot: productHomeLayout(options.home).spill } : {}),
     checkpoints: options.sessionRoot !== undefined,
   })
+  if (!safeMode) await ctx.plugin(CommandCompact)
   if (!safeMode) await mountSessionIntelligence(ctx, options.home ? { home: options.home } : {})
   if (!safeMode) await mountAgentTaskControl(ctx)
   await ctx.plugin(SkillRegistry)

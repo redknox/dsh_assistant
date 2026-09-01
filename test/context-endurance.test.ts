@@ -15,13 +15,17 @@ import { AssistantControlSurface } from '../src/ui/controller.js'
 describe('Context Endurance', () => {
   it('mounts native token metering, projections, pruning, and automatic compaction together', async () => {
     const control = await bootAssistantControl()
+    const handle = await createAssistantAgent(control.ctx, 'command-discovery')
     try {
       assert.ok(control.ctx.get('sessionProjections'))
       assert.ok(control.ctx.get('tokenMeter'))
       assert.ok(control.ctx.get('toolResultPruner'))
       assert.ok(control.ctx.get('compaction'))
       assert.ok(control.ctx.get('spillStore'))
+      assert.ok(control.ctx.get('commands'))
+      assert.deepEqual(control.ctx.commands.list(handle.agent).map((item) => item.name), ['compact', 'plan'])
     } finally {
+      await handle.dispose()
       await control.ctx.fiber.dispose()
     }
   })
@@ -36,6 +40,7 @@ describe('Context Endurance', () => {
       assert.equal(control.ctx.get('toolResultPruner'), undefined)
       assert.equal(control.ctx.get('compaction'), undefined)
       assert.equal(control.ctx.get('spillStore'), undefined)
+      assert.equal(control.ctx.get('commands'), undefined)
       assert.equal(inspectContextEndurance(control.ctx, undefined), undefined)
     } finally {
       await control.ctx.fiber.dispose()
@@ -169,6 +174,43 @@ describe('Context Endurance', () => {
       const view = new AssistantControlSurface(control.ctx, 'context-endurance').workspace()
       assert.equal(view.contextEndurance?.compaction, 'automatic')
       assert.equal(view.contextEndurance?.status, 'ready')
+    } finally {
+      await handle.dispose()
+      await control.ctx.fiber.dispose()
+    }
+  })
+
+  it('executes /compact through the native human-command seam without a model turn', async () => {
+    const control = await bootAssistantControl()
+    const adapter = new FakeReplyAdapter('command compact summary')
+    control.ctx.llm.registerAdapter(['command-compact-fake'], adapter)
+    const handle = await createAssistantAgent(control.ctx, 'command-compact-owner', { provider: 'command-compact-fake', model: 'fake' })
+    const surface = new AssistantControlSurface(control.ctx, 'command-compact-owner')
+    try {
+      for (let index = 0; index < 4; index += 1) {
+        handle.agent.followup(createUserMessage({
+          content: [{ type: 'text', text: `Command turn ${index}: ${'history '.repeat(500)}` }],
+          source: { kind: 'user' },
+        }))
+        await handle.agent.whenIdle()
+      }
+      const before = inspectContextEndurance(control.ctx, handle.agent.session)?.measuredTokens ?? 0
+      const execution = await surface.executeCommand('/compact', new AbortController().signal)
+      assert.equal(execution?.result.kind, 'success')
+      assert.match(execution?.result.text ?? '', /Compacted/)
+      const after = inspectContextEndurance(control.ctx, handle.agent.session)?.measuredTokens ?? Infinity
+      assert.ok(after < before)
+
+      const run = handle.agent.session.events.find((event) => event.type === 'command/run' && event.data.name === 'compact')
+      const summary = handle.agent.session.events.find((event) => event.type === 'compaction/summary')
+      const done = handle.agent.session.events.find((event) => event.type === 'command/done')
+      assert.ok(run)
+      assert.ok(summary)
+      assert.ok(done)
+      assert.equal(done.data.kind, 'success')
+      assert.equal(done.data.sourceEventSeq, summary.seq)
+      assert.equal(handle.agent.session.events.some((event) => event.type === 'user/message'
+        && event.data.content.some((block) => block.type === 'text' && block.text === '/compact')), false)
     } finally {
       await handle.dispose()
       await control.ctx.fiber.dispose()

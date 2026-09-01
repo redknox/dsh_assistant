@@ -2,6 +2,7 @@ import type { ActivationCard, ApprovalCard, MissionControlView, RollbackCard, Sk
 import type { SettingsSnapshot, SettingsUpdate } from '../../src/product/settings-types'
 import type { ExpenseReviewAvailability, ExpenseReviewInput, ExpenseReviewRecord } from '../../src/domain/expense-review/types'
 import type { FileReferenceCandidate } from '@deepseek-ai/dsh-file-reference'
+import type { CommandDescriptor } from '@deepseek-ai/dsh-commands'
 import type {
   CapabilitySpecificationDiffView,
   CapabilityEvaluationView,
@@ -13,6 +14,7 @@ import type {
 export interface UiEnvelope {
   readonly view: MissionControlView
   readonly webUi: string
+  readonly commands?: readonly CommandDescriptor[]
   readonly acknowledgement?: { readonly text: string }
 }
 

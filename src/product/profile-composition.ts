@@ -133,6 +133,8 @@ export const OFFICIAL_RUNTIME_MOUNTS = Object.freeze([
   { official: 'token-meter', runtime: 'TokenMeter', when: 'ready' },
   { official: 'tool-result-pruner', runtime: 'ToolResultPruner', when: 'ready' },
   { official: 'compaction-basic', runtime: 'BasicCompactionEngine', when: 'ready' },
+  { official: 'commands', runtime: 'CommandRuntime', when: 'ready' },
+  { official: 'command-compact', runtime: 'command-compact', when: 'ready' },
   { official: 'spill-local', runtime: 'LocalSpillStore', when: 'ready' },
   { official: 'spill-policy', runtime: 'spill-policy', when: 'ready' },
   { official: 'session-checkpoint-policy', runtime: 'session-checkpoint-policy', when: 'session-persistence' },

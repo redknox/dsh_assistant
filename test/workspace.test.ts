@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 import { CallId, createAssistantMessage, createToolResultMessage, createUserMessage } from '@deepseek-ai/dsh-llm'
 import { Session, SessionId } from '@deepseek-ai/dsh-session'
+import { CommandId } from '@deepseek-ai/dsh-commands'
 import { PERSONALITY_CORPUS } from '../src/domain/personality/index.js'
 import { googleCalendarReadRiskModel } from '../src/domain/reliability/index.js'
 import type { ResolutionReview } from '../src/domain/resolution/index.js'
@@ -42,6 +43,7 @@ describe('TARS-NG mission-control workspace', () => {
   it('keeps only the final assistant answer in conversation and sends execution detail to the log', () => {
     const session = Session.create(SessionId('workspace-execution-log'))
     const callId = CallId('write-1')
+    const commandId = CommandId('command-1')
     session.append('user/message', createUserMessage({ content: [{ type: 'text', text: 'Build it.' }], source: { kind: 'user' } }), { surfaceOp: 'append' })
     session.append('assistant/message', {
       turn: 1,
@@ -59,16 +61,21 @@ describe('TARS-NG mission-control workspace', () => {
       step: 2,
       message: createAssistantMessage({ content: [{ type: 'text', text: 'Candidate implementation is complete.' }], source: { provider: 'test', model: 'test' } }),
     }, { surfaceOp: 'append' })
+    session.append('command/run', { commandId, name: 'compact', source: { kind: 'user' } })
+    session.append('command/done', { commandId, kind: 'success', text: 'Compacted 8 history items.' })
 
     assert.deepEqual(conversationWithoutReasoning(session.events), [
       { kind: 'user', text: 'Build it.' },
       { kind: 'assistant', text: 'Candidate implementation is complete.' },
     ])
     const log = executionLogFromSession(session.events)
-    assert.deepEqual(log.map((entry) => entry.kind), ['agent-note', 'tool-call', 'tool-result'])
+    assert.deepEqual(log.map((entry) => entry.kind), ['agent-note', 'tool-call', 'tool-result', 'command-run', 'command-result'])
     assert.equal(log[1]?.label, 'write_candidate_file')
     assert.match(log[1]?.detail ?? '', /src\/plugin\.js/)
     assert.match(log[2]?.detail ?? '', /developing/)
+    assert.equal(log[3]?.label, '/compact')
+    assert.equal(log[4]?.label, '/compact')
+    assert.match(log[4]?.detail ?? '', /Compacted 8/)
   })
 
   it('A. shows today context and a concise objective without fake progress', () => {
