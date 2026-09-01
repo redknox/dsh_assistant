@@ -437,6 +437,10 @@ describe('TARS-NG mission-control workspace', () => {
     assert.deepEqual(card.capabilitiesChanged, ['obsidian.read'])
     assert.deepEqual(card.permissionsChanged, ['files.read'])
     assert.deepEqual(card.toolsChanged, ['obsidian_read'])
+    assert.equal(card.release?.stage, 'ready')
+    assert.match(card.release?.request ?? '', /Put Obsidian Vault online/)
+    assert.match(card.release?.reason ?? '', /separate trusted action/)
+    assert.match(card.release?.scope ?? '', /isolated runtime.*reversible/)
     assert.match(card.details.join('\n'), /~obsidian\.read/)
     assert.match(card.details.join('\n'), /~obsidian_read/)
     assert.match(card.details.join('\n'), /~files\.read/)
@@ -514,6 +518,7 @@ describe('TARS-NG mission-control workspace', () => {
     }))
     assert.equal(conflict.activations[0]?.status, 'APPROVED_NOT_ACTIVE')
     assert.equal(conflict.activations[0]?.eligibilityOk, false)
+    assert.equal(conflict.activations[0]?.release?.stage, 'blocked')
 
     const safeMode = projectMissionControl(snapshot({
       safeMode: true,
@@ -539,6 +544,7 @@ describe('TARS-NG mission-control workspace', () => {
     assert.equal(card.status, 'APPROVED_NOT_ACTIVE')
     assert.equal(card.eligibilityOk, false)
     assert.deepEqual(card.eligibilityDenials, ['safe-mode'])
+    assert.equal(card.release?.stage, 'blocked')
   })
 
   it('G5. READY-state user plugins project a trash uninstall action', () => {

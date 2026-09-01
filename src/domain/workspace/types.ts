@@ -192,6 +192,14 @@ export interface ActivationCard {
   readonly eligibilityDenials: readonly string[]
   readonly status: ExtensionLifecycleState
   readonly details: readonly string[]
+  readonly release?: {
+    readonly request: string
+    readonly stage: 'ready' | 'reactivate' | 'retry' | 'working' | 'blocked'
+    readonly reason: string
+    readonly outcome: string
+    readonly scope: string
+    readonly facts: readonly { readonly label: string; readonly value: string }[]
+  }
 }
 
 export interface UserCapabilityView {

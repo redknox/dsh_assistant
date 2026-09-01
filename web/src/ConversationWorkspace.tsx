@@ -120,26 +120,44 @@ function ActivationCardView(props: {
 }) {
   const { card } = props
   const actionable = (card.status === 'APPROVED_NOT_ACTIVE' || card.status === 'DISABLED_REACTIVATABLE' || card.status === 'ACTIVATION_FAILED') && card.eligibilityOk
+  const release = card.release ?? fallbackRelease(card)
   return (
-    <article className="approval-card" data-activation-id={card.id} data-kind={card.kind} data-fingerprint={card.fingerprint} data-candidate-id={card.candidateId} data-digest={card.digest} data-activation-status={card.status} aria-labelledby={`activation-title-${card.id}`}>
+    <article className="approval-card activation-decision-card" data-activation-id={card.id} data-kind={card.kind} data-release-stage={release.stage} data-fingerprint={card.fingerprint} data-candidate-id={card.candidateId} data-digest={card.digest} data-activation-status={card.status} aria-labelledby={`activation-title-${card.id}`}>
       <header className="approval-header">
         <Glyph name="shield" className="glyph approval-symbol" />
-        <h2 id={`activation-title-${card.id}`}>{card.title}</h2>
+        <div>
+          <p className="approval-kicker">RELEASE CONTROL · SEPARATE TRUSTED STEP</p>
+          <h2 id={`activation-title-${card.id}`}>{release.request}</h2>
+        </div>
+        <span className="activation-stage-badge">{releaseStageLabel(release.stage)}</span>
       </header>
-      <dl className="approval-facts">
-        <div><dt>OWNER</dt><dd>{card.owner}@{card.version}</dd></div>
-        <div><dt>CANDIDATE</dt><dd>{card.candidateId}</dd></div>
-        <div><dt>DIGEST</dt><dd>{card.digest}</dd></div>
-        <div><dt>FINGERPRINT</dt><dd>{card.fingerprint}</dd></div>
-        {card.runtimeContractVersion ? <div><dt>CONTRACT</dt><dd>{card.runtimeContractVersion}</dd></div> : null}
-        <div><dt>RUNTIME</dt><dd>Isolated runner only</dd></div>
-        <div><dt>STATUS</dt><dd>{card.status}</dd></div>
-        <div><dt>CAPABILITIES</dt><dd>{formatDiff(card.capabilitiesAdded, card.capabilitiesRemoved, card.capabilitiesChanged)}</dd></div>
-        <div><dt>TOOLS</dt><dd>{formatDiff(card.toolsAdded, card.toolsRemoved, card.toolsChanged)}</dd></div>
-        <div><dt>WORKFLOWS</dt><dd>{formatDiff(card.workflowsAdded ?? [], card.workflowsRemoved ?? [], card.workflowsChanged ?? [])}</dd></div>
-        <div><dt>PERMISSIONS</dt><dd>{formatDiff(card.permissionsAdded, card.permissionsRemoved, card.permissionsChanged)}</dd></div>
-        {card.details.map((line) => <div key={line}><dt>DETAIL</dt><dd>{line}</dd></div>)}
+      <div className="approval-explanation activation-explanation">
+        <section><strong>WHY THIS IS A SEPARATE STEP</strong><p>{release.reason}</p></section>
+        <section><strong>IF YOU ACTIVATE</strong><p>{release.outcome}</p></section>
+      </div>
+      <dl className="approval-facts approval-facts--decision activation-release-facts">
+        {release.facts.map((fact) => <div key={fact.label}><dt>{fact.label}</dt><dd>{fact.value}</dd></div>)}
       </dl>
+      <p className="approval-scope activation-scope"><Glyph name="shield" /><span><strong>RELEASE SCOPE</strong>{release.scope}</span></p>
+      {!card.eligibilityOk ? (
+        <section className="activation-blockers" role="status">
+          <strong>ACTIVATION IS CURRENTLY BLOCKED</strong>
+          <ul>{card.eligibilityDenials.map((reason) => <li key={reason}>{eligibilityMessage(reason)}</li>)}</ul>
+        </section>
+      ) : null}
+      <details className="approval-technical">
+        <summary>TECHNICAL DETAILS</summary>
+        <dl className="approval-facts approval-facts--technical">
+          <div><dt>OWNER</dt><dd>{card.owner}@{card.version}</dd></div>
+          <div><dt>CANDIDATE</dt><dd>{card.candidateId}</dd></div>
+          <div><dt>DIGEST</dt><dd>{card.digest}</dd></div>
+          <div><dt>FINGERPRINT</dt><dd>{card.fingerprint}</dd></div>
+          {card.runtimeContractVersion ? <div><dt>CONTRACT</dt><dd>{card.runtimeContractVersion}</dd></div> : null}
+          <div><dt>RUNTIME</dt><dd>Isolated runner only</dd></div>
+          <div><dt>STATUS</dt><dd>{card.status}</dd></div>
+          {card.details.map((line, index) => <div key={`${line}:${index}`}><dt>RAW DETAIL</dt><dd>{line}</dd></div>)}
+        </dl>
+      </details>
       {actionable ? (
         <div className="approval-actions">
           <button type="button" className="button button--secondary" data-activation-action="defer" disabled={props.locked} onClick={() => props.actions.deferActivation(card)}>NOT NOW</button>
@@ -157,6 +175,42 @@ function ActivationCardView(props: {
       ) : <p className="approval-status">Status {card.status}</p>}
     </article>
   )
+}
+
+function fallbackRelease(card: ActivationCard): NonNullable<ActivationCard['release']> {
+  return {
+    request: card.title,
+    stage: !card.eligibilityOk ? 'blocked' : card.status === 'DISABLED_REACTIVATABLE' ? 'reactivate' : card.status === 'ACTIVATION_FAILED' ? 'retry' : card.status === 'ACTIVATING' ? 'working' : 'ready',
+    reason: 'Approval and activation are separate trusted decisions.',
+    outcome: 'The exact isolated revision will become live.',
+    scope: `${card.owner}@${card.version} · isolated runtime · exact digest`,
+    facts: [
+      { label: 'CAPABILITIES', value: formatDiff(card.capabilitiesAdded, card.capabilitiesRemoved, card.capabilitiesChanged) },
+      { label: 'TOOLS', value: formatDiff(card.toolsAdded, card.toolsRemoved, card.toolsChanged) },
+      { label: 'WORKFLOWS', value: formatDiff(card.workflowsAdded ?? [], card.workflowsRemoved ?? [], card.workflowsChanged ?? []) },
+      { label: 'PERMISSIONS', value: formatDiff(card.permissionsAdded, card.permissionsRemoved, card.permissionsChanged) },
+    ],
+  }
+}
+
+function releaseStageLabel(stage: NonNullable<ActivationCard['release']>['stage']): string {
+  if (stage === 'ready') return 'READY TO ACTIVATE'
+  if (stage === 'reactivate') return 'READY TO RETURN'
+  if (stage === 'retry') return 'RETRY AVAILABLE'
+  if (stage === 'working') return 'ACTIVATING'
+  return 'BLOCKED'
+}
+
+function eligibilityMessage(reason: string): string {
+  const labels: Record<string, string> = {
+    'safe-mode': 'Exit Safe Mode after resolving recovery requirements.',
+    'digest-mismatch': 'The sealed artifact no longer matches the approved digest.',
+    'ownership-conflict': 'Another active owner conflicts with this capability.',
+    'host-owned-owner-not-replaceable': 'This host-owned capability cannot be replaced by an isolated revision.',
+    'isolated-runtime-forbids-services-or-providers': 'The isolated runtime cannot publish host services or providers.',
+    'host-product-change-required': 'This change must be implemented in the host product instead.',
+  }
+  return labels[reason] ?? reason.replaceAll('-', ' ')
 }
 
 export function ConversationWorkspace(props: {

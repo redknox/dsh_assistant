@@ -2634,6 +2634,18 @@ export function apply(ctx) {
           eligibilityDenials: [],
           status: 'APPROVED_NOT_ACTIVE',
           details: ['Approval did not activate this candidate.'],
+          release: {
+            request: 'Put Search online',
+            stage: 'ready',
+            reason: 'Review and approval are complete, but release remains separate.',
+            outcome: 'The Search capability and web_search tool will become live.',
+            scope: 'generated/search@0.1.0 · isolated runtime · exact digest · reversible',
+            facts: [
+              { label: 'CAPABILITIES', value: '~search' },
+              { label: 'TOOLS', value: '~web_search' },
+              { label: 'PERMISSIONS', value: 'none' },
+            ],
+          },
         }],
       }),
       connected: true,
@@ -2650,6 +2662,10 @@ export function apply(ctx) {
     assert.match(activation, /data-activation-action="defer"/)
     assert.match(activation, /~search/)
     assert.match(activation, /~web_search/)
+    assert.match(activation, /WHY THIS IS A SEPARATE STEP/)
+    assert.match(activation, /IF YOU ACTIVATE/)
+    assert.match(activation, /RELEASE SCOPE/)
+    assert.match(activation, /READY TO ACTIVATE/)
     assert.match(activation, /ACTIVATE/)
     assert.match(activation, /NOT NOW/)
     assert.doesNotMatch(activation, /NOT APPROVED/)
