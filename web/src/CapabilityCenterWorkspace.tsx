@@ -3,20 +3,25 @@ import { projectCapabilityPortfolio, type CapabilityPortfolioCard } from '../../
 import type { MissionControlView, SkillProjection, UserPluginView } from '../../src/domain/workspace/types'
 import type { ToolCatalogView } from '../../src/domain/tool-catalog/index'
 import type { WorkflowCatalogView } from '../../src/domain/workflow-catalog/index'
+import type { WorkbenchSnapshotView } from '../../src/product/web-ui-workbench-types'
 import { Glyph } from './icons'
 import type { WorkspacePane } from './WorkspaceNavigation'
+import { projectCapabilityHistory, type CapabilityDeliveryHistory } from './capabilityHistory'
 
 export function CapabilityCenterWorkspace(props: {
   readonly view: Pick<MissionControlView, 'extensions' | 'plugins' | 'skills'>
   readonly focusCapabilityId?: string
   readonly tools?: ToolCatalogView
   readonly workflows?: WorkflowCatalogView
+  readonly workbench?: WorkbenchSnapshotView
   readonly locked: boolean
   readonly confirmingUnplug?: string
   readonly armedSkill?: string
   readonly skillDependents?: { readonly id: string; readonly dependents: readonly string[] }
   readonly navigate: (pane: WorkspacePane) => void
   readonly defineCapability: () => void
+  readonly openConversation?: (id: string) => void
+  readonly openDelivery?: (id: string) => void
   readonly askUnplug?: (plugin: UserPluginView) => void
   readonly cancelUnplug?: () => void
   readonly confirmUnplug?: (plugin: UserPluginView) => void
@@ -70,6 +75,7 @@ export function CapabilityCenterWorkspace(props: {
           const pane = implementationPane(card)
           const skill = card.unplug?.kind === 'skill' ? card.unplug.skill : undefined
           const plugin = card.unplug?.kind === 'plugin' ? card.unplug.plugin : undefined
+          const history = projectCapabilityHistory(card, props.workbench)
           const confirming = (plugin !== undefined && plugin.id === props.confirmingUnplug)
             || (skill !== undefined && (props.armedSkill === `disable:${skill.id}` || props.skillDependents?.id === skill.id))
           return (
@@ -81,8 +87,11 @@ export function CapabilityCenterWorkspace(props: {
             cardRef={props.focusCapabilityId === card.id ? focusedCard : undefined}
             locked={props.locked}
             confirming={confirming}
+            history={history}
             toggle={() => setOpenCard(openCard === card.id ? undefined : card.id)}
             manage={pane ? () => props.navigate(pane) : undefined}
+            openConversation={history?.originSessionId ? () => props.openConversation?.(history.originSessionId!) : undefined}
+            openDelivery={history ? () => props.openDelivery?.(history.specificationId) : undefined}
             askUnplug={() => plugin ? props.askUnplug?.(plugin) : skill ? props.skillAction?.('disable', skill) : undefined}
             cancelUnplug={() => plugin ? props.cancelUnplug?.() : skill ? props.skillAction?.('cancel-disable', skill) : undefined}
             confirmUnplug={() => plugin ? props.confirmUnplug?.(plugin) : skill ? props.skillAction?.('disable', skill) : undefined}
@@ -120,8 +129,11 @@ function CapabilityCard(props: {
   readonly cardRef?: React.RefObject<HTMLElement | null>
   readonly locked: boolean
   readonly confirming: boolean
+  readonly history?: CapabilityDeliveryHistory
   readonly toggle: () => void
   readonly manage?: () => void
+  readonly openConversation?: () => void
+  readonly openDelivery?: () => void
   readonly askUnplug: () => void
   readonly cancelUnplug?: () => void
   readonly confirmUnplug: () => void
@@ -153,6 +165,7 @@ function CapabilityCard(props: {
             <div data-dependency-severity={card.dependency.severity}><strong>IF YOU UNPLUG IT</strong><p>{unplugImpact(card)}</p></div>
             {card.dependency.dependents.length > 0 ? <div><strong>AFFECTED CAPABILITIES</strong><ul>{card.dependency.dependents.map((item) => <li key={item}>{item}</li>)}</ul></div> : null}
           </section>
+          {props.history ? <DeliveryHistory history={props.history} openConversation={props.openConversation} openDelivery={props.openDelivery} /> : null}
           <details className="capability-technical-details">
             <summary>IMPLEMENTATION &amp; GOVERNANCE <span>Technical record</span></summary>
             <div>
@@ -179,6 +192,26 @@ function CapabilityCard(props: {
         </div>
       ) : null}
     </article>
+  )
+}
+
+function DeliveryHistory(props: {
+  readonly history: CapabilityDeliveryHistory
+  readonly openConversation?: () => void
+  readonly openDelivery?: () => void
+}) {
+  const { history } = props
+  return (
+    <section className="capability-delivery-history" aria-label="Capability development history">
+      <header><strong>DEVELOPMENT HISTORY</strong><span>REV {history.revision}</span></header>
+      <p>{history.goal}</p>
+      {history.plan ? <p><b>SELECTED PATH</b>{history.plan.recommendation || history.plan.kind.replaceAll('-', ' ')}</p> : null}
+      <ol>{history.milestones.map((item, index) => <li key={item}><span>{String(index + 1).padStart(2, '0')}</span>{item}</li>)}</ol>
+      <div>
+        {props.openConversation ? <button type="button" className="button button--secondary" onClick={props.openConversation}>OPEN ORIGINAL CONVERSATION</button> : null}
+        {props.openDelivery ? <button type="button" className="button button--secondary" onClick={props.openDelivery}>VIEW DELIVERY RECORD</button> : null}
+      </div>
+    </section>
   )
 }
 

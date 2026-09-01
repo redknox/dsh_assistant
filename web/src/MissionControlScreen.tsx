@@ -184,11 +184,20 @@ export function MissionControlScreen(input: MissionControlScreenProps) {
             focusCapabilityId={focusedCapability}
             tools={input.runtime.toolCatalog}
             workflows={input.runtime.workflowCatalog}
+            workbench={input.specifications.snapshot}
             locked={locked}
             confirmingUnplug={props.confirmingUnplug}
             armedSkill={props.armedSkill}
             skillDependents={props.skillDependents}
             navigate={navigate}
+            openConversation={(id) => {
+              props.onSwitchConversation?.(id)
+              navigate('today')
+            }}
+            openDelivery={(id) => {
+              input.specifications.select(id)
+              navigate('specifications')
+            }}
             defineCapability={() => requestCapability()}
             askUnplug={props.onAskUnplug}
             cancelUnplug={props.onCancelUnplug}

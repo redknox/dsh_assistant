@@ -9,9 +9,11 @@ describe('Capability Center workspace', () => {
   it('maps existing capability standards into one user-facing entry point', () => {
     const markup = renderToStaticMarkup(createElement(CapabilityCenterWorkspace, {
       locked: false,
-      focusCapabilityId: 'skill:skill-1',
+      focusCapabilityId: 'extension:generated/review@0.1.0',
       navigate() {},
       defineCapability() {},
+      openConversation() {},
+      openDelivery() {},
       askUnplug() {},
       cancelUnplug() {},
       confirmUnplug() {},
@@ -64,6 +66,12 @@ describe('Capability Center workspace', () => {
           name: 'internal-boot', title: 'Internal Boot Workflow', description: 'Host plumbing.', owner: 'managed/runtime', version: '0.4.0', provenance: 'managed', governance: 'host-managed', engine: 'dsh-workflow', runtime: 'isolated-process', lifecycle: 'active', intent: 'read', phases: [], inputFields: [], maxTotalAgents: 1,
         }],
       },
+      workbench: {
+        mutable: true,
+        specifications: [{ id: 'spec-review', revision: 1, capability: 'review.read', goal: 'Review material independently.', status: 'ready', digest: 'spec-digest', source: 'explicit', originSessionId: 'review-chat' }],
+        plans: [{ planId: 'plan-review', specificationId: 'spec-review', specificationDigest: 'spec-digest', kind: 'new-plugin', capability: 'review.read', need: 'Review material independently.', canCreate: true, recommendation: 'Create a governed review extension.' }],
+        candidates: [{ id: 'ext-1', owner: 'generated/review', version: '0.1.0', states: ['sealed', 'active'], step: 'active', planId: 'plan-review', specificationId: 'spec-review', leftover: false }],
+      },
     }))
 
     assert.match(markup, /CAPABILITY CENTER/)
@@ -76,7 +84,7 @@ describe('Capability Center workspace', () => {
     assert.match(markup, /SKILL/)
     assert.match(markup, /UNPLUG/)
     assert.match(markup, /HOW TO USE/)
-    assert.match(markup, /Safe to unplug/)
+    assert.match(markup, /optional dependents will continue with reduced functionality/)
     assert.match(markup, /IMPLEMENTATION &amp; GOVERNANCE/)
     assert.match(markup, /DELIVERY EVIDENCE/)
     assert.match(markup, /VALIDATED · INDEPENDENT REVIEW COMPLETE · HUMAN APPROVED · ACTIVE/)
@@ -86,8 +94,12 @@ describe('Capability Center workspace', () => {
     assert.match(markup, /CAPABILITY IS THE PRODUCT OBJECT/)
     assert.match(markup, /DESCRIBE WHAT YOU NEED/)
     assert.match(markup, /INSTALLED/)
-    assert.match(markup, /data-capability-id="skill:skill-1"[^>]*data-capability-focus="target"/)
-    assert.match(markup, /data-capability-id="skill:skill-1"[\s\S]*DELIVERY EVIDENCE/)
+    assert.match(markup, /data-capability-id="extension:generated\/review@0.1.0"[^>]*data-capability-focus="target"/)
+    assert.match(markup, /data-capability-id="extension:generated\/review@0.1.0"[\s\S]*DELIVERY EVIDENCE/)
+    assert.match(markup, /DEVELOPMENT HISTORY/)
+    assert.match(markup, /OPEN ORIGINAL CONVERSATION/)
+    assert.match(markup, /VIEW DELIVERY RECORD/)
+    assert.match(markup, /Create a governed review extension/)
     assert.doesNotMatch(markup, /capability-unplug-dialog/)
   })
 

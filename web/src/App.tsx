@@ -21,7 +21,7 @@ export function App() {
   const workspace = useWorkspaceControl(runtime, conversation)
   const [pane, setPane] = useState<WorkspacePane>(() => workspacePaneFromHash(globalThis.location?.hash))
   const settings = useSettingsControl(pane === 'settings')
-  const specifications = useCapabilitySpecifications(pane === 'specifications')
+  const specifications = useCapabilitySpecifications(pane === 'specifications' || pane === 'capabilities')
   const expenseReview = useExpenseReview(pane === 'expense-review')
 
   useEffect(() => {

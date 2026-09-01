@@ -1733,6 +1733,17 @@ button.nav-item::after { content: "›"; color: #7f857f; font: 500 22px/1 var(--
 .capability-technical-details > div > div { display: grid; grid-template-columns: 105px minmax(0, 1fr); gap: 9px; padding: 7px 9px; border-top: 1px solid #aca08e; }
 .capability-technical-details strong { font: 750 7px/1.25 var(--font-instrument); letter-spacing: .08em; }
 .capability-technical-details span { overflow-wrap: anywhere; color: #514b42; font: 8px/1.35 var(--font-mono); }
+.capability-delivery-history { padding: 10px; border: 1px solid #857a68; background: #d6cbb8; }
+.capability-delivery-history > header { display: flex; justify-content: space-between; gap: 8px; }
+.capability-delivery-history > header strong, .capability-delivery-history b { color: #67481f; font: 750 8px/1.2 var(--font-instrument); letter-spacing: .08em; }
+.capability-delivery-history > header span { font: 8px/1.2 var(--font-mono); }
+.capability-delivery-history > p { margin: 7px 0 0; color: #484239; font-size: 10px; line-height: 1.45; }
+.capability-delivery-history > p b { display: block; margin-bottom: 3px; }
+.capability-delivery-history ol { display: flex; flex-wrap: wrap; gap: 5px; margin: 9px 0; padding: 0; list-style: none; }
+.capability-delivery-history li { padding: 4px 6px; border: 1px solid #837764; background: #e6dccb; font: 700 7px/1.2 var(--font-instrument); letter-spacing: .05em; }
+.capability-delivery-history li span { margin-right: 4px; color: #8a5a1f; font-family: var(--font-mono); }
+.capability-delivery-history > div { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+.capability-delivery-history > div .button:only-child { grid-column: 1 / -1; }
 .capability-open-implementation { padding: 8px 9px; border: 0; background: transparent; color: #66441f; text-align: right; font: 750 8px/1 var(--font-instrument); cursor: pointer; }
 .capability-unplug-dialog { margin-top: 11px; padding: 10px; border: 2px solid #8b6230; background: #ead7b8; }
 .capability-unplug-dialog h3 { margin: 0 0 6px; font: 750 11px/1 var(--font-instrument); letter-spacing: .07em; }
