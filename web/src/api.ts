@@ -305,6 +305,24 @@ export async function uninstallPlugin(plugin: UserPluginView, confirm: boolean):
   }))
 }
 
+export async function disablePlugin(plugin: UserPluginView, confirm: boolean): Promise<UiEnvelope> {
+  return parseEnvelope(await fetch('/api/disable', {
+    ...include,
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({
+      id: plugin.id,
+      owner: plugin.owner,
+      version: plugin.version,
+      registryGeneration: plugin.registryGeneration,
+      confirm,
+      acknowledgeDependents: plugin.dependency.severity === 'optional',
+      ...(plugin.candidateId ? { candidateId: plugin.candidateId } : {}),
+      ...(plugin.digest ? { digest: plugin.digest } : {}),
+    }),
+  }))
+}
+
 export async function rollbackSystemState(card: RollbackCard, confirm: boolean): Promise<UiEnvelope> {
   return parseEnvelope(await fetch('/api/rollback', {
     ...include,

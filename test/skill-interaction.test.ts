@@ -65,6 +65,14 @@ describe('Skill interaction state', () => {
     })
   })
 
+  it('cancels an armed capability-card unplug without emitting a command', () => {
+    const armed = requestSkillInteraction(EMPTY_SKILL_INTERACTION, 'disable', skill())
+    const cancelled = requestSkillInteraction(armed.state, 'cancel-disable', skill())
+    assert.equal(cancelled.command, undefined)
+    assert.equal(cancelled.state.armedSkill, undefined)
+    assert.equal(cancelled.state.dependents, undefined)
+  })
+
   it('re-arms a denied destructive action with the exact dependent set', () => {
     const target = skill()
     const armed = requestSkillInteraction(EMPTY_SKILL_INTERACTION, 'disable', target)

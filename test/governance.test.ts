@@ -10,6 +10,7 @@ import ToolRuntime from '@deepseek-ai/dsh-tools'
 import { CandidateService } from '../src/domain/candidate/index.js'
 import {
   ActivationDeniedError,
+  DisableDeniedError,
   GovernanceAuthorityError,
   GovernanceContractError,
   InMemoryActivationRuntime,
@@ -548,12 +549,22 @@ describe('extension governance and recovery', () => {
       root.recordApproval(human, { candidateId: item.id, fingerprint, decision: 'approved-for-exact-diff' })
       await root.activate(item.id, human)
     }
+    await assert.rejects(() => root.disable(human, 'generated/text-slugify', '0.1.0'), (error: unknown) => {
+      assert.ok(error instanceof DisableDeniedError)
+      assert.ok(error.denials.some((item) => item.reason === 'dependency-blocked'))
+      return true
+    })
     await assert.rejects(() => root.uninstall(human, 'generated/text-slugify', '0.1.0'), (error: unknown) => {
       assert.ok(error instanceof UninstallDeniedError)
       assert.ok(error.denials.some((item) => item.reason === 'dependency-blocked'))
       return true
     })
     await root.uninstall(human, 'generated/other-dep', '0.1.0')
+    await assert.rejects(() => root.disable(human, 'generated/text-slugify', '0.1.0'), (error: unknown) => {
+      assert.ok(error instanceof DisableDeniedError)
+      assert.ok(error.denials.some((item) => item.reason === 'optional-dependents'))
+      return true
+    })
     await assert.rejects(() => root.uninstall(human, 'generated/text-slugify', '0.1.0'), (error: unknown) => {
       assert.ok(error instanceof UninstallDeniedError)
       assert.ok(error.denials.some((item) => item.reason === 'optional-dependents'))

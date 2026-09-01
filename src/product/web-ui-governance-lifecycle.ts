@@ -1,4 +1,4 @@
-import { GovernanceContractError, RollbackDeniedError, UninstallDeniedError } from '../domain/governance/errors.js'
+import { DisableDeniedError, GovernanceContractError, RollbackDeniedError, UninstallDeniedError } from '../domain/governance/errors.js'
 import { SimulatedCrashError } from '../domain/governance/service.js'
 import type { ActivationStatus } from '../domain/governance/types.js'
 import { boundActivationDiagnostics } from '../domain/workspace/failure.js'
@@ -12,6 +12,7 @@ import type { WebUiGovernanceMutations } from './web-ui-governance-mutations.js'
 
 interface GovernanceLifecycleAuthority {
   inspect(): ActivationStatus
+  disable(owner: string, version: string, acknowledgeDependents: boolean): Promise<ActivationStatus>
   uninstall(owner: string, version: string, acknowledgeDependents: boolean): Promise<ActivationStatus>
   rollback(): Promise<ActivationStatus>
   exitSafeMode(): ActivationStatus
@@ -41,7 +42,7 @@ export async function handleWebUiGovernanceLifecycleRequest(
   context: WebUiGovernanceLifecycleContext,
 ): Promise<WebUiGovernanceLifecycleResponse | undefined> {
   if (request.method !== 'POST'
-    || !['/api/uninstall', '/api/rollback', '/api/recovery'].includes(request.pathname)) {
+    || !['/api/disable', '/api/uninstall', '/api/rollback', '/api/recovery'].includes(request.pathname)) {
     return undefined
   }
 
@@ -54,8 +55,41 @@ export async function handleWebUiGovernanceLifecycleRequest(
   const busy = context.mutations.inFlight()
   if (busy !== undefined) return { status: 409, body: { error: `${busy}-in-flight`, ...context.project() } }
 
+  if (request.pathname === '/api/disable') return disable(body, context)
   if (request.pathname === '/api/uninstall') return uninstall(body, context)
   return rollback(body, context)
+}
+
+async function disable(
+  body: Record<string, unknown>,
+  context: WebUiGovernanceLifecycleContext,
+): Promise<WebUiGovernanceLifecycleResponse> {
+  const bound = bindUninstall(body, context.project().view.plugins)
+  if ('error' in bound) {
+    return { status: bound.error === 'malformed' ? 400 : 409, body: { error: bound.error } }
+  }
+  try {
+    await context.mutations.run('disable', () => context.authority.disable(
+      bound.card.owner,
+      bound.card.version,
+      body.acknowledgeDependents === true,
+    ))
+    return { status: 200, body: context.project(), broadcast: true }
+  } catch (error) {
+    if (error instanceof DisableDeniedError) {
+      return {
+        status: 409,
+        body: { error: 'disable-denied', denials: error.denials, ...context.project() },
+        broadcast: true,
+      }
+    }
+    const message = error instanceof Error ? error.message : 'disable failed'
+    return {
+      status: 409,
+      body: { error: 'disable-failed', diagnostics: boundActivationDiagnostics(message), ...context.project() },
+      broadcast: true,
+    }
+  }
 }
 
 async function uninstall(

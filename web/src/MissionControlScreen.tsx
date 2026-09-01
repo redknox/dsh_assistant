@@ -22,6 +22,8 @@ import { ExpenseReviewWorkspace } from './ExpenseReviewWorkspace'
 import type { ExpenseReviewControl } from './useExpenseReview'
 import { ToolCatalogWorkspace } from './ToolCatalogWorkspace'
 import { WorkflowCatalogWorkspace } from './WorkflowCatalogWorkspace'
+import { CapabilityCenterWorkspace } from './CapabilityCenterWorkspace'
+import { SystemInfoWorkspace } from './SystemInfoWorkspace'
 
 type CompactSurface = 'conversation' | 'navigation' | 'operations'
 
@@ -74,12 +76,16 @@ function projectScreenControls(input: MissionControlScreenProps) {
     confirmingSession: input.workspace.state.confirmingSession,
     inspectingExtension: input.workspace.state.inspectingExtension,
     confirmingPlugin: input.workspace.state.confirmingPlugin?.id,
+    confirmingUnplug: input.workspace.state.confirmingUnplug?.id,
     onAskDeleteConversation: (id: string) => input.workspace.dispatch({ action: 'ask-conversation-delete', id }),
     onConfirmDeleteConversation: (id: string) => input.workspace.dispatch({ action: 'confirm-conversation-delete', id }),
     onInspectExtension: (id: string) => input.workspace.dispatch({ action: 'inspect-extension', id }),
     onAskUninstall: (plugin: UserPluginView) => input.workspace.dispatch({ action: 'ask-plugin-uninstall', plugin }),
     onCancelUninstall: () => input.workspace.dispatch({ action: 'cancel-plugin-uninstall' }),
     onConfirmUninstall: (plugin: UserPluginView) => input.workspace.dispatch({ action: 'confirm-plugin-uninstall', id: plugin.id }),
+    onAskUnplug: (plugin: UserPluginView) => input.workspace.dispatch({ action: 'ask-capability-unplug', plugin }),
+    onCancelUnplug: () => input.workspace.dispatch({ action: 'cancel-capability-unplug' }),
+    onConfirmUnplug: (plugin: UserPluginView) => input.workspace.dispatch({ action: 'confirm-capability-unplug', id: plugin.id }),
     confirmingSkill: input.skill.state.confirmingSkill,
     armedSkill: input.skill.state.armedSkill,
     skillDependents: input.skill.state.dependents
@@ -108,10 +114,6 @@ export function MissionControlScreen(input: MissionControlScreenProps) {
   const navigate = (next: WorkspacePane) => {
     props.onNavigate?.(next)
     setCompactSurface('conversation')
-  }
-  const openOperations = () => {
-    setCompactSurface('operations')
-    globalThis.setTimeout(() => globalThis.document?.getElementById('capabilities')?.scrollIntoView({ block: 'start' }), 0)
   }
   return (
     <div className="chassis" data-shuttle-variant="A">
@@ -157,12 +159,30 @@ export function MissionControlScreen(input: MissionControlScreenProps) {
           pane={pane}
           actions={{
             navigate,
-            openOperations,
             createConversation: props.onCreateConversation,
             switchConversation: props.onSwitchConversation,
           }}
         />
-        {pane === 'extensions' ? (
+        {pane === 'capabilities' ? (
+          <CapabilityCenterWorkspace
+            view={view}
+            tools={input.runtime.toolCatalog}
+            workflows={input.runtime.workflowCatalog}
+            locked={locked}
+            confirmingUnplug={props.confirmingUnplug}
+            armedSkill={props.armedSkill}
+            skillDependents={props.skillDependents}
+            navigate={navigate}
+            defineCapability={() => {
+              input.specifications.beginCreate()
+              navigate('specifications')
+            }}
+            askUnplug={props.onAskUnplug}
+            cancelUnplug={props.onCancelUnplug}
+            confirmUnplug={props.onConfirmUnplug}
+            skillAction={props.onSkillAction}
+          />
+        ) : pane === 'extensions' ? (
           <ExtensionsWorkspace
             view={view}
             state={{
@@ -208,6 +228,8 @@ export function MissionControlScreen(input: MissionControlScreenProps) {
           <ExecutionLogWorkspace view={view} />
         ) : pane === 'settings' ? (
           <SettingsWorkspace control={input.settings} locked={locked} />
+        ) : pane === 'system-info' ? (
+          <SystemInfoWorkspace view={view} openSettings={() => navigate('settings')} />
         ) : pane === 'tools' ? (
           <ToolCatalogWorkspace
             catalog={input.runtime.toolCatalog}

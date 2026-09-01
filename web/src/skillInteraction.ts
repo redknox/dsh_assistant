@@ -1,6 +1,7 @@
 import type { SkillProjection } from '../../src/domain/workspace/types'
 
-export type SkillInteractionAction = 'approve' | 'reject' | 'activate' | 'disable' | 'reactivate' | 'uninstall' | 'rollback'
+export type SkillInteractionAction = 'approve' | 'reject' | 'activate' | 'disable' | 'cancel-disable' | 'reactivate' | 'uninstall' | 'rollback'
+type SkillInteractionCommandAction = Exclude<SkillInteractionAction, 'cancel-disable'>
 
 export interface SkillInteractionState {
   readonly confirmingSkill?: string
@@ -9,7 +10,7 @@ export interface SkillInteractionState {
 }
 
 export interface SkillInteractionCommand {
-  readonly action: SkillInteractionAction
+  readonly action: SkillInteractionCommandAction
   readonly skill?: SkillProjection
   readonly acknowledgeDependents?: boolean
   readonly dependents?: readonly string[]
@@ -22,6 +23,9 @@ export function requestSkillInteraction(
   action: SkillInteractionAction,
   skill?: SkillProjection,
 ): { readonly state: SkillInteractionState; readonly command?: SkillInteractionCommand } {
+  if (action === 'cancel-disable') {
+    return { state: { ...state, armedSkill: undefined, dependents: undefined } }
+  }
   if (action === 'uninstall') {
     if (skill === undefined) {
       return { state: { ...state, confirmingSkill: undefined, dependents: undefined } }

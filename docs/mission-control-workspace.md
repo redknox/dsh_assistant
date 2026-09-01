@@ -23,7 +23,9 @@ Approvals in the Web UI call `AssistantControlSurface.approve` / `deny` (and Rec
 
 | Region | Product concept | Not |
 | --- | --- | --- |
-| Context | Today, calendar/tasks, memory, knowledge, user-facing capabilities | DSH internal service browser |
+| Context | Today, calendar/tasks, memory, knowledge | DSH internal service browser |
+| Capabilities | Independently requested, installed, governed, and activated user additions. Tool, Workflow, Extension, Skill, and Connector describe how each addition is implemented; dependency-aware Unplug is reversible | Built-in product surfaces, provider health, a new runtime object, marketplace, or duplicate source of truth |
+| System Info | Product-declared built-ins, action policy, connection availability, and runtime context | User-installed capability inventory or lifecycle control |
 | Extensions | Primary pane for generated and **Third-party** revisions: approved, active, disabled, blocked, superseded, with inspect/approve/activate/uninstall/reactivate/history from the record | Marketplace, browser path picker, ops-panel-only list, or invented React plugin state |
 | Work | Conversation plus plans, proposals, approvals, failures | Identical chat bubbles for every object |
 | Activity | Operational facts from session tools, jobs, policy, recovery | Hidden chain-of-thought |

@@ -79,4 +79,22 @@ describe('Workspace interaction state', () => {
       action: 'cancel-plugin-uninstall',
     }).state.confirmingPlugin, undefined)
   })
+
+  it('binds reversible capability unplug to the exact projected plugin', () => {
+    const original = plugin({ dependency: { severity: 'optional', dependents: [] } })
+    const armed = transitionWorkspaceInteraction(EMPTY_WORKSPACE_INTERACTION, {
+      action: 'ask-capability-unplug',
+      plugin: original,
+    })
+    assert.equal(transitionWorkspaceInteraction(armed.state, {
+      action: 'confirm-capability-unplug',
+      id: 'plugin-2',
+    }).command, undefined)
+    const confirmed = transitionWorkspaceInteraction(armed.state, {
+      action: 'confirm-capability-unplug',
+      id: original.id,
+    })
+    assert.deepEqual(confirmed.command, { action: 'disable-plugin', plugin: original })
+    assert.equal(confirmed.state.confirmingUnplug, undefined)
+  })
 })

@@ -30,6 +30,7 @@ export {
   GovernanceContractError,
   RollbackDeniedError,
   UninstallDeniedError,
+  DisableDeniedError,
 } from './errors.js'
 export { analyzePluginDependents, type PluginDependencyResult, type PluginDependent } from './dependents.js'
 export { approvalFingerprint, approvalSummary, fingerprintFromCandidate } from './fingerprint.js'

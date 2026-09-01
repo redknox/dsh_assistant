@@ -15,15 +15,15 @@ export function CapabilitySpecificationsWorkspace(props: {
     && !superseded
     && !props.locked)
   return (
-    <main className="conversation-panel instrument-panel specification-workspace" aria-label="Capability Specifications">
+    <main className="conversation-panel instrument-panel specification-workspace" aria-label="Capability Build Queue">
       <header className="workspace-title specification-title">
         <div>
-          <span className="eyebrow">DOMAIN CONSTRUCTION / HOST AUTHORITY</span>
-          <h1>CAPABILITY SPECIFICATIONS</h1>
-          <p>Business intent before code. Every revision is immutable and binds Resolution, Candidate review, and approval to one digest.</p>
+          <span className="eyebrow">CAPABILITY DEVELOPMENT / GOVERNED PIPELINE</span>
+          <h1>BUILD QUEUE</h1>
+          <p>Capabilities moving from business intent toward validation, review, exact approval, and activation. Specifications remain the immutable starting evidence.</p>
         </div>
         <div className="specification-title-actions">
-          <button type="button" className="button button--approval" disabled={props.locked || control.loading} onClick={control.beginCreate}>NEW SPECIFICATION</button>
+          <button type="button" className="button button--approval" disabled={props.locked || control.loading} onClick={control.beginCreate}>DESCRIBE CAPABILITY</button>
           <button type="button" className="button button--secondary" disabled={control.loading} onClick={control.load}>REFRESH</button>
         </div>
       </header>
@@ -52,7 +52,7 @@ export function CapabilitySpecificationsWorkspace(props: {
               </li>
             ))}
           </ol>
-          {control.snapshot && control.snapshot.specifications.length === 0 ? <p className="specification-empty">No specifications yet. TARS-NG will create one before the next governed capability change.</p> : null}
+          {control.snapshot && control.snapshot.specifications.length === 0 ? <p className="specification-empty">The Build Queue is empty. Describe a missing outcome to begin the governed capability path.</p> : null}
         </aside>
         <section className="specification-detail" aria-live="polite">
           {control.creating ? <NewSpecificationForm control={control} locked={props.locked} /> : !selected ? <div className="specification-placeholder"><Glyph name="hex" /><p>Select a Capability Specification revision.</p></div> : (

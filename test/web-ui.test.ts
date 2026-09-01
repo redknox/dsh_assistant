@@ -1780,9 +1780,8 @@ export function apply(ctx) {
           onReject() {},
           onRecovery() {},
         }))
-        assert.match(markup, /data-nav="extensions"/)
+        assert.doesNotMatch(markup, /data-nav="extensions"/)
         assert.match(markup, /data-workspace-pane="extensions"/)
-        assert.match(markup, /aria-current="page"/)
         assert.match(markup, /data-extension-lifecycle="DISABLED_REACTIVATABLE"/)
         assert.match(markup, /data-extension-action="reactivate"/)
         assert.equal(ctx.tools.get('activate_extension'), undefined)
@@ -2789,7 +2788,7 @@ export function apply(ctx) {
       onRecovery() {},
     }))
     assert.match(extensionsPane, /data-workspace-pane="extensions"/)
-    assert.match(extensionsPane, /data-nav="extensions"[^>]*aria-current="page"/)
+    assert.doesNotMatch(extensionsPane, /data-nav="extensions"/)
     assert.match(extensionsPane, /data-extension-lifecycle="APPROVAL_REQUIRED"[^]*data-extension-action="approve"/)
     assert.match(extensionsPane, /data-extension-action="reject"/)
     assert.match(extensionsPane, /data-extension-action="reactivate"/)
@@ -3186,6 +3185,9 @@ export function apply(ctx) {
     assert.match(ready, /RECENT CONVERSATIONS/)
     assert.match(ready, /aria-label="System"/)
     assert.match(ready, /data-nav="capabilities"/)
+    assert.match(ready, /data-nav="system-info"/)
+    assert.match(ready, /BUILD QUEUE/)
+    assert.doesNotMatch(ready, /data-nav="expense-review"|data-nav="extensions"|data-nav="tools"|data-nav="workflows"/)
     assert.doesNotMatch(ready, /LOG 02|data-nav="conversations"/)
   })
 

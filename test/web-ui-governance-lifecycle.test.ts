@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
-import { RollbackDeniedError, UninstallDeniedError } from '../src/domain/governance/errors.js'
+import { DisableDeniedError, RollbackDeniedError, UninstallDeniedError } from '../src/domain/governance/errors.js'
 import type { ActivationStatus } from '../src/domain/governance/types.js'
 import type { MissionControlView, RollbackCard, UserPluginView } from '../src/domain/workspace/types.js'
 import {
@@ -75,6 +75,7 @@ function context(overrides: Partial<WebUiGovernanceLifecycleContext> = {}): WebU
   return {
     authority: {
       inspect: () => current,
+      disable: async () => current,
       uninstall: async () => current,
       rollback: async () => current,
       exitSafeMode: () => current,
@@ -145,6 +146,36 @@ describe('Web UI governance lifecycle', () => {
       registryGeneration: 2,
     }), context())
     assert.deepEqual(stale, { status: 409, body: { error: 'stale-registry' } })
+  })
+
+  it('unplugs through reversible disable and preserves dependency denials', async () => {
+    const calls: unknown[][] = []
+    const exact = await handleWebUiGovernanceLifecycleRequest(request('/api/disable', {
+      ...uninstallBody(),
+      acknowledgeDependents: true,
+    }), context({
+      authority: {
+        inspect: () => status(),
+        disable: async (...args) => { calls.push(args); return status() },
+        uninstall: async () => status(),
+        rollback: async () => status(),
+        exitSafeMode: () => status(),
+      },
+    }))
+    assert.deepEqual(calls, [['generated/example', '0.1.0', true]])
+    assert.equal(exact?.status, 200)
+    assert.equal(exact?.broadcast, true)
+
+    const denied = await handleWebUiGovernanceLifecycleRequest(request('/api/disable', uninstallBody()), context({
+      authority: {
+        inspect: () => status(),
+        disable: async () => { throw new DisableDeniedError([{ reason: 'dependency-blocked', detail: 'dependent' }]) },
+        uninstall: async () => status(),
+        rollback: async () => status(),
+        exitSafeMode: () => status(),
+      },
+    }))
+    assert.equal((denied?.body as { error?: string }).error, 'disable-denied')
   })
 
   it('preserves uninstall denials and bounds unexpected diagnostics', async () => {

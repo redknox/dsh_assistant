@@ -1,5 +1,5 @@
 import { useRef, useState } from 'react'
-import { uninstallPlugin } from './api'
+import { disablePlugin, uninstallPlugin } from './api'
 import type { ConversationControl } from './useConversationControl'
 import type { MissionControlRuntime } from './useMissionControlRuntime'
 import {
@@ -37,6 +37,9 @@ export function useWorkspaceControl(
       } else if (command?.action === 'uninstall-plugin') {
         const { plugin } = command
         void runtime.perform(() => uninstallPlugin(plugin, true))
+      } else if (command?.action === 'disable-plugin') {
+        const { plugin } = command
+        void runtime.perform(() => disablePlugin(plugin, true), 'unable to unplug capability')
       }
     },
   }

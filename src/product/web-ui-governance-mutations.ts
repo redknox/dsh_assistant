@@ -1,11 +1,12 @@
 import type { ActivationStatus } from '../domain/governance/types.js'
 
-export type WebUiMutationKind = 'activation' | 'uninstall' | 'recovery'
-export type WebUiMutationInFlight = WebUiMutationKind | 'disable'
+export type WebUiMutationKind = 'activation' | 'disable' | 'uninstall' | 'recovery'
+export type WebUiMutationInFlight = WebUiMutationKind
 
 export class WebUiGovernanceMutations {
   private readonly local: Record<WebUiMutationKind, number> = {
     activation: 0,
+    disable: 0,
     uninstall: 0,
     recovery: 0,
   }
@@ -14,6 +15,7 @@ export class WebUiGovernanceMutations {
 
   inFlight(): WebUiMutationInFlight | undefined {
     if (this.local.uninstall > 0) return 'uninstall'
+    if (this.local.disable > 0) return 'disable'
     if (this.local.activation > 0) return 'activation'
     if (this.local.recovery > 0) return 'recovery'
     const inspected = this.inspect()

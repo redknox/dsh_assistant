@@ -140,8 +140,13 @@ export class RecoveryRoot {
     return this.service.completeInterruptedRollback()
   }
 
-  disable(credential: TrustedAuthorityCredential, owner: string, version: string) {
-    return this.service.disable(credential, owner, version)
+  disable(
+    credential: TrustedAuthorityCredential,
+    owner: string,
+    version: string,
+    options: { readonly acknowledgeDependents?: boolean } = {},
+  ) {
+    return this.service.disable(credential, owner, version, options)
   }
 
   uninstall(

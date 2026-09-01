@@ -10,7 +10,7 @@ import type { CandidateManifestInput, CandidateRecord, CandidateValidation, Cand
 import { AUTHORING_CONTRACT_STAMP, GENERATED_EXTENSION_API_V1 } from '../workbench/authoring-contract.js'
 import { boundActivationDiagnostics } from '../workspace/failure.js'
 import { analyzePluginDependents } from './dependents.js'
-import { ActivationDeniedError, GovernanceAuthorityError, GovernanceContractError, RollbackDeniedError, UninstallDeniedError } from './errors.js'
+import { ActivationDeniedError, DisableDeniedError, GovernanceAuthorityError, GovernanceContractError, RollbackDeniedError, UninstallDeniedError } from './errors.js'
 import { approvalSummary, fingerprintFromCandidate } from './fingerprint.js'
 import { InMemoryActivationRuntime, type ActivationPrepareContext, type ActivationRuntime } from './runtime.js'
 import type {
@@ -438,9 +438,19 @@ export class GovernanceService implements ExtensionGovernance, ExtensionActivati
     }
   }
 
-  async disable(credential: TrustedAuthorityCredential, owner: string, version: string): Promise<ActivationStatus> {
+  async disable(
+    credential: TrustedAuthorityCredential,
+    owner: string,
+    version: string,
+    options: { readonly acknowledgeDependents?: boolean } = {},
+  ): Promise<ActivationStatus> {
     this.assertCredential(credential)
     this.assertMutationIdle('disable')
+    // Disable is intentionally idempotent for recovery operators. The Web UI only
+    // projects active plugins, while boot recovery may need to reassert disabled.
+    const denials = this.uninstallDenials(owner, version, options)
+      .filter((item) => item.reason !== 'already-uninstalled')
+    if (denials.length > 0) throw new DisableDeniedError(denials)
     const record = this.registry.get(owner, version)
     if (record === undefined) throw new GovernanceContractError(`unknown record: ${owner}@${version}`)
     const candidate = this.workspace.list().find((item) => item.owner === owner && item.version === version)
@@ -575,7 +585,7 @@ export class GovernanceService implements ExtensionGovernance, ExtensionActivati
     const denial = { reason: `${busy}-in-flight`, detail: 'another trusted lifecycle mutation is in progress' }
     if (kind === 'activation') throw new ActivationDeniedError([denial])
     if (kind === 'uninstall') throw new UninstallDeniedError([denial])
-    if (kind === 'disable') throw new GovernanceContractError(denial.reason)
+    if (kind === 'disable') throw new DisableDeniedError([denial])
     throw new GovernanceContractError(denial.reason)
   }
 

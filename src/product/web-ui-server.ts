@@ -314,6 +314,10 @@ export function startWebUiServer(options: WebUiServerOptions): Promise<WebUiServ
       }, {
         authority: {
           inspect: () => options.recoveryRoot.inspect(),
+          disable: (owner, version, acknowledgeDependents) => {
+            const human = options.recoveryRoot.issueAuthority({ kind: 'human-control', source: 'application-ui' })
+            return options.recoveryRoot.disable(human, owner, version, { acknowledgeDependents })
+          },
           uninstall: (owner, version, acknowledgeDependents) => {
             const human = options.recoveryRoot.issueAuthority({ kind: 'human-control', source: 'application-ui' })
             return options.recoveryRoot.uninstall(human, owner, version, { acknowledgeDependents })

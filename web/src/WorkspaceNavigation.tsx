@@ -2,11 +2,10 @@ import React from 'react'
 import type { MissionControlView } from '../../src/domain/workspace/types'
 import { Glyph } from './icons'
 
-export type WorkspacePane = 'today' | 'expense-review' | 'extensions' | 'tools' | 'workflows' | 'specifications' | 'memory' | 'logs' | 'settings'
+export type WorkspacePane = 'today' | 'expense-review' | 'capabilities' | 'extensions' | 'tools' | 'workflows' | 'specifications' | 'memory' | 'logs' | 'settings' | 'system-info'
 
 export interface WorkspaceNavigationActions {
   readonly navigate: (pane: WorkspacePane) => void
-  readonly openOperations: () => void
   readonly createConversation?: () => void
   readonly switchConversation?: (id: string) => void
 }
@@ -21,6 +20,14 @@ export function WorkspaceNavigation(props: {
     .slice()
     .sort((left, right) => right.lastActivityAt.localeCompare(left.lastActivityAt))
     .slice(0, 4)
+  const buildQueueCount = new Set([
+    ...(props.view.candidates ?? [])
+      .filter((item) => item.approvalState !== 'active' && item.extensionLifecycle !== 'SUPERSEDED')
+      .map((item) => `candidate:${item.id}`),
+    ...(props.view.skills ?? [])
+      .filter((item) => !item.system && !['active', 'disabled', 'uninstalled'].includes(item.lifecycle))
+      .map((item) => `skill:${item.id}`),
+  ]).size
 
   return (
     <aside className="nav-panel instrument-panel" aria-label="Workspace navigation">
@@ -39,16 +46,7 @@ export function WorkspaceNavigation(props: {
         >
           <span className="control-lamp" aria-hidden="true" /><Glyph name="today" /><span>TODAY</span>
         </button>
-        <button
-          type="button"
-          className={`nav-item${props.pane === 'expense-review' ? ' nav-item--active' : ''}`}
-          data-nav="expense-review"
-          aria-current={props.pane === 'expense-review' ? 'page' : undefined}
-          onClick={() => props.actions.navigate('expense-review')}
-        >
-          <span className="control-lamp" aria-hidden="true" /><Glyph name="shield" /><span>EXPENSE REVIEW</span>
-        </button>
-        <span className="nav-item nav-item--idle" aria-disabled="true" title="Calendar management is not available in this soak">
+        <span className="nav-item nav-item--idle" aria-disabled="true" title="Calendar is not connected">
           <span className="control-lamp" aria-hidden="true" /><Glyph name="calendar" /><span>CALENDAR</span>
         </span>
         <button
@@ -83,41 +81,17 @@ export function WorkspaceNavigation(props: {
         </div>
         <button type="button" className="view-all-conversations" onClick={() => props.actions.navigate('memory')}>View all in Memory <span aria-hidden="true">→</span></button>
       </section>
-      <div className="nav-group-label nav-group-label--system">LIBRARY</div>
+      <div className="nav-group-label nav-group-label--system">CAPABILITIES</div>
       <nav className="secondary-nav" aria-label="Capability library">
-        <button type="button" className="nav-item" data-nav="capabilities" onClick={props.actions.openOperations}>
-          <span className="control-lamp" aria-hidden="true" /><Glyph name="capabilities" /><span>CAPABILITIES</span>
-        </button>
         <button
           type="button"
-          className={`nav-item${props.pane === 'extensions' ? ' nav-item--active' : ''}`}
-          data-nav="extensions"
-          aria-current={props.pane === 'extensions' ? 'page' : undefined}
-          onClick={() => props.actions.navigate('extensions')}
+          className={`nav-item${props.pane === 'capabilities' ? ' nav-item--active' : ''}`}
+          data-nav="capabilities"
+          aria-current={props.pane === 'capabilities' ? 'page' : undefined}
+          onClick={() => props.actions.navigate('capabilities')}
         >
-          <span className="control-lamp" aria-hidden="true" /><Glyph name="capabilities" /><span>EXTENSIONS</span>
+          <span className="control-lamp" aria-hidden="true" /><Glyph name="capabilities" /><span>ALL CAPABILITIES</span>
         </button>
-        <button
-          type="button"
-          className={`nav-item${props.pane === 'tools' ? ' nav-item--active' : ''}`}
-          data-nav="tools"
-          aria-current={props.pane === 'tools' ? 'page' : undefined}
-          onClick={() => props.actions.navigate('tools')}
-        >
-          <span className="control-lamp" aria-hidden="true" /><Glyph name="terminal" /><span>TOOLS</span>
-        </button>
-        <button
-          type="button"
-          className={`nav-item${props.pane === 'workflows' ? ' nav-item--active' : ''}`}
-          data-nav="workflows"
-          aria-current={props.pane === 'workflows' ? 'page' : undefined}
-          onClick={() => props.actions.navigate('workflows')}
-        >
-          <span className="control-lamp" aria-hidden="true" /><Glyph name="workflow" /><span>WORKFLOWS</span>
-        </button>
-      </nav>
-      <div className="nav-group-label nav-group-label--system">REQUESTS</div>
-      <nav className="secondary-nav" aria-label="Capability requests">
         <button
           type="button"
           className={`nav-item${props.pane === 'specifications' ? ' nav-item--active' : ''}`}
@@ -125,19 +99,20 @@ export function WorkspaceNavigation(props: {
           aria-current={props.pane === 'specifications' ? 'page' : undefined}
           onClick={() => props.actions.navigate('specifications')}
         >
-          <span className="control-lamp" aria-hidden="true" /><Glyph name="hex" /><span>CAPABILITY REQUESTS</span>
+          <span className="control-lamp" aria-hidden="true" /><Glyph name="hex" /><span>BUILD QUEUE</span>
+          {buildQueueCount > 0 ? <strong className="nav-item-count" aria-label={`${buildQueueCount} capability builds in queue`}>{buildQueueCount}</strong> : null}
         </button>
       </nav>
       <div className="nav-group-label nav-group-label--system">SYSTEM</div>
       <nav className="secondary-nav" aria-label="System">
         <button
           type="button"
-          className={`nav-item${props.pane === 'logs' ? ' nav-item--active' : ''}`}
-          data-nav="logs"
-          aria-current={props.pane === 'logs' ? 'page' : undefined}
-          onClick={() => props.actions.navigate('logs')}
+          className={`nav-item${props.pane === 'system-info' ? ' nav-item--active' : ''}`}
+          data-nav="system-info"
+          aria-current={props.pane === 'system-info' ? 'page' : undefined}
+          onClick={() => props.actions.navigate('system-info')}
         >
-          <span className="control-lamp" aria-hidden="true" /><Glyph name="terminal" /><span>LOGS</span>
+          <span className="control-lamp" aria-hidden="true" /><Glyph name="shield" /><span>SYSTEM INFO</span>
         </button>
         <button
           type="button"
@@ -147,6 +122,15 @@ export function WorkspaceNavigation(props: {
           onClick={() => props.actions.navigate('settings')}
         >
           <span className="control-lamp" aria-hidden="true" /><Glyph name="settings" /><span>SETTINGS</span>
+        </button>
+        <button
+          type="button"
+          className={`nav-item nav-item--diagnostic${props.pane === 'logs' ? ' nav-item--active' : ''}`}
+          data-nav="logs"
+          aria-current={props.pane === 'logs' ? 'page' : undefined}
+          onClick={() => props.actions.navigate('logs')}
+        >
+          <span className="control-lamp" aria-hidden="true" /><Glyph name="terminal" /><span>LOGS</span>
         </button>
       </nav>
       <div className="panel-coordinates" aria-label="Local runtime marker">

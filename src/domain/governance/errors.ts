@@ -41,3 +41,13 @@ export class UninstallDeniedError extends GovernanceContractError {
     this.denials = denials
   }
 }
+
+export class DisableDeniedError extends GovernanceContractError {
+  readonly denials: readonly { reason: string; detail: string }[]
+
+  constructor(denials: readonly { reason: string; detail: string }[]) {
+    super(`disable denied: ${denials.map((item) => item.reason).join(', ')}`)
+    this.name = 'DisableDeniedError'
+    this.denials = denials
+  }
+}
