@@ -26,7 +26,7 @@ import { ProductSettings } from '../src/product/settings.js'
 import { catalogBindingOf, SessionCatalog } from '../src/product/session-catalog.js'
 import { LiveSessionHost } from '../src/product/session-lifecycle.js'
 import { attachWebUiBroadcast, startWebUiServer } from '../src/product/web-ui-server.js'
-import type { MissionControlView } from '../src/domain/workspace/types.js'
+import type { MissionControlView, WebUiAcknowledgement } from '../src/domain/workspace/types.js'
 import { MissionControlScreen } from './helpers/mission-control-screen.js'
 
 function fixtureView(overrides: Partial<MissionControlView> = {}): MissionControlView {
@@ -1002,8 +1002,10 @@ export function apply(ctx) {
         body: JSON.stringify({ id: card.id, candidateId: card.candidateId, digest: card.digest, fingerprint: card.fingerprint, confirm: true }),
       })
       assert.equal(activated.status, 200, await activated.clone().text())
-      const afterActivate = await activated.json() as { view: MissionControlView }
+      const afterActivate = await activated.json() as { view: MissionControlView; acknowledgement?: WebUiAcknowledgement }
       assert.equal(afterActivate.view.activations.length, 0)
+      assert.match(afterActivate.acknowledgement?.text ?? '', /is live/)
+      assert.equal(afterActivate.acknowledgement?.action?.capabilityId, `extension:${card.owner}@${card.version}`)
       assert.equal(ctx.capabilityRegistry.get('generated/r0-workbench-ping', '0.1.0')?.status, 'active')
       const replay = await fetch(`${url}/api/activate`, {
         method: 'POST',

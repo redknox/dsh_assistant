@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 import type { ActivationStatus } from '../src/domain/governance/types.js'
-import type { ActivationCard, MissionControlView } from '../src/domain/workspace/types.js'
+import type { ActivationCard, MissionControlView, WebUiAcknowledgement } from '../src/domain/workspace/types.js'
 import {
   handleWebUiActivationRequest,
   type WebUiActivationContext,
@@ -30,6 +30,9 @@ function activationCard(overrides: Partial<ActivationCard> = {}): ActivationCard
     toolsAdded: [],
     toolsRemoved: [],
     toolsChanged: [],
+    workflowsAdded: [],
+    workflowsRemoved: [],
+    workflowsChanged: [],
     effects: [],
     eligibilityOk: true,
     eligibilityDenials: [],
@@ -61,7 +64,7 @@ function context(overrides: Partial<WebUiActivationContext> = {}): WebUiActivati
     },
     mutations: new WebUiGovernanceMutations(() => ({ state: 'idle' })),
     activations: () => [activationCard()],
-    project: () => ({ view, webUi: 'http://127.0.0.1:8787' }),
+    project: (acknowledgement) => ({ view, webUi: 'http://127.0.0.1:8787', ...(acknowledgement ? { acknowledgement } : {}) }),
     ...overrides,
   }
 }
@@ -115,9 +118,31 @@ describe('Web UI activations', () => {
     assert.deepEqual(candidates, ['candidate-1'])
     assert.deepEqual(result, {
       status: 200,
-      body: { view, webUi: 'http://127.0.0.1:8787' },
+      body: {
+        view,
+        webUi: 'http://127.0.0.1:8787',
+        acknowledgement: {
+          text: 'Example@0.1.0 is live. The capability is ready to use.',
+          action: {
+            kind: 'open-capability',
+            label: 'VIEW CAPABILITY',
+            capabilityId: 'extension:generated/example@0.1.0',
+          },
+        },
+      },
       broadcast: true,
     })
+  })
+
+  it('names newly published Tools and Workflows in the activation receipt', async () => {
+    const card = activationCard({
+      toolsAdded: ['risk_check'],
+      workflowsAdded: ['expense_review'],
+    })
+    const result = await handleWebUiActivationRequest(request('/api/activate', body(card)), context({ activations: () => [card] }))
+    const acknowledgement = (result?.body as { acknowledgement?: WebUiAcknowledgement }).acknowledgement
+    assert.equal(acknowledgement?.text, 'Example@0.1.0 is live. risk_check, expense_review are ready to use.')
+    assert.equal(acknowledgement?.action?.capabilityId, 'extension:generated/example@0.1.0')
   })
 
   it('rejects missing confirmation, busy state, and stale evidence before activation', async () => {

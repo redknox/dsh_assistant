@@ -2,7 +2,7 @@ import { ActivationDeniedError } from '../domain/governance/errors.js'
 import { SimulatedCrashError } from '../domain/governance/service.js'
 import type { ActivationStatus } from '../domain/governance/types.js'
 import { boundActivationDiagnostics } from '../domain/workspace/failure.js'
-import type { ActivationCard, MissionControlView } from '../domain/workspace/types.js'
+import type { ActivationCard, MissionControlView, WebUiAcknowledgement } from '../domain/workspace/types.js'
 import type { WebUiGovernanceMutations } from './web-ui-governance-mutations.js'
 
 interface ActivationAuthority {
@@ -20,7 +20,11 @@ export interface WebUiActivationContext {
   readonly authority: ActivationAuthority
   readonly mutations: WebUiGovernanceMutations
   readonly activations: () => readonly ActivationCard[]
-  readonly project: () => { readonly view: MissionControlView; readonly webUi: string }
+  readonly project: (acknowledgement?: WebUiAcknowledgement) => {
+    readonly view: MissionControlView
+    readonly webUi: string
+    readonly acknowledgement?: WebUiAcknowledgement
+  }
 }
 
 export interface WebUiActivationResponse {
@@ -73,7 +77,7 @@ async function activate(card: ActivationCard, context: WebUiActivationContext): 
         broadcast: true,
       }
     }
-    return { status: 200, body: context.project(), broadcast: true }
+    return { status: 200, body: context.project(activationAcknowledgement(card)), broadcast: true }
   } catch (error) {
     if (error instanceof ActivationDeniedError) {
       return { status: 409, body: { error: 'activation-denied', denials: error.denials, ...context.project() }, broadcast: true }
@@ -97,6 +101,34 @@ async function activate(card: ActivationCard, context: WebUiActivationContext): 
       broadcast: true,
     }
   }
+}
+
+function activationAcknowledgement(card: ActivationCard): WebUiAcknowledgement {
+  const name = friendlyOwner(card.owner)
+  return {
+    text: `${name}@${card.version} is live. ${publishedSurfaceSummary(card)}`,
+    action: {
+      kind: 'open-capability',
+      label: 'VIEW CAPABILITY',
+      capabilityId: `extension:${card.owner}@${card.version}`,
+    },
+  }
+}
+
+function friendlyOwner(owner: string): string {
+  const name = owner.split('/').at(-1) ?? owner
+  return name.split('-').map((part) => part ? `${part[0]?.toUpperCase()}${part.slice(1)}` : '').join(' ')
+}
+
+function publishedSurfaceSummary(card: ActivationCard): string {
+  const surfaces = [
+    ...card.toolsAdded,
+    ...card.toolsChanged,
+    ...(card.workflowsAdded ?? []),
+    ...(card.workflowsChanged ?? []),
+  ]
+  if (surfaces.length === 0) return 'The capability is ready to use.'
+  return `${surfaces.join(', ')} ${surfaces.length === 1 ? 'is' : 'are'} ready to use.`
 }
 
 function abandon(card: ActivationCard, context: WebUiActivationContext): WebUiActivationResponse {

@@ -289,7 +289,7 @@ export function startWebUiServer(options: WebUiServerOptions): Promise<WebUiServ
         },
         mutations,
         activations: () => snapshot().activations,
-        project: envelope,
+        project: (acknowledgement) => envelope(acknowledgement ? { acknowledgement } : {}),
       })
       if (activation) {
         sendJson(res, activation.status, activation.body)
