@@ -94,6 +94,7 @@ export function CapabilitySpecificationsWorkspace(props: {
               {selectedDelivery ? <DeliveryOverview
                 item={selectedDelivery}
                 onAction={props.continueDelivery}
+                actionVisible={!(selectedDelivery.plan && !selectedDelivery.candidate)}
                 onAskStop={selectedDelivery.historical || selectedDelivery.stage === 'approve' || selectedDelivery.stage === 'activate'
                   ? undefined
                   : () => control.askStop(selectedDelivery.id)}
@@ -102,6 +103,9 @@ export function CapabilitySpecificationsWorkspace(props: {
                 cancelStop={control.cancelStop}
                 confirmStop={control.stopDelivery}
               /> : null}
+              {selectedDelivery?.plan && !selectedDelivery.candidate ? (
+                <ImplementationProposal item={selectedDelivery} onAction={props.continueDelivery} />
+              ) : null}
               {control.comparison ? (
                 <div className="specification-diff" data-specification-diff="true">
                   <strong>Δ REV {control.comparison.from.revision} → {control.comparison.to.revision}</strong>
@@ -237,6 +241,7 @@ function SkillDeliveryDetail(props: { readonly item: SkillDeliveryItem; readonly
 function DeliveryOverview(props: {
   readonly item: CapabilityDeliveryProgress
   readonly onAction?: (item: CapabilityDeliveryProgress) => void
+  readonly actionVisible?: boolean
   readonly onAskStop?: () => void
   readonly confirmingStop?: boolean
   readonly stopping?: boolean
@@ -256,7 +261,7 @@ function DeliveryOverview(props: {
         <span>{item.needsUser ? 'NEEDS YOUR DECISION' : 'NEXT'}</span>
         <strong>{item.stateLabel}</strong>
         <p>{item.nextAction}</p>
-        {item.action ? <button type="button" className="button button--approval delivery-action" data-delivery-action={item.action.kind} onClick={() => props.onAction?.(item)}>{item.action.label}</button> : null}
+        {item.action && props.actionVisible !== false ? <button type="button" className="button button--approval delivery-action" data-delivery-action={item.action.kind} onClick={() => props.onAction?.(item)}>{item.action.label}</button> : null}
         {item.action?.kind === 'conversation' && !item.action.sessionId
           ? <small className="delivery-session-fallback">ORIGIN SESSION NOT RECORDED · CONTINUES IN CURRENT CHAT</small>
           : null}
@@ -275,6 +280,61 @@ function DeliveryOverview(props: {
       </div>
     </section>
   )
+}
+
+function ImplementationProposal(props: {
+  readonly item: CapabilityDeliveryItem
+  readonly onAction?: (item: CapabilityDeliveryProgress) => void
+}) {
+  const { item } = props
+  const plan = item.plan
+  if (!plan) return null
+  return (
+    <section className="implementation-proposal" aria-label="Proposed capability implementation" data-plan-kind={plan.kind}>
+      <header>
+        <div>
+          <span className="eyebrow">AI RECOMMENDATION / NO CODE AUTHORIZED YET</span>
+          <h3>PROPOSED IMPLEMENTATION</h3>
+        </div>
+        <span className="implementation-proposal-kind">{implementationPath(plan.kind)}</span>
+      </header>
+      <div className="implementation-proposal-body">
+        <section>
+          <span>WHAT TARS-NG PROPOSES</span>
+          <strong>{plan.recommendation || fallbackRecommendation(plan.kind)}</strong>
+        </section>
+        <section>
+          <span>WHY THIS PATH</span>
+          <p>{plan.rationale || 'Capability Resolution selected the smallest governed implementation path supported by the current architecture facts.'}</p>
+        </section>
+        {plan.implications?.length ? (
+          <section className="implementation-proposal-impact">
+            <span>WHAT THIS MEANS</span>
+            <ul>{plan.implications.map((line) => <li key={line}>{line}</li>)}</ul>
+          </section>
+        ) : null}
+      </div>
+      <footer>
+        <p><Glyph name="shield" /> Accepting authorizes development of a Candidate only. Validation, review, exact-artifact approval, and activation remain separate gates.</p>
+        {item.action ? <button type="button" className="button button--approval" data-plan-decision="accept" onClick={() => props.onAction?.(item)}>{item.action.label}</button> : null}
+      </footer>
+    </section>
+  )
+}
+
+function implementationPath(kind: string): string {
+  return ({
+    configure: 'CONFIGURE EXISTING',
+    'evolve-owner': 'EVOLVE EXISTING OWNER',
+    'adopt-existing': 'ADOPT EXISTING',
+    'implement-provider': 'ADD PROVIDER',
+    'new-plugin': 'NEW EXTENSION',
+    'host-product-change-required': 'PRODUCT UPDATE',
+  } as Record<string, string>)[kind] ?? kind.replaceAll('-', ' ').toUpperCase()
+}
+
+function fallbackRecommendation(kind: string): string {
+  return `Proceed through the governed ${implementationPath(kind).toLowerCase()} path.`
 }
 
 function NewSpecificationForm(props: { readonly control: CapabilitySpecificationsControl; readonly locked: boolean }) {

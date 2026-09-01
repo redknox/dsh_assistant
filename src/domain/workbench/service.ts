@@ -431,6 +431,9 @@ export class WorkbenchService implements CandidateWorkbench {
       capability: plan.review.capability,
       need: plan.review.need,
       canCreate: WORKBENCH_CHANGE_KINDS.includes(plan.review.kind as (typeof WORKBENCH_CHANGE_KINDS)[number]),
+      recommendation: plan.review.recommendation,
+      rationale: plan.review.rationale,
+      implications: plan.review.implications,
     }))
     const candidates = this.workspace.list().map((record) => {
       const view = this.inspect(record.id)

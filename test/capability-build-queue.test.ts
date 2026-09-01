@@ -30,6 +30,24 @@ describe('Capability Build Queue projection', () => {
     assert.match(queue.open[0]?.nextAction ?? '', /Today/)
   })
 
+  it('requires a user decision before candidate authoring begins', () => {
+    const queue = projectCapabilityBuildQueue(snapshot({
+      specifications: [{ ...specification('spec-plan', 1), originSessionId: 'capability-chat' }],
+      plans: [{
+        planId: 'plan-ready', specificationId: 'spec-plan', specificationDigest: 'digest-1', kind: 'new-plugin',
+        capability: 'text.echo', need: 'Echo text', canCreate: true,
+        recommendation: 'Create a small text extension.', rationale: 'No existing owner provides the behavior.',
+        implications: ['Candidate governance still applies.'],
+      }],
+    }))
+
+    assert.equal(queue.summary.needsUser, 1)
+    assert.equal(queue.open[0]?.stateLabel, 'PLAN READY FOR DECISION')
+    assert.equal(queue.open[0]?.action?.label, 'ACCEPT PLAN IN CHAT')
+    assert.equal(queue.open[0]?.action?.sessionId, 'capability-chat')
+    assert.match(queue.open[0]?.action?.prompt ?? '', /我已审阅并同意/)
+  })
+
   it('moves live and legacy records out of the active queue', () => {
     const queue = projectCapabilityBuildQueue(snapshot({
       specifications: [specification('spec-live', 1), { ...specification('legacy', 1), source: 'legacy' }],

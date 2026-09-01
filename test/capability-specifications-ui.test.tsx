@@ -111,4 +111,44 @@ describe('Capability Specifications workspace', () => {
     assert.match(markup, /CONFIRM STOP DEVELOPMENT/)
     assert.match(markup, /data-delivery-stop="confirm"/)
   })
+
+  it('presents a resolution plan as a user decision before development', () => {
+    const specification = {
+      id: 'spec-proposal', version: 'capability-specification/v1', revision: 1, source: 'explicit' as const, digest: 'digest-proposal', status: 'ready', capability: 'finance.exchange-rate.query', goal: 'Return a current exchange rate.',
+      nonGoals: [], inputs: [], businessRules: [], permissions: [], effects: { filesystem: [], network: [], process: [], secrets: [], externalSystems: [], remoteSideEffect: 'none' as const }, acceptanceExamples: [], unresolved: [],
+    }
+    const markup = renderToStaticMarkup(createElement(CapabilitySpecificationsWorkspace, {
+      locked: false,
+      control: {
+        snapshot: {
+          mutable: true,
+          specifications: [specification],
+          plans: [{
+            planId: 'plan-proposal', specificationId: specification.id, specificationDigest: specification.digest,
+            kind: 'new-plugin', capability: specification.capability, need: specification.goal, canCreate: true,
+            recommendation: 'Create a bounded exchange-rate extension.',
+            rationale: 'No active owner provides the requested rate lookup.',
+            implications: ['Network access remains separately governed.'],
+          }],
+          candidates: [],
+        },
+        selected: specification,
+        draft: { goal: specification.goal, nonGoals: '', businessRules: '', unresolved: '' },
+        creating: false, createDraft: {} as never,
+        loading: false, saving: false, dirty: false,
+        load() {}, select() {}, change() {}, saveRevision() {}, beginCreate() {}, askStop() {}, cancelStop() {}, stopDelivery() {},
+      },
+      continueDelivery() {},
+    }))
+
+    assert.match(markup, /PLAN READY FOR DECISION/)
+    assert.match(markup, /PROPOSED IMPLEMENTATION/)
+    assert.match(markup, /NEW EXTENSION/)
+    assert.match(markup, /Create a bounded exchange-rate extension/)
+    assert.match(markup, /No active owner provides/)
+    assert.match(markup, /Network access remains separately governed/)
+    assert.match(markup, /data-plan-decision="accept"/)
+    assert.match(markup, /ACCEPT PLAN IN CHAT/)
+    assert.match(markup, /NO CODE AUTHORIZED YET/)
+  })
 })
