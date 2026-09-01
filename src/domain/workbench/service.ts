@@ -378,6 +378,7 @@ export class WorkbenchService implements CandidateWorkbench {
       goal: specification.goal,
       status: specification.status,
       digest: specification.digest,
+      source: specification.source,
     }))
     const plans = [...this.plans.values()].map((plan) => ({
       planId: plan.id,

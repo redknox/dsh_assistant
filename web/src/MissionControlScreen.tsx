@@ -249,7 +249,7 @@ export function MissionControlScreen(input: MissionControlScreenProps) {
             }}
           />
         ) : pane === 'specifications' ? (
-          <CapabilitySpecificationsWorkspace control={input.specifications} locked={locked} />
+          <CapabilitySpecificationsWorkspace control={input.specifications} skills={view.skills} locked={locked} />
         ) : pane === 'expense-review' ? (
           <ExpenseReviewWorkspace
             control={input.expenseReview}

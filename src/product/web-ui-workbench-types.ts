@@ -7,11 +7,33 @@ export interface CapabilitySpecificationSummaryView {
   readonly goal: string
   readonly status: string
   readonly digest: string
+  readonly source: 'explicit' | 'legacy'
+}
+
+export interface CapabilityPlanSummaryView {
+  readonly planId: string
+  readonly specificationId: string
+  readonly specificationDigest: string
+  readonly kind: string
+  readonly capability: string
+  readonly need: string
+  readonly canCreate: boolean
+}
+
+export interface CapabilityCandidateSummaryView {
+  readonly id: string
+  readonly owner: string
+  readonly version: string
+  readonly states: readonly ('mutable' | 'sealed' | 'review-required' | 'changes-required' | 'approval-requested' | 'active' | 'failed' | 'superseded')[]
+  readonly step: 'author' | 'validate' | 'review' | 'repair' | 'request' | 'approved' | 'active'
+  readonly planId?: string
+  readonly specificationId?: string
+  readonly parentId?: string
+  readonly leftover: boolean
 }
 
 export interface CapabilitySpecificationView extends CapabilitySpecificationSummaryView {
   readonly version: string
-  readonly source: 'explicit' | 'legacy'
   readonly nonGoals: readonly string[]
   readonly inputs: readonly { readonly name: string; readonly description: string; readonly required: boolean }[]
   readonly businessRules: readonly string[]
@@ -92,8 +114,8 @@ export interface CapabilitySpecificationCreateInput {
 
 export interface WorkbenchSnapshotView {
   readonly specifications: readonly CapabilitySpecificationSummaryView[]
-  readonly plans: readonly unknown[]
-  readonly candidates: readonly unknown[]
+  readonly plans: readonly CapabilityPlanSummaryView[]
+  readonly candidates: readonly CapabilityCandidateSummaryView[]
   readonly nextCursor?: string
   readonly mutable: boolean
 }

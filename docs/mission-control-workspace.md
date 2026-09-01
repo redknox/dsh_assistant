@@ -25,6 +25,7 @@ Approvals in the Web UI call `AssistantControlSurface.approve` / `deny` (and Rec
 | --- | --- | --- |
 | Context | Today, calendar/tasks, memory, knowledge | DSH internal service browser |
 | Capabilities | Independently requested, installed, governed, and activated user additions. Tool, Workflow, Extension, Skill, and Connector describe how each addition is implemented; dependency-aware Unplug is reversible | Built-in product surfaces, provider health, a new runtime object, marketplace, or duplicate source of truth |
+| Build Queue | One current delivery item per requested capability, projected across Define → Resolve → Build → Validate → Review → Approve → Activate → Live; decisions needing the user are first-class and prior revisions/live work move to History | A flat Candidate list, developer file editor, or a second lifecycle authority |
 | System Info | Product-declared built-ins, action policy, connection availability, and runtime context | User-installed capability inventory or lifecycle control |
 | Extensions | Primary pane for generated and **Third-party** revisions: approved, active, disabled, blocked, superseded, with inspect/approve/activate/uninstall/reactivate/history from the record | Marketplace, browser path picker, ops-panel-only list, or invented React plugin state |
 | Work | Conversation plus plans, proposals, approvals, failures | Identical chat bubbles for every object |
@@ -63,6 +64,8 @@ A control-plane decision is not a human conversation message. Approve, Reject, a
 Self-Extension is a capability/permission/effect diff bound to digest/fingerprint. Effect diffs include secret-access metadata (name/scope/type only); secret values are never rendered. It is not self-authorization. UI approve still goes through the existing policy/governance roots and leaves the candidate `APPROVED_NOT_ACTIVE` until a distinct trusted activation.
 
 Workbench/Mission-Control DTOs split `reviewState`, `governanceApproval`, and `activationState`. Independent Review may still say it is not a human approval; public Workbench inspect no longer prints `NOT APPROVED` next to an already-approved candidate.
+
+The Build Queue is a user-facing projection over immutable Capability Specifications, Resolution Plans, Candidates, and the existing Skill lifecycle. It does not merge those domain records or invent a new runtime object. The latest explicit specification revision is the current delivery item; compatibility-era specifications remain current only while they have an in-flight Candidate. Superseded revisions and live/retired capabilities are available under History. Non-system Skills use the same delivery vocabulary and decision priority without being converted into Extensions or Tools. Detailed business rules, permissions, effects, acceptance evidence, digests, and revision controls remain inspectable under **Specification & Evidence**, but do not dominate the default view.
 
 ## Memory and context
 

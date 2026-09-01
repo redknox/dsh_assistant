@@ -1,12 +1,16 @@
-import React from 'react'
+import React, { useMemo, useState } from 'react'
+import type { SkillProjection } from '../../src/domain/workspace/types'
 import type { CapabilitySpecificationsControl } from './useCapabilitySpecifications'
 import { Glyph } from './icons'
+import { CAPABILITY_DELIVERY_STEPS, projectCapabilityBuildQueue, projectSkillBuildQueue, type CapabilityDeliveryItem, type CapabilityDeliveryProgress, type SkillDeliveryItem } from './capabilityBuildQueue'
 
 export function CapabilitySpecificationsWorkspace(props: {
   readonly control: CapabilitySpecificationsControl
+  readonly skills?: readonly SkillProjection[]
   readonly locked: boolean
 }) {
   const { control } = props
+  const [selectedSkillId, setSelectedSkillId] = useState<string>()
   const selected = control.selected
   const superseded = selected !== undefined && control.snapshot?.specifications.some((item) => item.supersedesId === selected.id) === true
   const editable = Boolean(selected
@@ -14,6 +18,20 @@ export function CapabilitySpecificationsWorkspace(props: {
     && selected.source === 'explicit'
     && !superseded
     && !props.locked)
+  const queue = useMemo(() => projectCapabilityBuildQueue(control.snapshot), [control.snapshot])
+  const skillQueue = useMemo(() => projectSkillBuildQueue(props.skills), [props.skills])
+  const selectedDelivery = [...queue.open, ...queue.history].find((item) => item.specification.id === selected?.id)
+  const selectedSkill = [...skillQueue.open, ...skillQueue.history].find((item) => item.skill.id === selectedSkillId)
+  const selectSpecification = (id: string) => {
+    setSelectedSkillId(undefined)
+    control.select(id)
+  }
+  const summary = {
+    open: queue.summary.open + skillQueue.summary.open,
+    needsUser: queue.summary.needsUser + skillQueue.summary.needsUser,
+    inProgress: queue.summary.inProgress + skillQueue.summary.inProgress,
+    live: queue.summary.live + skillQueue.summary.live,
+  }
   return (
     <main className="conversation-panel instrument-panel specification-workspace" aria-label="Capability Build Queue">
       <header className="workspace-title specification-title">
@@ -29,33 +47,36 @@ export function CapabilitySpecificationsWorkspace(props: {
       </header>
       {control.error ? <p className="settings-alert" role="alert">{control.error}</p> : null}
       {control.notice ? <p className="settings-notice" role="status">{control.notice}</p> : null}
+      <section className="capability-center-summary build-queue-summary" aria-label="Capability delivery summary">
+        <QueueSummary label="IN DELIVERY" value={summary.open} />
+        <QueueSummary label="NEEDS YOU" value={summary.needsUser} />
+        <QueueSummary label="IN PROGRESS" value={summary.inProgress} />
+        <QueueSummary label="LIVE" value={summary.live} />
+      </section>
       <div className="specification-layout">
-        <aside className="specification-index" aria-label="Specification revisions">
+        <aside className="specification-index" aria-label="Capability delivery queue">
           <div className="specification-index-heading">
-            <span>SPECIFICATIONS</span>
-            <strong>{control.snapshot?.specifications.length ?? 0}</strong>
+            <span>IN DELIVERY</span>
+            <strong>{summary.open}</strong>
           </div>
           {control.loading && !control.snapshot ? <p className="settings-state">Reading Workbench authority…</p> : null}
           <ol>
-            {(control.snapshot?.specifications ?? []).slice().reverse().map((item) => (
-              <li key={item.id}>
-                <button
-                  type="button"
-                  className={selected?.id === item.id ? 'is-active' : ''}
-                  aria-current={selected?.id === item.id ? 'true' : undefined}
-                  onClick={() => control.select(item.id)}
-                >
-                  <span><i className="control-lamp" aria-hidden="true" />{item.capability}</span>
-                  <small>REV {item.revision} · {item.status === 'ready' ? 'READY' : 'CLARIFY'} · {item.id}</small>
-                  <em>{item.goal}</em>
-                </button>
-              </li>
-            ))}
+            {queue.open.map((item) => <DeliveryIndexItem key={item.id} item={item} selected={!selectedSkill && selected?.id === item.specification.id} select={selectSpecification} />)}
+            {skillQueue.open.map((item) => <SkillDeliveryIndexItem key={item.id} item={item} selected={selectedSkill?.skill.id === item.skill.id} select={setSelectedSkillId} />)}
           </ol>
-          {control.snapshot && control.snapshot.specifications.length === 0 ? <p className="specification-empty">The Build Queue is empty. Describe a missing outcome to begin the governed capability path.</p> : null}
+          {control.snapshot && summary.open === 0 ? <p className="specification-empty">Nothing is waiting for delivery. Describe a missing outcome to begin.</p> : null}
+          {queue.history.length + skillQueue.history.length > 0 ? (
+            <details className="build-queue-history">
+              <summary>HISTORY <span>{queue.history.length + skillQueue.history.length}</span></summary>
+              <ol>
+                {queue.history.map((item) => <DeliveryIndexItem key={`history:${item.id}`} item={item} selected={!selectedSkill && selected?.id === item.specification.id} select={selectSpecification} />)}
+                {skillQueue.history.map((item) => <SkillDeliveryIndexItem key={`history:${item.id}`} item={item} selected={selectedSkill?.skill.id === item.skill.id} select={setSelectedSkillId} />)}
+              </ol>
+            </details>
+          ) : null}
         </aside>
         <section className="specification-detail" aria-live="polite">
-          {control.creating ? <NewSpecificationForm control={control} locked={props.locked} /> : !selected ? <div className="specification-placeholder"><Glyph name="hex" /><p>Select a Capability Specification revision.</p></div> : (
+          {control.creating ? <NewSpecificationForm control={control} locked={props.locked} /> : selectedSkill ? <SkillDeliveryDetail item={selectedSkill} /> : !selected ? <div className="specification-placeholder"><Glyph name="hex" /><p>Select a capability delivery item.</p></div> : (
             <>
               <header className="specification-detail-header">
                 <div>
@@ -63,18 +84,21 @@ export function CapabilitySpecificationsWorkspace(props: {
                   <h2>{selected.capability}</h2>
                 </div>
                 <div className="specification-badges">
-                  <span data-spec-status={selected.status}>{selected.status.replace('-', ' ')}</span>
+                  <span data-spec-status={selectedDelivery?.stage ?? selected.status}>{selectedDelivery?.stateLabel ?? selected.status.replace('-', ' ')}</span>
                   <span>REV {selected.revision}</span>
                   {superseded ? <span>HISTORY</span> : null}
                 </div>
               </header>
+              {selectedDelivery ? <DeliveryOverview item={selectedDelivery} /> : null}
               {control.comparison ? (
                 <div className="specification-diff" data-specification-diff="true">
                   <strong>Δ REV {control.comparison.from.revision} → {control.comparison.to.revision}</strong>
                   <span>{control.comparison.changedFields.length ? control.comparison.changedFields.join(' · ') : 'No business fields changed'}</span>
                 </div>
               ) : null}
-              <div className="specification-form">
+              <details className="specification-technical-record">
+                <summary><span>SPECIFICATION &amp; EVIDENCE</span><small>Business rules, permissions, effects, acceptance examples, and revision controls</small></summary>
+                <div className="specification-form">
                 <label>
                   <span>GOAL</span>
                   <textarea value={control.draft.goal} disabled={!editable} rows={3} onChange={(event) => control.change('goal', event.target.value)} />
@@ -84,8 +108,8 @@ export function CapabilitySpecificationsWorkspace(props: {
                   <LineEditor label="BUSINESS RULES" help="One authoritative rule per line" field="businessRules" value={control.draft.businessRules} editable={editable} control={control} />
                 </div>
                 <LineEditor label="UNRESOLVED QUESTIONS" help="A non-empty list blocks Capability Resolution" field="unresolved" value={control.draft.unresolved} editable={editable} control={control} />
-              </div>
-              <div className="specification-evidence-grid">
+                </div>
+                <div className="specification-evidence-grid">
                 <SpecBlock title="INPUTS">
                   {selected.inputs.length ? selected.inputs.map((item) => <p key={item.name}><strong>{item.name}</strong><span>{item.required ? 'REQUIRED' : 'OPTIONAL'}</span><small>{item.description}</small></p>) : <Empty />}
                 </SpecBlock>
@@ -121,18 +145,99 @@ export function CapabilitySpecificationsWorkspace(props: {
                     </div>
                   ) : <span className="specification-none">{control.evaluation?.candidateId ? 'CANDIDATE NOT EVALUATED' : 'NO CANDIDATE BOUND'}</span>}
                 </SpecBlock>
-              </div>
-              <footer className="specification-footer">
+                </div>
+                <footer className="specification-footer">
                 <p><Glyph name="shield" /> Saving creates a successor revision. It never changes existing Plans or Candidates.</p>
                 <button type="button" className="button button--approval" data-specification-action="revise" disabled={!editable || !control.dirty || control.saving} onClick={control.saveRevision}>
                   {control.saving ? 'CREATING REVISION…' : superseded ? 'HISTORICAL REVISION' : 'CREATE NEW REVISION'}
                 </button>
-              </footer>
+                </footer>
+              </details>
             </>
           )}
         </section>
       </div>
     </main>
+  )
+}
+
+function QueueSummary(props: { readonly label: string; readonly value: number }) {
+  return <div><span>{props.label}</span><strong>{props.value}</strong></div>
+}
+
+function DeliveryIndexItem(props: { readonly item: CapabilityDeliveryItem; readonly selected: boolean; readonly select: (id: string) => void }) {
+  const { item } = props
+  return (
+    <li>
+      <button type="button" className={props.selected ? 'is-active' : ''} aria-current={props.selected ? 'true' : undefined} data-delivery-stage={item.stage} onClick={() => props.select(item.specification.id)}>
+        <span><i className="control-lamp" aria-hidden="true" />{item.specification.capability}</span>
+        <small>{item.stateLabel} · REV {item.specification.revision}</small>
+        <em>{item.specification.goal}</em>
+        {item.needsUser ? <strong className="delivery-needs-user">YOUR DECISION</strong> : null}
+      </button>
+    </li>
+  )
+}
+
+function SkillDeliveryIndexItem(props: { readonly item: SkillDeliveryItem; readonly selected: boolean; readonly select: (id: string) => void }) {
+  const { item } = props
+  return (
+    <li>
+      <button type="button" className={props.selected ? 'is-active' : ''} aria-current={props.selected ? 'true' : undefined} data-delivery-stage={item.stage} onClick={() => props.select(item.skill.id)}>
+        <span><i className="control-lamp" aria-hidden="true" />{item.skill.name}</span>
+        <small>{item.stateLabel} · SKILL {item.skill.version}</small>
+        <em>{item.skill.description}</em>
+        {item.needsUser ? <strong className="delivery-needs-user">YOUR DECISION</strong> : null}
+      </button>
+    </li>
+  )
+}
+
+function SkillDeliveryDetail(props: { readonly item: SkillDeliveryItem }) {
+  const { item } = props
+  const skill = item.skill
+  return (
+    <>
+      <header className="specification-detail-header">
+        <div>
+          <span className="eyebrow">SKILL / {skill.id}</span>
+          <h2>{skill.name}</h2>
+        </div>
+        <div className="specification-badges"><span data-spec-status={item.stage}>{item.stateLabel}</span><span>{skill.version}</span></div>
+      </header>
+      <DeliveryOverview item={item} />
+      <details className="specification-technical-record">
+        <summary><span>SKILL DETAILS</span><small>Invocation, resources, dependencies, validation, review, and exact revision identity</small></summary>
+        <div className="skill-delivery-details">
+          <p><strong>PURPOSE</strong><span>{skill.description}</span></p>
+          {skill.whenToUse ? <p><strong>WHEN TO USE</strong><span>{skill.whenToUse}</span></p> : null}
+          <p><strong>INVOCATION</strong><span>Model {skill.modelInvocable ? 'enabled' : 'disabled'} · User {skill.userInvocable ? 'enabled' : 'disabled'}</span></p>
+          <p><strong>RESOURCES</strong><span>{skill.resources.join(', ') || 'None'}</span></p>
+          <p><strong>DEPENDENCIES</strong><span>{skill.dependsOn.join(', ') || 'None'}</span></p>
+          <p><strong>EVIDENCE</strong><span>Validation {skill.validationPassed ? 'passed' : 'pending'} · Review {skill.reviewComplete ? 'complete' : 'pending'}</span></p>
+          <p><strong>IDENTITY</strong><code>{skill.digest}</code></p>
+        </div>
+      </details>
+    </>
+  )
+}
+
+function DeliveryOverview(props: { readonly item: CapabilityDeliveryProgress }) {
+  const { item } = props
+  return (
+    <section className="delivery-overview" data-delivery-stage={item.stage}>
+      <ol aria-label="Capability delivery progress">
+        {CAPABILITY_DELIVERY_STEPS.map((step, index) => {
+          const state = item.completedSteps > index ? 'complete' : item.completedSteps === index ? 'current' : 'pending'
+          return <li key={step} data-step-state={state}><span>{String(index + 1).padStart(2, '0')}</span><strong>{step}</strong></li>
+        })}
+      </ol>
+      <div className="delivery-next-action">
+        <span>{item.needsUser ? 'NEEDS YOUR DECISION' : 'NEXT'}</span>
+        <strong>{item.stateLabel}</strong>
+        <p>{item.nextAction}</p>
+      </div>
+    </section>
   )
 }
 

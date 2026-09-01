@@ -8,12 +8,17 @@ describe('Capability Specifications workspace', () => {
   it('renders immutable authority, revision diff, and editable business fields', () => {
     const markup = renderToStaticMarkup(createElement(CapabilitySpecificationsWorkspace, {
       locked: false,
+      skills: [{
+        id: 'skill-1', name: 'review-style', version: '0.1.0', profile: 'assistant', provenance: 'third-party', origin: 'import', lifecycle: 'approval-requested',
+        sealed: true, modelInvocable: true, userInvocable: true, description: 'Apply the preferred review style.', resources: [], validationPassed: true,
+        reviewComplete: true, approvalDecision: 'approval-requested', digest: 'skill-digest', dependsOn: [], dependents: [], system: false, generation: 1,
+      }],
       control: {
         snapshot: {
           mutable: true,
           plans: [],
           candidates: [],
-          specifications: [{ id: 'spec-2', revision: 2, supersedesId: 'spec-1', capability: 'text.echo', goal: 'Echo text exactly.', status: 'ready', digest: 'digest-2' }],
+          specifications: [{ id: 'spec-2', revision: 2, supersedesId: 'spec-1', capability: 'text.echo', goal: 'Echo text exactly.', status: 'ready', digest: 'digest-2', source: 'explicit' }],
         },
         selected: {
           id: 'spec-2', version: 'capability-specification/v1', revision: 2, supersedesId: 'spec-1', source: 'explicit', digest: 'digest-2', status: 'ready', capability: 'text.echo', goal: 'Echo text exactly.', nonGoals: ['No storage.'], inputs: [{ name: 'text', description: 'Input text.', required: true }], businessRules: ['Preserve whitespace.'], permissions: ['host.text.echo'], effects: { filesystem: [], network: [], process: [], secrets: [], externalSystems: [], remoteSideEffect: 'none' }, acceptanceExamples: [{ name: 'plain text', given: ['hello'], when: 'called', then: ['hello'], fixture: { input: { text: 'hello' }, expected: 'hello' } }], unresolved: [],
@@ -30,8 +35,12 @@ describe('Capability Specifications workspace', () => {
         load() {}, select() {}, change() {}, saveRevision() {},
       },
     }))
-    assert.match(markup, /CAPABILITY SPECIFICATIONS/)
-    assert.match(markup, /DOMAIN CONSTRUCTION \/ HOST AUTHORITY/)
+    assert.match(markup, /BUILD QUEUE/)
+    assert.match(markup, /CAPABILITY DEVELOPMENT \/ GOVERNED PIPELINE/)
+    assert.match(markup, /CHOOSING IMPLEMENTATION/)
+    assert.match(markup, /WAITING FOR APPROVAL · SKILL 0\.1\.0/)
+    assert.match(markup, /YOUR DECISION/)
+    assert.match(markup, /SPECIFICATION &amp; EVIDENCE/)
     assert.match(markup, /data-specification-diff="true"/)
     assert.match(markup, /host\.text\.echo/)
     assert.match(markup, /CREATE NEW REVISION/)

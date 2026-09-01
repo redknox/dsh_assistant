@@ -45,6 +45,7 @@ export interface WorkbenchListSpecificationItem {
   readonly goal: string
   readonly status: string
   readonly digest: string
+  readonly source: 'explicit' | 'legacy'
 }
 
 export interface WorkbenchListCandidateItem {
