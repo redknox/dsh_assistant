@@ -438,6 +438,25 @@ function manifestParameters() {
     tools: strings,
     services: strings,
     providers: strings,
+    workflows: {
+      type: 'array' as const,
+      description: 'Governed DSH WorkflowMeta declarations. script is a candidate-relative orchestration body; models can run it only after activation by registered name.',
+      items: {
+        type: 'object' as const,
+        additionalProperties: false,
+        properties: {
+          name: { type: 'string' as const },
+          description: { type: 'string' as const },
+          whenToUse: { type: 'string' as const },
+          script: { type: 'string' as const },
+          intent: { type: 'string' as const },
+          maxInputBytes: { type: 'number' as const },
+          maxTotalAgents: { type: 'number' as const },
+          phases: { type: 'array' as const, items: { type: 'object' as const, additionalProperties: true } },
+          inputFields: { type: 'array' as const, items: { type: 'object' as const, additionalProperties: true } },
+        },
+      },
+    },
     secrets: strings,
     configRequired: strings,
     entryPoints: strings,
@@ -476,6 +495,7 @@ function manifestFromArgs(args: Record<string, unknown>): CandidateManifestInput
     tools: asStringList(args.tools),
     services: asStringList(args.services),
     providers: asStringList(args.providers),
+    workflows: parseWorkflows(args.workflows),
     secrets: asStringList(args.secrets),
     configRequired: asStringList(args.configRequired),
     effects: parseEffects(args.effects),
@@ -483,6 +503,30 @@ function manifestFromArgs(args: Record<string, unknown>): CandidateManifestInput
     riskModel: parseRiskModel(args.riskModel),
     pluginDependencies: parsePluginDependencies(args.pluginDependencies),
   }
+}
+
+function parseWorkflows(value: unknown): CandidateManifestInput['workflows'] {
+  if (!Array.isArray(value)) return undefined
+  return value.map((item) => {
+    const row = item as Record<string, unknown>
+    return {
+      name: typeof row.name === 'string' ? row.name : '',
+      description: typeof row.description === 'string' ? row.description : '',
+      ...(typeof row.whenToUse === 'string' ? { whenToUse: row.whenToUse } : {}),
+      script: typeof row.script === 'string' ? row.script : '',
+      intent: row.intent as 'read' | 'mutate',
+      maxInputBytes: Number(row.maxInputBytes),
+      maxTotalAgents: Number(row.maxTotalAgents),
+      ...(Array.isArray(row.phases) ? { phases: row.phases.map((phase) => {
+        const value = phase as Record<string, unknown>
+        return { title: String(value.title ?? ''), ...(typeof value.detail === 'string' ? { detail: value.detail } : {}) }
+      }) } : {}),
+      ...(Array.isArray(row.inputFields) ? { inputFields: row.inputFields.map((field) => {
+        const value = field as Record<string, unknown>
+        return { name: String(value.name ?? ''), required: value.required === true, ...(typeof value.description === 'string' ? { description: value.description } : {}) }
+      }) } : {}),
+    }
+  })
 }
 
 function parsePluginDependencies(value: unknown): CandidateManifestInput['pluginDependencies'] {

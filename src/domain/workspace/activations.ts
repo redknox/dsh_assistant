@@ -63,6 +63,7 @@ function selfExtensionActivationCard(
   const capabilitiesChanged = approval.capabilitiesChanged ?? []
   const permissionsChanged = approval.permissionsChanged ?? []
   const toolsChanged = approval.toolsChanged ?? []
+  const workflowsChanged = approval.workflowsChanged ?? []
   return {
     id: activationCardId(approval.id, status, attempt?.generation === undefined ? undefined : {
       generation: attempt.generation,
@@ -90,6 +91,9 @@ function selfExtensionActivationCard(
     toolsAdded: approval.toolsAdded ?? [],
     toolsRemoved: approval.toolsRemoved ?? [],
     toolsChanged,
+    workflowsAdded: approval.workflowsAdded ?? [],
+    workflowsRemoved: approval.workflowsRemoved ?? [],
+    workflowsChanged,
     effects: approval.effects,
     eligibilityOk,
     eligibilityDenials: denials,
@@ -101,6 +105,7 @@ function selfExtensionActivationCard(
       `Fingerprint ${approval.fingerprint}`,
       `Capabilities ${formatExactDiff(approval.capabilitiesAdded, approval.capabilitiesRemoved, capabilitiesChanged)}`,
       `Tools       ${formatExactDiff(approval.toolsAdded ?? [], approval.toolsRemoved ?? [], toolsChanged)}`,
+      `Workflows   ${formatExactDiff(approval.workflowsAdded ?? [], approval.workflowsRemoved ?? [], workflowsChanged)}`,
       `Permissions ${formatExactDiff(approval.permissionsAdded, approval.permissionsRemoved, permissionsChanged)}`,
       `Effects     ${approval.effects.join('; ') || 'none'}`,
       `Contract    ${approval.runtimeContractVersion || 'unspecified'}`,

@@ -70,6 +70,7 @@ export function startWebUiServer(options: WebUiServerOptions): Promise<WebUiServ
     webUi: url,
     commands: options.surface.listCommands(),
     toolCatalog: options.surface.listTools(),
+    workflowCatalog: options.surface.listWorkflows(),
     ...(extra.acknowledgement ? { acknowledgement: extra.acknowledgement } : {}),
   })
 

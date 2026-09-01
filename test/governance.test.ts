@@ -939,6 +939,50 @@ export function apply() {}
     }
   })
 
+  it('activates a sealed Workflow declaration into the Catalog and removes it on rollback', async () => {
+    const { ctx, recoveryRoot } = await bootAssistantControl()
+    try {
+      const candidate = ctx.candidateWorkspace.create({
+        review: review({
+          kind: 'new-plugin', capability: 'analysis.workflow.echo', need: 'approved reusable orchestration', target: undefined,
+        }),
+        owner: 'generated/approved-workflow',
+        version: '0.1.0',
+        manifest: {
+          capabilities: ['analysis.workflow.echo'],
+          runtimeSeams: ['workflow'],
+          workflows: [{
+            name: 'approved-echo',
+            description: 'Return one governed Workflow input.',
+            script: 'src/approved-echo.workflow.js',
+            intent: 'read',
+            maxInputBytes: 4096,
+            maxTotalAgents: 1,
+            inputFields: [{ name: 'text', required: true }],
+          }],
+        },
+      })
+      ctx.candidateWorkspace.writeFile(candidate.id, 'src/approved-echo.workflow.js', 'return { echoed: args.text }\n')
+      const validated = ctx.candidateValidation.validate(candidate.id)
+      assert.equal(validated.passed, true, validated.stages.filter((stage) => stage.status === 'failed').map((stage) => `${stage.name}: ${stage.summary}`).join('; '))
+      const sealed = ctx.candidateWorkspace.seal(candidate.id)
+      ctx.independentReview.reviewCandidate(sealed.id)
+      const requested = ctx.extensionGovernance.requestApproval(sealed.id)
+      assert.deepEqual(requested.summary.workflows.added, ['approved-echo'])
+      const human = recoveryRoot.issueAuthority({ kind: 'human-control', source: 'application-ui' })
+      recoveryRoot.recordApproval(human, { candidateId: sealed.id, fingerprint: requested.fingerprint, decision: 'approved-for-exact-diff' })
+      const active = await recoveryRoot.activate(sealed.id, human)
+      assert.equal(active.state, 'active')
+      assert.ok(ctx.workflowCatalog.list().workflows.some((item) => item.name === 'approved-echo' && item.governance === 'generated-governed'))
+      const result = await ctx.workflowCatalog.execute('approved-echo', { text: 'hello' }, { parent: {} as never })
+      assert.deepEqual(result.result, { echoed: 'hello' })
+      await recoveryRoot.rollback(human)
+      assert.equal(ctx.workflowCatalog.list().workflows.some((item) => item.name === 'approved-echo'), false)
+    } finally {
+      await ctx.fiber.dispose()
+    }
+  })
+
   it('swaps managed/integrations 0.1.0 to 0.2.0 and restores the old implementation', async () => {
     const { ctx, recoveryRoot } = await bootAssistantControl()
     try {

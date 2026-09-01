@@ -1,15 +1,18 @@
 import type { ActivationSnapshot } from './types.js'
+import type { CandidateWorkflowDeclaration } from '../candidate/types.js'
 
 export interface ActivationPrepareContext {
   readonly workspaceRoot: string
   readonly entryPoints: readonly string[]
   readonly owner: string
+  readonly version: string
   readonly resolutionKind: string
   readonly baseVersion?: string
   readonly digest?: string
   readonly tools: readonly string[]
   readonly services: readonly string[]
   readonly providers: readonly string[]
+  readonly workflows: readonly CandidateWorkflowDeclaration[]
   readonly runtimeSeams: readonly string[]
   readonly permissions?: readonly string[]
   readonly provenanceKind?: string

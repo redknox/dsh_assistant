@@ -6,6 +6,7 @@ const strokes: Record<string, readonly string[]> = {
   calendar: ['M5 7h14v12H5z', 'M5 11h14', 'M8 5v4', 'M16 5v4'],
   memory: ['M8 4h8v16l-4-2.4L8 20z'],
   capabilities: ['M5 6h5v5H5z', 'M14 6h5v5h-5z', 'M5 14h5v5H5z', 'M14 14h5v5h-5z'],
+  workflow: ['M5 5h5v5H5z', 'M14 14h5v5h-5z', 'M10 7.5h4a3 3 0 0 1 3 3V14', 'M14.5 12l2.5 2 2.5-2'],
   attach: ['M15 8.5v6.2a3 3 0 0 1-6 0V8a2.4 2.4 0 1 1 4.8 0v6.1a1.2 1.2 0 1 1-2.4 0V9'],
   send: ['M4 12h13', 'M13 7l5 5-5 5'],
   chip: ['M8 7h8v10H8z', 'M10 4v3', 'M14 4v3', 'M10 17v3', 'M14 17v3', 'M5 10H3', 'M5 14H3', 'M21 10h-2', 'M21 14h-2'],

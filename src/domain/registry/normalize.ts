@@ -132,6 +132,7 @@ export function normalizeRegisterInput(input: RegistryRegisterInput): RegistryRe
     tools: Object.freeze((input.tools ?? []).map((item) => parseName(item, 'tool'))),
     services: Object.freeze((input.services ?? []).map((item) => parseName(item, 'service'))),
     providers: Object.freeze((input.providers ?? []).map((item) => parseToken(item, 'provider'))),
+    workflows: Object.freeze((input.workflows ?? []).map((item) => parseName(item, 'workflow'))),
     pluginDependencies: Object.freeze((input.pluginDependencies ?? []).map((item, index) => {
       if (item.strength !== 'hard' && item.strength !== 'optional') {
         throw new RegistryContractError(`malformed pluginDependencies[${index}].strength`)
@@ -154,6 +155,7 @@ export function cloneRecord(record: RegistryRecord): RegistryRecord {
     tools: Object.freeze([...record.tools]),
     services: Object.freeze([...record.services]),
     providers: Object.freeze([...record.providers]),
+    workflows: Object.freeze([...record.workflows]),
     pluginDependencies: Object.freeze((record.pluginDependencies ?? []).map((item) => ({
       capability: item.capability,
       strength: item.strength,

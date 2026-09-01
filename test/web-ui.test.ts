@@ -198,13 +198,14 @@ describe('local Mission-Control Web UI', () => {
 
   it('serves an authoritative snapshot, conversation, and live update', async () => {
     await withServer(bootAssistantControl, 'web-ui-ready', async (url, surface, agent) => {
-      const first = await fetch(`${url}/api/view`).then((res) => res.json()) as { view: MissionControlView; webUi: string; commands: readonly { readonly name: string }[]; toolCatalog: { readonly tools: readonly { readonly name: string }[] } }
+      const first = await fetch(`${url}/api/view`).then((res) => res.json()) as { view: MissionControlView; webUi: string; commands: readonly { readonly name: string }[]; toolCatalog: { readonly tools: readonly { readonly name: string }[] }; workflowCatalog: { readonly workflows: readonly { readonly name: string }[] } }
       assert.equal(first.view.identity, 'TARS-NG')
       assert.equal(first.view.systemState, 'READY')
       assert.ok(Array.isArray(first.view.skills))
       assert.match(first.webUi, /^http:\/\/127\.0\.0\.1:\d+$/)
       assert.deepEqual(first.commands.map((item) => item.name), ['compact', 'plan'])
       assert.ok(first.toolCatalog.tools.some((item) => item.name === 'define_capability_specification'))
+      assert.ok(first.workflowCatalog.workflows.some((item) => item.name === 'parallel-analysis'))
       assert.doesNotMatch(JSON.stringify(first), /reasoning_content|"type":"reasoning"/)
 
       const page = await fetch(`${url}/`)

@@ -601,6 +601,7 @@ function extensionApprovals(ctx: Context): WorkspaceSnapshotInput['extensionAppr
       capabilities: { added: readonly string[]; removed: readonly string[]; changed?: readonly string[] }
       permissions: { added: readonly string[]; removed: readonly string[]; changed?: readonly string[] }
       tools?: { added: readonly string[]; removed: readonly string[]; changed?: readonly string[] }
+      workflows?: { added: readonly string[]; removed: readonly string[]; changed?: readonly string[] }
       secrets: readonly string[]
       effects: { filesystem: readonly string[]; network: readonly string[]; process: readonly string[]; secrets: readonly string[]; externalSystems: readonly string[] }
     }
@@ -637,6 +638,9 @@ function extensionApprovals(ctx: Context): WorkspaceSnapshotInput['extensionAppr
       toolsAdded: [...(summary.tools?.added ?? [])],
       toolsRemoved: [...(summary.tools?.removed ?? [])],
       toolsChanged: [...(summary.tools?.changed ?? [])],
+      workflowsAdded: [...(summary.workflows?.added ?? [])],
+      workflowsRemoved: [...(summary.workflows?.removed ?? [])],
+      workflowsChanged: [...(summary.workflows?.changed ?? [])],
       ...(contract ? { runtimeContractVersion: contract } : {}),
       eligibilityOk: eligibility?.ok !== false,
       eligibilityDenials: eligibility?.denials.map((item) => item.reason) ?? [],

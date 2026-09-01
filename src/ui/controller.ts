@@ -16,6 +16,7 @@ import { projectAssistantView } from './projection.js'
 import { redactText } from '../domain/workspace/redact.js'
 import { answerTaskQuestion, controlPlanMode } from '../product/agent-task-control.js'
 import { projectToolCatalog, type ToolCatalogView } from '../domain/tool-catalog/index.js'
+import type { WorkflowCatalogView } from '../domain/workflow-catalog/index.js'
 
 export interface RememberInput {
   readonly category: MemoryCategory
@@ -116,6 +117,13 @@ export class AssistantControlSurface {
     const agent = this.findAgent()
     const registry = this.ctx.get('capabilityRegistry')
     return projectToolCatalog(this.ctx.tools.schemas(agent), registry?.list() ?? [])
+  }
+
+  listWorkflows(): WorkflowCatalogView {
+    return this.ctx.get('workflowCatalog')?.list() ?? {
+      summary: { total: 0, hostManaged: 0, generatedGoverned: 0, thirdPartyGoverned: 0 },
+      workflows: [],
+    }
   }
 
   executeCommand(line: string, signal: AbortSignal): Promise<CommandExecution | undefined> {

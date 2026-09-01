@@ -2,7 +2,7 @@ import { parseCapabilityId, parseOwnerId, parsePermission, parseVersion } from '
 import type { ExtensionProvenance } from '../registry/types.js'
 import type { ResolutionKind, ResolutionReview } from '../resolution/types.js'
 import { CandidateContractError } from './errors.js'
-import type { CandidateManifest, CandidateManifestInput, OperationalEffects, PluginCapabilityDependency, RemoteSideEffect } from './types.js'
+import type { CandidateManifest, CandidateManifestInput, CandidateWorkflowDeclaration, OperationalEffects, PluginCapabilityDependency, RemoteSideEffect } from './types.js'
 import { PLUGIN_DEPENDENCY_STRENGTHS, REMOTE_SIDE_EFFECTS } from './types.js'
 
 const CHANGE_KINDS: readonly ResolutionKind[] = [
@@ -72,6 +72,7 @@ export function normalizeManifest(
     tools: [...(input.tools ?? [])],
     services: [...(input.services ?? [])],
     providers: [...(input.providers ?? [])],
+    workflows: normalizeWorkflows(input.workflows),
     secrets: [...(input.secrets ?? [])],
     configRequired: [...(input.configRequired ?? [])],
     effects: {
@@ -92,6 +93,42 @@ export function normalizeManifest(
     runtimeContractVersion,
     pluginDependencies: normalizePluginDependencies(input.pluginDependencies),
   }
+}
+
+function normalizeWorkflows(input?: readonly CandidateWorkflowDeclaration[]): readonly CandidateWorkflowDeclaration[] {
+  const workflows = input ?? []
+  const names = new Set<string>()
+  return workflows.map((workflow, index) => {
+    if (!workflow || typeof workflow !== 'object') throw new CandidateContractError(`malformed workflows[${index}]`)
+    if (!/^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/.test(workflow.name) || names.has(workflow.name)) {
+      throw new CandidateContractError(`invalid or duplicate workflows[${index}].name`)
+    }
+    names.add(workflow.name)
+    if (typeof workflow.description !== 'string' || workflow.description.trim() === '' || workflow.description.length > 400) {
+      throw new CandidateContractError(`invalid workflows[${index}].description`)
+    }
+    if (!/^(?!\/)(?!.*(?:^|\/)\.\.(?:\/|$))[A-Za-z0-9._/-]+$/.test(workflow.script)) {
+      throw new CandidateContractError(`invalid workflows[${index}].script`)
+    }
+    if (workflow.intent !== 'read' && workflow.intent !== 'mutate') throw new CandidateContractError(`invalid workflows[${index}].intent`)
+    if (!Number.isSafeInteger(workflow.maxInputBytes) || workflow.maxInputBytes < 2 || workflow.maxInputBytes > 262_144) {
+      throw new CandidateContractError(`invalid workflows[${index}].maxInputBytes`)
+    }
+    if (!Number.isSafeInteger(workflow.maxTotalAgents) || workflow.maxTotalAgents < 1 || workflow.maxTotalAgents > 32) {
+      throw new CandidateContractError(`invalid workflows[${index}].maxTotalAgents`)
+    }
+    return {
+      name: workflow.name,
+      description: workflow.description,
+      ...(workflow.whenToUse ? { whenToUse: workflow.whenToUse.slice(0, 400) } : {}),
+      ...(workflow.phases ? { phases: workflow.phases.map((phase) => ({ title: phase.title.slice(0, 120), ...(phase.detail ? { detail: phase.detail.slice(0, 300) } : {}) })) } : {}),
+      script: workflow.script,
+      intent: workflow.intent,
+      maxInputBytes: workflow.maxInputBytes,
+      maxTotalAgents: workflow.maxTotalAgents,
+      ...(workflow.inputFields ? { inputFields: workflow.inputFields.map((field) => ({ name: field.name.slice(0, 120), required: Boolean(field.required), ...(field.description ? { description: field.description.slice(0, 300) } : {}) })) } : {}),
+    }
+  })
 }
 
 function normalizePluginDependencies(input?: readonly PluginCapabilityDependency[]): readonly PluginCapabilityDependency[] {

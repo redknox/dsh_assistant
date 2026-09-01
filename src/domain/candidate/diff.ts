@@ -21,6 +21,7 @@ export function diffAgainstBase(manifest: CandidateManifest, base?: RegistryReco
     tools: namedDiff(base?.tools ?? [], manifest.tools),
     services: namedDiff(base?.services ?? [], manifest.services),
     providers: namedDiff(base?.providers ?? [], manifest.providers),
+    workflows: namedDiff(base?.workflows ?? [], manifest.workflows.map((item) => item.name)),
     runtimeSeams: namedDiff(base?.runtimeSeams ?? [], manifest.runtimeSeams),
     effects: manifest.effects,
     ...(manifest.runtimeContractVersion === undefined ? {} : { runtimeContractVersion: manifest.runtimeContractVersion }),

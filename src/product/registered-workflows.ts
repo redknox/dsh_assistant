@@ -1,6 +1,7 @@
-import type { Context } from '@deepseek-ai/cordis'
+import { Service, type Context } from '@deepseek-ai/cordis'
 import type { WorkflowMeta } from '@deepseek-ai/dsh-workflow'
 import { defineTool } from '@deepseek-ai/dsh-tools'
+import { GovernedWorkflowCatalog, type GovernedWorkflowDefinition, type WorkflowCatalogView } from '../domain/workflow-catalog/index.js'
 import { GOVERNED_SUBAGENT_PROVIDER, MAX_ACTIVE_DELEGATIONS } from './governed-subagent-provider.js'
 
 const MAX_INPUT_BYTES = 32 * 1024
@@ -34,14 +35,6 @@ interface ParallelAnalysisInput {
   readonly tasks: readonly AnalysisTask[]
 }
 
-const CATALOG = Object.freeze([{
-  name: PARALLEL_ANALYSIS_META.name,
-  title: 'Parallel analysis',
-  description: PARALLEL_ANALYSIS_META.description,
-  intent: 'read',
-  engine: 'dsh-workflow',
-}])
-
 function textOutput() {
   return {
     schema: { type: 'string' as const },
@@ -60,9 +53,6 @@ function boundedString(value: unknown, field: string, maxBytes: number): string 
 function parseParallelAnalysisInput(value: unknown): ParallelAnalysisInput {
   if (value === null || typeof value !== 'object' || Array.isArray(value)) {
     throw new Error('parallel-analysis input must be an object')
-  }
-  if (Buffer.byteLength(JSON.stringify(value), 'utf8') > MAX_INPUT_BYTES) {
-    throw new Error(`registered workflow input exceeds the ${MAX_INPUT_BYTES}-byte limit`)
   }
   const record = value as Record<string, unknown>
   if (Object.keys(record).some((key) => key !== 'tasks')) throw new Error('parallel-analysis input contains an unknown field')
@@ -87,31 +77,74 @@ function parseParallelAnalysisInput(value: unknown): ParallelAnalysisInput {
   }
 }
 
-/** Model-facing access is limited to a host catalog and fixed native scripts. */
+/** Model-facing execution is limited to exact active Catalog names; inline scripts never cross the tool seam. */
 export const name = 'dsh-assistant-registered-workflows'
 export const inject = ['tools', 'systemPrompt', 'workflowEngine']
 
-export function apply(ctx: Context): void {
+declare module '@deepseek-ai/cordis' {
+  interface Context {
+    workflowCatalog: RegisteredWorkflowCatalogService
+  }
+}
+
+export class RegisteredWorkflowCatalogService extends Service {
+  constructor(ctx: Context, private readonly catalog: GovernedWorkflowCatalog) {
+    super(ctx, 'workflowCatalog')
+  }
+
+  list(): WorkflowCatalogView {
+    return this.catalog.list()
+  }
+
+  execute(...args: Parameters<GovernedWorkflowCatalog['execute']>) {
+    return this.catalog.execute(...args)
+  }
+
+  register<Input>(definition: GovernedWorkflowDefinition<Input>): () => void {
+    return this.catalog.register(definition)
+  }
+}
+
+export async function apply(ctx: Context): Promise<void> {
+  const catalog = new GovernedWorkflowCatalog(ctx.workflowEngine, GOVERNED_SUBAGENT_PROVIDER, MAX_ACTIVE_DELEGATIONS)
+  catalog.register({
+    meta: PARALLEL_ANALYSIS_META,
+    title: 'Parallel analysis',
+    script: PARALLEL_ANALYSIS_SCRIPT,
+    owner: 'managed/workflow-runtime',
+    version: '0.1.0',
+    provenance: 'managed',
+    intent: 'read',
+    inputFields: [{ name: 'tasks', required: true, description: 'One to four independent analysis tasks.' }],
+    maxInputBytes: MAX_INPUT_BYTES,
+    maxTotalAgents: MAX_ACTIVE_DELEGATIONS,
+    parseInput: parseParallelAnalysisInput,
+  })
+  await ctx.plugin(class extends RegisteredWorkflowCatalogService {
+    constructor(scope: Context) {
+      super(scope, catalog)
+    }
+  })
   ctx.systemPrompt.section({
     name: 'product:registered-workflows',
     order: 51,
-    text: 'Use list_registered_workflows and run_registered_workflow only for fixed workflows registered by the TARS-NG host. Runs are foreground and governed by the same child-agent, workspace, tool-policy, approval, cancellation, and depth boundaries as direct delegation. Model-authored workflow scripts are not supported.',
+    text: 'Use list_registered_workflows and run_registered_workflow only for active workflows registered in the TARS-NG Catalog. Runs are foreground and governed by the same child-agent, workspace, tool-policy, approval, cancellation, and depth boundaries as direct delegation. Never pass inline JavaScript to execution. A missing reusable workflow may be authored only as a Candidate, then validated, sealed, independently reviewed, exactly approved, and human-activated before use.',
   })
 
   ctx.effect(() => ctx.tools.register(defineTool({
     name: 'list_registered_workflows',
-    description: 'List trusted native DSH workflows registered by the TARS-NG host. Read-only; does not start work.',
+    description: 'List active governed native DSH workflows in the TARS-NG Catalog. Read-only; does not start work.',
     parameters: {},
     output: textOutput(),
     isConcurrencySafe: () => true,
     async execute() {
-      return JSON.stringify(CATALOG)
+      return JSON.stringify(catalog.list().workflows)
     },
   })))
 
   ctx.effect(() => ctx.tools.register(defineTool({
     name: 'run_registered_workflow',
-    description: 'Run one trusted host-registered native DSH workflow in the foreground. This never accepts or executes model-authored script text.',
+    description: 'Run one exact active governed native DSH workflow in the foreground. This accepts only Catalog name and input, never inline script text.',
     parameters: {
       name: { type: 'string', required: true },
       input: { type: 'object', required: true, additionalProperties: true },
@@ -119,26 +152,11 @@ export function apply(ctx: Context): void {
     output: textOutput(),
     async execute(args, exec) {
       if (!exec.agent) throw new Error('registered workflows require a calling agent')
-      if (args.name !== PARALLEL_ANALYSIS_META.name) throw new Error(`unknown registered workflow: ${args.name}`)
-      const input = parseParallelAnalysisInput(args.input)
-      const run = ctx.workflowEngine.start({
-        meta: PARALLEL_ANALYSIS_META,
-        script: PARALLEL_ANALYSIS_SCRIPT,
-        args: input,
+      const result = await catalog.execute(args.name, args.input, {
         parent: exec.agent,
-        signal: exec.signal,
-        subagentProvider: GOVERNED_SUBAGENT_PROVIDER,
-        maxTotalAgents: MAX_ACTIVE_DELEGATIONS,
+        ...(exec.signal ? { signal: exec.signal } : {}),
       })
-      try {
-        const result = await run.result
-        if (result.stopReason !== 'completed') {
-          throw new Error(`workflow ${result.stopReason}: ${result.error ?? 'no detail'}`)
-        }
-        return JSON.stringify({ runId: String(run.id), agentsStarted: result.agentsStarted, result: result.value })
-      } finally {
-        await run.dispose()
-      }
+      return JSON.stringify(result)
     },
   })))
 }

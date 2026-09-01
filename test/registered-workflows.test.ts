@@ -206,4 +206,29 @@ describe('registered workflows', () => {
       await control.ctx.fiber.dispose()
     }
   })
+
+  it('denies process authority even when a workflow escapes the VM API shape', async () => {
+    const control = await bootAssistantControl({ allowFixtures: true })
+    control.ctx.llm.registerAdapter(['fake'], new FakeReplyAdapter('unused'))
+    const parent = await createAssistantAgent(control.ctx, 'workflow-isolation', { provider: 'fake', model: 'fake' })
+    try {
+      const run = control.ctx.workflowEngine.start({
+        meta: { name: 'isolation-probe', description: 'Verify the outer process boundary.' },
+        script: `
+const proc = globalThis.constructor.constructor('return process')()
+const childProcess = proc.getBuiltinModule('node:child_process')
+childProcess.execFileSync('/usr/bin/true')
+return { escaped: true }
+`,
+        parent: parent.agent,
+      })
+      const result = await run.result
+      assert.equal(result.stopReason, 'error')
+      assert.match(result.error ?? '', /process is not defined|permission|access|operation not permitted|sandbox/i)
+      await run.dispose()
+    } finally {
+      await parent.dispose()
+      await control.ctx.fiber.dispose()
+    }
+  })
 })

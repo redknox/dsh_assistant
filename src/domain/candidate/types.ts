@@ -72,6 +72,7 @@ export interface CandidateManifest {
   readonly tools: readonly string[]
   readonly services: readonly string[]
   readonly providers: readonly string[]
+  readonly workflows: readonly CandidateWorkflowDeclaration[]
   readonly secrets: readonly string[]
   readonly configRequired: readonly string[]
   readonly effects: OperationalEffects
@@ -97,6 +98,7 @@ export interface CandidateManifestInput {
   readonly tools?: readonly string[]
   readonly services?: readonly string[]
   readonly providers?: readonly string[]
+  readonly workflows?: readonly CandidateWorkflowDeclaration[]
   readonly secrets?: readonly string[]
   readonly configRequired?: readonly string[]
   readonly effects?: Partial<OperationalEffects>
@@ -144,9 +146,23 @@ export interface CandidateDiff {
   readonly tools: NamedDiff
   readonly services: NamedDiff
   readonly providers: NamedDiff
+  readonly workflows: NamedDiff
   readonly runtimeSeams: NamedDiff
   readonly effects: OperationalEffects
   readonly runtimeContractVersion?: string
+}
+
+/** TARS governance envelope around DSH WorkflowMeta plus its artifact entry. */
+export interface CandidateWorkflowDeclaration {
+  readonly name: string
+  readonly description: string
+  readonly whenToUse?: string
+  readonly phases?: readonly { readonly title: string; readonly detail?: string }[]
+  readonly script: string
+  readonly intent: 'read' | 'mutate'
+  readonly maxInputBytes: number
+  readonly maxTotalAgents: number
+  readonly inputFields?: readonly { readonly name: string; readonly required: boolean; readonly description?: string }[]
 }
 
 export interface ValidationStageResult {

@@ -103,6 +103,7 @@ function ActivationCardView(props: {
         <div><dt>STATUS</dt><dd>{card.status}</dd></div>
         <div><dt>CAPABILITIES</dt><dd>{formatDiff(card.capabilitiesAdded, card.capabilitiesRemoved, card.capabilitiesChanged)}</dd></div>
         <div><dt>TOOLS</dt><dd>{formatDiff(card.toolsAdded, card.toolsRemoved, card.toolsChanged)}</dd></div>
+        <div><dt>WORKFLOWS</dt><dd>{formatDiff(card.workflowsAdded ?? [], card.workflowsRemoved ?? [], card.workflowsChanged ?? [])}</dd></div>
         <div><dt>PERMISSIONS</dt><dd>{formatDiff(card.permissionsAdded, card.permissionsRemoved, card.permissionsChanged)}</dd></div>
         {card.details.map((line) => <div key={line}><dt>DETAIL</dt><dd>{line}</dd></div>)}
       </dl>

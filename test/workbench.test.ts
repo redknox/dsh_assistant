@@ -268,7 +268,7 @@ describe('candidate workbench', () => {
       assert.throws(() => empty.workbench.listFiles(listed.id), WorkbenchContractError)
       assert.equal(ctx.tools.get('remember_plan'), undefined)
       assert.doesNotMatch(JSON.stringify(ctx.tools.get('write_candidate_file') ?? {}), /"argv"|npm run|postinstall/)
-      assert.doesNotMatch(JSON.stringify(ctx.tools.get('set_candidate_manifest') ?? {}), /"argv"|"script"/)
+      assert.doesNotMatch(JSON.stringify(ctx.tools.get('set_candidate_manifest') ?? {}), /"argv"|"validationTasks"/)
     } finally {
       await ctx.fiber.dispose()
     }

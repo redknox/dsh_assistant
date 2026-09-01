@@ -820,6 +820,7 @@ function mergeManifestPatch(
     tools: patch.tools ?? current.tools,
     services: patch.services ?? current.services,
     providers: patch.providers ?? current.providers,
+    workflows: patch.workflows ?? current.workflows,
     secrets: patch.secrets ?? current.secrets,
     configRequired: patch.configRequired ?? current.configRequired,
     effects: {

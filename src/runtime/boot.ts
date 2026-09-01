@@ -17,7 +17,6 @@ import * as toolSkill from '@deepseek-ai/dsh-tool-skill'
 import ToolRuntime from '@deepseek-ai/dsh-tools'
 import SubagentRuntime from '@deepseek-ai/dsh-subagent'
 import * as SpawnSubagent from '@deepseek-ai/dsh-subagent-spawn-in-process'
-import WorkerThreadWorkflowEngine from '@deepseek-ai/dsh-workflow-worker-thread'
 import WebRuntime from '@deepseek-ai/dsh-web'
 import * as DeepSeekWebSearch from '@deepseek-ai/dsh-web-search-deepseek'
 import * as ToolWeb from '@deepseek-ai/dsh-tool-web'
@@ -43,6 +42,7 @@ import type { MemoryPluginConfig } from '../plugins/memory-plugin.js'
 import type { KnowledgePluginConfig } from '../plugins/knowledge-plugin.js'
 import { boundedWorkspaceRoot } from '../product/bounded-workbench.js'
 import { GOVERNED_SUBAGENT_PROVIDER, MAX_ACTIVE_DELEGATIONS } from '../product/governed-subagent-provider.js'
+import { IsolatedWorkflowEngine } from '../adapters/workflow/isolated-workflow-engine.js'
 
 /**
  * Minimal public DSH plugin stack for this product layer.
@@ -141,12 +141,11 @@ async function bootStack(options: BootOptions = {}): Promise<AssistantControl> {
   if (!safeMode) {
     await ctx.plugin(SubagentRuntime)
     await ctx.plugin(SpawnSubagent, { providerName: 'tars-spawn' })
-    await ctx.plugin(WorkerThreadWorkflowEngine, {
+    await ctx.plugin(IsolatedWorkflowEngine, {
       provider: GOVERNED_SUBAGENT_PROVIDER,
       maxConcurrentAgents: 2,
       maxTotalAgents: MAX_ACTIVE_DELEGATIONS,
       maxItemsPerCall: MAX_ACTIVE_DELEGATIONS,
-      syncTimeoutMs: 1_000,
       disposeGraceMs: 5_000,
     })
   }

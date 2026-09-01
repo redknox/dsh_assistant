@@ -2,7 +2,7 @@ import React from 'react'
 import type { MissionControlView } from '../../src/domain/workspace/types'
 import { Glyph } from './icons'
 
-export type WorkspacePane = 'today' | 'expense-review' | 'extensions' | 'tools' | 'specifications' | 'memory' | 'logs' | 'settings'
+export type WorkspacePane = 'today' | 'expense-review' | 'extensions' | 'tools' | 'workflows' | 'specifications' | 'memory' | 'logs' | 'settings'
 
 export interface WorkspaceNavigationActions {
   readonly navigate: (pane: WorkspacePane) => void
@@ -83,8 +83,11 @@ export function WorkspaceNavigation(props: {
         </div>
         <button type="button" className="view-all-conversations" onClick={() => props.actions.navigate('memory')}>View all in Memory <span aria-hidden="true">→</span></button>
       </section>
-      <div className="nav-group-label nav-group-label--system">SYSTEM</div>
-      <nav className="secondary-nav" aria-label="System">
+      <div className="nav-group-label nav-group-label--system">LIBRARY</div>
+      <nav className="secondary-nav" aria-label="Capability library">
+        <button type="button" className="nav-item" data-nav="capabilities" onClick={props.actions.openOperations}>
+          <span className="control-lamp" aria-hidden="true" /><Glyph name="capabilities" /><span>CAPABILITIES</span>
+        </button>
         <button
           type="button"
           className={`nav-item${props.pane === 'extensions' ? ' nav-item--active' : ''}`}
@@ -93,9 +96,6 @@ export function WorkspaceNavigation(props: {
           onClick={() => props.actions.navigate('extensions')}
         >
           <span className="control-lamp" aria-hidden="true" /><Glyph name="capabilities" /><span>EXTENSIONS</span>
-        </button>
-        <button type="button" className="nav-item" data-nav="capabilities" onClick={props.actions.openOperations}>
-          <span className="control-lamp" aria-hidden="true" /><Glyph name="capabilities" /><span>CAPABILITIES</span>
         </button>
         <button
           type="button"
@@ -108,13 +108,28 @@ export function WorkspaceNavigation(props: {
         </button>
         <button
           type="button"
+          className={`nav-item${props.pane === 'workflows' ? ' nav-item--active' : ''}`}
+          data-nav="workflows"
+          aria-current={props.pane === 'workflows' ? 'page' : undefined}
+          onClick={() => props.actions.navigate('workflows')}
+        >
+          <span className="control-lamp" aria-hidden="true" /><Glyph name="workflow" /><span>WORKFLOWS</span>
+        </button>
+      </nav>
+      <div className="nav-group-label nav-group-label--system">REQUESTS</div>
+      <nav className="secondary-nav" aria-label="Capability requests">
+        <button
+          type="button"
           className={`nav-item${props.pane === 'specifications' ? ' nav-item--active' : ''}`}
           data-nav="specifications"
           aria-current={props.pane === 'specifications' ? 'page' : undefined}
           onClick={() => props.actions.navigate('specifications')}
         >
-          <span className="control-lamp" aria-hidden="true" /><Glyph name="hex" /><span>SPECIFICATIONS</span>
+          <span className="control-lamp" aria-hidden="true" /><Glyph name="hex" /><span>CAPABILITY REQUESTS</span>
         </button>
+      </nav>
+      <div className="nav-group-label nav-group-label--system">SYSTEM</div>
+      <nav className="secondary-nav" aria-label="System">
         <button
           type="button"
           className={`nav-item${props.pane === 'logs' ? ' nav-item--active' : ''}`}

@@ -124,7 +124,7 @@ export const OFFICIAL_RUNTIME_MOUNTS = Object.freeze([
   { official: 'tool-web', runtime: 'tool-web', when: 'ready' },
   { official: 'subagent', runtime: 'SubagentRuntime', when: 'ready' },
   { official: 'subagent-spawn-in-process', runtime: 'subagent-spawn-in-process', when: 'ready' },
-  { official: 'workflow-worker-thread', runtime: 'WorkerThreadWorkflowEngine', when: 'ready' },
+  { official: 'workflow-worker-thread', runtime: 'IsolatedWorkflowEngine', when: 'ready' },
   { official: 'session-persistence-jsonl', runtime: 'JsonlSessionPersistence', when: 'session-persistence' },
   { official: 'session-title', runtime: 'SessionTitleService', when: 'ready' },
   { official: 'session-title-llm', runtime: 'session-title-first-prompt-llm', when: 'ready' },

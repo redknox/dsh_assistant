@@ -174,6 +174,9 @@ export interface ActivationCard {
   readonly toolsAdded: readonly string[]
   readonly toolsRemoved: readonly string[]
   readonly toolsChanged: readonly string[]
+  readonly workflowsAdded: readonly string[]
+  readonly workflowsRemoved: readonly string[]
+  readonly workflowsChanged: readonly string[]
   readonly effects: readonly string[]
   readonly eligibilityOk: boolean
   readonly eligibilityDenials: readonly string[]
@@ -510,6 +513,9 @@ export interface WorkspaceSnapshotInput {
     readonly toolsAdded?: readonly string[]
     readonly toolsRemoved?: readonly string[]
     readonly toolsChanged?: readonly string[]
+    readonly workflowsAdded?: readonly string[]
+    readonly workflowsRemoved?: readonly string[]
+    readonly workflowsChanged?: readonly string[]
     readonly runtimeContractVersion?: string
     readonly eligibilityOk?: boolean
     readonly eligibilityDenials?: readonly string[]

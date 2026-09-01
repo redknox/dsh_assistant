@@ -42,7 +42,13 @@ export class CandidateService implements CandidateWorkspace, CandidateValidation
   ) {
     this.persistRecords = options.persist
     for (const record of options.restore ?? []) {
-      this.records.set(record.id, { ...record })
+      this.records.set(record.id, {
+        ...record,
+        manifest: {
+          ...record.manifest,
+          workflows: record.manifest.workflows ?? [],
+        },
+      })
     }
   }
 

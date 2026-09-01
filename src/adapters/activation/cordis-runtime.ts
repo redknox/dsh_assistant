@@ -9,6 +9,9 @@ import type { GeneratedToolDescriptor } from '../../domain/generated-runtime/typ
 import { resolveCandidateEntry } from './candidate-entry.js'
 import { IsolatedGeneratedRunner } from './generated-runner.js'
 import { createGeneratedHostBroker } from './generated-broker-operations.js'
+import { contractDigestExtras, digestFiles } from '../../domain/candidate/digest.js'
+import { listSourceFiles, readSourceFile } from '../../domain/candidate/files.js'
+import type { RegisteredWorkflowCatalogService } from '../../product/registered-workflows.js'
 
 interface SurfaceSnapshot {
   readonly tools: readonly string[]
@@ -105,6 +108,8 @@ export class CordisActivationRuntime implements ActivationRuntime {
   private readonly inProcessPlugins = new Map<string, PriorOwnerMount>()
   private readonly parkedBy = new Map<string, Array<{ id: string; runner: IsolatedGeneratedRunner }>>()
   private readonly isolatedRecipes = new Map<string, ActivationPrepareContext>()
+  private readonly workflowDisposers = new Map<string, Array<() => void>>()
+  private readonly parkedWorkflowsBy = new Map<string, string[]>()
   private readonly generatedBroker
 
   constructor(private readonly ctx: Context) {
@@ -135,7 +140,7 @@ export class CordisActivationRuntime implements ActivationRuntime {
       provenanceKind: context.provenanceKind,
       origin: context.origin,
     })) {
-      return this.prepareGenerated(candidateId, context)
+      return this.prepareGeneratedComposite(candidateId, context)
     }
     let swapped: PriorOwnerMount[] = []
     try {
@@ -190,9 +195,22 @@ export class CordisActivationRuntime implements ActivationRuntime {
       if (declared.services.length > 0 || declared.providers.length > 0) {
         return { ok: false, diagnostics: 'generated runtime does not proxy services or providers' }
       }
-      if (declaredTools.length === 0) {
-        return { ok: false, diagnostics: 'candidate declared no tools, services, or providers to verify' }
+      const catalog = this.ctx.get('workflowCatalog') as RegisteredWorkflowCatalogService | undefined
+      const activeWorkflows = new Set(catalog?.list().workflows.map((item) => item.name) ?? [])
+      const missingWorkflows = declared.workflows.map((item) => item.name).filter((name) => !activeWorkflows.has(name))
+      if (missingWorkflows.length > 0) {
+        return { ok: false, diagnostics: missingWorkflows.map((name) => `workflow:${name} missing after candidate mount`).join('; ') }
       }
+      if (declaredTools.length === 0 && declared.workflows.length === 0) {
+        return { ok: false, diagnostics: 'candidate declared no tools, workflows, services, or providers to verify' }
+      }
+      return { ok: true }
+    }
+    if (this.workflowDisposers.has(candidateId)) {
+      const catalog = this.ctx.get('workflowCatalog') as RegisteredWorkflowCatalogService | undefined
+      const active = new Set(catalog?.list().workflows.map((item) => item.name) ?? [])
+      const missing = declared.workflows.map((item) => item.name).filter((name) => !active.has(name))
+      if (missing.length > 0) return { ok: false, diagnostics: missing.map((name) => `workflow:${name} missing after candidate mount`).join('; ') }
       return { ok: true }
     }
     if (!this.fibers.has(candidateId)) return { ok: false, diagnostics: 'candidate artifact is not mounted' }
@@ -229,6 +247,9 @@ export class CordisActivationRuntime implements ActivationRuntime {
       if (snapshot.mounted.includes(id)) continue
       waiting.push(this.dropGenerated(id, runner))
     }
+    for (const id of [...this.workflowDisposers.keys()]) {
+      if (!snapshot.mounted.includes(id)) this.dropWorkflows(id)
+    }
     for (const id of new Set([...this.parkedBy.keys(), ...this.priorOwners.keys()])) {
       if (snapshot.mounted.includes(id)) {
         await this.discardParked(id)
@@ -238,14 +259,14 @@ export class CordisActivationRuntime implements ActivationRuntime {
     }
     await Promise.all(waiting)
     for (const id of snapshot.mounted) {
-      if (this.generated.has(id) || this.fibers.has(id)) continue
+      if (this.generated.has(id) || this.fibers.has(id) || this.workflowDisposers.has(id)) continue
       const recipe = this.isolatedRecipes.get(id)
       if (recipe === undefined) continue
-      const remounted = await this.prepareGenerated(id, recipe)
+      const remounted = await this.prepareGeneratedComposite(id, recipe)
       if (!remounted.ok) throw new Error(remounted.diagnostics ?? `failed to remount isolated candidate ${id}`)
       await this.commit(id)
     }
-    this.currentMounted = snapshot.mounted.filter((id) => this.generated.has(id) || this.fibers.has(id))
+    this.currentMounted = snapshot.mounted.filter((id) => this.generated.has(id) || this.fibers.has(id) || this.workflowDisposers.has(id))
   }
 
   async unloadGenerated(candidateId?: string): Promise<void> {
@@ -254,11 +275,13 @@ export class CordisActivationRuntime implements ActivationRuntime {
       if (runner !== undefined) {
         await this.dropGenerated(candidateId, runner)
       }
+      this.dropWorkflows(candidateId)
       await this.discardParked(candidateId)
       return
     }
     const runners = [...this.generated.entries()]
     await Promise.all(runners.map(([id, runner]) => this.dropGenerated(id, runner)))
+    for (const id of [...this.workflowDisposers.keys()]) this.dropWorkflows(id)
     for (const id of [...this.parkedBy.keys()]) await this.discardParked(id)
   }
 
@@ -268,6 +291,116 @@ export class CordisActivationRuntime implements ActivationRuntime {
 
   bindIsolatedFailure(handler: (failure: IsolatedRuntimeFailure) => void | Promise<void>): void {
     this.isolatedFailure = handler
+  }
+
+  private async prepareGeneratedComposite(candidateId: string, context: ActivationPrepareContext): Promise<{ ok: boolean; diagnostics?: string }> {
+    if (context.workflows.length === 0) return this.prepareGenerated(candidateId, context)
+    if (context.services.length > 0 || context.providers.length > 0) {
+      return { ok: false, diagnostics: 'generated runtime does not proxy services or providers' }
+    }
+    if (this.workflowDisposers.has(candidateId)) return { ok: true }
+    this.parkWorkflowPriors(candidateId, context)
+    let toolsMounted = false
+    if (context.tools.length > 0) {
+      const tools = await this.prepareGenerated(candidateId, context)
+      if (!tools.ok) {
+        await this.restoreParkedWorkflows(candidateId)
+        return tools
+      }
+      toolsMounted = true
+    }
+    try {
+      const mounted = await this.mountGeneratedWorkflows(candidateId, context)
+      if (!mounted.ok) throw new Error(mounted.diagnostics ?? 'Workflow mount failed')
+      return { ok: true }
+    } catch (error) {
+      this.dropWorkflows(candidateId)
+      if (toolsMounted) {
+        const runner = this.generated.get(candidateId)
+        if (runner) await this.dropGenerated(candidateId, runner)
+        await this.restoreIsolatedSwap(candidateId)
+      } else await this.restoreParkedWorkflows(candidateId)
+      return { ok: false, diagnostics: error instanceof Error ? error.message : String(error) }
+    }
+  }
+
+  private async mountGeneratedWorkflows(candidateId: string, context: ActivationPrepareContext): Promise<{ ok: boolean; diagnostics?: string }> {
+    try {
+      this.verifyWorkflowArtifact(context)
+      const service = this.ctx.get('workflowCatalog') as RegisteredWorkflowCatalogService | undefined
+      if (!service) throw new Error('Workflow Catalog is unavailable')
+      const disposers: Array<() => void> = []
+      try {
+        for (const workflow of context.workflows) disposers.push(service.register({
+          meta: {
+            name: workflow.name,
+            description: workflow.description,
+            ...(workflow.whenToUse ? { whenToUse: workflow.whenToUse } : {}),
+            ...(workflow.phases ? { phases: workflow.phases.map((phase) => ({ ...phase })) } : {}),
+          },
+          title: workflow.name.split('-').map((part) => `${part.slice(0, 1).toUpperCase()}${part.slice(1)}`).join(' '),
+          script: readSourceFile(context.workspaceRoot, workflow.script),
+          owner: context.owner,
+          version: context.version,
+          provenance: context.provenanceKind === 'third-party' ? 'third-party' : 'generated',
+          intent: workflow.intent,
+          inputFields: workflow.inputFields ?? [],
+          maxInputBytes: workflow.maxInputBytes,
+          maxTotalAgents: workflow.maxTotalAgents,
+          parseInput(value) { return value },
+        }))
+      } catch (error) {
+        for (const dispose of disposers.reverse()) dispose()
+        throw error
+      }
+      this.workflowDisposers.set(candidateId, disposers)
+      this.isolatedRecipes.set(candidateId, context)
+      this.candidateOwners.set(candidateId, context.owner)
+      return { ok: true }
+    } catch (error) {
+      return { ok: false, diagnostics: error instanceof Error ? error.message : String(error) }
+    }
+  }
+
+  private verifyWorkflowArtifact(context: ActivationPrepareContext): void {
+    if (!context.digest) throw new Error('generated Workflow activation requires a sealed digest')
+    const digest = digestFiles(
+      context.workspaceRoot,
+      listSourceFiles(context.workspaceRoot),
+      contractDigestExtras(context.runtimeContractVersion),
+    )
+    if (digest !== context.digest) throw new Error('generated Workflow artifact digest does not match the approved sealed digest')
+  }
+
+  private dropWorkflows(candidateId: string): void {
+    for (const dispose of this.workflowDisposers.get(candidateId)?.slice().reverse() ?? []) dispose()
+    this.workflowDisposers.delete(candidateId)
+  }
+
+  private parkWorkflowPriors(candidateId: string, context: ActivationPrepareContext): void {
+    const names = new Set(context.workflows.map((item) => item.name))
+    const priors = [...this.workflowDisposers.keys()].filter((id) => {
+      if (id === candidateId) return false
+      const recipe = this.isolatedRecipes.get(id)
+      return this.candidateOwners.get(id) === context.owner || recipe?.workflows.some((item) => names.has(item.name)) === true
+    })
+    for (const id of priors) {
+      this.dropWorkflows(id)
+      this.currentMounted = this.currentMounted.filter((mounted) => mounted !== id)
+    }
+    this.parkedWorkflowsBy.set(candidateId, priors)
+  }
+
+  private async restoreParkedWorkflows(candidateId: string): Promise<void> {
+    const priors = this.parkedWorkflowsBy.get(candidateId) ?? []
+    this.parkedWorkflowsBy.delete(candidateId)
+    for (const id of priors) {
+      const recipe = this.isolatedRecipes.get(id)
+      if (!recipe) continue
+      const mounted = await this.mountGeneratedWorkflows(id, recipe)
+      if (!mounted.ok) throw new Error(mounted.diagnostics ?? `failed to restore Workflow candidate ${id}`)
+      if (!this.currentMounted.includes(id)) this.currentMounted = [...this.currentMounted, id]
+    }
   }
 
   private async prepareGenerated(candidateId: string, context: ActivationPrepareContext): Promise<{ ok: boolean; diagnostics?: string }> {
@@ -410,6 +543,7 @@ export class CordisActivationRuntime implements ActivationRuntime {
   private async discardParked(candidateId: string): Promise<void> {
     const parked = this.parkedBy.get(candidateId) ?? []
     this.parkedBy.delete(candidateId)
+    this.parkedWorkflowsBy.delete(candidateId)
     for (const item of parked) {
       item.runner.onFatal = undefined
       item.runner.kill()
@@ -424,6 +558,7 @@ export class CordisActivationRuntime implements ActivationRuntime {
     this.candidateOwners.delete(candidateId)
     this.baselines.delete(candidateId)
     await this.restoreParked(candidateId)
+    await this.restoreParkedWorkflows(candidateId)
     await this.restorePriorOwner(candidateId, this.priorOwners.get(candidateId) ?? [])
   }
 

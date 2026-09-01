@@ -4,6 +4,7 @@ import type { ExpenseReviewAvailability, ExpenseReviewInput, ExpenseReviewRecord
 import type { FileReferenceCandidate } from '@deepseek-ai/dsh-file-reference'
 import type { CommandDescriptor } from '@deepseek-ai/dsh-commands'
 import type { ToolCatalogView } from '../../src/domain/tool-catalog/index'
+import type { WorkflowCatalogView } from '../../src/domain/workflow-catalog/index'
 import type {
   CapabilitySpecificationDiffView,
   CapabilityEvaluationView,
@@ -18,6 +19,7 @@ export interface UiEnvelope {
   readonly webUi: string
   readonly commands?: readonly CommandDescriptor[]
   readonly toolCatalog?: ToolCatalogView
+  readonly workflowCatalog?: WorkflowCatalogView
   readonly acknowledgement?: { readonly text: string }
 }
 

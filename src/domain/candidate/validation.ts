@@ -167,6 +167,7 @@ function inspectManifest(record: CandidateRecord): ValidationStageResult {
       tools: record.manifest.tools,
       services: record.manifest.services,
       providers: record.manifest.providers,
+      workflows: record.manifest.workflows.map((item) => item.name),
       pluginDependencies: record.manifest.pluginDependencies,
     })
     return stage('manifest.validate', 'passed', `Manifest for ${record.owner}@${record.version} is well-formed.`)
@@ -200,7 +201,8 @@ function inspectGeneratedSourceContract(record: CandidateRecord, root: string, f
   }
   const invalidEffects: string[] = []
   const undeclaredBrokerPermissions: string[] = []
-  const sources = files.filter((file) => /\.(?:js|mjs|cjs)$/.test(file))
+  const workflowScripts = new Set(record.manifest.workflows.map((item) => item.script))
+  const sources = files.filter((file) => /\.(?:js|mjs|cjs)$/.test(file) && !workflowScripts.has(file))
   for (const file of sources) {
     const text = readFileSync(path.join(root, file), 'utf8')
     try {
@@ -248,6 +250,26 @@ function inspectGeneratedSourceContract(record: CandidateRecord, root: string, f
     'passed',
     'Generated ctx.effect calls and Broker permission declarations match the host contract.',
   )
+}
+
+function inspectWorkflows(record: CandidateRecord, files: readonly string[]): ValidationStageResult {
+  if (record.manifest.workflows.length === 0) return stage('workflow.validate', 'not-applicable', 'No Workflow declarations.')
+  const failures: string[] = []
+  for (const workflow of record.manifest.workflows) {
+    if (!files.includes(workflow.script)) {
+      failures.push(`${workflow.name}: missing script ${workflow.script}`)
+      continue
+    }
+    try {
+      const body = readFileSync(path.join(record.workspaceRoot, workflow.script), 'utf8')
+      parse(`async function __workflow(args, agent, parallel, pipeline, phase, log) {\n${body}\n}`, { ecmaVersion: 'latest' })
+    } catch (error) {
+      failures.push(`${workflow.name}: ${error instanceof Error ? error.message : String(error)}`)
+    }
+  }
+  return failures.length === 0
+    ? stage('workflow.validate', 'passed', `Validated ${record.manifest.workflows.length} DSH Workflow script declaration(s).`)
+    : stage('workflow.validate', 'failed', 'Workflow declarations are not executable.', { diagnostics: failures.join('; ') })
 }
 
 interface SyntaxNode {
@@ -423,6 +445,7 @@ export function runValidation(record: CandidateRecord, activeOwner?: OwnerExecut
   ))
   stages.push(inspectRuntimeContract(record))
   stages.push(inspectActivationCompatibility(record, activeOwner))
+  stages.push(inspectWorkflows(record, files))
   stages.push(inspectGeneratedSourceContract(record, record.workspaceRoot, files))
   stages.push(inspectBoundary(record.workspaceRoot, files))
   stages.push(runTypecheck(record.workspaceRoot, files))

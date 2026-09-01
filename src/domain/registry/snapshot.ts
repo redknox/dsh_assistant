@@ -25,6 +25,7 @@ export interface RegistryRecordSnapshot {
   readonly tools: readonly string[]
   readonly services: readonly string[]
   readonly providers: readonly string[]
+  readonly workflows?: readonly string[]
   readonly pluginDependencies?: readonly { readonly capability: string; readonly strength: string }[]
 }
 
@@ -42,6 +43,7 @@ const SNAPSHOT_KEYS = new Set([
   'tools',
   'services',
   'providers',
+  'workflows',
   'pluginDependencies',
 ])
 
@@ -100,6 +102,7 @@ export function toRegistrySnapshot(record: RegistryRecord): RegistryRecordSnapsh
     tools: [...record.tools],
     services: [...record.services],
     providers: [...record.providers],
+    workflows: [...record.workflows],
     pluginDependencies: [...(record.pluginDependencies ?? [])],
   }
 }
@@ -145,6 +148,7 @@ export function parseRegistryRecord(raw: unknown): RegistryRecord {
     tools: snapshot.tools === undefined ? [] : asStringArray(snapshot.tools, 'tools'),
     services: snapshot.services === undefined ? [] : asStringArray(snapshot.services, 'services'),
     providers: snapshot.providers === undefined ? [] : asStringArray(snapshot.providers, 'providers'),
+    workflows: snapshot.workflows === undefined ? [] : asStringArray(snapshot.workflows, 'workflows'),
     pluginDependencies: parsePluginDependencies(snapshot.pluginDependencies),
   })
   return { ...record, approval: approval as ApprovalState }

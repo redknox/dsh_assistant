@@ -21,12 +21,13 @@ import type { CapabilitySpecificationsControl } from './useCapabilitySpecificati
 import { ExpenseReviewWorkspace } from './ExpenseReviewWorkspace'
 import type { ExpenseReviewControl } from './useExpenseReview'
 import { ToolCatalogWorkspace } from './ToolCatalogWorkspace'
+import { WorkflowCatalogWorkspace } from './WorkflowCatalogWorkspace'
 
 type CompactSurface = 'conversation' | 'navigation' | 'operations'
 
 export interface MissionControlScreenProps {
   readonly view: MissionControlView
-  readonly runtime: Pick<MissionControlRuntime, 'connected' | 'error' | 'acknowledgement' | 'dismissAcknowledgement' | 'perform' | 'toolCatalog'>
+  readonly runtime: Pick<MissionControlRuntime, 'connected' | 'error' | 'acknowledgement' | 'dismissAcknowledgement' | 'perform' | 'toolCatalog' | 'workflowCatalog'>
   readonly conversation: ConversationControl
   readonly governance: GovernanceControl
   readonly workspace: WorkspaceControl
@@ -210,6 +211,15 @@ export function MissionControlScreen(input: MissionControlScreenProps) {
         ) : pane === 'tools' ? (
           <ToolCatalogWorkspace
             catalog={input.runtime.toolCatalog}
+            locked={locked}
+            defineCapability={() => {
+              input.specifications.beginCreate()
+              navigate('specifications')
+            }}
+          />
+        ) : pane === 'workflows' ? (
+          <WorkflowCatalogWorkspace
+            catalog={input.runtime.workflowCatalog}
             locked={locked}
             defineCapability={() => {
               input.specifications.beginCreate()

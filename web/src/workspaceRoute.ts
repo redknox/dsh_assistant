@@ -7,6 +7,7 @@ export function workspacePaneFromHash(hash: string | undefined): WorkspacePane {
   if (hash === '#logs') return 'logs'
   if (hash === '#settings') return 'settings'
   if (hash === '#tools') return 'tools'
+  if (hash === '#workflows') return 'workflows'
   if (hash === '#specifications') return 'specifications'
   return 'today'
 }
