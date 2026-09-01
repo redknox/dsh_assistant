@@ -42,16 +42,22 @@ describe('Capability Build Queue projection', () => {
   })
 
   it('includes user Skills in the same delivery language', () => {
-    const queue = projectSkillBuildQueue([{
+    const projected = {
       id: 'skill-1', name: 'review-style', version: '0.1.0', profile: 'assistant', provenance: 'third-party', origin: 'import', lifecycle: 'approval-requested',
       sealed: true, modelInvocable: true, userInvocable: true, description: 'Apply the preferred review style.', resources: [], validationPassed: true,
       reviewComplete: true, approvalDecision: 'approval-requested', digest: 'skill-digest', dependsOn: [], dependents: [], system: false, generation: 1,
-    }])
+    } as const
+    const queue = projectSkillBuildQueue([projected])
 
     assert.equal(queue.open.length, 1)
     assert.equal(queue.summary.needsUser, 1)
     assert.equal(queue.open[0]?.stateLabel, 'WAITING FOR APPROVAL')
     assert.equal(queue.open[0]?.stage, 'approve')
+
+    const live = projectSkillBuildQueue([{ ...projected, lifecycle: 'active', approvalDecision: 'approved-for-exact-diff' }])
+    assert.equal(live.open.length, 0)
+    assert.equal(live.history[0]?.stateLabel, 'LIVE')
+    assert.equal(live.summary.live, 1)
   })
 
   it('keeps host product changes actionable instead of calling resolution complete', () => {

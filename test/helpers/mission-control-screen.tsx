@@ -1,5 +1,5 @@
 import React from 'react'
-import type { MissionControlView } from '../../src/domain/workspace/types.js'
+import type { MissionControlView, WebUiAcknowledgement } from '../../src/domain/workspace/types.js'
 import {
   MissionControlScreen as MissionControlScreenView,
 } from '../../web/src/MissionControlScreen.js'
@@ -11,7 +11,7 @@ interface LegacyMissionControlScreenProps {
   readonly sending?: boolean
   readonly error?: string
   readonly draft?: string
-  readonly acknowledgement?: { readonly text: string }
+  readonly acknowledgement?: WebUiAcknowledgement
   readonly armedRecovery?: 'diagnostics' | 'rollback' | 'exit-safe-mode'
   readonly deferredActivations?: readonly string[]
   readonly armedActivation?: string

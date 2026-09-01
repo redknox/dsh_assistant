@@ -1,4 +1,4 @@
-import type { ActivationCard, ApprovalCard, MissionControlView, RollbackCard, SkillProjection, UserPluginView, WorkObjectKind } from '../../src/domain/workspace/types'
+import type { ActivationCard, ApprovalCard, MissionControlView, RollbackCard, SkillProjection, UserPluginView, WebUiAcknowledgement, WorkObjectKind } from '../../src/domain/workspace/types'
 import type { SettingsSnapshot, SettingsUpdate } from '../../src/product/settings-types'
 import type { ExpenseReviewAvailability, ExpenseReviewInput, ExpenseReviewRecord } from '../../src/domain/expense-review/types'
 import type { FileReferenceCandidate } from '@deepseek-ai/dsh-file-reference'
@@ -20,7 +20,7 @@ export interface UiEnvelope {
   readonly commands?: readonly CommandDescriptor[]
   readonly toolCatalog?: ToolCatalogView
   readonly workflowCatalog?: WorkflowCatalogView
-  readonly acknowledgement?: { readonly text: string }
+  readonly acknowledgement?: WebUiAcknowledgement
 }
 
 export type WorkbenchSnapshot = WorkbenchSnapshotView

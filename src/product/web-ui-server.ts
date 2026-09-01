@@ -1,6 +1,7 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http'
 import type { RecoveryRoot } from '../domain/governance/root.js'
 import { acknowledgementOf } from '../domain/workspace/approvals.js'
+import type { WebUiAcknowledgement } from '../domain/workspace/types.js'
 import { redactText } from '../domain/workspace/redact.js'
 import { AssistantControlSurface } from '../ui/controller.js'
 import type { MissionControlView } from '../domain/workspace/types.js'
@@ -65,7 +66,7 @@ export function startWebUiServer(options: WebUiServerOptions): Promise<WebUiServ
     return options.surface.workspace()
   }
 
-  const envelope = (extra: { readonly acknowledgement?: { readonly text: string } } = {}) => ({
+  const envelope = (extra: { readonly acknowledgement?: WebUiAcknowledgement } = {}) => ({
     view: snapshot(),
     webUi: url,
     commands: options.surface.listCommands(),

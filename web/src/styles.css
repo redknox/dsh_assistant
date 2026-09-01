@@ -671,6 +671,8 @@ button.nav-item::after { content: "›"; color: #7f857f; font: 500 22px/1 var(--
   background: #e8e2d6;
   font: 650 14px/1.4 var(--font-instrument);
 }
+.acknowledgement-actions { display: flex; align-items: center; gap: 8px; }
+.capability-card--focused { outline: 3px solid rgb(153 91 36 / 45%); outline-offset: 3px; }
 
 .approval-card {
   margin-top: 28px;

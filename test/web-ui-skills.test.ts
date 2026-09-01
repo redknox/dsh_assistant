@@ -107,6 +107,24 @@ describe('Web UI Skills', () => {
     })
   })
 
+  it('returns an actionable user-facing receipt after Skill activation', async () => {
+    const approved = skill({ lifecycle: 'approved' })
+    const commands: WebUiSkillCommand[] = []
+    const result = await handleWebUiSkillRequest(
+      request(body('activate', approved)),
+      context(commands, view({ skills: [approved] })),
+    )
+    assert.deepEqual(commands, [{ action: 'activate', id: 'skill-1' }])
+    assert.deepEqual((result?.body as { acknowledgement?: unknown }).acknowledgement, {
+      text: 'weekly-review@1.0.0 is live and ready to use.',
+      action: {
+        kind: 'open-capability',
+        label: 'VIEW CAPABILITY',
+        capabilityId: 'skill:skill-1',
+      },
+    })
+  })
+
   it('rejects stale evidence and lifecycle before executing authority', async () => {
     const commands: WebUiSkillCommand[] = []
     const staleDigest = await handleWebUiSkillRequest(request({ ...body('approve'), digest: 'old' }), context(commands))

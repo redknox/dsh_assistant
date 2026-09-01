@@ -398,6 +398,17 @@ describe('client control hooks', () => {
     assert.equal(hook.current().acknowledgement, undefined)
 
     await act(async () => {
+      await hook.current().perform(async () => envelope(fixtureView(), {
+        text: 'weekly-review@1.0.0 is live and ready to use.',
+        action: { kind: 'open-capability', label: 'VIEW CAPABILITY', capabilityId: 'skill:skill-1' },
+      }))
+    })
+    act(() => context.mock.timers.tick(4000))
+    assert.equal(hook.current().acknowledgement?.action?.capabilityId, 'skill:skill-1')
+    act(() => hook.current().dismissAcknowledgement())
+    assert.equal(hook.current().acknowledgement, undefined)
+
+    await act(async () => {
       await hook.current().perform(async () => { throw new Error('denied') })
     })
     assert.equal(hook.current().error, 'denied')

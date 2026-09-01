@@ -2624,6 +2624,24 @@ export function apply(ctx) {
     assert.match(toasted, /Rejected\. calendar\.create_event was denied/)
     assert.doesNotMatch(toasted, /conversation-scroll[\s\S]*data-acknowledgement/)
 
+    const actionableToast = renderToStaticMarkup(createElement(MissionControlScreen, {
+      view: fixtureView(),
+      acknowledgement: {
+        text: 'weekly-review@1.0.0 is live and ready to use.',
+        action: { kind: 'open-capability', label: 'VIEW CAPABILITY', capabilityId: 'skill:skill-1' },
+      },
+      connected: true,
+      sending: false,
+      draft: '',
+      onDraft() {},
+      onSend() {},
+      onApprove() {},
+      onReject() {},
+      onRecovery() {},
+    }))
+    assert.match(actionableToast, /data-acknowledgement-action="open-capability"/)
+    assert.match(actionableToast, /VIEW CAPABILITY/)
+
     const extension = renderToStaticMarkup(createElement(MissionControlScreen, {
       view: fixtureView({
         approvals: [{

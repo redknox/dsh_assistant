@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import type { MissionControlView } from '../../src/domain/workspace/types'
+import type { MissionControlView, WebUiAcknowledgement } from '../../src/domain/workspace/types'
 import type { CommandDescriptor } from '@deepseek-ai/dsh-commands'
 import type { ToolCatalogView } from '../../src/domain/tool-catalog/index'
 import type { WorkflowCatalogView } from '../../src/domain/workflow-catalog/index'
@@ -17,7 +17,7 @@ export interface MissionControlRuntime {
   readonly toolCatalog?: ToolCatalogView
   readonly workflowCatalog?: WorkflowCatalogView
   readonly error?: string
-  readonly acknowledgement?: { readonly text: string }
+  readonly acknowledgement?: WebUiAcknowledgement
   readonly perform: (
     operation: () => Promise<UiEnvelope>,
     failureMessage?: string,
@@ -33,7 +33,7 @@ export function useMissionControlRuntime(): MissionControlRuntime {
   const [envelope, setEnvelope] = useState<UiEnvelope>()
   const [connected, setConnected] = useState(false)
   const [error, setError] = useState<string>()
-  const [acknowledgement, setAcknowledgement] = useState<{ readonly text: string }>()
+  const [acknowledgement, setAcknowledgement] = useState<WebUiAcknowledgement>()
 
   useEffect(() => {
     let closed = false
@@ -58,6 +58,7 @@ export function useMissionControlRuntime(): MissionControlRuntime {
 
   useEffect(() => {
     if (!acknowledgement) return
+    if (acknowledgement.action) return
     const timer = globalThis.setTimeout(() => setAcknowledgement(undefined), 4000)
     return () => globalThis.clearTimeout(timer)
   }, [acknowledgement])

@@ -9,6 +9,7 @@ describe('Capability Center workspace', () => {
   it('maps existing capability standards into one user-facing entry point', () => {
     const markup = renderToStaticMarkup(createElement(CapabilityCenterWorkspace, {
       locked: false,
+      focusCapabilityId: 'skill:skill-1',
       navigate() {},
       defineCapability() {},
       askUnplug() {},
@@ -82,6 +83,9 @@ describe('Capability Center workspace', () => {
     assert.match(markup, /CAPABILITY IS THE PRODUCT OBJECT/)
     assert.match(markup, /DESCRIBE WHAT YOU NEED/)
     assert.match(markup, /INSTALLED/)
+    assert.match(markup, /data-capability-id="skill:skill-1"[^>]*data-capability-focus="target"/)
+    assert.match(markup, /data-capability-id="skill:skill-1"[\s\S]*DELIVERY EVIDENCE/)
+    assert.doesNotMatch(markup, /capability-unplug-dialog/)
   })
 
   it('routes each first-class implementation to its own technical surface', () => {

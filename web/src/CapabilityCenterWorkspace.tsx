@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react'
+import React, { useEffect, useMemo, useRef, useState } from 'react'
 import { projectCapabilityPortfolio, type CapabilityPortfolioCard } from '../../src/domain/capability-portfolio/index'
 import type { MissionControlView, SkillProjection, UserPluginView } from '../../src/domain/workspace/types'
 import type { ToolCatalogView } from '../../src/domain/tool-catalog/index'
@@ -8,6 +8,7 @@ import type { WorkspacePane } from './WorkspaceNavigation'
 
 export function CapabilityCenterWorkspace(props: {
   readonly view: Pick<MissionControlView, 'extensions' | 'plugins' | 'skills'>
+  readonly focusCapabilityId?: string
   readonly tools?: ToolCatalogView
   readonly workflows?: WorkflowCatalogView
   readonly locked: boolean
@@ -21,12 +22,24 @@ export function CapabilityCenterWorkspace(props: {
   readonly confirmUnplug?: (plugin: UserPluginView) => void
   readonly skillAction?: (action: 'disable' | 'cancel-disable', skill?: SkillProjection) => void
 }) {
-  const [openCard, setOpenCard] = useState<string>()
+  const [openCard, setOpenCard] = useState<string | undefined>(props.focusCapabilityId)
+  const focusedCard = useRef<HTMLElement>(null)
   const portfolio = useMemo(() => projectCapabilityPortfolio({
     view: props.view,
     tools: props.tools,
     workflows: props.workflows,
   }), [props.tools, props.view, props.workflows])
+  const focusAvailable = portfolio.cards.some((card) => card.id === props.focusCapabilityId)
+
+  useEffect(() => {
+    if (!props.focusCapabilityId || !focusAvailable) return
+    setOpenCard(props.focusCapabilityId)
+    const frame = globalThis.requestAnimationFrame(() => {
+      focusedCard.current?.focus({ preventScroll: true })
+      focusedCard.current?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+    })
+    return () => globalThis.cancelAnimationFrame(frame)
+  }, [focusAvailable, props.focusCapabilityId])
 
   return (
     <main className="conversation-panel instrument-panel capability-center-workspace" aria-label="Capability Center">
@@ -57,13 +70,15 @@ export function CapabilityCenterWorkspace(props: {
           const pane = implementationPane(card)
           const skill = card.unplug?.kind === 'skill' ? card.unplug.skill : undefined
           const plugin = card.unplug?.kind === 'plugin' ? card.unplug.plugin : undefined
-          const confirming = plugin?.id === props.confirmingUnplug
+          const confirming = (plugin !== undefined && plugin.id === props.confirmingUnplug)
             || (skill !== undefined && (props.armedSkill === `disable:${skill.id}` || props.skillDependents?.id === skill.id))
           return (
           <CapabilityCard
             key={card.id}
             card={card}
             open={openCard === card.id}
+            focused={props.focusCapabilityId === card.id}
+            cardRef={props.focusCapabilityId === card.id ? focusedCard : undefined}
             locked={props.locked}
             confirming={confirming}
             toggle={() => setOpenCard(openCard === card.id ? undefined : card.id)}
@@ -101,6 +116,8 @@ export function CapabilityCenterWorkspace(props: {
 function CapabilityCard(props: {
   readonly card: CapabilityPortfolioCard
   readonly open: boolean
+  readonly focused: boolean
+  readonly cardRef?: React.RefObject<HTMLElement | null>
   readonly locked: boolean
   readonly confirming: boolean
   readonly toggle: () => void
@@ -113,7 +130,7 @@ function CapabilityCard(props: {
   const blocked = card.dependency.severity === 'unresolved'
     || (card.dependency.severity === 'hard' && card.unplug?.kind === 'plugin')
   return (
-    <article className="capability-card" data-capability-id={card.id} data-capability-status={card.status} data-dependency={card.dependency.severity}>
+    <article ref={props.cardRef} tabIndex={-1} className={`capability-card${props.focused ? ' capability-card--focused' : ''}`} data-capability-id={card.id} data-capability-focus={props.focused ? 'target' : undefined} data-capability-status={card.status} data-dependency={card.dependency.severity}>
       <header>
         <span className="capability-card-lamp" aria-hidden="true" />
         <div><h2>{card.title}</h2><small>{`INSTALLED${card.version ? ` · ${card.version}` : ''}`}</small></div>

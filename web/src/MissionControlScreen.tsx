@@ -112,6 +112,7 @@ export function MissionControlScreen(input: MissionControlScreenProps) {
   const locked = !props.connected
   const pane = props.pane ?? 'today'
   const [compactSurface, setCompactSurface] = useState<CompactSurface>('conversation')
+  const [focusedCapability, setFocusedCapability] = useState<string>()
   const navigate = (next: WorkspacePane) => {
     props.onNavigate?.(next)
     setCompactSurface('conversation')
@@ -134,7 +135,16 @@ export function MissionControlScreen(input: MissionControlScreenProps) {
       {props.acknowledgement ? (
         <div className="acknowledgement" role="status" data-acknowledgement-region="toast" data-acknowledgement="true">
           <span>{props.acknowledgement.text}</span>
-          <button type="button" className="button button--secondary" data-acknowledgement-dismiss="true" onClick={() => props.onDismissAcknowledgement?.()}>Dismiss</button>
+          <div className="acknowledgement-actions">
+            {props.acknowledgement.action?.kind === 'open-capability' ? (
+              <button type="button" className="button button--approval" data-acknowledgement-action="open-capability" onClick={() => {
+                setFocusedCapability(props.acknowledgement?.action?.capabilityId)
+                props.onDismissAcknowledgement?.()
+                navigate('capabilities')
+              }}>{props.acknowledgement.action.label}</button>
+            ) : null}
+            <button type="button" className="button button--secondary" data-acknowledgement-dismiss="true" onClick={() => props.onDismissAcknowledgement?.()}>Dismiss</button>
+          </div>
         </div>
       ) : null}
       {safe && view.recovery ? (
@@ -171,6 +181,7 @@ export function MissionControlScreen(input: MissionControlScreenProps) {
         {pane === 'capabilities' ? (
           <CapabilityCenterWorkspace
             view={view}
+            focusCapabilityId={focusedCapability}
             tools={input.runtime.toolCatalog}
             workflows={input.runtime.workflowCatalog}
             locked={locked}

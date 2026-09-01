@@ -1,6 +1,6 @@
 import { SkillContractError } from '../domain/skill/errors.js'
 import { redactText } from '../domain/workspace/redact.js'
-import type { MissionControlView, SkillProjection } from '../domain/workspace/types.js'
+import type { MissionControlView, SkillProjection, WebUiAcknowledgement } from '../domain/workspace/types.js'
 
 export type WebUiSkillCommand =
   | { readonly action: 'approve' | 'reject'; readonly id: string; readonly fingerprint: string }
@@ -22,10 +22,10 @@ export interface WebUiSkillRequest {
 
 export interface WebUiSkillContext {
   readonly authority: SkillAuthority
-  readonly project: (acknowledgement?: { readonly text: string }) => {
+  readonly project: (acknowledgement?: WebUiAcknowledgement) => {
     readonly view: MissionControlView
     readonly webUi: string
-    readonly acknowledgement?: { readonly text: string }
+    readonly acknowledgement?: WebUiAcknowledgement
   }
 }
 
@@ -71,7 +71,7 @@ export async function handleWebUiSkillRequest(
     context.authority.execute(command.command)
     return {
       status: 200,
-      body: context.project({ text: `Skill ${action} recorded.` }),
+      body: context.project(skillAcknowledgement(action, bound.skill)),
       broadcast: true,
     }
   } catch (error) {
@@ -85,6 +85,20 @@ export async function handleWebUiSkillRequest(
       body: { error: code, detail: redactText(message), ...context.project() },
     }
   }
+}
+
+function skillAcknowledgement(action: string, skill: SkillProjection): WebUiAcknowledgement {
+  if (action === 'activate') {
+    return {
+      text: `${skill.name}@${skill.version} is live and ready to use.`,
+      action: {
+        kind: 'open-capability',
+        label: 'VIEW CAPABILITY',
+        capabilityId: `skill:${skill.id}`,
+      },
+    }
+  }
+  return { text: `Skill ${action} recorded.` }
 }
 
 function commandFor(

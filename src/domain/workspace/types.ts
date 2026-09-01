@@ -139,6 +139,15 @@ export interface ApprovalResolution {
   readonly occurredAt?: string
 }
 
+export interface WebUiAcknowledgement {
+  readonly text: string
+  readonly action?: {
+    readonly kind: 'open-capability'
+    readonly label: string
+    readonly capabilityId: string
+  }
+}
+
 export interface ApprovalCard {
   readonly id: string
   readonly kind: 'calendar-create' | 'self-extension' | 'skill' | 'other-side-effect' | 'dsh-tool'
