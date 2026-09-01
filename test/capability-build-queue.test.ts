@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 import type { WorkbenchSnapshotView } from '../src/product/web-ui-workbench-types.js'
-import { projectCapabilityBuildQueue, projectSkillBuildQueue } from '../web/src/capabilityBuildQueue.js'
+import { continueCapabilityDelivery, projectCapabilityBuildQueue, projectSkillBuildQueue } from '../web/src/capabilityBuildQueue.js'
 
 describe('Capability Build Queue projection', () => {
   it('shows only the latest explicit revision as current delivery work', () => {
@@ -52,6 +52,83 @@ describe('Capability Build Queue projection', () => {
     assert.equal(queue.summary.needsUser, 1)
     assert.equal(queue.open[0]?.stateLabel, 'WAITING FOR APPROVAL')
     assert.equal(queue.open[0]?.stage, 'approve')
+  })
+
+  it('keeps host product changes actionable instead of calling resolution complete', () => {
+    const queue = projectCapabilityBuildQueue(snapshot({
+      specifications: [specification('spec-ui', 1)],
+      plans: [{ planId: 'plan-ui', specificationId: 'spec-ui', specificationDigest: 'digest-1', kind: 'host-product-change-required', capability: 'ui.syntax-highlight', need: 'Highlight code.', canCreate: false }],
+    }))
+
+    assert.equal(queue.open[0]?.stage, 'blocked')
+    assert.equal(queue.open[0]?.stateLabel, 'TARS-NG UPDATE REQUIRED')
+    assert.equal(queue.open[0]?.action?.kind, 'conversation')
+  })
+
+  it('routes continuation back to the conversation that originated the capability', () => {
+    const queue = projectCapabilityBuildQueue(snapshot({
+      specifications: [{ ...specification('spec-ui', 1), originSessionId: 'conversation-product-ui' }],
+      plans: [{ planId: 'plan-ui', specificationId: 'spec-ui', specificationDigest: 'digest-1', kind: 'host-product-change-required', capability: 'ui.syntax-highlight', need: 'Highlight code.', canCreate: false }],
+    }))
+
+    assert.equal(queue.open[0]?.action?.sessionId, 'conversation-product-ui')
+  })
+
+  it('switches conversations before restoring the continuation prompt', () => {
+    const events: string[] = []
+    continueCapabilityDelivery({
+      kind: 'conversation',
+      label: 'CONTINUE',
+      prompt: 'Continue the product update.',
+      sessionId: 'conversation-product-ui',
+    }, {
+      currentSessionId: 'main',
+      switchSession: (id) => events.push(`switch:${id}`),
+      setDraft: (value) => events.push(`draft:${value}`),
+      openToday: () => events.push('today'),
+    })
+
+    assert.deepEqual(events, [
+      'switch:conversation-product-ui',
+      'draft:Continue the product update.',
+      'today',
+    ])
+  })
+
+  it('does not offer activation when host eligibility says the approved candidate cannot replace the product owner', () => {
+    const queue = projectCapabilityBuildQueue(snapshot({
+      specifications: [specification('spec-ui', 1)],
+      plans: [{ planId: 'plan-ui', specificationId: 'spec-ui', specificationDigest: 'digest-1', kind: 'evolve-owner', capability: 'ui.markdown', need: 'Render markdown.', canCreate: true }],
+      candidates: [{
+        id: 'candidate-ui', owner: 'managed/ui-control-surface', version: '0.1.1', states: ['sealed'], step: 'approved', planId: 'plan-ui', specificationId: 'spec-ui', leftover: false,
+        governanceApproval: 'approved-for-exact-diff', eligibilityOk: false, eligibilityDenials: ['host-owned-owner-not-replaceable', 'host-product-change-required'], activationState: 'inactive',
+      }],
+    }))
+
+    assert.equal(queue.open[0]?.stage, 'blocked')
+    assert.equal(queue.open[0]?.stateLabel, 'TARS-NG UPDATE REQUIRED')
+    assert.equal(queue.open[0]?.action?.label, 'CONTINUE AS PRODUCT UPDATE')
+  })
+
+  it('archives a non-creating resolution that is already fulfilled by an existing capability', () => {
+    const queue = projectCapabilityBuildQueue(snapshot({
+      specifications: [specification('spec-adopt', 1)],
+      plans: [{ planId: 'plan-adopt', specificationId: 'spec-adopt', specificationDigest: 'digest-1', kind: 'adopt-existing', capability: 'text.slugify', need: 'Slugify text.', canCreate: false }],
+    }))
+
+    assert.equal(queue.open.length, 0)
+    assert.equal(queue.history[0]?.stateLabel, 'FULFILLED BY EXISTING CAPABILITY')
+  })
+
+  it('moves a stopped delivery into history without a continuation action', () => {
+    const queue = projectCapabilityBuildQueue(snapshot({
+      specifications: [{ ...specification('spec-stopped', 1), deliveryStatus: 'stopped' }],
+      plans: [{ planId: 'plan-stopped', specificationId: 'spec-stopped', specificationDigest: 'digest-1', kind: 'host-product-change-required', capability: 'ui.syntax-highlight', need: 'Highlight code.', canCreate: false }],
+    }))
+
+    assert.equal(queue.open.length, 0)
+    assert.equal(queue.history[0]?.stateLabel, 'STOPPED')
+    assert.equal(queue.history[0]?.action, undefined)
   })
 })
 

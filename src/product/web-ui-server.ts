@@ -38,7 +38,7 @@ export interface WebUiServerOptions extends WebUiListenOptions {
   readonly sessionHost?: LiveSessionHost
   readonly settings?: ProductSettings
   readonly workbench?: Pick<CandidateWorkbench,
-    'list' | 'inspectSpecification' | 'inspectSpecificationEvaluation' | 'defineSpecification' | 'reviseSpecification' | 'compareSpecifications'>
+    'list' | 'inspectSpecification' | 'inspectSpecificationEvaluation' | 'defineSpecification' | 'reviseSpecification' | 'compareSpecifications' | 'stopSpecification'>
   readonly workbenchMutable?: boolean
   readonly expenseReview?: Pick<ExpenseRiskReviewModule, 'inspect' | 'review'>
 }
@@ -192,6 +192,7 @@ export function startWebUiServer(options: WebUiServerOptions): Promise<WebUiServ
         }, {
           workbench: options.workbench,
           mutable: options.workbenchMutable === true,
+          currentSessionId: () => options.surface.sessionId,
         })
         if (workbench) {
           sendJson(res, workbench.status, workbench.body)

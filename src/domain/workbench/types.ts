@@ -52,6 +52,14 @@ export interface WorkbenchPersistState {
   readonly specifications: readonly CapabilitySpecification[]
   readonly plans: readonly WorkbenchPlan[]
   readonly bindings: readonly WorkbenchBinding[]
+  readonly deliveryStops?: readonly CapabilityDeliveryStop[]
+}
+
+export interface CapabilityDeliveryStop {
+  readonly specificationId: string
+  readonly status: 'stopped'
+  readonly stoppedFromSessionId: string
+  readonly stoppedAt: string
 }
 
 export interface WorkbenchPlanView {
@@ -138,6 +146,7 @@ export interface WorkbenchServiceOptions {
       lastFailure?: { candidateId?: string; diagnostics?: string }
     }
   }
+  readonly now?: () => Date
 }
 
 export interface CandidateWorkbench {
@@ -145,6 +154,7 @@ export interface CandidateWorkbench {
   reviseSpecification(specificationId: string, patch: CapabilitySpecificationPatch): CapabilitySpecification
   compareSpecifications(fromSpecificationId: string, toSpecificationId: string): CapabilitySpecificationDiff
   inspectSpecification(specificationId: string): CapabilitySpecification
+  stopSpecification(specificationId: string, control: { readonly sessionId: string }): CapabilityDeliveryStop
   inspectSpecificationEvaluation(specificationId: string): {
     readonly specificationId: string
     readonly specificationDigest: string

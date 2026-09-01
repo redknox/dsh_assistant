@@ -143,6 +143,15 @@ export async function defineCapabilitySpecification(
   }), 'capability specification creation')
 }
 
+export async function stopCapabilityDelivery(specificationId: string): Promise<void> {
+  await parseJson(await fetch('/api/workbench/specification/stop', {
+    ...include,
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ specificationId }),
+  }), 'capability delivery stop')
+}
+
 async function parseJson<T>(response: Response, label: string): Promise<T> {
   const body = await response.json() as T & { readonly error?: string }
   if (!response.ok) throw new Error(body.error ?? `${label} failed (${response.status})`)

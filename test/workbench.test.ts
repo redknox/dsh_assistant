@@ -1116,6 +1116,21 @@ describe('candidate workbench', () => {
     assert.ok(staleGate.denials.some((item) => item.reason === 'review-stale'))
   })
 
+  it('rejects further candidate development after the user stops delivery', () => {
+    const setup = isolatedWorkbench()
+    const candidateId = draftIsolated(setup)
+    const specificationId = setup.workbench.inspect(candidateId).specification?.id
+    assert.ok(specificationId)
+
+    setup.workbench.stopSpecification(specificationId, { sessionId: 'conversation-product-ui' })
+
+    assert.throws(
+      () => setup.workbench.writeFile(candidateId, 'src/continued.ts', 'export const continued = true\n'),
+      /delivery is stopped/,
+    )
+    assert.throws(() => setup.workbench.validate(candidateId), /delivery is stopped/)
+  })
+
   it('restores host plans and parent digest across a real home restart', async () => {
     const home = mkdtempSync(path.join(tmpdir(), 'dsh-wb-home-'))
     const first = await bootAssistantControl({ home })
@@ -1130,12 +1145,14 @@ describe('candidate workbench', () => {
         goal: 'Persist a specification.',
         businessRules: ['Preserve the exact content.'],
         acceptanceExamples: [{ name: 'restart', given: ['A saved specification.'], when: 'The host restarts.', then: ['The revision remains inspectable.'] }],
+        origin: { sessionId: 'conversation-product-ui' },
       })
       const revised = first.ctx.candidateWorkbench.reviseSpecification(specification.id, {
         goal: 'Persist an immutable specification revision.',
       })
       specificationId = specification.id
       revisedSpecificationId = revised.id
+      first.ctx.candidateWorkbench.stopSpecification(revised.id, { sessionId: 'conversation-product-ui' })
       candidateId = authorR0(first.ctx)
       planId = first.ctx.candidateWorkbench.inspect(candidateId).planId ?? ''
       first.ctx.candidateWorkbench.validate(candidateId)
@@ -1157,6 +1174,15 @@ describe('candidate workbench', () => {
       assert.notEqual(plan.review.registryFacts, undefined)
       const revised = second.ctx.candidateWorkbench.inspectSpecification(revisedSpecificationId)
       assert.equal(revised.supersedesId, specificationId)
+      assert.deepEqual(revised.origin, { sessionId: 'conversation-product-ui' })
+      assert.equal(
+        second.ctx.candidateWorkbench.list({ limit: 50 }).specifications.find((item) => item.id === revisedSpecificationId)?.deliveryStatus,
+        'stopped',
+      )
+      assert.throws(
+        () => second.ctx.candidateWorkbench.plan({ specificationId: revisedSpecificationId }),
+        /delivery is stopped/,
+      )
       assert.deepEqual(
         second.ctx.candidateWorkbench.compareSpecifications(specificationId, revisedSpecificationId).changedFields,
         ['goal'],

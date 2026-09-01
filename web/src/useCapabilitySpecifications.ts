@@ -7,6 +7,7 @@ import {
   fetchCapabilitySpecification,
   fetchWorkbench,
   reviseCapabilitySpecification,
+  stopCapabilityDelivery,
   type WorkbenchSnapshot,
 } from './api'
 
@@ -47,6 +48,8 @@ export interface CapabilitySpecificationsControl {
   readonly canCreate: boolean
   readonly loading: boolean
   readonly saving: boolean
+  readonly stopping: boolean
+  readonly confirmingStopId?: string
   readonly error?: string
   readonly notice?: string
   readonly dirty: boolean
@@ -58,6 +61,9 @@ export interface CapabilitySpecificationsControl {
   readonly cancelCreate: () => void
   readonly changeCreate: (field: keyof NewCapabilitySpecificationDraft, value: string) => void
   readonly createSpecification: () => void
+  readonly askStop: (id: string) => void
+  readonly cancelStop: () => void
+  readonly stopDelivery: () => void
 }
 
 const EMPTY_DRAFT: CapabilitySpecificationDraft = { goal: '', nonGoals: '', businessRules: '', unresolved: '' }
@@ -90,6 +96,8 @@ export function useCapabilitySpecifications(active: boolean): CapabilitySpecific
   const [createDraft, setCreateDraft] = useState<NewCapabilitySpecificationDraft>(EMPTY_CREATE_DRAFT)
   const [loading, setLoading] = useState(false)
   const [saving, setSaving] = useState(false)
+  const [stopping, setStopping] = useState(false)
+  const [confirmingStopId, setConfirmingStopId] = useState<string>()
   const [attempted, setAttempted] = useState(false)
   const [error, setError] = useState<string>()
   const [notice, setNotice] = useState<string>()
@@ -216,10 +224,31 @@ export function useCapabilitySpecifications(active: boolean): CapabilitySpecific
     })).catch(fail(setError, 'unable to create capability specification')).finally(() => setSaving(false))
   }
 
+  const askStop = (id: string) => {
+    if (!snapshot?.mutable || stopping) return
+    setConfirmingStopId(id)
+    setError(undefined)
+  }
+
+  const cancelStop = () => setConfirmingStopId(undefined)
+
+  const stopDelivery = () => {
+    if (!confirmingStopId || !snapshot?.mutable || stopping) return
+    const id = confirmingStopId
+    setStopping(true)
+    setError(undefined)
+    void stopCapabilityDelivery(id).then(() => fetchWorkbench()).then((next) => {
+      setSnapshot(next)
+      setConfirmingStopId(undefined)
+      setNotice('Development stopped. The immutable specification and governance evidence remain available in History.')
+    }).catch(fail(setError, 'unable to stop capability delivery')).finally(() => setStopping(false))
+  }
+
   return {
     snapshot, selected, comparison, evaluation, draft, creating, createDraft, canCreate,
-    loading, saving, error, notice, dirty, load, select, change, saveRevision,
+    loading, saving, stopping, confirmingStopId, error, notice, dirty, load, select, change, saveRevision,
     beginCreate, cancelCreate, changeCreate, createSpecification,
+    askStop, cancelStop, stopDelivery,
   }
 }
 

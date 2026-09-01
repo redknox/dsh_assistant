@@ -17,6 +17,7 @@ export interface WorkbenchFile {
   readonly specifications?: readonly CapabilitySpecification[]
   readonly plans: readonly WorkbenchPlan[]
   readonly bindings: WorkbenchPersistState['bindings']
+  readonly deliveryStops?: WorkbenchPersistState['deliveryStops']
 }
 
 function isObject(value: unknown): value is Record<string, unknown> {
@@ -147,6 +148,12 @@ export function parseWorkbenchFile(parsed: unknown): WorkbenchFile {
       throw new PersistenceIntegrityError(`workbench binding ${binding.candidateId} references a stale capability specification`)
     }
   }
+  const deliveryStops = Array.isArray(parsed.deliveryStops)
+    ? parsed.deliveryStops.map((item, index) => parseDeliveryStop(item, index, specificationById))
+    : []
+  if (new Set(deliveryStops.map((item) => item.specificationId)).size !== deliveryStops.length) {
+    throw new PersistenceIntegrityError('workbench delivery stop specification ids must be unique')
+  }
   const nextSpecification = nextSpecificationAfter(specifications)
   if (parsed.nextSpecification !== undefined
     && (typeof parsed.nextSpecification !== 'number' || !Number.isInteger(parsed.nextSpecification) || parsed.nextSpecification < nextSpecification)) {
@@ -159,12 +166,13 @@ export function parseWorkbenchFile(parsed: unknown): WorkbenchFile {
     specifications,
     plans,
     bindings,
+    deliveryStops,
   }
 }
 
 /** Host-owned Workbench plans and lineage bindings. Corrupt files fail closed. */
 export class DurableWorkbenchStore {
-  private state: WorkbenchPersistState = { nextPlan: 1, nextSpecification: 1, specifications: [], plans: [], bindings: [] }
+  private state: WorkbenchPersistState = { nextPlan: 1, nextSpecification: 1, specifications: [], plans: [], bindings: [], deliveryStops: [] }
 
   constructor(private readonly home: SelfExtensionHome) {
     if (!existsSync(home.workbenchPath)) return
@@ -188,6 +196,7 @@ export class DurableWorkbenchStore {
       specifications: state.specifications,
       plans: state.plans,
       bindings: state.bindings,
+      deliveryStops: state.deliveryStops ?? [],
     }
     parseWorkbenchFile(file)
     this.state = snapshotOf(file)
@@ -202,6 +211,29 @@ function snapshotOf(file: WorkbenchFile): WorkbenchPersistState {
     specifications: file.specifications ?? [],
     plans: file.plans,
     bindings: file.bindings,
+    deliveryStops: file.deliveryStops ?? [],
+  }
+}
+
+function parseDeliveryStop(
+  value: unknown,
+  index: number,
+  specifications: ReadonlyMap<string, CapabilitySpecification>,
+): NonNullable<WorkbenchPersistState['deliveryStops']>[number] {
+  if (!isObject(value)
+    || typeof value.specificationId !== 'string'
+    || value.status !== 'stopped'
+    || typeof value.stoppedFromSessionId !== 'string'
+    || typeof value.stoppedAt !== 'string'
+    || !specifications.has(value.specificationId)
+    || Number.isNaN(Date.parse(value.stoppedAt))) {
+    throw new PersistenceIntegrityError(`workbench delivery stop ${index} is invalid`)
+  }
+  return {
+    specificationId: value.specificationId,
+    status: 'stopped',
+    stoppedFromSessionId: value.stoppedFromSessionId,
+    stoppedAt: value.stoppedAt,
   }
 }
 

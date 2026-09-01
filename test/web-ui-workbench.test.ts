@@ -55,11 +55,57 @@ describe('Web UI Capability Workbench adapter', () => {
     assert.equal(accepted?.broadcast, true)
     assert.equal(revised, true)
   })
+
+  it('binds a new specification to the trusted current conversation', async () => {
+    let received: { readonly origin?: { readonly sessionId: string } } | undefined
+    const base = fakeContext()
+    const created = await handleWebUiWorkbenchRequest(request('POST', '/api/workbench/specification/define', {}, {
+      capability: 'text.echo',
+      goal: 'Echo text.',
+      origin: { sessionId: 'spoofed-browser-session' },
+    }), {
+      ...base,
+      currentSessionId: () => 'trusted-current-session',
+      workbench: {
+        ...base.workbench,
+        defineSpecification: (input) => {
+          received = input
+          return SPECIFICATION as never
+        },
+      },
+    })
+
+    assert.equal(created?.status, 200)
+    assert.deepEqual(received?.origin, { sessionId: 'trusted-current-session' })
+  })
+
+  it('stops capability delivery through an explicit trusted user action', async () => {
+    let received: { readonly specificationId: string; readonly sessionId: string } | undefined
+    const base = fakeContext()
+    const stopped = await handleWebUiWorkbenchRequest(request('POST', '/api/workbench/specification/stop', {}, {
+      specificationId: 'spec-1',
+    }), {
+      ...base,
+      currentSessionId: () => 'trusted-current-session',
+      workbench: {
+        ...base.workbench,
+        stopSpecification: (specificationId: string, control: { readonly sessionId: string }) => {
+          received = { specificationId, sessionId: control.sessionId }
+          return { specificationId, status: 'stopped', stoppedFromSessionId: control.sessionId }
+        },
+      } as never,
+    })
+
+    assert.equal(stopped?.status, 200)
+    assert.equal(stopped?.broadcast, true)
+    assert.deepEqual(received, { specificationId: 'spec-1', sessionId: 'trusted-current-session' })
+  })
 })
 
 function fakeContext(onRevise: () => void = () => {}): WebUiWorkbenchContext {
   return {
     mutable: true,
+    currentSessionId: () => 'main',
     workbench: {
       list: () => ({ specifications: [SPECIFICATION], plans: [], candidates: [] }) as never,
       inspectSpecification: () => SPECIFICATION as never,

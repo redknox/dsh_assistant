@@ -8,6 +8,8 @@ export interface CapabilitySpecificationSummaryView {
   readonly status: string
   readonly digest: string
   readonly source: 'explicit' | 'legacy'
+  readonly originSessionId?: string
+  readonly deliveryStatus?: 'stopped'
 }
 
 export interface CapabilityPlanSummaryView {
@@ -30,6 +32,10 @@ export interface CapabilityCandidateSummaryView {
   readonly specificationId?: string
   readonly parentId?: string
   readonly leftover: boolean
+  readonly governanceApproval?: string
+  readonly activationState?: 'inactive' | 'activating' | 'active' | 'failed'
+  readonly eligibilityOk?: boolean
+  readonly eligibilityDenials?: readonly string[]
 }
 
 export interface CapabilitySpecificationView extends CapabilitySpecificationSummaryView {
@@ -54,6 +60,7 @@ export interface CapabilitySpecificationView extends CapabilitySpecificationSumm
     readonly fixture?: { readonly input: Readonly<Record<string, unknown>>; readonly expected: unknown }
   }[]
   readonly unresolved: readonly string[]
+  readonly origin?: { readonly sessionId: string }
 }
 
 export interface CapabilityEvaluationView {

@@ -129,7 +129,7 @@ export function registerWorkbenchTools(
       goal: { type: 'string', required: true },
     },
     output: textOutput(),
-    async execute(args) {
+    async execute(args, exec) {
       return JSON.stringify(workbench.defineSpecification({
         capability: String(args.capability),
         goal: String(args.goal),
@@ -140,6 +140,7 @@ export function registerWorkbenchTools(
         effects: parseEffects(args.effects),
         acceptanceExamples: parseAcceptanceExamples(args.acceptanceExamples),
         unresolved: asStringList(args.unresolved),
+        ...(exec.agent ? { origin: { sessionId: String(exec.agent.id) } } : {}),
       }))
     },
   }))

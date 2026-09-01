@@ -36,8 +36,10 @@ describe('Capability Specifications workspace', () => {
       },
     }))
     assert.match(markup, /BUILD QUEUE/)
+    assert.match(markup, /REQUEST IN CHAT/)
     assert.match(markup, /CAPABILITY DEVELOPMENT \/ GOVERNED PIPELINE/)
     assert.match(markup, /CHOOSING IMPLEMENTATION/)
+    assert.match(markup, /ORIGIN SESSION NOT RECORDED/)
     assert.match(markup, /WAITING FOR APPROVAL · SKILL 0\.1\.0/)
     assert.match(markup, /YOUR DECISION/)
     assert.match(markup, /SPECIFICATION &amp; EVIDENCE/)
@@ -77,5 +79,36 @@ describe('Capability Specifications workspace', () => {
     assert.match(markup, /INITIAL ACCEPTANCE EXAMPLE/)
     assert.match(markup, /data-specification-action="create"/)
     assert.match(markup, /grants no Tool, permission, installation, or activation authority/)
+  })
+
+  it('offers the trusted continuation for a delivery waiting on approval', () => {
+    const specification = {
+      id: 'spec-approval', version: 'capability-specification/v1', revision: 1, source: 'explicit' as const, digest: 'digest-approval', status: 'ready', capability: 'text.echo', goal: 'Echo text exactly.',
+      nonGoals: [], inputs: [], businessRules: [], permissions: [], effects: { filesystem: [], network: [], process: [], secrets: [], externalSystems: [], remoteSideEffect: 'none' as const }, acceptanceExamples: [], unresolved: [],
+    }
+    const markup = renderToStaticMarkup(createElement(CapabilitySpecificationsWorkspace, {
+      locked: false,
+      control: {
+        snapshot: {
+          mutable: true,
+          specifications: [specification],
+          plans: [{ planId: 'plan-approval', specificationId: specification.id, specificationDigest: specification.digest, kind: 'new-plugin', capability: specification.capability, need: specification.goal, canCreate: true }],
+          candidates: [{ id: 'candidate-approval', owner: 'generated/text-echo', version: '0.1.0', states: ['sealed', 'approval-requested'], step: 'request', planId: 'plan-approval', specificationId: specification.id, leftover: false }],
+        },
+        selected: specification,
+        draft: { goal: specification.goal, nonGoals: '', businessRules: '', unresolved: '' },
+        creating: false,
+        confirmingStopId: specification.id,
+        createDraft: {} as never,
+        loading: false, saving: false, dirty: false,
+        load() {}, select() {}, change() {}, saveRevision() {}, beginCreate() {}, askStop() {}, cancelStop() {}, stopDelivery() {},
+      },
+    }))
+
+    assert.match(markup, /WAITING FOR APPROVAL/)
+    assert.match(markup, /data-delivery-action="today"/)
+    assert.match(markup, /OPEN APPROVAL/)
+    assert.match(markup, /CONFIRM STOP DEVELOPMENT/)
+    assert.match(markup, /data-delivery-stop="confirm"/)
   })
 })

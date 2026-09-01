@@ -10,7 +10,24 @@ import {
 } from '../src/domain/evaluation/index.js'
 import { CandidateService } from '../src/domain/candidate/index.js'
 import { InMemoryRegistryPersistence, RegistryService, bootstrapCoreInventory } from '../src/domain/registry/index.js'
-import { defineCapabilitySpecification } from '../src/domain/workbench/capability-specification.js'
+import { defineCapabilitySpecification, reviseCapabilitySpecification } from '../src/domain/workbench/capability-specification.js'
+
+describe('Capability Specification conversation origin', () => {
+  it('preserves the originating conversation across immutable revisions', () => {
+    const first = defineCapabilitySpecification('spec-1', {
+      capability: 'text.echo',
+      goal: 'Echo text.',
+      businessRules: ['Preserve text.'],
+      acceptanceExamples: [{ name: 'echo', given: [], when: 'called', then: ['same text'] }],
+      origin: { sessionId: 'conversation-product-ui' },
+    })
+
+    const revised = reviseCapabilitySpecification('spec-2', first, { goal: 'Echo text exactly.' })
+
+    assert.deepEqual(first.origin, { sessionId: 'conversation-product-ui' })
+    assert.deepEqual(revised.origin, first.origin)
+  })
+})
 
 describe('Capability Evaluation Harness', () => {
   it('prepares digest-bound executable fixtures from business acceptance examples', () => {

@@ -12,6 +12,10 @@ _Avoid_: Requirements blob, plugin prompt, implementation plan
 An immutable successor to one Capability Specification; it preserves the prior revision and receives its own identity and digest.
 _Avoid_: Edit, overwrite, latest spec
 
+**Capability Delivery Stop**:
+A host-owned user decision that ends further development of one current Capability Specification without deleting its Specification, Resolution Plan, Candidate, approval, or audit evidence. Stopped delivery belongs in History; an already-live capability must be Unplugged instead.
+_Avoid_: Delete, cancel button navigation, rollback, uninstall
+
 **Resolution Plan**:
 A host-owned decision to reuse, configure, evolve, adopt, provide, or create a capability from one exact Capability Specification.
 _Avoid_: Plan, coding plan

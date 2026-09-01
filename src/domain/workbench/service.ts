@@ -51,6 +51,7 @@ import {
   WORKBENCH_MAX_TRAVERSAL_ENTRIES,
   WORKBENCH_MAX_WORKSPACE_BYTES,
   type CandidateWorkbench,
+  type CapabilityDeliveryStop,
   type WorkbenchCandidateView,
   type WorkbenchCreateInput,
   type WorkbenchListInput,
@@ -77,6 +78,7 @@ export class WorkbenchService implements CandidateWorkbench {
   private readonly specifications = new Map<string, CapabilitySpecification>()
   private readonly plans = new Map<string, WorkbenchPlan>()
   private readonly bindings = new Map<string, Binding>()
+  private readonly deliveryStops = new Map<string, CapabilityDeliveryStop>()
   private readonly evaluation = new CapabilityEvaluationHarness()
 
   constructor(
@@ -104,6 +106,7 @@ export class WorkbenchService implements CandidateWorkbench {
         specificationDigest: binding.specificationDigest,
       })
     }
+    for (const stop of restore.deliveryStops ?? []) this.deliveryStops.set(stop.specificationId, stop)
   }
 
   defineSpecification(input: CapabilitySpecificationInput): CapabilitySpecification {
@@ -115,6 +118,7 @@ export class WorkbenchService implements CandidateWorkbench {
 
   reviseSpecification(specificationId: string, patch: CapabilitySpecificationPatch): CapabilitySpecification {
     const previous = this.inspectSpecification(specificationId)
+    this.assertSpecificationDeliveryOpen(previous.id)
     if ([...this.specifications.values()].some((item) => item.supersedesId === previous.id)) {
       throw new WorkbenchContractError(`capability specification ${previous.id} is already superseded; revise its successor`)
     }
@@ -137,6 +141,38 @@ export class WorkbenchService implements CandidateWorkbench {
     return specification
   }
 
+  stopSpecification(specificationId: string, control: { readonly sessionId: string }): CapabilityDeliveryStop {
+    this.inspectSpecification(specificationId)
+    if ([...this.specifications.values()].some((item) => item.supersedesId === specificationId)) {
+      throw new WorkbenchContractError(`capability specification ${specificationId} is superseded; stop its current revision`)
+    }
+    const existing = this.deliveryStops.get(specificationId)
+    if (existing) return existing
+    const hasActiveCandidate = this.workspace.list().some((record) => (
+      this.bindings.get(record.id)?.specificationId === specificationId
+      && this.options.registry?.get(record.owner, record.version)?.status === 'active'
+    ))
+    if (hasActiveCandidate) throw new WorkbenchContractError('an active capability must be unplugged instead of stopping development')
+    const unresolvedHumanDecision = this.workspace.list().find((record) => {
+      if (this.bindings.get(record.id)?.specificationId !== specificationId) return false
+      const decision = this.governance.inspectApproval(record.id)?.decision
+      return decision === 'approval-requested'
+        || (decision === 'approved-for-exact-diff' && this.governance.eligibility(record.id).ok)
+    })
+    if (unresolvedHumanDecision) {
+      throw new WorkbenchContractError('resolve the pending approval or activation before stopping development')
+    }
+    const stopped: CapabilityDeliveryStop = {
+      specificationId,
+      status: 'stopped',
+      stoppedFromSessionId: control.sessionId,
+      stoppedAt: (this.options.now?.() ?? new Date()).toISOString(),
+    }
+    this.deliveryStops.set(specificationId, stopped)
+    this.flush()
+    return stopped
+  }
+
   inspectSpecificationEvaluation(specificationId: string) {
     const specification = this.inspectSpecification(specificationId)
     const candidate = [...this.workspace.list()].reverse().find((record: CandidateRecord) => this.bindings.get(record.id)?.specificationId === specification.id)
@@ -154,6 +190,9 @@ export class WorkbenchService implements CandidateWorkbench {
     const specification = 'specificationId' in input
       ? this.inspectSpecification(input.specificationId)
       : this.rememberLegacySpecification(input.capability, input.need, input.behavior)
+    if (this.deliveryStops.has(specification.id)) {
+      throw new WorkbenchContractError(`capability specification ${specification.id} delivery is stopped`)
+    }
     if (specification.status !== 'ready') {
       throw new WorkbenchContractError(`capability specification ${specification.id} needs clarification: ${specification.unresolved.join(' ')}`)
     }
@@ -194,6 +233,7 @@ export class WorkbenchService implements CandidateWorkbench {
       throw new WorkbenchContractError('caller cannot set owner, version, or provenance; those come from the host plan')
     }
     const plan = this.getPlan(input.planId)
+    this.assertSpecificationDeliveryOpen(plan.specificationId)
     const specification = this.inspectSpecification(plan.specificationId)
     if (specification.digest !== plan.specificationDigest) {
       throw new WorkbenchContractError(`workbench plan ${plan.id} capability specification digest is stale`)
@@ -319,6 +359,7 @@ export class WorkbenchService implements CandidateWorkbench {
   }
 
   scaffold(input: WorkbenchScaffoldInput): WorkbenchCandidateView {
+    this.assertCandidateDeliveryOpen(input.candidateId)
     const record = this.workspace.get(input.candidateId)
     assertImportedReadOnly(record)
     if (record.sealed) throw new WorkbenchContractError('cannot scaffold a sealed candidate')
@@ -379,6 +420,8 @@ export class WorkbenchService implements CandidateWorkbench {
       status: specification.status,
       digest: specification.digest,
       source: specification.source,
+      originSessionId: specification.origin?.sessionId,
+      deliveryStatus: this.deliveryStops.get(specification.id)?.status,
     }))
     const plans = [...this.plans.values()].map((plan) => ({
       planId: plan.id,
@@ -391,6 +434,7 @@ export class WorkbenchService implements CandidateWorkbench {
     }))
     const candidates = this.workspace.list().map((record) => {
       const view = this.inspect(record.id)
+      const eligibility = this.governance.eligibility(record.id)
       return {
         id: record.id,
         owner: record.owner,
@@ -407,6 +451,10 @@ export class WorkbenchService implements CandidateWorkbench {
         specificationId: view.specification?.id,
         parentId: view.parentId,
         leftover: view.leftover,
+        governanceApproval: view.governanceApproval,
+        activationState: view.activationState,
+        eligibilityOk: eligibility.ok,
+        eligibilityDenials: eligibility.denials.map((item) => item.reason),
       }
     })
     const specificationSlice = specifications.slice(cursor.specifications, cursor.specifications + limit)
@@ -446,6 +494,7 @@ export class WorkbenchService implements CandidateWorkbench {
   }
 
   writeFile(candidateId: string, relativePath: string, content: string): WorkbenchCandidateView {
+    this.assertCandidateDeliveryOpen(candidateId)
     assertRelativePath(relativePath)
     if (relativePath === AUTHORING_CONTRACT_STAMP || relativePath === CAPABILITY_SPECIFICATION_STAMP || relativePath === 'candidate.manifest.json' || relativePath.startsWith('.dsh/')) {
       throw new WorkbenchContractError(`candidate write cannot change host-owned path: ${relativePath}`)
@@ -467,6 +516,7 @@ export class WorkbenchService implements CandidateWorkbench {
   }
 
   setManifest(candidateId: string, manifest: CandidateManifestInput): WorkbenchCandidateView {
+    this.assertCandidateDeliveryOpen(candidateId)
     if (manifest.validationTasks?.some((task) => task.argv !== undefined || task.script !== undefined)) {
       throw new WorkbenchContractError('candidate manifest cannot include argv, scripts, or a shell runner')
     }
@@ -491,6 +541,7 @@ export class WorkbenchService implements CandidateWorkbench {
   }
 
   validate(candidateId: string): WorkbenchCandidateView {
+    this.assertCandidateDeliveryOpen(candidateId)
     this.assertSpecificationStamp(candidateId)
     this.validation.validate(candidateId)
     this.flush()
@@ -498,12 +549,14 @@ export class WorkbenchService implements CandidateWorkbench {
   }
 
   seal(candidateId: string): WorkbenchCandidateView {
+    this.assertCandidateDeliveryOpen(candidateId)
     this.workspace.seal(candidateId)
     this.flush()
     return this.inspect(candidateId)
   }
 
   review(candidateId: string): ReviewReport {
+    this.assertCandidateDeliveryOpen(candidateId)
     const record = this.workspace.get(candidateId)
     const binding = this.bindings.get(candidateId)
     const parentDigest = binding?.parentDigest
@@ -525,6 +578,7 @@ export class WorkbenchService implements CandidateWorkbench {
   }
 
   repair(candidateId: string): WorkbenchCandidateView {
+    this.assertCandidateDeliveryOpen(candidateId)
     const parent = this.workspace.get(candidateId)
     assertImportedReadOnly(parent)
     if (!parent.sealed) throw new WorkbenchContractError('repair requires a sealed parent revision')
@@ -611,6 +665,7 @@ export class WorkbenchService implements CandidateWorkbench {
         ...(binding.specificationId === undefined ? {} : { specificationId: binding.specificationId }),
         ...(binding.specificationDigest === undefined ? {} : { specificationDigest: binding.specificationDigest }),
       })),
+      deliveryStops: [...this.deliveryStops.values()],
     }
   }
 
@@ -694,7 +749,19 @@ export class WorkbenchService implements CandidateWorkbench {
   }
 
   requestApproval(candidateId: string) {
+    this.assertCandidateDeliveryOpen(candidateId)
     return this.governance.requestApproval(candidateId)
+  }
+
+  private assertSpecificationDeliveryOpen(specificationId: string): void {
+    if (this.deliveryStops.has(specificationId)) {
+      throw new WorkbenchContractError(`capability specification ${specificationId} delivery is stopped`)
+    }
+  }
+
+  private assertCandidateDeliveryOpen(candidateId: string): void {
+    const specificationId = this.bindings.get(candidateId)?.specificationId
+    if (specificationId) this.assertSpecificationDeliveryOpen(specificationId)
   }
 
   private stepOf(candidateId: string) {

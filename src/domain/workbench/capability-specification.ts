@@ -20,6 +20,11 @@ export interface CapabilitySpecificationInput {
   readonly effects?: Partial<OperationalEffects>
   readonly acceptanceExamples?: readonly CapabilityAcceptanceExample[]
   readonly unresolved?: readonly string[]
+  readonly origin?: CapabilitySpecificationOrigin
+}
+
+export interface CapabilitySpecificationOrigin {
+  readonly sessionId: string
 }
 
 export interface CapabilitySpecificationPatch {
@@ -53,6 +58,7 @@ export interface CapabilitySpecification {
   readonly revision: number
   readonly supersedesId?: string
   readonly source: 'explicit' | 'legacy'
+  readonly origin?: CapabilitySpecificationOrigin
   readonly digest: string
   readonly status: 'ready' | 'needs-clarification'
   readonly capability: string
@@ -117,6 +123,9 @@ export function defineCapabilitySpecification(
     }
   })
   const unresolved = uniqueTexts(input.unresolved ?? [], 'unresolved')
+  const origin = input.origin === undefined
+    ? undefined
+    : { sessionId: boundedText(input.origin.sessionId, 'origin.sessionId', 240) }
   if (source === 'explicit' && businessRules.length === 0) unresolved.push(MISSING_BUSINESS_RULE)
   if (source === 'explicit' && acceptanceExamples.length === 0) unresolved.push(MISSING_ACCEPTANCE_EXAMPLE)
   const body = {
@@ -125,6 +134,7 @@ export function defineCapabilitySpecification(
     revision: revision.number,
     ...(revision.supersedesId === undefined ? {} : { supersedesId: revision.supersedesId }),
     source,
+    ...(origin === undefined ? {} : { origin }),
     status: unresolved.length === 0 ? 'ready' as const : 'needs-clarification' as const,
     capability,
     goal,
@@ -168,6 +178,7 @@ export function reviseCapabilitySpecification(
     effects: patch.effects ?? previous.effects,
     acceptanceExamples: patch.acceptanceExamples ?? previous.acceptanceExamples,
     unresolved: patch.unresolved ?? previous.unresolved.filter((item) => item !== MISSING_BUSINESS_RULE && item !== MISSING_ACCEPTANCE_EXAMPLE),
+    origin: previous.origin,
   }, 'explicit', { number: previous.revision + 1, supersedesId: previous.id })
 }
 

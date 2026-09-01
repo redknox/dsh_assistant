@@ -46,6 +46,8 @@ export interface WorkbenchListSpecificationItem {
   readonly status: string
   readonly digest: string
   readonly source: 'explicit' | 'legacy'
+  readonly originSessionId?: string
+  readonly deliveryStatus?: 'stopped'
 }
 
 export interface WorkbenchListCandidateItem {
@@ -58,6 +60,10 @@ export interface WorkbenchListCandidateItem {
   readonly specificationId?: string
   readonly parentId?: string
   readonly leftover: boolean
+  readonly governanceApproval?: string
+  readonly activationState?: 'inactive' | 'activating' | 'active' | 'failed'
+  readonly eligibilityOk?: boolean
+  readonly eligibilityDenials?: readonly string[]
 }
 
 export interface WorkbenchListView {

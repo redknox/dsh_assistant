@@ -1521,6 +1521,7 @@ button.nav-item::after { content: "›"; color: #7f857f; font: 500 22px/1 var(--
 .specification-index button[data-delivery-stage="approve"] .control-lamp,
 .specification-index button[data-delivery-stage="activate"] .control-lamp { background: #e4a83c; box-shadow: 0 0 7px rgb(211 142 32 / 58%); }
 .specification-index button[data-delivery-stage="failed"] .control-lamp { background: #c94739; box-shadow: 0 0 7px rgb(190 45 35 / 60%); }
+.specification-index button[data-delivery-stage="blocked"] .control-lamp { background: #c94739; box-shadow: 0 0 7px rgb(190 45 35 / 60%); }
 .specification-index button[data-delivery-stage="live"] .control-lamp { background: #68a36d; box-shadow: 0 0 7px rgb(64 145 75 / 58%); }
 .delivery-needs-user { display: inline-block; margin-top: 7px; padding: 4px 6px; color: #37260f; border: 1px solid #8b6229; background: #e6b766; font: 750 7px/1 var(--font-instrument); letter-spacing: .1em; }
 .build-queue-history { border-top: 3px solid #514a3f; }
@@ -1556,7 +1557,17 @@ button.nav-item::after { content: "›"; color: #7f857f; font: 500 22px/1 var(--
 .delivery-next-action > span { color: #785020; font: 750 8px/1 var(--font-instrument); letter-spacing: .12em; }
 .delivery-next-action > strong { font: 750 13px/1.2 var(--font-instrument); letter-spacing: .04em; }
 .delivery-next-action p { margin: 1px 0 0; color: #514b42; font-size: 10px; line-height: 1.4; }
+.delivery-action { width: 100%; margin-top: 7px; }
 .delivery-overview[data-delivery-stage="failed"] .delivery-next-action { border-color: #8b453d; background: #e4cbc2; }
+.delivery-overview[data-delivery-stage="blocked"] .delivery-next-action { border-color: #8b453d; background: #e4cbc2; }
+.delivery-overview[data-delivery-stage="stopped"] .delivery-next-action { border-color: #817b6c; background: #d8d1bf; }
+.specification-index button[data-delivery-stage="stopped"] .control-lamp { background: #777268; box-shadow: none; }
+.delivery-stop { width: 100%; margin-top: 8px; }
+.delivery-session-fallback { display: block; margin-top: 7px; color: #6f685a; font-size: .7rem; letter-spacing: .06em; }
+.delivery-stop-confirmation { margin-top: 10px; padding: 12px; border: 1px solid #8b453d; background: rgb(139 69 61 / 8%); }
+.delivery-stop-confirmation > strong { display: block; color: #7b3029; letter-spacing: .08em; }
+.delivery-stop-confirmation > p { margin: 6px 0 10px; }
+.delivery-stop-confirmation > div { display: flex; gap: 8px; flex-wrap: wrap; }
 .specification-technical-record { border-bottom: 1px solid #938875; }
 .specification-technical-record > summary { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 12px; padding: 12px 18px; color: #ddd5c7; background: #353832; cursor: pointer; list-style: none; }
 .specification-technical-record > summary::-webkit-details-marker { display: none; }

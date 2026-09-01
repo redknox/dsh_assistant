@@ -13,8 +13,9 @@ export interface WebUiWorkbenchRequest {
 
 export interface WebUiWorkbenchContext {
   readonly workbench: Pick<CandidateWorkbench,
-    'list' | 'inspectSpecification' | 'inspectSpecificationEvaluation' | 'defineSpecification' | 'reviseSpecification' | 'compareSpecifications'>
+    'list' | 'inspectSpecification' | 'inspectSpecificationEvaluation' | 'defineSpecification' | 'reviseSpecification' | 'compareSpecifications' | 'stopSpecification'>
   readonly mutable: boolean
+  readonly currentSessionId: () => string
 }
 
 export async function handleWebUiWorkbenchRequest(
@@ -46,13 +47,27 @@ export async function handleWebUiWorkbenchRequest(
   const body = await request.readJson()
   if (request.pathname === '/api/workbench/specification/define') {
     if (!isSpecificationInput(body)) return { status: 400, body: { error: 'malformed-capability-specification' } }
-    return { status: 200, body: context.workbench.defineSpecification(body), broadcast: true }
+    return {
+      status: 200,
+      body: context.workbench.defineSpecification({ ...body, origin: { sessionId: context.currentSessionId() } }),
+      broadcast: true,
+    }
   }
   if (request.pathname === '/api/workbench/specification/revise') {
     if (!isRevisionInput(body)) return { status: 400, body: { error: 'malformed-capability-specification-revision' } }
     return {
       status: 200,
       body: context.workbench.reviseSpecification(body.specificationId, body.patch),
+      broadcast: true,
+    }
+  }
+  if (request.pathname === '/api/workbench/specification/stop') {
+    if (!isRecord(body) || typeof body.specificationId !== 'string') {
+      return { status: 400, body: { error: 'malformed-capability-delivery-stop' } }
+    }
+    return {
+      status: 200,
+      body: context.workbench.stopSpecification(body.specificationId, { sessionId: context.currentSessionId() }),
       broadcast: true,
     }
   }

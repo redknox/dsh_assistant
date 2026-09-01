@@ -24,6 +24,7 @@ import { ToolCatalogWorkspace } from './ToolCatalogWorkspace'
 import { WorkflowCatalogWorkspace } from './WorkflowCatalogWorkspace'
 import { CapabilityCenterWorkspace } from './CapabilityCenterWorkspace'
 import { SystemInfoWorkspace } from './SystemInfoWorkspace'
+import { continueCapabilityDelivery } from './capabilityBuildQueue'
 
 type CompactSurface = 'conversation' | 'navigation' | 'operations'
 
@@ -115,6 +116,10 @@ export function MissionControlScreen(input: MissionControlScreenProps) {
     props.onNavigate?.(next)
     setCompactSurface('conversation')
   }
+  const requestCapability = (draft = '我想增加一个能力：') => {
+    props.onDraft?.(draft)
+    navigate('today')
+  }
   return (
     <div className="chassis" data-shuttle-variant="A">
     <div className="console" data-system-state={view.systemState} data-connected={props.connected ? 'yes' : 'no'}>
@@ -173,10 +178,7 @@ export function MissionControlScreen(input: MissionControlScreenProps) {
             armedSkill={props.armedSkill}
             skillDependents={props.skillDependents}
             navigate={navigate}
-            defineCapability={() => {
-              input.specifications.beginCreate()
-              navigate('specifications')
-            }}
+            defineCapability={() => requestCapability()}
             askUnplug={props.onAskUnplug}
             cancelUnplug={props.onCancelUnplug}
             confirmUnplug={props.onConfirmUnplug}
@@ -234,22 +236,29 @@ export function MissionControlScreen(input: MissionControlScreenProps) {
           <ToolCatalogWorkspace
             catalog={input.runtime.toolCatalog}
             locked={locked}
-            defineCapability={() => {
-              input.specifications.beginCreate()
-              navigate('specifications')
-            }}
+            defineCapability={() => requestCapability('我需要一个现有工具还无法完成的能力：')}
           />
         ) : pane === 'workflows' ? (
           <WorkflowCatalogWorkspace
             catalog={input.runtime.workflowCatalog}
             locked={locked}
-            defineCapability={() => {
-              input.specifications.beginCreate()
-              navigate('specifications')
-            }}
+            defineCapability={() => requestCapability('我希望把下面这项重复工作变成一个受治理的流程：')}
           />
         ) : pane === 'specifications' ? (
-          <CapabilitySpecificationsWorkspace control={input.specifications} skills={view.skills} locked={locked} />
+          <CapabilitySpecificationsWorkspace
+            control={input.specifications}
+            skills={view.skills}
+            locked={locked}
+            requestCapability={() => requestCapability()}
+            continueDelivery={(item) => {
+              continueCapabilityDelivery(item.action, {
+                currentSessionId: view.runtimeContext?.sessionId ?? view.sessions?.currentSessionId,
+                switchSession: (id) => props.onSwitchConversation?.(id),
+                setDraft: (value) => props.onDraft?.(value),
+                openToday: () => navigate('today'),
+              })
+            }}
+          />
         ) : pane === 'expense-review' ? (
           <ExpenseReviewWorkspace
             control={input.expenseReview}

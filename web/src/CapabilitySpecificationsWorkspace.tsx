@@ -8,6 +8,8 @@ export function CapabilitySpecificationsWorkspace(props: {
   readonly control: CapabilitySpecificationsControl
   readonly skills?: readonly SkillProjection[]
   readonly locked: boolean
+  readonly requestCapability?: () => void
+  readonly continueDelivery?: (item: CapabilityDeliveryProgress) => void
 }) {
   const { control } = props
   const [selectedSkillId, setSelectedSkillId] = useState<string>()
@@ -41,7 +43,7 @@ export function CapabilitySpecificationsWorkspace(props: {
           <p>Capabilities moving from business intent toward validation, review, exact approval, and activation. Specifications remain the immutable starting evidence.</p>
         </div>
         <div className="specification-title-actions">
-          <button type="button" className="button button--approval" disabled={props.locked || control.loading} onClick={control.beginCreate}>DESCRIBE CAPABILITY</button>
+          <button type="button" className="button button--approval" disabled={props.locked || control.loading} onClick={props.requestCapability ?? control.beginCreate}>REQUEST IN CHAT</button>
           <button type="button" className="button button--secondary" disabled={control.loading} onClick={control.load}>REFRESH</button>
         </div>
       </header>
@@ -76,7 +78,7 @@ export function CapabilitySpecificationsWorkspace(props: {
           ) : null}
         </aside>
         <section className="specification-detail" aria-live="polite">
-          {control.creating ? <NewSpecificationForm control={control} locked={props.locked} /> : selectedSkill ? <SkillDeliveryDetail item={selectedSkill} /> : !selected ? <div className="specification-placeholder"><Glyph name="hex" /><p>Select a capability delivery item.</p></div> : (
+          {control.creating ? <NewSpecificationForm control={control} locked={props.locked} /> : selectedSkill ? <SkillDeliveryDetail item={selectedSkill} onAction={props.continueDelivery} /> : !selected ? <div className="specification-placeholder"><Glyph name="hex" /><p>Select a capability delivery item.</p></div> : (
             <>
               <header className="specification-detail-header">
                 <div>
@@ -89,7 +91,17 @@ export function CapabilitySpecificationsWorkspace(props: {
                   {superseded ? <span>HISTORY</span> : null}
                 </div>
               </header>
-              {selectedDelivery ? <DeliveryOverview item={selectedDelivery} /> : null}
+              {selectedDelivery ? <DeliveryOverview
+                item={selectedDelivery}
+                onAction={props.continueDelivery}
+                onAskStop={selectedDelivery.historical || selectedDelivery.stage === 'approve' || selectedDelivery.stage === 'activate'
+                  ? undefined
+                  : () => control.askStop(selectedDelivery.id)}
+                confirmingStop={control.confirmingStopId === selectedDelivery.id}
+                stopping={control.stopping}
+                cancelStop={control.cancelStop}
+                confirmStop={control.stopDelivery}
+              /> : null}
               {control.comparison ? (
                 <div className="specification-diff" data-specification-diff="true">
                   <strong>Δ REV {control.comparison.from.revision} → {control.comparison.to.revision}</strong>
@@ -193,7 +205,7 @@ function SkillDeliveryIndexItem(props: { readonly item: SkillDeliveryItem; reado
   )
 }
 
-function SkillDeliveryDetail(props: { readonly item: SkillDeliveryItem }) {
+function SkillDeliveryDetail(props: { readonly item: SkillDeliveryItem; readonly onAction?: (item: CapabilityDeliveryProgress) => void }) {
   const { item } = props
   const skill = item.skill
   return (
@@ -205,7 +217,7 @@ function SkillDeliveryDetail(props: { readonly item: SkillDeliveryItem }) {
         </div>
         <div className="specification-badges"><span data-spec-status={item.stage}>{item.stateLabel}</span><span>{skill.version}</span></div>
       </header>
-      <DeliveryOverview item={item} />
+      <DeliveryOverview item={item} onAction={props.onAction} />
       <details className="specification-technical-record">
         <summary><span>SKILL DETAILS</span><small>Invocation, resources, dependencies, validation, review, and exact revision identity</small></summary>
         <div className="skill-delivery-details">
@@ -222,7 +234,15 @@ function SkillDeliveryDetail(props: { readonly item: SkillDeliveryItem }) {
   )
 }
 
-function DeliveryOverview(props: { readonly item: CapabilityDeliveryProgress }) {
+function DeliveryOverview(props: {
+  readonly item: CapabilityDeliveryProgress
+  readonly onAction?: (item: CapabilityDeliveryProgress) => void
+  readonly onAskStop?: () => void
+  readonly confirmingStop?: boolean
+  readonly stopping?: boolean
+  readonly cancelStop?: () => void
+  readonly confirmStop?: () => void
+}) {
   const { item } = props
   return (
     <section className="delivery-overview" data-delivery-stage={item.stage}>
@@ -236,6 +256,22 @@ function DeliveryOverview(props: { readonly item: CapabilityDeliveryProgress }) 
         <span>{item.needsUser ? 'NEEDS YOUR DECISION' : 'NEXT'}</span>
         <strong>{item.stateLabel}</strong>
         <p>{item.nextAction}</p>
+        {item.action ? <button type="button" className="button button--approval delivery-action" data-delivery-action={item.action.kind} onClick={() => props.onAction?.(item)}>{item.action.label}</button> : null}
+        {item.action?.kind === 'conversation' && !item.action.sessionId
+          ? <small className="delivery-session-fallback">ORIGIN SESSION NOT RECORDED · CONTINUES IN CURRENT CHAT</small>
+          : null}
+        {props.confirmingStop ? (
+          <div className="delivery-stop-confirmation" role="alertdialog" aria-label="Confirm stop development">
+            <strong>CONFIRM STOP DEVELOPMENT</strong>
+            <p>This removes the item from active delivery. Specifications, Candidates, approvals, and audit evidence are retained.</p>
+            <div>
+              <button type="button" className="button button--secondary" disabled={props.stopping} onClick={props.cancelStop}>KEEP DEVELOPING</button>
+              <button type="button" className="button button--fault" data-delivery-stop="confirm" disabled={props.stopping} onClick={props.confirmStop}>{props.stopping ? 'STOPPING…' : 'STOP DEVELOPMENT'}</button>
+            </div>
+          </div>
+        ) : props.onAskStop ? (
+          <button type="button" className="button button--secondary delivery-stop" data-delivery-stop="ask" onClick={props.onAskStop}>STOP DEVELOPMENT</button>
+        ) : null}
       </div>
     </section>
   )
