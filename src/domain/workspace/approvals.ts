@@ -77,6 +77,7 @@ export function acknowledgementOf(resolution: ApprovalResolution): { readonly te
 }
 
 function dshToolCard(approval: NonNullable<WorkspaceSnapshotInput['dshApprovals']>[number]): ApprovalCard {
+  const argumentsForReview = argumentDetails(approval.arguments)
   return {
     id: approval.id,
     kind: 'dsh-tool',
@@ -94,6 +95,20 @@ function dshToolCard(approval: NonNullable<WorkspaceSnapshotInput['dshApprovals'
       ...argumentDetails(approval.arguments),
       'Approval returns allowed-once to DSH; TARS-NG does not re-run the tool.',
     ],
+    decision: {
+      request: `Allow ${approval.toolName} to continue`,
+      reason: approval.reason ?? 'This tool call crossed a governed execution boundary and is paused for your decision.',
+      outcome: 'The exact paused call will resume once. TARS-NG will not execute a second copy of it.',
+      scope: 'One tool call · fingerprint bound · no standing permission',
+      risk: 'tool-execution',
+      facts: [
+        { label: 'TOOL', value: approval.toolName },
+        ...(approval.callId ? [{ label: 'CALL', value: approval.callId }] : []),
+        ...argumentsForReview.map((line) => splitDetail(line)),
+      ],
+      approveLabel: 'ALLOW ONCE',
+      rejectLabel: 'DENY',
+    },
   }
 }
 
@@ -154,20 +169,37 @@ function resolutionFromTicket(ticket: WorkspaceSnapshotInput['pendingConfirmatio
 function sideEffectCard(ticket: WorkspaceSnapshotInput['pendingConfirmations'][number]): ApprovalCard {
   const payload = allowedApprovalPayload(ticket.payload)
   if (ticket.capability === 'calendar' && ticket.operation === 'create_event') {
+    const title = String(payload.title ?? '(untitled)')
+    const when = formatWhen(payload)
+    const attendees = formatAttendees(payload.attendees)
     return {
       id: ticket.id,
       kind: 'calendar-create',
       title: 'CREATE CALENDAR EVENT',
       target: String(payload.calendarId ?? 'Personal'),
-      sideEffect: 'yes',
+      sideEffect: 'create one event in an external calendar',
       authorityChange: 'none',
       fingerprint: ticket.fingerprint,
       status: ticket.status,
       details: [
-        `Title       ${String(payload.title ?? '(untitled)')}`,
-        `When        ${formatWhen(payload)}`,
-        `Attendees   ${formatAttendees(payload.attendees)}`,
+        `Title       ${title}`,
+        `When        ${when}`,
+        `Attendees   ${attendees}`,
       ],
+      decision: {
+        request: `Create “${title}”`,
+        reason: 'Creating an event changes an external calendar, so TARS-NG needs your confirmation immediately before the write.',
+        outcome: 'One calendar event will be created with the details below.',
+        scope: 'One external write · no recurring permission',
+        risk: 'external-change',
+        facts: [
+          { label: 'CALENDAR', value: String(payload.calendarId ?? 'Personal') },
+          { label: 'WHEN', value: when || 'Not specified' },
+          { label: 'ATTENDEES', value: attendees },
+        ],
+        approveLabel: 'CREATE EVENT',
+        rejectLabel: 'CANCEL',
+      },
     }
   }
   if (ticket.capability === 'obsidian') {
@@ -186,6 +218,20 @@ function sideEffectCard(ticket: WorkspaceSnapshotInput['pendingConfirmations'][n
         `Content     ${content.slice(0, 4_000)}${content.length > 4_000 ? `\n… (${content.length} characters total)` : ''}`,
         ...(payload.expectedDigest ? [`Version     ${String(payload.expectedDigest)}`] : []),
       ],
+      decision: {
+        request: ticket.operation === 'create_note' ? 'Create this Obsidian note' : 'Append to this Obsidian note',
+        reason: 'This changes the assistant knowledge vault and requires confirmation immediately before writing.',
+        outcome: ticket.operation === 'create_note' ? 'One new Markdown note will be created.' : 'The reviewed content will be appended to the current note version.',
+        scope: 'One local write · confined to the configured vault',
+        risk: 'local-write',
+        facts: [
+          { label: 'NOTE', value: String(payload.path ?? '(unknown)') },
+          { label: 'CONTENT', value: `${content.slice(0, 800)}${content.length > 800 ? `\n… (${content.length} characters total)` : ''}` },
+          ...(payload.expectedDigest ? [{ label: 'CURRENT VERSION', value: String(payload.expectedDigest) }] : []),
+        ],
+        approveLabel: ticket.operation === 'create_note' ? 'CREATE NOTE' : 'APPEND NOTE',
+        rejectLabel: 'CANCEL',
+      },
     }
   }
   return {
@@ -200,6 +246,16 @@ function sideEffectCard(ticket: WorkspaceSnapshotInput['pendingConfirmations'][n
     details: [
       ...Object.entries(payload).map(([key, value]) => `${key}: ${stringify(value)}`),
     ],
+    decision: {
+      request: `Allow ${ticket.capability}.${ticket.operation}`,
+      reason: 'This operation has a governed side effect and is paused for your decision.',
+      outcome: 'The exact pending operation will execute once.',
+      scope: 'One exact action · fingerprint bound',
+      risk: 'external-change',
+      facts: Object.entries(payload).map(([key, value]) => ({ label: key.toUpperCase(), value: stringify(value) })),
+      approveLabel: 'ALLOW ONCE',
+      rejectLabel: 'DENY',
+    },
   }
 }
 
@@ -223,7 +279,27 @@ function selfExtensionCard(approval: NonNullable<WorkspaceSnapshotInput['extensi
       `Effects     ${approval.effects.join('; ') || 'none'}`,
       'This is not self-authorization. Model/tools cannot mint approval.',
     ],
+    decision: {
+      request: `Approve ${approval.owner}@${approval.candidateVersion}`,
+      reason: 'This revision changes the capabilities or authority available to TARS-NG. Only you can approve the exact reviewed artifact.',
+      outcome: 'The exact revision becomes eligible for a separate activation decision. Approval alone does not put it live.',
+      scope: 'Exact digest and diff · no future revisions · activation remains separate',
+      risk: 'capability-authority',
+      facts: [
+        { label: 'CAPABILITY', value: `${approval.owner}@${approval.candidateVersion}` },
+        { label: 'ADDS', value: approval.capabilitiesAdded.join(', ') || 'No capabilities' },
+        { label: 'PERMISSIONS', value: approval.permissionsAdded.join(', ') || 'No new permissions' },
+        { label: 'EFFECTS', value: approval.effects.join('; ') || 'None declared' },
+      ],
+      approveLabel: 'APPROVE REVISION',
+      rejectLabel: 'REJECT',
+    },
   }
+}
+
+function splitDetail(line: string): { readonly label: string; readonly value: string } {
+  const match = /^(\S+)\s+(.*)$/s.exec(line.trim())
+  return match ? { label: match[1]!.toUpperCase(), value: match[2]! } : { label: 'DETAIL', value: line }
 }
 
 function formatWhen(payload: Record<string, unknown>): string {

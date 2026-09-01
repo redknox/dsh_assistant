@@ -54,7 +54,7 @@ Optional providers that were never configured render as `NOT LINKED` and do not 
 
 ## Approvals
 
-Calendar create is an ordinary external side-effect card: target, when, attendees, external side effect, no authority change.
+Every approval source projects the same decision interface: requested outcome, why the user is being asked, what approval will do, reviewable facts, and the exact one-time scope. Calendar and Obsidian cards describe the concrete write; DSH tool approval makes clear that the paused call resumes once without re-execution; Self-Extension approval states that the exact revision only becomes eligible for a separate activation decision. Fingerprints, digests, raw detail, and authority diagnostics remain available under Technical Details instead of competing with the decision.
 
 A control-plane decision is not a human conversation message. Approve, Reject, and Cancel resolve through the trusted host and appear in Actions history and Activity. They do not append a synthetic `Confirmation ...` user message or start an extra model turn. A successful decision may return a one-shot acknowledgement on the POST response for a dismissible toast; `/api/view` and SSE snapshots do not re-project that toast into Conversation.
 

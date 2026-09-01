@@ -41,41 +41,74 @@ function ApprovalCardView(props: {
 }) {
   const { card } = props
   const pending = isPendingApproval(card.status)
+  const decision = card.decision ?? fallbackApprovalDecision(card)
   return (
-    <article className="approval-card" data-approval-id={card.id} data-kind={card.kind} data-fingerprint={card.fingerprint} data-candidate-id={card.candidateId ?? ''} aria-labelledby={`approval-title-${card.id}`}>
+    <article className="approval-card approval-decision-card" data-approval-id={card.id} data-kind={card.kind} data-risk={decision.risk} data-fingerprint={card.fingerprint} data-candidate-id={card.candidateId ?? ''} aria-labelledby={`approval-title-${card.id}`}>
       <header className="approval-header">
-        <Glyph name="calendar" className="glyph approval-symbol" />
+        <ApprovalGlyph kind={card.kind} />
         <div>
-          <p className="approval-kicker">APPROVAL REQUIRED · ONE EXACT ACTION</p>
-          <h2 id={`approval-title-${card.id}`}>{card.title}</h2>
+          <p className="approval-kicker">DECISION REQUIRED · {riskLabel(decision.risk)}</p>
+          <h2 id={`approval-title-${card.id}`}>{decision.request}</h2>
         </div>
+        <span className="approval-scope-badge">ONE-TIME</span>
       </header>
-      <p className="approval-guidance">Review the target and exact change below. Approving permits this action once.</p>
-      <dl className="approval-facts">
-        <div><dt>TARGET</dt><dd>{card.target}</dd></div>
-        {card.details.map((line) => <div key={line}><dt>CHANGE</dt><dd>{line}</dd></div>)}
-      </dl>
-      <div className="effect-line">
-        <Glyph name="info" className="glyph effect-icon" />
-        <span><strong>WHAT WILL HAPPEN</strong> {card.sideEffect}</span>
+      <div className="approval-explanation">
+        <section><strong>WHY YOU ARE SEEING THIS</strong><p>{decision.reason}</p></section>
+        <section><strong>IF YOU APPROVE</strong><p>{decision.outcome}</p></section>
       </div>
+      <dl className="approval-facts approval-facts--decision">
+        {decision.facts.map((fact, index) => <div key={`${fact.label}:${index}`}><dt>{fact.label}</dt><dd>{fact.value}</dd></div>)}
+      </dl>
+      <p className="approval-scope"><Glyph name="shield" /><span><strong>APPROVAL SCOPE</strong>{decision.scope}</span></p>
       <details className="approval-technical">
         <summary>TECHNICAL DETAILS</summary>
         <dl className="approval-facts approval-facts--technical">
+          <div><dt>REQUEST TYPE</dt><dd>{card.title}</dd></div>
+          <div><dt>TARGET</dt><dd>{card.target}</dd></div>
+          <div><dt>SIDE EFFECT</dt><dd>{card.sideEffect}</dd></div>
           <div><dt>AUTHORITY</dt><dd>{card.authorityChange}</dd></div>
           <div><dt>FINGERPRINT</dt><dd>{card.fingerprint}</dd></div>
           {card.candidateId ? <div><dt>CANDIDATE</dt><dd>{card.candidateId}</dd></div> : null}
           {card.digest ? <div><dt>DIGEST</dt><dd>{card.digest}</dd></div> : null}
+          {card.details.map((line, index) => <div key={`${line}:${index}`}><dt>RAW DETAIL</dt><dd>{line}</dd></div>)}
         </dl>
       </details>
       {pending ? (
         <div className="approval-actions">
-          <button type="button" className="button button--secondary" data-approval-action="reject" disabled={props.locked} onClick={() => props.actions.reject(card)}>REJECT</button>
-          <button type="button" className="button button--approval" data-approval-action="approve" disabled={props.locked} onClick={() => props.actions.approve(card)}>APPROVE</button>
+          <button type="button" className="button button--secondary" data-approval-action="reject" disabled={props.locked} onClick={() => props.actions.reject(card)}>{decision.rejectLabel}</button>
+          <button type="button" className="button button--approval" data-approval-action="approve" disabled={props.locked} onClick={() => props.actions.approve(card)}>{decision.approveLabel}</button>
         </div>
       ) : <p className="approval-status">Status {card.status}</p>}
     </article>
   )
+}
+
+function fallbackApprovalDecision(card: ApprovalCard): NonNullable<ApprovalCard['decision']> {
+  return {
+    request: card.title,
+    reason: 'This exact operation is governed and needs your decision before it can continue.',
+    outcome: card.sideEffect === 'yes' ? 'The pending operation will execute once.' : card.sideEffect,
+    scope: 'One exact action · fingerprint bound',
+    risk: card.kind === 'self-extension' ? 'capability-authority' : card.kind === 'dsh-tool' ? 'tool-execution' : 'external-change',
+    facts: [
+      { label: 'TARGET', value: card.target },
+      ...card.details.map((value) => ({ label: 'CHANGE', value })),
+    ],
+    approveLabel: card.kind === 'self-extension' ? 'APPROVE REVISION' : card.kind === 'dsh-tool' ? 'ALLOW ONCE' : 'APPROVE',
+    rejectLabel: card.kind === 'calendar-create' ? 'CANCEL' : 'REJECT',
+  }
+}
+
+function ApprovalGlyph(props: { readonly kind: ApprovalCard['kind'] }) {
+  const name = props.kind === 'calendar-create' ? 'calendar' : props.kind === 'dsh-tool' ? 'terminal' : props.kind === 'self-extension' ? 'capabilities' : 'attach'
+  return <Glyph name={name} className="glyph approval-symbol" />
+}
+
+function riskLabel(risk: NonNullable<ApprovalCard['decision']>['risk']): string {
+  if (risk === 'external-change') return 'EXTERNAL CHANGE'
+  if (risk === 'capability-authority') return 'CAPABILITY AUTHORITY'
+  if (risk === 'tool-execution') return 'TOOL EXECUTION'
+  return 'LOCAL WRITE'
 }
 
 function ActivationCardView(props: {

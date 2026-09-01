@@ -2491,6 +2491,16 @@ export function apply(ctx) {
           details: ['Title Team review'],
           fingerprint: 'fp-calendar',
           status: 'pending',
+          decision: {
+            request: 'Create “Team review”',
+            reason: 'Creating an event changes an external calendar.',
+            outcome: 'One calendar event will be created.',
+            scope: 'One external write · no recurring permission',
+            risk: 'external-change',
+            facts: [{ label: 'WHEN', value: 'Tomorrow at 10:00' }],
+            approveLabel: 'CREATE EVENT',
+            rejectLabel: 'CANCEL',
+          },
         }],
         controlStrip: { pendingApprovals: 1, backgroundJobs: 0, mode: 'NEEDS_APPROVAL' },
       }),
@@ -2508,8 +2518,11 @@ export function apply(ctx) {
     assert.match(approval, /data-fingerprint="fp-calendar"/)
     assert.match(approval, /data-approval-action="approve"/)
     assert.match(approval, /data-approval-action="reject"/)
-    assert.match(approval, /APPROVE/)
-    assert.match(approval, /REJECT/)
+    assert.match(approval, /WHY YOU ARE SEEING THIS/)
+    assert.match(approval, /IF YOU APPROVE/)
+    assert.match(approval, /APPROVAL SCOPE/)
+    assert.match(approval, /CREATE EVENT/)
+    assert.match(approval, /CANCEL/)
     assert.doesNotMatch(approval, /data-approval-action="approve" disabled/)
 
     const rejected = renderToStaticMarkup(createElement(MissionControlScreen, {

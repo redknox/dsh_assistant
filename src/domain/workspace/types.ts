@@ -152,6 +152,16 @@ export interface ApprovalCard {
   readonly candidateId?: string
   readonly digest?: string
   readonly sessionId?: string
+  readonly decision?: {
+    readonly request: string
+    readonly reason: string
+    readonly outcome: string
+    readonly scope: string
+    readonly risk: 'external-change' | 'capability-authority' | 'tool-execution' | 'local-write'
+    readonly facts: readonly { readonly label: string; readonly value: string }[]
+    readonly approveLabel: string
+    readonly rejectLabel: string
+  }
 }
 
 export interface ActivationCard {
