@@ -289,6 +289,14 @@ export async function activateCandidate(card: ActivationCard, confirm: boolean):
   }))
 }
 
+export async function activateGovernedCapability(card: ActivationCard, confirm: boolean): Promise<UiEnvelope> {
+  if (card.kind === 'skill-activate') {
+    if (!card.skill) throw new Error('Skill activation is no longer actionable')
+    return runSkillAction({ action: 'activate', skill: card.skill, confirm })
+  }
+  return activateCandidate(card, confirm)
+}
+
 export async function abandonCandidateActivation(card: ActivationCard, confirm: boolean): Promise<UiEnvelope> {
   return parseEnvelope(await fetch('/api/activation/abandon', {
     ...include,

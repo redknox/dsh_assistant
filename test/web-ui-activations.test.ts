@@ -139,6 +139,16 @@ describe('Web UI activations', () => {
     assert.deepEqual(stale, { status: 409, body: { error: 'stale-digest' } })
   })
 
+  it('does not let a Skill activation card cross the extension activation authority', async () => {
+    const skill = activationCard({
+      kind: 'skill-activate',
+      isolatedRuntime: false,
+      skill: { id: 'skill-1', name: 'review', version: '1.0.0', digest: 'digest-1', generation: 2 },
+    })
+    const result = await handleWebUiActivationRequest(request('/api/activate', body(skill)), context({ activations: () => [skill] }))
+    assert.deepEqual(result, { status: 409, body: { error: 'unknown-activation' } })
+  })
+
   it('returns bounded diagnostics for a failed activation', async () => {
     const result = await handleWebUiActivationRequest(request('/api/activate', body()), context({
       authority: {

@@ -4,7 +4,7 @@ import { JSDOM } from 'jsdom'
 import { act, createElement } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import type { MissionControlView } from '../src/domain/workspace/types.js'
-import { decideApproval, type UiEnvelope } from '../web/src/api.js'
+import { activateGovernedCapability, decideApproval, type UiEnvelope } from '../web/src/api.js'
 import { ConversationWorkspace, type ConversationWorkspaceActions } from '../web/src/ConversationWorkspace.js'
 import { useConversationControl, type ConversationControl } from '../web/src/useConversationControl.js'
 import { useMissionControlRuntime, type MissionControlRuntime } from '../web/src/useMissionControlRuntime.js'
@@ -135,6 +135,38 @@ describe('client control hooks', () => {
       generation: 4,
       dependents: [],
       acknowledgeDependents: false,
+    })
+  })
+
+  it('routes a unified Skill activation card through the exact Skill authority endpoint', async () => {
+    const calls: { readonly url: string; readonly body: Record<string, unknown> }[] = []
+    globalThis.fetch = async (input, init) => {
+      calls.push({ url: String(input), body: JSON.parse(String(init?.body)) as Record<string, unknown> })
+      return Response.json(envelope())
+    }
+
+    await activateGovernedCapability({
+      id: 'skill-activation:weekly-review@1.0.0:4',
+      kind: 'skill-activate',
+      title: 'SKILL ACTIVATION',
+      owner: 'skill/weekly-review',
+      version: '1.0.0',
+      candidateId: 'weekly-review@1.0.0',
+      digest: 'skill-digest',
+      fingerprint: 'skill-fingerprint',
+      isolatedRuntime: false,
+      capabilitiesAdded: [], capabilitiesRemoved: [], capabilitiesChanged: [],
+      permissionsAdded: [], permissionsRemoved: [], permissionsChanged: [],
+      toolsAdded: [], toolsRemoved: [], toolsChanged: [],
+      workflowsAdded: [], workflowsRemoved: [], workflowsChanged: [],
+      effects: [], eligibilityOk: true, eligibilityDenials: [], status: 'APPROVED_NOT_ACTIVE', details: [],
+      skill: { id: 'weekly-review@1.0.0', name: 'weekly-review', version: '1.0.0', digest: 'skill-digest', approvalFingerprint: 'skill-fingerprint', generation: 4 },
+    }, true)
+
+    assert.equal(calls[0]?.url, '/api/skill')
+    assert.deepEqual(calls[0]?.body, {
+      action: 'activate', confirm: true, id: 'weekly-review@1.0.0', name: 'weekly-review', version: '1.0.0',
+      digest: 'skill-digest', fingerprint: 'skill-fingerprint', generation: 4, dependents: [], acknowledgeDependents: false,
     })
   })
 

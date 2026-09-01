@@ -2716,6 +2716,49 @@ export function apply(ctx) {
     assert.match(activation, /NOT NOW/)
     assert.doesNotMatch(activation, /NOT APPROVED/)
 
+    const skillActivation = renderToStaticMarkup(createElement(MissionControlScreen, {
+      view: fixtureView({
+        activations: [{
+          id: 'skill-activation:weekly-review@1.0.0:4',
+          kind: 'skill-activate',
+          title: 'SKILL ACTIVATION',
+          owner: 'skill/weekly-review',
+          version: '1.0.0',
+          candidateId: 'weekly-review@1.0.0',
+          digest: 'skill-digest',
+          fingerprint: 'skill-fingerprint',
+          isolatedRuntime: false,
+          capabilitiesAdded: [], capabilitiesRemoved: [], capabilitiesChanged: [],
+          permissionsAdded: [], permissionsRemoved: [], permissionsChanged: [],
+          toolsAdded: [], toolsRemoved: [], toolsChanged: [],
+          workflowsAdded: [], workflowsRemoved: [], workflowsChanged: [],
+          effects: [], eligibilityOk: true, eligibilityDenials: [], status: 'APPROVED_NOT_ACTIVE', details: [],
+          skill: { id: 'weekly-review@1.0.0', name: 'weekly-review', version: '1.0.0', digest: 'skill-digest', approvalFingerprint: 'skill-fingerprint', generation: 4 },
+          release: {
+            request: 'Put Weekly Review online',
+            stage: 'ready',
+            reason: 'Approval accepts the package; activation publishes it.',
+            outcome: 'The exact approved Skill will become live.',
+            scope: 'weekly-review@1.0.0 · exact digest · catalog generation 4 · reversible',
+            facts: [{ label: 'INVOCATION', value: 'model + user' }],
+          },
+        }],
+      }),
+      connected: true,
+      sending: false,
+      draft: '',
+      onDraft() {},
+      onSend() {},
+      onApprove() {},
+      onReject() {},
+      onRecovery() {},
+    }))
+    assert.match(skillActivation, /data-kind="skill-activate"/)
+    assert.match(skillActivation, /Put Weekly Review online/)
+    assert.match(skillActivation, /Instruction package · governed catalog/)
+    assert.match(skillActivation, /catalog generation 4/)
+    assert.match(skillActivation, /data-activation-action="activate"/)
+
     const blockedActivation = renderToStaticMarkup(createElement(MissionControlScreen, {
       view: fixtureView({
         activations: [{

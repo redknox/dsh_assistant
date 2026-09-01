@@ -2,7 +2,7 @@ import { useRef, useState } from 'react'
 import type { ActivationCard, ApprovalCard, RollbackCard } from '../../src/domain/workspace/types'
 import {
   abandonCandidateActivation,
-  activateCandidate,
+  activateGovernedCapability,
   decideApproval,
   rollbackSystemState,
   runRecovery,
@@ -73,7 +73,7 @@ export function useGovernanceControl(
       commit(requested.state)
       const command = requested.command
       if (command?.action === 'activate') {
-        void runtime.perform(() => activateCandidate(command.card, true))
+        void runtime.perform(() => activateGovernedCapability(command.card, true))
       } else if (command?.action === 'abandon-activation') {
         void runtime.perform(() => abandonCandidateActivation(command.card, true))
       } else if (command?.action === 'rollback-system') {

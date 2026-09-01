@@ -142,7 +142,7 @@ function ActivationCardView(props: {
   return (
     <article className="approval-card activation-decision-card" data-activation-id={card.id} data-kind={card.kind} data-release-stage={release.stage} data-fingerprint={card.fingerprint} data-candidate-id={card.candidateId} data-digest={card.digest} data-activation-status={card.status} aria-labelledby={`activation-title-${card.id}`}>
       <header className="approval-header">
-        <Glyph name="shield" className="glyph approval-symbol" />
+        <Glyph name={card.kind === 'skill-activate' ? 'capabilities' : 'shield'} className="glyph approval-symbol" />
         <div>
           <p className="approval-kicker">RELEASE CONTROL · SEPARATE TRUSTED STEP</p>
           <h2 id={`activation-title-${card.id}`}>{release.request}</h2>
@@ -166,12 +166,12 @@ function ActivationCardView(props: {
       <details className="approval-technical">
         <summary>TECHNICAL DETAILS</summary>
         <dl className="approval-facts approval-facts--technical">
-          <div><dt>OWNER</dt><dd>{card.owner}@{card.version}</dd></div>
-          <div><dt>CANDIDATE</dt><dd>{card.candidateId}</dd></div>
+          <div><dt>{card.kind === 'skill-activate' ? 'SKILL' : 'OWNER'}</dt><dd>{card.kind === 'skill-activate' ? `${card.skill?.name ?? card.owner}@${card.version}` : `${card.owner}@${card.version}`}</dd></div>
+          <div><dt>{card.kind === 'skill-activate' ? 'SKILL ID' : 'CANDIDATE'}</dt><dd>{card.candidateId}</dd></div>
           <div><dt>DIGEST</dt><dd>{card.digest}</dd></div>
           <div><dt>FINGERPRINT</dt><dd>{card.fingerprint}</dd></div>
           {card.runtimeContractVersion ? <div><dt>CONTRACT</dt><dd>{card.runtimeContractVersion}</dd></div> : null}
-          <div><dt>RUNTIME</dt><dd>Isolated runner only</dd></div>
+          <div><dt>RUNTIME</dt><dd>{card.isolatedRuntime ? 'Isolated runner only' : 'Instruction package · governed catalog'}</dd></div>
           <div><dt>STATUS</dt><dd>{card.status}</dd></div>
           {card.details.map((line, index) => <div key={`${line}:${index}`}><dt>RAW DETAIL</dt><dd>{line}</dd></div>)}
         </dl>

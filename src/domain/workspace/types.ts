@@ -167,7 +167,7 @@ export interface ApprovalCard {
 
 export interface ActivationCard {
   readonly id: string
-  readonly kind: 'self-extension-activate'
+  readonly kind: 'self-extension-activate' | 'skill-activate'
   readonly title: string
   readonly owner: string
   readonly version: string
@@ -175,7 +175,7 @@ export interface ActivationCard {
   readonly digest: string
   readonly fingerprint: string
   readonly runtimeContractVersion?: string
-  readonly isolatedRuntime: true
+  readonly isolatedRuntime: boolean
   readonly capabilitiesAdded: readonly string[]
   readonly capabilitiesRemoved: readonly string[]
   readonly capabilitiesChanged: readonly string[]
@@ -193,6 +193,7 @@ export interface ActivationCard {
   readonly eligibilityDenials: readonly string[]
   readonly status: ExtensionLifecycleState
   readonly details: readonly string[]
+  readonly skill?: Pick<SkillProjection, 'id' | 'name' | 'version' | 'digest' | 'approvalFingerprint' | 'generation'>
   readonly release?: {
     readonly request: string
     readonly stage: 'ready' | 'reactivate' | 'retry' | 'working' | 'blocked'

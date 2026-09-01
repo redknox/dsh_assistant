@@ -127,6 +127,7 @@ function bindActivation(
   if (typeof body.fingerprint !== 'string' || body.fingerprint === '') return { error: 'malformed' }
   const card = cards.find((item) => item.id === body.id)
   if (!card) return { error: 'unknown-activation' }
+  if (card.kind !== 'self-extension-activate') return { error: 'unknown-activation' }
   if (card.candidateId !== body.candidateId) return { error: 'stale-candidate' }
   if (card.digest !== body.digest) return { error: 'stale-digest' }
   if (card.fingerprint !== body.fingerprint) return { error: 'stale-fingerprint' }

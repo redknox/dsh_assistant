@@ -434,6 +434,54 @@ describe('TARS-NG mission-control workspace', () => {
     assert.match(card?.decision?.outcome ?? '', /does not make it available/)
   })
 
+  it('projects an approved Skill into the separate Today activation surface', () => {
+    const view = projectMissionControl(snapshot({
+      skillCatalog: { state: 'ok', failed: [], recoveryRequired: false },
+      skills: [{
+        id: 'weekly-review@1.0.0',
+        name: 'weekly-review',
+        version: '1.0.0',
+        profile: 'assistant',
+        provenance: 'third-party',
+        origin: 'import',
+        lifecycle: 'approved',
+        sealed: true,
+        modelInvocable: true,
+        userInvocable: true,
+        description: 'Guide a weekly review.',
+        resources: ['checklist.md'],
+        validationPassed: true,
+        reviewComplete: true,
+        approvalDecision: 'approved',
+        approvalFingerprint: 'skill-fingerprint',
+        digest: 'skill-digest',
+        dependsOn: ['calendar.read'],
+        dependents: [],
+        system: false,
+        generation: 4,
+      }],
+    }))
+
+    const card = view.activations.find((item) => item.kind === 'skill-activate')
+    assert.equal(card?.id, 'skill-activation:weekly-review@1.0.0:4')
+    assert.equal(card?.status, 'APPROVED_NOT_ACTIVE')
+    assert.equal(card?.isolatedRuntime, false)
+    assert.equal(card?.skill?.digest, 'skill-digest')
+    assert.match(card?.release?.reason ?? '', /separate decision/)
+    assert.match(card?.release?.scope ?? '', /catalog generation 4/)
+    assert.ok(card?.release?.facts.some((item) => item.label === 'DEPENDENCIES' && item.value === 'calendar.read'))
+  })
+
+  it('withholds a Skill activation card when the active catalog is unavailable', () => {
+    const skill = {
+      id: 'weekly-review@1.0.0', name: 'weekly-review', version: '1.0.0', profile: 'assistant', provenance: 'third-party', origin: 'import',
+      lifecycle: 'approved', sealed: true, modelInvocable: true, userInvocable: true, description: 'Guide a weekly review.', resources: [],
+      validationPassed: true, reviewComplete: true, approvalDecision: 'approved', digest: 'skill-digest', dependsOn: [], dependents: [], system: false, generation: 4,
+    } as const
+    assert.equal(projectMissionControl(snapshot({ skills: [skill], safeMode: true })).activations.some((item) => item.kind === 'skill-activate'), false)
+    assert.equal(projectMissionControl(snapshot({ skills: [skill], skillCatalog: { state: 'withheld', failed: [], recoveryRequired: false } })).activations.some((item) => item.kind === 'skill-activate'), false)
+  })
+
   it('G2. approved Self-Extension projects an Activation Card without claiming NOT APPROVED', () => {
     const view = projectMissionControl(snapshot({
       extensionApprovals: [{

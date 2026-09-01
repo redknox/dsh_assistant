@@ -50,7 +50,82 @@ export function projectActivationCards(input: WorkspaceSnapshotInput): readonly 
       failurePhase: input.activation?.lastFailure?.phase,
     }))
   }
+  if (!input.safeMode && !input.recoveryRequired && input.skillCatalog?.state !== 'withheld') {
+    for (const skill of input.skills ?? []) {
+      if (!skill.system && skill.lifecycle === 'approved') cards.push(skillActivationCard(skill))
+    }
+  }
   return cards
+}
+
+function skillActivationCard(skill: NonNullable<WorkspaceSnapshotInput['skills']>[number]): ActivationCard {
+  const invocation = [
+    skill.modelInvocable ? 'model' : '',
+    skill.userInvocable ? 'user' : '',
+  ].filter(Boolean).join(' + ') || 'not invocable'
+  const resources = skill.resources.join(', ') || 'none'
+  const dependencies = skill.dependsOn.join(', ') || 'none'
+  return {
+    id: `skill-activation:${skill.id}:${skill.generation}`,
+    kind: 'skill-activate',
+    title: 'SKILL ACTIVATION',
+    owner: `skill/${skill.name}`,
+    version: skill.version,
+    candidateId: skill.id,
+    digest: skill.digest,
+    fingerprint: skill.approvalFingerprint ?? skill.digest,
+    isolatedRuntime: false,
+    capabilitiesAdded: [],
+    capabilitiesRemoved: [],
+    capabilitiesChanged: [],
+    permissionsAdded: [],
+    permissionsRemoved: [],
+    permissionsChanged: [],
+    toolsAdded: [],
+    toolsRemoved: [],
+    toolsChanged: [],
+    workflowsAdded: [],
+    workflowsRemoved: [],
+    workflowsChanged: [],
+    effects: [],
+    eligibilityOk: true,
+    eligibilityDenials: [],
+    status: 'APPROVED_NOT_ACTIVE',
+    skill: {
+      id: skill.id,
+      name: skill.name,
+      version: skill.version,
+      digest: skill.digest,
+      approvalFingerprint: skill.approvalFingerprint,
+      generation: skill.generation,
+    },
+    details: [
+      `Skill       ${skill.name}@${skill.version}`,
+      `Digest      ${skill.digest}`,
+      `Generation  ${skill.generation}`,
+      `Invocation  ${invocation}`,
+      `Resources   ${resources}`,
+      `Depends on  ${dependencies}`,
+      'Approval did not activate this Skill. Activation publishes the exact approved instructions to the active catalog.',
+    ],
+    release: {
+      request: `Put ${titleCase(skill.name)} online`,
+      stage: 'ready',
+      reason: 'Approval accepts this exact instruction package, but activation is the separate decision that makes it available to the assistant and user.',
+      outcome: `The exact approved Skill will become live with ${invocation} invocation.`,
+      scope: `${skill.name}@${skill.version} · exact digest · catalog generation ${skill.generation} · reversible`,
+      facts: [
+        { label: 'PURPOSE', value: skill.description },
+        { label: 'INVOCATION', value: invocation },
+        { label: 'RESOURCES', value: resources },
+        { label: 'DEPENDENCIES', value: dependencies },
+      ],
+    },
+  }
+}
+
+function titleCase(value: string): string {
+  return value.split(/[-_]/).map((part) => `${part.slice(0, 1).toUpperCase()}${part.slice(1)}`).join(' ')
 }
 
 function selfExtensionActivationCard(
