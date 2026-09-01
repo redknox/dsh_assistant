@@ -15,6 +15,7 @@ export interface OperationsActions {
   readonly controlGoal?: (action: 'pause' | 'resume', id: string, revision: number) => void
   readonly controlPlan?: (active: boolean) => void
   readonly answerQuestion?: (id: string, selected: string) => void
+  readonly openSession?: (id: string) => void
 }
 
 function TaskControlPanel(props: {
@@ -256,6 +257,10 @@ export function OperationsPanel(props: {
   const unavailableCapabilities = props.view.capabilities.length - activeCapabilities - governedCapabilities
   const degradation = props.view.controlStrip.degradation
   const pendingApprovals = props.view.controlStrip.pendingApprovals
+  const routedDecisions = [
+    ...props.view.approvals.filter((item) => ['pending', 'approval-requested', 'unreviewed'].includes(item.status)),
+    ...(props.view.activations ?? []).filter((item) => item.eligibilityOk && ['APPROVED_NOT_ACTIVE', 'ACTIVATION_FAILED', 'DISABLED_REACTIVATABLE'].includes(item.status)),
+  ].filter((item): item is typeof item & { readonly sessionId: string } => Boolean(item.sessionId))
   const currentCandidates = partitionCandidates(props.view.candidates ?? []).current
   const failedCandidates = currentCandidates.filter((item) => item.extensionLifecycle === 'ACTIVATION_FAILED').length
   const systemNeedsAttention = ['SAFE_MODE', 'RECOVERY', 'DEGRADED', 'BLOCKED', 'FAULT'].includes(props.view.systemState)
@@ -272,6 +277,18 @@ export function OperationsPanel(props: {
         {!props.connected ? <p><Glyph name="warn" /> CONTROL LINK OFFLINE</p> : null}
         {unavailableCapabilities > 0 ? <p><Glyph name="warn" /> {unavailableCapabilities} CAPABILIT{unavailableCapabilities === 1 ? 'Y' : 'IES'} UNAVAILABLE</p> : null}
         {failedCandidates > 0 ? <p><Glyph name="warn" /> {failedCandidates} ACTIVATION FAILURE{failedCandidates === 1 ? '' : 'S'}</p> : null}
+        {routedDecisions.length > 0 ? (
+          <div className="attention-routes" aria-label="Delivery conversations needing attention">
+            {routedDecisions.slice(0, 3).map((item) => {
+              const session = props.view.sessions?.sessions.find((candidate) => candidate.id === item.sessionId)
+              return (
+                <button key={item.id} type="button" className="button button--secondary" onClick={() => props.actions.openSession?.(item.sessionId)}>
+                  OPEN {session?.title ?? 'DELIVERY'}
+                </button>
+              )
+            })}
+          </div>
+        ) : null}
       </section>
       <section className="ops-overview" aria-labelledby="ops-overview-title">
         <div className="ops-section-heading"><h2 id="ops-overview-title">SYSTEM HEALTH</h2><span className={`status-lamp status-lamp--${lampModifier(props.view.systemState, props.connected)}`} aria-hidden="true" /></div>

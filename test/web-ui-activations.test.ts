@@ -142,7 +142,20 @@ describe('Web UI activations', () => {
     const result = await handleWebUiActivationRequest(request('/api/activate', body(card)), context({ activations: () => [card] }))
     const acknowledgement = (result?.body as { acknowledgement?: WebUiAcknowledgement }).acknowledgement
     assert.equal(acknowledgement?.text, 'Example@0.1.0 is live. risk_check, expense_review are ready to use.')
-    assert.equal(acknowledgement?.action?.capabilityId, 'extension:generated/example@0.1.0')
+    assert.equal(acknowledgement?.action?.kind, 'open-capability')
+    assert.equal(acknowledgement?.action?.kind === 'open-capability' ? acknowledgement.action.capabilityId : undefined, 'extension:generated/example@0.1.0')
+  })
+
+  it('offers to archive the originating delivery conversation after activation', async () => {
+    const card = activationCard({ sessionId: 'delivery-session' })
+    const result = await handleWebUiActivationRequest(request('/api/activate', body(card)), context({ activations: () => [card] }))
+    const acknowledgement = (result?.body as { acknowledgement?: WebUiAcknowledgement }).acknowledgement
+    assert.match(acknowledgement?.text ?? '', /can now be archived/)
+    assert.deepEqual(acknowledgement?.action, {
+      kind: 'archive-session',
+      label: 'ARCHIVE DELIVERY',
+      sessionId: 'delivery-session',
+    })
   })
 
   it('rejects missing confirmation, busy state, and stale evidence before activation', async () => {

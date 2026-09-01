@@ -321,6 +321,45 @@ describe('client control hooks', () => {
     assert.equal(hook.current().draft, 'new message')
   })
 
+  it('creates a dedicated conversation before drafting a capability request', async () => {
+    const calls: { readonly url: string; readonly body: Record<string, unknown> }[] = []
+    globalThis.fetch = async (input, init) => {
+      calls.push({ url: String(input), body: JSON.parse(String(init?.body)) as Record<string, unknown> })
+      const view = fixtureView()
+      return jsonResponse(envelope({
+        ...view,
+        runtimeContext: { ...view.runtimeContext!, sessionId: 'delivery-session' },
+        sessions: { ...view.sessions!, currentSessionId: 'delivery-session', revision: 8 },
+      }))
+    }
+    const runtime: Pick<MissionControlRuntime, 'view' | 'commands' | 'perform'> = {
+      view: fixtureView(),
+      commands: [],
+      perform: async (operation) => operation(),
+    }
+    const hook = mountHook<ConversationControl>(() => useConversationControl(runtime))
+
+    await act(async () => {
+      hook.current().dispatch({
+        action: 'start-capability',
+        title: 'Workflow capability delivery',
+        draft: 'Turn this repeated work into a governed workflow:',
+      })
+      await flush()
+    })
+
+    assert.deepEqual(calls, [{
+      url: '/api/conversations',
+      body: {
+        action: 'create',
+        title: 'Workflow capability delivery',
+        sessionId: 'session-1',
+        revision: 7,
+      },
+    }])
+    assert.equal(hook.current().draft, 'Turn this repeated work into a governed workflow:')
+  })
+
   it('immediately acknowledges a slash command while host execution is pending', async () => {
     let resolveResponse: ((response: Response) => void) | undefined
     globalThis.fetch = () => new Promise<Response>((resolve) => { resolveResponse = resolve })

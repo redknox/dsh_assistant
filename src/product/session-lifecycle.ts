@@ -11,6 +11,7 @@ import {
   type PublicSessionCatalog,
   type SessionCatalogFile,
 } from './session-catalog.js'
+import { DEFAULT_SESSION_ID } from './runtime-context.js'
 
 export type SessionLifecycleFault =
   | 'after-flush'
@@ -120,6 +121,9 @@ export class LiveSessionHost {
     return this.serialize(async () => {
       this.assertMutable()
       this.assertExpected(expected)
+      if (id === DEFAULT_SESSION_ID) {
+        throw new SessionCatalogError('management-session', 'the Today management conversation cannot be archived')
+      }
       const before = this.catalog.inspect()
       const nextCurrent = before.currentSessionId === id
         ? before.sessions.find((item) => item.lifecycle === 'active' && item.id !== id)?.id
@@ -149,6 +153,9 @@ export class LiveSessionHost {
     return this.serialize(async () => {
       this.assertMutable()
       this.assertExpected(expected)
+      if (id === DEFAULT_SESSION_ID) {
+        throw new SessionCatalogError('management-session', 'the Today management conversation cannot be deleted')
+      }
       const before = this.catalog.inspect()
       const nextCurrent = before.currentSessionId === id
         ? before.sessions.find((item) => item.lifecycle === 'active' && item.id !== id)?.id

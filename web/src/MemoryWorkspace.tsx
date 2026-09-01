@@ -86,7 +86,7 @@ export function MemoryWorkspace(props: {
             {visibleSessions.length === 0 ? <p className="memory-empty">{results === undefined ? 'No conversations yet.' : 'No matching conversations.'}</p> : visibleSessions.map((session) => (
               <article key={session.id} className={`memory-card conversation-card${session.current ? ' conversation-card--current' : ''}`} data-session-id={session.id}>
                 <div className="memory-card-topline">
-                  <span className={`memory-badge${session.current ? ' memory-badge--current' : ''}`}>{session.current ? 'Current' : session.lifecycle}</span>
+                  <span className={`memory-badge${session.current ? ' memory-badge--current' : ''}`}>{session.management || session.id === 'main' ? 'Today · permanent' : session.current ? 'Current' : session.lifecycle}</span>
                   <span>{formatMemoryDate(session.lastActivityAt)}</span>
                 </div>
                 <h3>{session.title}</h3>
@@ -97,7 +97,7 @@ export function MemoryWorkspace(props: {
                   ) : (
                     <button type="button" className="memory-card-open" onClick={() => props.actions.open?.(session.id)}>{session.current ? 'Continue' : 'Open'}</button>
                   )}
-                  <button
+                  {!session.management && session.id !== 'main' ? <button
                     type="button"
                     onClick={() => {
                       const next = globalThis.prompt?.('Rename conversation', session.title)
@@ -105,9 +105,9 @@ export function MemoryWorkspace(props: {
                     }}
                   >
                     Rename
-                  </button>
-                  {session.lifecycle === 'active' ? <button type="button" onClick={() => props.actions.archive?.(session.id)}>Archive</button> : null}
-                  {props.confirmingSession === session.id ? (
+                  </button> : null}
+                  {session.lifecycle === 'active' && !session.management && session.id !== 'main' ? <button type="button" onClick={() => props.actions.archive?.(session.id)}>Archive</button> : null}
+                  {session.management || session.id === 'main' ? null : props.confirmingSession === session.id ? (
                     <button type="button" className="memory-card-danger" onClick={() => props.actions.confirmDelete?.(session.id)}>Confirm delete</button>
                   ) : (
                     <button type="button" onClick={() => props.actions.askDelete?.(session.id)}>Delete</button>

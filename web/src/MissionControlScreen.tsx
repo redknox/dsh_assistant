@@ -57,6 +57,7 @@ function projectScreenControls(input: MissionControlScreenProps) {
     onDraft: (value: string) => input.conversation.dispatch({ action: 'draft', value }),
     onSend: () => input.conversation.dispatch({ action: 'send' }),
     onCreateConversation: () => input.conversation.dispatch({ action: 'create' }),
+    onStartCapability: (title: string, draft: string) => input.conversation.dispatch({ action: 'start-capability', title, draft }),
     onSwitchConversation: (id: string) => input.conversation.dispatch({ action: 'switch', id }),
     onRenameConversation: (id: string, title: string) => input.conversation.dispatch({ action: 'rename', id, title }),
     onArchiveConversation: (id: string) => input.conversation.dispatch({ action: 'archive', id }),
@@ -113,12 +114,14 @@ export function MissionControlScreen(input: MissionControlScreenProps) {
   const pane = props.pane ?? 'today'
   const [compactSurface, setCompactSurface] = useState<CompactSurface>('conversation')
   const [focusedCapability, setFocusedCapability] = useState<string>()
+  const openCapabilityAction = props.acknowledgement?.action?.kind === 'open-capability' ? props.acknowledgement.action : undefined
+  const archiveSessionAction = props.acknowledgement?.action?.kind === 'archive-session' ? props.acknowledgement.action : undefined
   const navigate = (next: WorkspacePane) => {
     props.onNavigate?.(next)
     setCompactSurface('conversation')
   }
-  const requestCapability = (draft = '我想增加一个能力：') => {
-    props.onDraft?.(draft)
+  const requestCapability = (draft = '我想增加一个能力：', title = 'Capability delivery') => {
+    props.onStartCapability?.(title, draft)
     navigate('today')
   }
   return (
@@ -136,12 +139,19 @@ export function MissionControlScreen(input: MissionControlScreenProps) {
         <div className="acknowledgement" role="status" data-acknowledgement-region="toast" data-acknowledgement="true">
           <span>{props.acknowledgement.text}</span>
           <div className="acknowledgement-actions">
-            {props.acknowledgement.action?.kind === 'open-capability' ? (
+            {openCapabilityAction ? (
               <button type="button" className="button button--approval" data-acknowledgement-action="open-capability" onClick={() => {
-                setFocusedCapability(props.acknowledgement?.action?.capabilityId)
+                setFocusedCapability(openCapabilityAction.capabilityId)
                 props.onDismissAcknowledgement?.()
                 navigate('capabilities')
-              }}>{props.acknowledgement.action.label}</button>
+              }}>{openCapabilityAction.label}</button>
+            ) : null}
+            {archiveSessionAction ? (
+              <button type="button" className="button button--approval" data-acknowledgement-action="archive-session" onClick={() => {
+                props.onArchiveConversation?.(archiveSessionAction.sessionId)
+                props.onDismissAcknowledgement?.()
+                navigate('today')
+              }}>{archiveSessionAction.label}</button>
             ) : null}
             <button type="button" className="button button--secondary" data-acknowledgement-dismiss="true" onClick={() => props.onDismissAcknowledgement?.()}>Dismiss</button>
           </div>
@@ -256,13 +266,13 @@ export function MissionControlScreen(input: MissionControlScreenProps) {
           <ToolCatalogWorkspace
             catalog={input.runtime.toolCatalog}
             locked={locked}
-            defineCapability={() => requestCapability('我需要一个现有工具还无法完成的能力：')}
+            defineCapability={() => requestCapability('我需要一个现有工具还无法完成的能力：', 'Tool capability delivery')}
           />
         ) : pane === 'workflows' ? (
           <WorkflowCatalogWorkspace
             catalog={input.runtime.workflowCatalog}
             locked={locked}
-            defineCapability={() => requestCapability('我希望把下面这项重复工作变成一个受治理的流程：')}
+            defineCapability={() => requestCapability('我希望把下面这项重复工作变成一个受治理的流程：', 'Workflow capability delivery')}
           />
         ) : pane === 'specifications' ? (
           <CapabilitySpecificationsWorkspace
@@ -299,6 +309,7 @@ export function MissionControlScreen(input: MissionControlScreenProps) {
             activations: (view.activations ?? []).filter((card) => (
               card.eligibilityOk
               && !(props.deferredActivations ?? []).includes(card.id)
+              && (!card.sessionId || card.sessionId === (view.runtimeContext?.sessionId ?? view.sessions?.currentSessionId))
             )),
             armedActivation: props.armedActivation,
             armedAbandonment: props.armedAbandonment,
@@ -328,6 +339,10 @@ export function MissionControlScreen(input: MissionControlScreenProps) {
             controlGoal: props.onGoalAction,
             controlPlan: props.onPlanAction,
             answerQuestion: props.onQuestionAnswer,
+            openSession: (id) => {
+              props.onSwitchConversation?.(id)
+              navigate('today')
+            },
           }}
         />
       </div>

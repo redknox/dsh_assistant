@@ -16,7 +16,7 @@ export function WorkspaceNavigation(props: {
   readonly actions: WorkspaceNavigationActions
 }) {
   const recentSessions = (props.view.sessions?.sessions ?? [])
-    .filter((item) => item.lifecycle === 'active')
+    .filter((item) => item.lifecycle === 'active' && !item.management && item.id !== 'main')
     .slice()
     .sort((left, right) => right.lastActivityAt.localeCompare(left.lastActivityAt))
     .slice(0, 4)
@@ -42,7 +42,11 @@ export function WorkspaceNavigation(props: {
           className={`nav-item${props.pane === 'today' ? ' nav-item--active' : ''}`}
           data-nav="today"
           aria-current={props.pane === 'today' ? 'page' : undefined}
-          onClick={() => props.actions.navigate('today')}
+          onClick={() => {
+            const management = props.view.sessions?.sessions.find((item) => item.management) ?? props.view.sessions?.sessions.find((item) => item.id === 'main')
+            if (management && !management.current) props.actions.switchConversation?.(management.id)
+            props.actions.navigate('today')
+          }}
         >
           <span className="control-lamp" aria-hidden="true" /><Glyph name="today" /><span>TODAY</span>
         </button>

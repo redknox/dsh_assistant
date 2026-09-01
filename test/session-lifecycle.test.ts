@@ -212,6 +212,7 @@ describe('Session lifecycle transactions', () => {
   it('keeps approval origin after switch, decision, and delete', async () => {
     const { catalog, extra, host, surface, control } = await liveHost()
     try {
+      await host.switchTo(extra.id, { sessionId: 'main', revision: catalog.inspect().revision })
       const pending = surface.requestExecute('calendar', 'create_event', {
         calendarId: 'primary',
         title: 'Focus',
@@ -220,14 +221,14 @@ describe('Session lifecycle transactions', () => {
       })
       assert.equal(pending.kind, 'pending_confirmation')
       if (pending.kind !== 'pending_confirmation') return
-      await host.switchTo(extra.id, { sessionId: 'main', revision: catalog.inspect().revision })
+      await host.switchTo('main', { sessionId: extra.id, revision: catalog.inspect().revision })
       await surface.deny(pending.confirmationId)
       const view = surface.workspace()
-      assert.equal(view.approvals.find((item) => item.id === pending.confirmationId)?.sessionId, 'main')
-      assert.equal(view.activity.find((item) => item.id === `approval-resolved-${pending.confirmationId}`)?.sessionId, 'main')
-      await host.delete('main', { sessionId: extra.id, revision: catalog.inspect().revision, confirm: true })
-      assert.equal(catalog.approvalOrigin(pending.confirmationId), 'main')
-      assert.equal(surface.workspace().approvals.find((item) => item.id === pending.confirmationId)?.sessionId, 'main')
+      assert.equal(view.approvals.find((item) => item.id === pending.confirmationId)?.sessionId, extra.id)
+      assert.equal(view.activity.find((item) => item.id === `approval-resolved-${pending.confirmationId}`)?.sessionId, extra.id)
+      await host.delete(extra.id, { sessionId: 'main', revision: catalog.inspect().revision, confirm: true })
+      assert.equal(catalog.approvalOrigin(pending.confirmationId), extra.id)
+      assert.equal(surface.workspace().approvals.find((item) => item.id === pending.confirmationId)?.sessionId, extra.id)
     } finally {
       await host.currentHandle().dispose()
       await control.ctx.fiber.dispose()
@@ -237,13 +238,14 @@ describe('Session lifecycle transactions', () => {
   it('keeps the new live handle when unlink fails after adopt', async () => {
     const { catalog, extra, host, surface, control } = await liveHost({ failAt: 'before-unlink' })
     try {
+      await host.switchTo(extra.id, { sessionId: 'main', revision: catalog.inspect().revision })
       await assert.rejects(
-        () => host.delete(surface.sessionId, { sessionId: 'main', revision: catalog.inspect().revision, confirm: true }),
+        () => host.delete(extra.id, { sessionId: extra.id, revision: catalog.inspect().revision, confirm: true }),
         (error: SessionCatalogError) => error.code === 'injected-fault',
       )
-      assert.equal(surface.sessionId, extra.id)
-      assert.equal(catalog.inspect().currentSessionId, extra.id)
-      assert.equal(host.currentHandle().agent.session && catalog.inspect().currentSessionId, extra.id)
+      assert.equal(surface.sessionId, 'main')
+      assert.equal(catalog.inspect().currentSessionId, 'main')
+      assert.equal(host.currentHandle().agent.session && catalog.inspect().currentSessionId, 'main')
       assert.equal(catalog.readJournal()?.phase, 'committed')
       await host.finishCommittedJournal(catalog.readJournal()!)
       assert.equal(catalog.readJournal(), undefined)

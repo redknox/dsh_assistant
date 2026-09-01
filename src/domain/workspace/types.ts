@@ -145,6 +145,10 @@ export interface WebUiAcknowledgement {
     readonly kind: 'open-capability'
     readonly label: string
     readonly capabilityId: string
+  } | {
+    readonly kind: 'archive-session'
+    readonly label: string
+    readonly sessionId: string
   }
 }
 
@@ -202,6 +206,7 @@ export interface ActivationCard {
   readonly eligibilityDenials: readonly string[]
   readonly status: ExtensionLifecycleState
   readonly details: readonly string[]
+  readonly sessionId?: string
   readonly skill?: Pick<SkillProjection, 'id' | 'name' | 'version' | 'digest' | 'approvalFingerprint' | 'generation'>
   readonly release?: {
     readonly request: string
@@ -400,6 +405,7 @@ export interface SessionTopicView {
   readonly preview?: string
   readonly persistence: 'persistent' | 'unavailable' | 'recovery-required'
   readonly current: boolean
+  readonly management?: boolean
 }
 
 export interface SessionCatalogView {

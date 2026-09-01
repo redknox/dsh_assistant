@@ -61,7 +61,9 @@ export function startWebUiServer(options: WebUiServerOptions): Promise<WebUiServ
 
   const snapshot = (): MissionControlView => {
     const view = options.surface.workspace()
-    const pending = view.approvals.filter((card) => card.status === 'pending').map((card) => card.id)
+    const pending = view.approvals
+      .filter((card) => ['pending', 'approval-requested', 'unreviewed'].includes(card.status))
+      .map((card) => card.id)
     if (pending.length > 0) options.sessionHost?.noteApprovals(pending)
     return options.surface.workspace()
   }

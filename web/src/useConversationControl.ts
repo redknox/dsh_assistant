@@ -8,6 +8,7 @@ export type ConversationEvent =
   | { readonly action: 'suggest-skill'; readonly name: string }
   | { readonly action: 'send' }
   | { readonly action: 'create' }
+  | { readonly action: 'start-capability'; readonly title: string; readonly draft: string }
   | { readonly action: 'switch'; readonly id: string }
   | { readonly action: 'rename'; readonly id: string; readonly title: string }
   | { readonly action: 'archive'; readonly id: string }
@@ -61,6 +62,16 @@ export function useConversationControl(
     }
     if (event.action === 'create') {
       void runtime.perform(() => runConversation('create', reference))
+      return
+    }
+    if (event.action === 'start-capability') {
+      void (async () => {
+        const next = await runtime.perform(
+          () => runConversation('create', { ...reference, title: event.title }),
+          'unable to create capability delivery conversation',
+        )
+        if (next) setDraft(event.draft)
+      })()
       return
     }
     const input = {

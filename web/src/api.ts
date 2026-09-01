@@ -50,6 +50,7 @@ function recoveryFailureText(error: string | undefined): string | undefined {
   }
   if (error === 'stale-session' || error === 'stale-revision') return 'Conversation list changed; retry the action.'
   if (error === 'last-active') return 'The last active conversation cannot be removed.'
+  if (error === 'management-session') return 'Today is the permanent management conversation and cannot be archived or deleted.'
   if (error === 'confirmation-required') return 'Confirm the recovery action.'
   if (error === 'untrusted session') return 'Web UI session is untrusted; reload the page.'
   return error

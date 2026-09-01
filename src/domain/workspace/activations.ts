@@ -48,17 +48,22 @@ export function projectActivationCards(input: WorkspaceSnapshotInput): readonly 
     cards.push(selfExtensionActivationCard(approval, lifecycle, {
       generation: input.activation?.generation,
       failurePhase: input.activation?.lastFailure?.phase,
-    }))
+    }, input.approvalOrigins?.[approval.id]))
   }
   if (!input.safeMode && !input.recoveryRequired && input.skillCatalog?.state !== 'withheld') {
     for (const skill of input.skills ?? []) {
-      if (!skill.system && skill.lifecycle === 'approved') cards.push(skillActivationCard(skill))
+      if (!skill.system && skill.lifecycle === 'approved') {
+        cards.push(skillActivationCard(skill, input.approvalOrigins?.[`skill-approval:${skill.id}`]))
+      }
     }
   }
   return cards
 }
 
-function skillActivationCard(skill: NonNullable<WorkspaceSnapshotInput['skills']>[number]): ActivationCard {
+function skillActivationCard(
+  skill: NonNullable<WorkspaceSnapshotInput['skills']>[number],
+  sessionId?: string,
+): ActivationCard {
   const invocation = [
     skill.modelInvocable ? 'model' : '',
     skill.userInvocable ? 'user' : '',
@@ -91,6 +96,7 @@ function skillActivationCard(skill: NonNullable<WorkspaceSnapshotInput['skills']
     eligibilityOk: true,
     eligibilityDenials: [],
     status: 'APPROVED_NOT_ACTIVE',
+    ...(sessionId ? { sessionId } : {}),
     skill: {
       id: skill.id,
       name: skill.name,
@@ -132,6 +138,7 @@ function selfExtensionActivationCard(
   approval: NonNullable<WorkspaceSnapshotInput['extensionApprovals']>[number],
   status: ActivationCard['status'],
   attempt?: { readonly generation?: number; readonly failurePhase?: string },
+  sessionId?: string,
 ): ActivationCard {
   const eligibilityOk = approval.eligibilityOk !== false
   const denials = approval.eligibilityDenials ?? []
@@ -177,6 +184,7 @@ function selfExtensionActivationCard(
     eligibilityOk,
     eligibilityDenials: denials,
     status,
+    ...(sessionId ? { sessionId } : {}),
     details: [
       `Owner       ${approval.owner}@${approval.candidateVersion}`,
       `Candidate   ${approval.candidateId}`,

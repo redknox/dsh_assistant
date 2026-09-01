@@ -36,6 +36,7 @@ describe('Session Catalog', () => {
     assert.equal(view.currentSessionId, 'main')
     assert.equal(view.sessions[0]?.id, 'main')
     assert.equal(view.sessions[0]?.title, 'Conversation')
+    assert.equal(view.sessions[0]?.management, true)
     assert.equal(catalog.ensureMigrated('main').revision, view.revision)
   })
 
@@ -65,6 +66,7 @@ describe('Session Catalog', () => {
     assert.equal(catalog.inspect().sessions.some((item) => item.id === extra.id), false)
     assert.throws(() => catalog.delete('main', { confirm: true }), SessionCatalogError)
     assert.throws(() => catalog.delete('main'), (error: SessionCatalogError) => error.code === 'confirmation-required')
+    assert.throws(() => catalog.archive('main'), (error: SessionCatalogError) => error.code === 'management-session')
   })
 
   it('rejects stale revision and safely normalizes titles', () => {
@@ -164,22 +166,23 @@ describe('Session Catalog', () => {
     const { catalog, context } = catalogFor()
     catalog.ensureMigrated('main')
     const extra = catalog.create('Scratch')
+    catalog.switchTo(extra.id)
     const previous = catalog.load()
-    const deleted = catalog.delete('main', { confirm: true })
+    const deleted = catalog.delete(extra.id, { confirm: true })
     catalog.writeJournal({
       schemaVersion: 1,
       op: 'delete',
-      fromSessionId: 'main',
-      toSessionId: extra.id,
+      fromSessionId: extra.id,
+      toSessionId: 'main',
       previous,
       intended: catalog.load(),
       phase: 'committed',
-      unlink: ['main'],
+      unlink: [extra.id],
     })
-    const started = catalog.resolveStartSession('main')
-    assert.equal(started.sessionId, extra.id)
-    assert.equal(catalog.inspect().sessions.some((item) => item.id === 'main'), false)
-    assert.equal(deleted.currentSessionId, extra.id)
+    const started = catalog.resolveStartSession(extra.id)
+    assert.equal(started.sessionId, 'main')
+    assert.equal(catalog.inspect().sessions.some((item) => item.id === extra.id), false)
+    assert.equal(deleted.currentSessionId, 'main')
     assert.equal(inspectSessionJournal(context.sessionPersistenceDir, catalogBindingOf(context))?.phase, 'committed')
   })
 
@@ -248,8 +251,9 @@ describe('Session Catalog', () => {
     const { catalog } = catalogFor()
     catalog.ensureMigrated('main')
     const extra = catalog.create('Scratch')
+    catalog.switchTo(extra.id)
     const previous = catalog.load()
-    catalog.delete('main', { confirm: true })
+    catalog.delete(extra.id, { confirm: true })
     const live = catalog.load()
     const at = extra.createdAt
     const intended = {
@@ -267,12 +271,12 @@ describe('Session Catalog', () => {
     assert.throws(() => catalog.writeJournal({
       schemaVersion: 1,
       op: 'delete',
-      fromSessionId: 'main',
-      toSessionId: extra.id,
+      fromSessionId: extra.id,
+      toSessionId: 'main',
       previous,
       intended,
       phase: 'committed',
-      unlink: ['main'],
+      unlink: [extra.id],
     }), (error: SessionCatalogError) => error.code === 'corrupt')
   })
 

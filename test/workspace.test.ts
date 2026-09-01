@@ -436,6 +436,7 @@ describe('TARS-NG mission-control workspace', () => {
 
   it('projects an approved Skill into the separate Today activation surface', () => {
     const view = projectMissionControl(snapshot({
+      approvalOrigins: { 'skill-approval:weekly-review@1.0.0': 'skill-delivery' },
       skillCatalog: { state: 'ok', failed: [], recoveryRequired: false },
       skills: [{
         id: 'weekly-review@1.0.0',
@@ -466,6 +467,7 @@ describe('TARS-NG mission-control workspace', () => {
     assert.equal(card?.id, 'skill-activation:weekly-review@1.0.0:4')
     assert.equal(card?.status, 'APPROVED_NOT_ACTIVE')
     assert.equal(card?.isolatedRuntime, false)
+    assert.equal(card?.sessionId, 'skill-delivery')
     assert.equal(card?.skill?.digest, 'skill-digest')
     assert.match(card?.release?.reason ?? '', /separate decision/)
     assert.match(card?.release?.scope ?? '', /catalog generation 4/)
@@ -484,6 +486,7 @@ describe('TARS-NG mission-control workspace', () => {
 
   it('G2. approved Self-Extension projects an Activation Card without claiming NOT APPROVED', () => {
     const view = projectMissionControl(snapshot({
+      approvalOrigins: { 'apr-2': 'delivery-session' },
       extensionApprovals: [{
         id: 'apr-2',
         candidateId: 'cand-obsidian',
@@ -525,6 +528,7 @@ describe('TARS-NG mission-control workspace', () => {
     const card = view.activations.find((item) => item.candidateId === 'cand-obsidian')
     assert.ok(card)
     assert.equal(card.status, 'APPROVED_NOT_ACTIVE')
+    assert.equal(card.sessionId, 'delivery-session')
     assert.deepEqual(card.capabilitiesChanged, ['obsidian.read'])
     assert.deepEqual(card.permissionsChanged, ['files.read'])
     assert.deepEqual(card.toolsChanged, ['obsidian_read'])

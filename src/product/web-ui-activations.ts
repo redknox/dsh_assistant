@@ -105,6 +105,16 @@ async function activate(card: ActivationCard, context: WebUiActivationContext): 
 
 function activationAcknowledgement(card: ActivationCard): WebUiAcknowledgement {
   const name = friendlyOwner(card.owner)
+  if (card.sessionId && card.sessionId !== 'main') {
+    return {
+      text: `${name}@${card.version} is live. ${publishedSurfaceSummary(card)} This delivery conversation can now be archived.`,
+      action: {
+        kind: 'archive-session',
+        label: 'ARCHIVE DELIVERY',
+        sessionId: card.sessionId,
+      },
+    }
+  }
   return {
     text: `${name}@${card.version} is live. ${publishedSurfaceSummary(card)}`,
     action: {

@@ -240,7 +240,10 @@ export function ConversationWorkspace(props: {
   const { state, actions } = props
   const locked = !state.connected
   const sendDisabled = state.sending || locked || state.draft.trim() === ''
-  const pendingApprovals = useMemo(() => props.view.approvals.filter((card) => isPendingApproval(card.status)), [props.view.approvals])
+  const currentSessionId = props.view.runtimeContext?.sessionId ?? props.view.sessions?.currentSessionId
+  const pendingApprovals = useMemo(() => props.view.approvals.filter((card) => (
+    isPendingApproval(card.status) && (!card.sessionId || card.sessionId === currentSessionId)
+  )), [currentSessionId, props.view.approvals])
   const empty = props.view.conversation.length === 0
     && pendingApprovals.length === 0
     && state.activations.length === 0

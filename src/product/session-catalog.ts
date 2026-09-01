@@ -57,6 +57,7 @@ export interface PublicSessionView {
   readonly preview?: string
   readonly persistence: SessionRecord['persistence']
   readonly current: boolean
+  readonly management: boolean
 }
 
 export interface PublicSessionCatalog {
@@ -362,6 +363,7 @@ function publicView(stored: SessionCatalogFile): PublicSessionCatalog {
   const sessions = stored.sessions.map((item) => ({
     ...item,
     current: item.id === stored.currentSessionId,
+    management: item.id === DEFAULT_SESSION_ID,
   }))
   return {
     schemaVersion: stored.schemaVersion,
@@ -549,7 +551,7 @@ export class SessionCatalog {
       revision: stored.revision + 1,
       sessions: [...stored.sessions, record],
     })
-    return { ...record, current: false }
+    return { ...record, current: false, management: false }
   }
 
   createAndSwitch(id: string, title: string | undefined, expected?: { readonly sessionId?: string; readonly revision?: number }): PublicSessionCatalog {
@@ -627,6 +629,9 @@ export class SessionCatalog {
   archive(id: string, expected?: { readonly revision?: number }): PublicSessionCatalog {
     const stored = this.assertExpected(expected)
     const target = parseSessionId(id)
+    if (target === DEFAULT_SESSION_ID) {
+      throw new SessionCatalogError('management-session', 'the Today management conversation cannot be archived')
+    }
     const match = stored.sessions.find((item) => item.id === target)
     if (!match) throw new SessionCatalogError('not-found', `session ${target} is not in the catalog`)
     const active = stored.sessions.filter((item) => item.lifecycle === 'active')
@@ -668,6 +673,9 @@ export class SessionCatalog {
     }
     const stored = this.assertExpected(expected)
     const target = parseSessionId(id)
+    if (target === DEFAULT_SESSION_ID) {
+      throw new SessionCatalogError('management-session', 'the Today management conversation cannot be deleted')
+    }
     const match = stored.sessions.find((item) => item.id === target)
     if (!match) return publicView(stored)
     const remainingActive = stored.sessions.filter((item) => item.lifecycle === 'active' && item.id !== target)
