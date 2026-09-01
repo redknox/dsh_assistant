@@ -397,6 +397,10 @@ describe('candidate workbench', () => {
     })
     assert.equal(setup.governance.inspectApproval(parent)?.decision, 'rejected')
 
+    const hostMetadata = path.join(setup.workspace.get(parent).workspaceRoot, '.dsh')
+    mkdirSync(hostMetadata, { recursive: true })
+    writeFileSync(path.join(hostMetadata, 'network.sb'), '(version 1)\n')
+
     const repaired = setup.workbench.repair(parent)
     assert.equal(repaired.parentId, parent)
     assert.equal(repaired.parentDigest, setup.workspace.get(parent).digest)
@@ -996,6 +1000,16 @@ describe('candidate workbench', () => {
         /manifest\.permissions.*exact diff/,
       )
       assert.deepEqual(contract.brokerOps, ['host.text.echo', 'host.knowledge.retrieve'])
+      assert.equal(
+        (contract.workflow as { scriptFormat?: string }).scriptFormat,
+        'JavaScript async-function body',
+      )
+      assert.match(
+        String((contract.workflow as { example?: string }).example),
+        /phase\('Analyze'\).*parallel.*agent.*return/s,
+      )
+      assert.match(String((contract.workflow as { runtimeGlobals?: string }).runtimeGlobals), /TextEncoder/)
+      assert.match(String((contract.workflow as { runtimeGlobals?: string }).runtimeGlobals), /maxInputBytes is host-enforced/)
     } finally {
       await ctx.fiber.dispose()
     }

@@ -33,6 +33,15 @@ export interface AuthoringContractV1 {
     readonly nodeNativeTests: true
     readonly noCandidateArgv: true
   }
+  readonly workflow: {
+    readonly scriptFormat: 'JavaScript async-function body'
+    readonly scriptExtensions: readonly ['.js', '.mjs', '.cjs']
+    readonly parameters: readonly ['args', 'agent', 'parallel', 'pipeline', 'phase', 'log']
+    readonly manifestShape: 'workflows[].phases use { title, detail? }; inputFields use { name, required, description? }'
+    readonly executionBoundary: 'registered catalog name plus JSON input only; callers never provide script text'
+    readonly runtimeGlobals: 'ECMAScript intrinsics only; no Node, Web, timer, URL, TextEncoder, or fetch globals; maxInputBytes is host-enforced'
+    readonly example: string
+  }
   readonly sizeBounds: {
     readonly maxFileBytes: number
     readonly maxWorkspaceBytes: number
@@ -88,6 +97,22 @@ export function authoringContractV1(): AuthoringContractV1 {
       hostOwned: true,
       nodeNativeTests: true,
       noCandidateArgv: true,
+    },
+    workflow: {
+      scriptFormat: 'JavaScript async-function body',
+      scriptExtensions: ['.js', '.mjs', '.cjs'],
+      parameters: ['args', 'agent', 'parallel', 'pipeline', 'phase', 'log'],
+      manifestShape: 'workflows[].phases use { title, detail? }; inputFields use { name, required, description? }',
+      executionBoundary: 'registered catalog name plus JSON input only; callers never provide script text',
+      runtimeGlobals: 'ECMAScript intrinsics only; no Node, Web, timer, URL, TextEncoder, or fetch globals; maxInputBytes is host-enforced',
+      example: `phase('Analyze')
+const [risk, opportunity] = await parallel([
+  () => agent('Analyze risk for: ' + args.subject, { label: 'risk', phase: 'Analyze' }),
+  () => agent('Analyze opportunity for: ' + args.subject, { label: 'opportunity', phase: 'Analyze' }),
+])
+phase('Synthesize')
+const synthesis = await agent('Synthesize: ' + JSON.stringify({ risk, opportunity }), { label: 'synthesis', phase: 'Synthesize' })
+return { risk, opportunity, synthesis }`,
     },
     sizeBounds: {
       maxFileBytes: 256 * 1024,

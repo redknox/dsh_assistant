@@ -868,7 +868,10 @@ function snapshotRepairParent(parent: CandidateRecord): RepairSnapshot {
   if (parent.digest === undefined) {
     throw new WorkbenchContractError('repair requires a sealed parent with a host digest')
   }
-  const names = listBoundedFiles(parent.workspaceRoot, true)
+  // Host-owned `.dsh/` runtime metadata is deliberately outside the sealed
+  // Candidate digest. Repair must use the same byte boundary as validation or
+  // a sandbox profile written after validation looks like Candidate tampering.
+  const names = listBoundedFiles(parent.workspaceRoot)
   const files: { relative: string; bytes: Buffer }[] = []
   const hash = createHash('sha256')
   let total = 0

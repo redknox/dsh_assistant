@@ -35,6 +35,28 @@ Broker requests are bound to the active proxy-tool invocation. Candidate startup
 
 Host-owned stages only. Node-native tests (`.js` / `.mjs` / `.cjs`) run in the restricted runner. Candidate argv/script/shell is rejected. `runtime.contract` fails closed on an unsupported stamp.
 
+## Governed Workflow declarations
+
+A Workflow `script` is a candidate-relative `.js`, `.mjs`, or `.cjs` file containing a JavaScript async-function body. It is not YAML and there is no `.dsh` text DSL. The body receives only `args`, `agent`, `parallel`, `pipeline`, `phase`, and `log`, and it must return a result. Models and callers select an exact active Catalog name plus JSON input; script text never crosses the execution seam.
+
+The isolated body has ECMAScript intrinsics only. Node, Web, timer, URL, `TextEncoder`, and `fetch` globals are unavailable. Input byte limits are enforced by the host from the sealed Manifest, so Workflow source must not reproduce that check with host globals.
+
+Manifest phase metadata uses `{ title, detail? }`; input metadata uses `{ name, required, description? }`. Empty or duplicate names and unsupported script extensions fail closed.
+
+```js
+phase('Analyze')
+const [risk, opportunity] = await parallel([
+  () => agent('Analyze risk for: ' + args.subject, { label: 'risk', phase: 'Analyze' }),
+  () => agent('Analyze opportunity for: ' + args.subject, { label: 'opportunity', phase: 'Analyze' }),
+])
+phase('Synthesize')
+const synthesis = await agent(
+  'Synthesize: ' + JSON.stringify({ risk, opportunity }),
+  { label: 'synthesis', phase: 'Synthesize' },
+)
+return { risk, opportunity, synthesis }
+```
+
 ## Size and lifecycle
 
 File/workspace/count bounds are the Workbench bounds. Lifecycle is scaffold → edit → validate → seal → Independent Review → approval request → human approve → human activate → isolated run.

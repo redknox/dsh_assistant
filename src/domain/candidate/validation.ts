@@ -17,6 +17,21 @@ import { ALLOWED_VALIDATION_TASKS } from './types.js'
 
 const LIFECYCLE_SCRIPTS = ['preinstall', 'install', 'postinstall', 'prepare', 'prepublish', 'preprepare']
 const FORBIDDEN_IMPORT = /@deepseek-ai\/dsh[^"'\\n]*\/src\//
+const UNAVAILABLE_WORKFLOW_GLOBALS = new Set([
+  'Buffer',
+  'TextDecoder',
+  'TextEncoder',
+  'URL',
+  'URLSearchParams',
+  'clearInterval',
+  'clearTimeout',
+  'fetch',
+  'process',
+  'queueMicrotask',
+  'require',
+  'setInterval',
+  'setTimeout',
+])
 
 function stage(
   name: string,
@@ -262,7 +277,10 @@ function inspectWorkflows(record: CandidateRecord, files: readonly string[]): Va
     }
     try {
       const body = readFileSync(path.join(record.workspaceRoot, workflow.script), 'utf8')
-      parse(`async function __workflow(args, agent, parallel, pipeline, phase, log) {\n${body}\n}`, { ecmaVersion: 'latest' })
+      const program = parse(`async function __workflow(args, agent, parallel, pipeline, phase, log) {\n${body}\n}`, { ecmaVersion: 'latest' }) as unknown as SyntaxNode
+      if (!workflowReturnsResult(program)) failures.push(`${workflow.name}: Workflow script must return a result`)
+      const unavailable = workflowUnavailableGlobals(program)
+      if (unavailable.length > 0) failures.push(`${workflow.name}: ${unavailable.join(', ')} are not available in the isolated Workflow runtime`)
     } catch (error) {
       failures.push(`${workflow.name}: ${error instanceof Error ? error.message : String(error)}`)
     }
@@ -272,9 +290,40 @@ function inspectWorkflows(record: CandidateRecord, files: readonly string[]): Va
     : stage('workflow.validate', 'failed', 'Workflow declarations are not executable.', { diagnostics: failures.join('; ') })
 }
 
+function workflowUnavailableGlobals(program: SyntaxNode): string[] {
+  const hits = new Set<string>()
+  walkSyntax(program, (node) => {
+    if (node.type !== 'Identifier' || typeof node.name !== 'string') return
+    if (UNAVAILABLE_WORKFLOW_GLOBALS.has(node.name)) hits.add(node.name)
+  })
+  return [...hits].sort()
+}
+
 interface SyntaxNode {
   readonly type: string
   readonly [key: string]: unknown
+}
+
+function workflowReturnsResult(program: SyntaxNode): boolean {
+  const body = Array.isArray(program.body) ? program.body : []
+  const root = body.find((node): node is SyntaxNode => isSyntaxNode(node) && node.type === 'FunctionDeclaration')
+  if (!root || !isSyntaxNode(root.body)) return false
+  let returned = false
+  const visit = (node: SyntaxNode): void => {
+    if (returned) return
+    if (node !== root && (node.type === 'FunctionDeclaration' || node.type === 'FunctionExpression' || node.type === 'ArrowFunctionExpression')) return
+    if (node.type === 'ReturnStatement' && isSyntaxNode(node.argument)) {
+      returned = true
+      return
+    }
+    for (const [key, value] of Object.entries(node)) {
+      if (key === 'type' || key === 'start' || key === 'end') continue
+      if (isSyntaxNode(value)) visit(value)
+      else if (Array.isArray(value)) for (const item of value) if (isSyntaxNode(item)) visit(item)
+    }
+  }
+  visit(root)
+  return returned
 }
 
 const CALLBACK_NODE_TYPES = new Set([

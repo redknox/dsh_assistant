@@ -7,6 +7,7 @@ import { Context } from '@deepseek-ai/cordis'
 import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
 import ToolRuntime from '@deepseek-ai/dsh-tools'
 import {
+  CandidateContractError,
   CandidateService,
   SealedCandidateError,
   WorkspaceEscapeError,
@@ -43,6 +44,84 @@ function seeded(area = mkdtempSync(path.join(tmpdir(), 'dsh-cand-'))) {
 }
 
 describe('candidate workspace and validation', () => {
+  it('rejects malformed Workflow metadata before it reaches validation', () => {
+    const { workspace } = seeded()
+    assert.throws(() => workspace.create({
+      review: review({ capability: 'analysis.workflow.probe' }),
+      owner: 'generated/workflow-probe',
+      version: '0.1.0',
+      manifest: {
+        capabilities: ['analysis.workflow.probe'],
+        runtimeSeams: ['workflow'],
+        workflows: [{
+          name: 'workflow-probe',
+          description: 'Probe one governed Workflow.',
+          phases: [{ title: '' }],
+          script: 'workflow/probe.dsh',
+          intent: 'read',
+          maxInputBytes: 4096,
+          maxTotalAgents: 1,
+        }],
+      },
+    }), CandidateContractError)
+  })
+
+  it('does not validate a syntactically legal Workflow body that returns no result', () => {
+    const { workspace } = seeded()
+    const candidate = workspace.create({
+      review: review({ capability: 'analysis.workflow.probe' }),
+      owner: 'generated/workflow-probe',
+      version: '0.1.0',
+      manifest: {
+        capabilities: ['analysis.workflow.probe'],
+        runtimeSeams: ['workflow'],
+        workflows: [{
+          name: 'workflow-probe',
+          description: 'Probe one governed Workflow.',
+          phases: [{ title: 'Analyze' }],
+          script: 'workflow/probe.js',
+          intent: 'read',
+          maxInputBytes: 4096,
+          maxTotalAgents: 1,
+        }],
+      },
+    })
+    workspace.writeFile(candidate.id, 'workflow/probe.js', 'hello\n')
+
+    const report = workspace.validate(candidate.id)
+    const workflow = report.stages.find((item) => item.name === 'workflow.validate')
+    assert.equal(workflow?.status, 'failed')
+    assert.match(workflow?.diagnostics ?? '', /return a result/i)
+  })
+
+  it('rejects Workflow globals that the isolated runtime does not provide', () => {
+    const { workspace } = seeded()
+    const candidate = workspace.create({
+      review: review({ capability: 'analysis.workflow.probe' }),
+      owner: 'generated/workflow-probe',
+      version: '0.1.0',
+      manifest: {
+        capabilities: ['analysis.workflow.probe'],
+        runtimeSeams: ['workflow'],
+        workflows: [{
+          name: 'workflow-probe',
+          description: 'Probe one governed Workflow.',
+          phases: [{ title: 'Analyze' }],
+          script: 'workflow/probe.js',
+          intent: 'read',
+          maxInputBytes: 4096,
+          maxTotalAgents: 1,
+        }],
+      },
+    })
+    workspace.writeFile(candidate.id, 'workflow/probe.js', 'return { bytes: new TextEncoder().encode(args.subject).length }\n')
+
+    const report = workspace.validate(candidate.id)
+    const workflow = report.stages.find((item) => item.name === 'workflow.validate')
+    assert.equal(workflow?.status, 'failed')
+    assert.match(workflow?.diagnostics ?? '', /TextEncoder.*not available/i)
+  })
+
   it('A. evolves an existing owner into a separate candidate workspace', () => {
     const { registry, workspace } = seeded()
     const active = registry.get('managed/integrations', '0.1.0')

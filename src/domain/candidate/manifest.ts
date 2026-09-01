@@ -110,6 +110,9 @@ function normalizeWorkflows(input?: readonly CandidateWorkflowDeclaration[]): re
     if (!/^(?!\/)(?!.*(?:^|\/)\.\.(?:\/|$))[A-Za-z0-9._/-]+$/.test(workflow.script)) {
       throw new CandidateContractError(`invalid workflows[${index}].script`)
     }
+    if (!/\.(?:js|mjs|cjs)$/.test(workflow.script)) {
+      throw new CandidateContractError(`workflows[${index}].script must be a JavaScript file`)
+    }
     if (workflow.intent !== 'read' && workflow.intent !== 'mutate') throw new CandidateContractError(`invalid workflows[${index}].intent`)
     if (!Number.isSafeInteger(workflow.maxInputBytes) || workflow.maxInputBytes < 2 || workflow.maxInputBytes > 262_144) {
       throw new CandidateContractError(`invalid workflows[${index}].maxInputBytes`)
@@ -117,16 +120,40 @@ function normalizeWorkflows(input?: readonly CandidateWorkflowDeclaration[]): re
     if (!Number.isSafeInteger(workflow.maxTotalAgents) || workflow.maxTotalAgents < 1 || workflow.maxTotalAgents > 32) {
       throw new CandidateContractError(`invalid workflows[${index}].maxTotalAgents`)
     }
+    const phaseTitles = new Set<string>()
+    for (const [phaseIndex, phase] of (workflow.phases ?? []).entries()) {
+      if (!phase || typeof phase.title !== 'string' || phase.title.trim() === '' || phase.title.length > 120) {
+        throw new CandidateContractError(`invalid workflows[${index}].phases[${phaseIndex}].title`)
+      }
+      if (phaseTitles.has(phase.title)) throw new CandidateContractError(`duplicate workflows[${index}].phases title`)
+      phaseTitles.add(phase.title)
+      if (phase.detail !== undefined && (typeof phase.detail !== 'string' || phase.detail.trim() === '' || phase.detail.length > 300)) {
+        throw new CandidateContractError(`invalid workflows[${index}].phases[${phaseIndex}].detail`)
+      }
+    }
+    const inputNames = new Set<string>()
+    for (const [fieldIndex, field] of (workflow.inputFields ?? []).entries()) {
+      if (!field || !/^[A-Za-z][A-Za-z0-9_]*$/.test(field.name) || field.name.length > 120 || inputNames.has(field.name)) {
+        throw new CandidateContractError(`invalid or duplicate workflows[${index}].inputFields[${fieldIndex}].name`)
+      }
+      inputNames.add(field.name)
+      if (typeof field.required !== 'boolean') {
+        throw new CandidateContractError(`invalid workflows[${index}].inputFields[${fieldIndex}].required`)
+      }
+      if (field.description !== undefined && (typeof field.description !== 'string' || field.description.trim() === '' || field.description.length > 300)) {
+        throw new CandidateContractError(`invalid workflows[${index}].inputFields[${fieldIndex}].description`)
+      }
+    }
     return {
       name: workflow.name,
       description: workflow.description,
       ...(workflow.whenToUse ? { whenToUse: workflow.whenToUse.slice(0, 400) } : {}),
-      ...(workflow.phases ? { phases: workflow.phases.map((phase) => ({ title: phase.title.slice(0, 120), ...(phase.detail ? { detail: phase.detail.slice(0, 300) } : {}) })) } : {}),
+      ...(workflow.phases ? { phases: workflow.phases.map((phase) => ({ title: phase.title, ...(phase.detail ? { detail: phase.detail } : {}) })) } : {}),
       script: workflow.script,
       intent: workflow.intent,
       maxInputBytes: workflow.maxInputBytes,
       maxTotalAgents: workflow.maxTotalAgents,
-      ...(workflow.inputFields ? { inputFields: workflow.inputFields.map((field) => ({ name: field.name.slice(0, 120), required: Boolean(field.required), ...(field.description ? { description: field.description.slice(0, 300) } : {}) })) } : {}),
+      ...(workflow.inputFields ? { inputFields: workflow.inputFields.map((field) => ({ name: field.name, required: field.required, ...(field.description ? { description: field.description } : {}) })) } : {}),
     }
   })
 }

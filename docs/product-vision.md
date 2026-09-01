@@ -35,6 +35,38 @@ The intended creator is a **domain professional**, not necessarily a software de
 
 The intended operator may be the same person for a personal or small system. In an enterprise deployment, author, reviewer, approver, and runtime operator may be different people.
 
+## Strategic entry point: trusted enterprise knowledge
+
+TARS-NG should first become a trusted enterprise knowledge entry point, then progressively earn bounded authority to act. A read-only assistant is the preferred initial enterprise form because it can reduce knowledge-access cost, improve answer consistency, and establish the data, permission, audit, and governance foundation needed by later Agents without immediately changing authoritative systems.
+
+This is a sequencing decision, not a claim that read-only means safe. The central risk question is not only whether the assistant can write, but:
+
+> What can it read, who may receive the answer, and how will that answer be treated?
+
+Before a read-only enterprise assistant is considered trustworthy, TARS-NG must address three primary controls:
+
+1. **Data confidentiality** — retrieval, model routing, retention, citations, and logs must not expose material beyond the approved boundary.
+2. **Permission fidelity** — the assistant must preserve source-system identity and authorization boundaries; a read-only UI does not make an over-broad reader acceptable.
+3. **Prompt-injection resistance** — retrieved content remains untrusted data and cannot redefine authority, request secrets, or turn reading into an execution path.
+
+Accuracy, compliance, supply-chain control, internal misuse, and operational accountability remain necessary controls as the product matures. The strategic promise is therefore not “safe because read-only,” but:
+
+> Deliver useful knowledge work with low and reversible system-change risk, while building the governance foundation required for future action.
+
+This produces the intended capability progression:
+
+```text
+Trusted knowledge access
+        ↓
+Governed analysis and recommendation
+        ↓
+Human-approved bounded mutations
+        ↓
+Durable workflows and professional applications
+```
+
+Each transition must be earned through typed capabilities, observable evidence, exact approval, and recovery. Action authority is not an automatic upgrade from successful knowledge retrieval.
+
 ## Product stack
 
 ```text
@@ -204,6 +236,8 @@ A suggested first proof is one low-risk finance capability, such as invoice anom
 ## Product discipline
 
 - Daily use comes before broad capability expansion after v0.4.0.
+- Establish TARS-NG as a trusted enterprise knowledge entry point before broadening its mutation authority.
+- Treat “read-only” as reduced system-change risk, never as a substitute for confidentiality, permission fidelity, or prompt-injection defenses.
 - Real failures are classified as defects, usability gaps, or genuinely missing capabilities.
 - TARS-NG should prefer reuse, configuration, or evolution before creating another plugin.
 - Domain logic belongs in domain services and policies, not in the Agent prompt or UI.
