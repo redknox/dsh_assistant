@@ -378,6 +378,8 @@ describe('TARS-NG mission-control workspace', () => {
         capabilitiesRemoved: [],
         permissionsAdded: ['files.read'],
         permissionsRemoved: [],
+        toolsAdded: ['obsidian_search'],
+        workflowsAdded: ['index-vault'],
         effects: ['vault read'],
       }],
     }))
@@ -385,10 +387,51 @@ describe('TARS-NG mission-control workspace', () => {
     assert.ok(card)
     assert.equal(card.candidateId, 'cand-obsidian')
     assert.equal(card.decision?.approveLabel, 'APPROVE REVISION')
+    assert.equal(card.decision?.request, 'Approve capability “Obsidian Read”')
     assert.match(card.decision?.outcome ?? '', /does not put it live/)
+    assert.ok(card.decision?.facts.some((item) => item.label === 'TOOL CHANGE' && item.value === '+obsidian_search'))
+    assert.ok(card.decision?.facts.some((item) => item.label === 'WORKFLOW CHANGE' && item.value === '+index-vault'))
     assert.match(card.details.join('\n'), /obsidian.read/)
     assert.match(card.details.join('\n'), /not self-authorization/)
     assert.match(card.authorityChange, /human approval/)
+  })
+
+  it('projects a pending Skill into the same approval surface and system counters', () => {
+    const view = projectMissionControl(snapshot({
+      skills: [{
+        id: 'weekly-review@1.0.0',
+        name: 'weekly-review',
+        version: '1.0.0',
+        profile: 'assistant',
+        provenance: 'third-party',
+        origin: 'import',
+        lifecycle: 'approval-requested',
+        sealed: true,
+        modelInvocable: true,
+        userInvocable: true,
+        description: 'Guide a weekly review.',
+        resources: ['checklist.md'],
+        validationPassed: true,
+        reviewComplete: true,
+        approvalDecision: 'approval-requested',
+        approvalFingerprint: 'skill-fingerprint',
+        digest: 'skill-digest',
+        dependsOn: [],
+        dependents: [],
+        system: false,
+        generation: 3,
+      }],
+    }))
+
+    assert.equal(view.systemState, 'NEEDS_APPROVAL')
+    assert.equal(view.controlStrip.pendingApprovals, 1)
+    const card = view.approvals.find((item) => item.kind === 'skill')
+    assert.equal(card?.id, 'skill-approval:weekly-review@1.0.0')
+    assert.equal(card?.fingerprint, 'skill-fingerprint')
+    assert.equal(card?.decision?.risk, 'agent-instructions')
+    assert.equal(card?.decision?.approveLabel, 'APPROVE SKILL')
+    assert.equal(card?.skill?.generation, 3)
+    assert.match(card?.decision?.outcome ?? '', /does not make it available/)
   })
 
   it('G2. approved Self-Extension projects an Activation Card without claiming NOT APPROVED', () => {

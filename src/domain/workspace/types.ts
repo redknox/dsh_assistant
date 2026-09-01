@@ -141,7 +141,7 @@ export interface ApprovalResolution {
 
 export interface ApprovalCard {
   readonly id: string
-  readonly kind: 'calendar-create' | 'self-extension' | 'other-side-effect' | 'dsh-tool'
+  readonly kind: 'calendar-create' | 'self-extension' | 'skill' | 'other-side-effect' | 'dsh-tool'
   readonly title: string
   readonly target: string
   readonly sideEffect: string
@@ -152,12 +152,13 @@ export interface ApprovalCard {
   readonly candidateId?: string
   readonly digest?: string
   readonly sessionId?: string
+  readonly skill?: Pick<SkillProjection, 'id' | 'name' | 'version' | 'digest' | 'approvalFingerprint' | 'generation'>
   readonly decision?: {
     readonly request: string
     readonly reason: string
     readonly outcome: string
     readonly scope: string
-    readonly risk: 'external-change' | 'capability-authority' | 'tool-execution' | 'local-write'
+    readonly risk: 'external-change' | 'capability-authority' | 'agent-instructions' | 'tool-execution' | 'local-write'
     readonly facts: readonly { readonly label: string; readonly value: string }[]
     readonly approveLabel: string
     readonly rejectLabel: string

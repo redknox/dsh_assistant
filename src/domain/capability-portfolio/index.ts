@@ -22,6 +22,13 @@ export interface CapabilityPortfolioCard {
   readonly capabilities: readonly string[]
   readonly tools: readonly string[]
   readonly workflows: readonly string[]
+  readonly assurance: {
+    readonly validation: 'passed' | 'not-recorded'
+    readonly review: 'complete' | 'not-recorded'
+    readonly approval: 'approved' | 'not-recorded'
+    readonly activation: CapabilityPortfolioStatus
+    readonly digest?: string
+  }
   readonly dependency: {
     readonly severity: 'none' | 'optional' | 'hard' | 'unresolved'
     readonly dependents: readonly string[]
@@ -54,6 +61,7 @@ export function projectCapabilityPortfolio(input: {
     if (!userAddedOwner(plugin)) continue
     if (representedOwners.has(ownerKey(plugin.owner, plugin.version))) continue
     representedOwners.add(ownerKey(plugin.owner, plugin.version))
+    const extension = input.view.extensions?.find((item) => item.owner === plugin.owner && item.version === plugin.version)
     const workflows = workflowsFor(input.workflows, plugin.owner)
     cards.push({
       id: `extension:${ownerKey(plugin.owner, plugin.version)}`,
@@ -71,6 +79,7 @@ export function projectCapabilityPortfolio(input: {
       capabilities: plugin.capabilities,
       tools: plugin.tools,
       workflows,
+      assurance: assuranceOf(extension, 'active', plugin.digest),
       dependency: dependencyOf(plugin),
       unplug: { kind: 'plugin', plugin },
     })
@@ -98,6 +107,7 @@ export function projectCapabilityPortfolio(input: {
       capabilities: extension.capabilities,
       tools: extension.tools,
       workflows,
+      assurance: assuranceOf(extension, extension.lifecycle === 'ACTIVE' ? 'active' : 'disabled', extension.digest),
       dependency: { severity: 'none', dependents: [] },
     })
   }
@@ -116,6 +126,13 @@ export function projectCapabilityPortfolio(input: {
       capabilities: [],
       tools: [],
       workflows: [],
+      assurance: {
+        validation: skill.validationPassed ? 'passed' : 'not-recorded',
+        review: skill.reviewComplete ? 'complete' : 'not-recorded',
+        approval: skill.approvalDecision === 'approved-for-exact-diff' ? 'approved' : 'not-recorded',
+        activation: skill.lifecycle === 'active' ? 'active' : 'disabled',
+        digest: skill.digest,
+      },
       dependency: {
         severity: skill.dependents.length > 0 ? 'hard' : 'none',
         dependents: skill.dependents,
@@ -133,6 +150,20 @@ export function projectCapabilityPortfolio(input: {
       attention: cards.filter((item) => item.status !== 'active').length,
       unplugReady: cards.filter((item) => item.unplug && item.dependency.severity !== 'unresolved').length,
     },
+  }
+}
+
+function assuranceOf(
+  extension: MissionControlView['extensions'][number] | undefined,
+  activation: CapabilityPortfolioStatus,
+  digest?: string,
+): CapabilityPortfolioCard['assurance'] {
+  return {
+    validation: extension?.validationPassed ? 'passed' : 'not-recorded',
+    review: extension?.reviewState === 'review-complete' ? 'complete' : 'not-recorded',
+    approval: extension?.approvalDecision === 'approved-for-exact-diff' ? 'approved' : 'not-recorded',
+    activation,
+    ...(extension?.digest ?? digest ? { digest: extension?.digest ?? digest } : {}),
   }
 }
 

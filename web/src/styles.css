@@ -700,11 +700,13 @@ button.nav-item::after { content: "›"; color: #7f857f; font: 500 22px/1 var(--
 .approval-decision-card .approval-header { display: grid; grid-template-columns: 28px minmax(0, 1fr) auto; background: #d1c3ab; border-bottom: 2px solid #766b5a; }
 .approval-decision-card .approval-symbol { width: 24px; height: 24px; color: #765225; }
 .approval-decision-card[data-risk="capability-authority"] .approval-symbol,
+.approval-decision-card[data-risk="agent-instructions"] .approval-symbol,
 .approval-decision-card[data-risk="tool-execution"] .approval-symbol { color: #984238; }
 .approval-scope-badge { align-self: start; padding: 5px 7px; border: 1px solid #776b58; background: #e1d5c1; color: #574f43; font: 750 8px/1 var(--font-instrument); letter-spacing: .1em; }
 .approval-explanation { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); border-bottom: 1px solid var(--line-soft); }
 .approval-explanation section { padding: 14px 20px; }
 .approval-explanation section + section { border-left: 1px solid var(--line-soft); background: rgb(255 250 239 / 30%); }
+.approval-explanation .approval-review-guidance { grid-column: 1 / -1; border-top: 1px solid var(--line-soft); border-left: 0; background: #c9bba3; }
 .approval-explanation strong { color: #725126; font: 750 9px/1 var(--font-instrument); letter-spacing: .1em; }
 .approval-explanation p { margin: 7px 0 0; color: #49443c; font: 500 13px/1.45 var(--font-body); }
 .approval-facts--decision { padding-block: 10px; }

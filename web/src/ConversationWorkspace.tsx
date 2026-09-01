@@ -50,18 +50,19 @@ function ApprovalCardView(props: {
           <p className="approval-kicker">DECISION REQUIRED · {riskLabel(decision.risk)}</p>
           <h2 id={`approval-title-${card.id}`}>{decision.request}</h2>
         </div>
-        <span className="approval-scope-badge">ONE-TIME</span>
+        <span className="approval-scope-badge">{approvalScopeBadge(card)}</span>
       </header>
       <div className="approval-explanation">
-        <section><strong>WHY YOU ARE SEEING THIS</strong><p>{decision.reason}</p></section>
-        <section><strong>IF YOU APPROVE</strong><p>{decision.outcome}</p></section>
+        <section><strong>WHY THIS NEEDS YOU</strong><p>{decision.reason}</p></section>
+        <section><strong>WHAT WILL HAPPEN</strong><p>{decision.outcome}</p></section>
+        <section className="approval-review-guidance"><strong>WHAT TO CHECK</strong><p>{reviewGuidance(decision.risk)}</p></section>
       </div>
       <dl className="approval-facts approval-facts--decision">
         {decision.facts.map((fact, index) => <div key={`${fact.label}:${index}`}><dt>{fact.label}</dt><dd>{fact.value}</dd></div>)}
       </dl>
       <p className="approval-scope"><Glyph name="shield" /><span><strong>APPROVAL SCOPE</strong>{decision.scope}</span></p>
       <details className="approval-technical">
-        <summary>TECHNICAL DETAILS</summary>
+        <summary>TECHNICAL EVIDENCE</summary>
         <dl className="approval-facts approval-facts--technical">
           <div><dt>REQUEST TYPE</dt><dd>{card.title}</dd></div>
           <div><dt>TARGET</dt><dd>{card.target}</dd></div>
@@ -100,15 +101,32 @@ function fallbackApprovalDecision(card: ApprovalCard): NonNullable<ApprovalCard[
 }
 
 function ApprovalGlyph(props: { readonly kind: ApprovalCard['kind'] }) {
-  const name = props.kind === 'calendar-create' ? 'calendar' : props.kind === 'dsh-tool' ? 'terminal' : props.kind === 'self-extension' ? 'capabilities' : 'attach'
+  const name = props.kind === 'calendar-create' ? 'calendar' : props.kind === 'dsh-tool' ? 'terminal' : props.kind === 'self-extension' || props.kind === 'skill' ? 'capabilities' : 'attach'
   return <Glyph name={name} className="glyph approval-symbol" />
 }
 
 function riskLabel(risk: NonNullable<ApprovalCard['decision']>['risk']): string {
   if (risk === 'external-change') return 'EXTERNAL CHANGE'
   if (risk === 'capability-authority') return 'CAPABILITY AUTHORITY'
+  if (risk === 'agent-instructions') return 'AGENT INSTRUCTIONS'
   if (risk === 'tool-execution') return 'TOOL EXECUTION'
   return 'LOCAL WRITE'
+}
+
+function approvalScopeBadge(card: ApprovalCard): string {
+  if (card.kind === 'self-extension') return 'EXACT REVISION'
+  if (card.kind === 'skill') return 'EXACT SKILL'
+  if (card.kind === 'dsh-tool') return 'ONE CALL'
+  if (card.kind === 'calendar-create') return 'ONE EVENT'
+  return 'ONE ACTION'
+}
+
+function reviewGuidance(risk: NonNullable<ApprovalCard['decision']>['risk']): string {
+  if (risk === 'capability-authority') return 'Check the capability, Tool or Workflow changes, requested permissions, and declared side effects. Approval does not activate it.'
+  if (risk === 'agent-instructions') return 'Check the purpose, who may invoke the Skill, bundled resources, and dependencies. Approval does not activate it.'
+  if (risk === 'tool-execution') return 'Check the exact Tool, arguments, and intended effect. This grants no standing permission and does not run a second call.'
+  if (risk === 'local-write') return 'Check the destination, exact content, and current-version guard before allowing the write.'
+  return 'Check the destination, timing, recipients, and exact external change before approving.'
 }
 
 function ActivationCardView(props: {

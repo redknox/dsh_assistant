@@ -134,10 +134,12 @@ function CapabilityCard(props: {
           <Contract label="CAPABILITIES" values={card.capabilities} empty="No separate capability claims" />
           <Contract label="TOOLS" values={card.tools} empty="No callable tools" />
           <Contract label="WORKFLOWS" values={card.workflows} empty="No registered workflows" />
+          <Contract label="DELIVERY EVIDENCE" values={deliveryEvidence(card)} empty="No lifecycle evidence recorded" />
+          <Contract label="EXACT REVISION" values={card.assurance.digest ? [card.assurance.digest] : []} empty="Digest not recorded" />
           <Contract label="PROVIDER" values={card.provider ? [card.provider] : []} empty="Local or host runtime" />
           <Contract label="SOURCE" values={[`${card.owner ?? 'user-added'}${card.version ? `@${card.version}` : ''}`]} empty="Unknown" />
           <Contract label="UNPLUG IMPACT" values={card.dependency.dependents} empty={unplugImpact(card)} />
-          {props.manage ? <button type="button" className="capability-open-implementation" onClick={props.manage}>OPEN TECHNICAL IMPLEMENTATION →</button> : null}
+          {props.manage ? <button type="button" className="capability-open-implementation" onClick={props.manage}>{implementationLabel(card)} →</button> : null}
         </div>
       ) : null}
       {props.confirming && card.unplug ? (
@@ -173,9 +175,26 @@ function unplugImpact(card: CapabilityPortfolioCard): string {
   return 'No active dependents were found.'
 }
 
-function implementationPane(card: CapabilityPortfolioCard): WorkspacePane | undefined {
-  if (card.implementation.includes('skill') || card.implementation.includes('extension')) return 'extensions'
+export function implementationPane(card: CapabilityPortfolioCard): WorkspacePane | undefined {
+  if (card.implementation.includes('skill')) return 'extensions'
   if (card.implementation.includes('workflow')) return 'workflows'
   if (card.implementation.includes('tool')) return 'tools'
+  if (card.implementation.includes('extension')) return 'extensions'
   return undefined
+}
+
+function deliveryEvidence(card: CapabilityPortfolioCard): readonly string[] {
+  return [
+    card.assurance.validation === 'passed' ? 'VALIDATED' : 'VALIDATION NOT RECORDED',
+    card.assurance.review === 'complete' ? 'INDEPENDENT REVIEW COMPLETE' : 'REVIEW NOT RECORDED',
+    card.assurance.approval === 'approved' ? 'HUMAN APPROVED' : 'APPROVAL NOT RECORDED',
+    card.assurance.activation.toUpperCase(),
+  ]
+}
+
+function implementationLabel(card: CapabilityPortfolioCard): string {
+  if (card.implementation.includes('skill')) return 'OPEN SKILL IMPLEMENTATION'
+  if (card.implementation.includes('workflow')) return 'OPEN WORKFLOW IMPLEMENTATION'
+  if (card.implementation.includes('tool')) return 'OPEN TOOL IMPLEMENTATION'
+  return 'OPEN EXTENSION IMPLEMENTATION'
 }

@@ -225,6 +225,14 @@ export async function runConversation(
 }
 
 export async function decideApproval(card: ApprovalCard, decision: 'approve' | 'deny' | 'cancel'): Promise<UiEnvelope> {
+  if (card.kind === 'skill') {
+    if (!card.skill || decision === 'cancel') throw new Error('Skill approval is no longer actionable')
+    return runSkillAction({
+      action: decision === 'approve' ? 'approve' : 'reject',
+      skill: card.skill,
+      confirm: true,
+    })
+  }
   return parseEnvelope(await fetch(`/api/${decision}`, {
     ...include,
     method: 'POST',
@@ -240,7 +248,7 @@ export async function decideApproval(card: ApprovalCard, decision: 'approve' | '
 
 export async function runSkillAction(input: {
   readonly action: 'approve' | 'reject' | 'activate' | 'disable' | 'reactivate' | 'uninstall' | 'rollback'
-  readonly skill?: SkillProjection
+  readonly skill?: Pick<SkillProjection, 'id' | 'name' | 'version' | 'digest' | 'approvalFingerprint' | 'generation'>
   readonly rollback?: MissionControlView['skillRollback']
   readonly confirm: boolean
   readonly dependents?: readonly string[]

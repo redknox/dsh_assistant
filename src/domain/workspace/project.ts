@@ -70,8 +70,7 @@ export function projectMissionControl(input: WorkspaceSnapshotInput): MissionCon
         }
       : {}),
     controlStrip: {
-      pendingApprovals: input.pendingConfirmations.filter((item) => item.status === 'pending').length
-        + (input.dshApprovals ?? []).filter((item) => item.status === 'pending').length,
+      pendingApprovals: approvals.filter((item) => ['pending', 'approval-requested', 'unreviewed'].includes(item.status)).length,
       backgroundJobs: jobsRunning,
       ...(input.objective ? { objective: input.objective.text } : {}),
       ...(degraded.length > 0 ? { degradation: `${degraded.join(', ')} unavailable` } : {}),

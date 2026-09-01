@@ -2518,12 +2518,58 @@ export function apply(ctx) {
     assert.match(approval, /data-fingerprint="fp-calendar"/)
     assert.match(approval, /data-approval-action="approve"/)
     assert.match(approval, /data-approval-action="reject"/)
-    assert.match(approval, /WHY YOU ARE SEEING THIS/)
-    assert.match(approval, /IF YOU APPROVE/)
+    assert.match(approval, /WHY THIS NEEDS YOU/)
+    assert.match(approval, /WHAT WILL HAPPEN/)
+    assert.match(approval, /WHAT TO CHECK/)
     assert.match(approval, /APPROVAL SCOPE/)
+    assert.match(approval, /ONE EVENT/)
+    assert.match(approval, /TECHNICAL EVIDENCE/)
     assert.match(approval, /CREATE EVENT/)
     assert.match(approval, /CANCEL/)
     assert.doesNotMatch(approval, /data-approval-action="approve" disabled/)
+
+    const skillApproval = renderToStaticMarkup(createElement(MissionControlScreen, {
+      view: fixtureView({
+        systemState: 'NEEDS_APPROVAL',
+        approvals: [{
+          id: 'skill-approval:weekly-review@1.0.0',
+          kind: 'skill',
+          title: 'SKILL APPROVAL',
+          target: 'weekly-review@1.0.0',
+          sideEffect: 'changes reusable Agent instructions',
+          authorityChange: 'exact Skill revision only',
+          details: ['Skill weekly-review@1.0.0'],
+          fingerprint: 'fp-skill',
+          digest: 'digest-skill',
+          status: 'approval-requested',
+          skill: { id: 'weekly-review@1.0.0', name: 'weekly-review', version: '1.0.0', digest: 'digest-skill', approvalFingerprint: 'fp-skill', generation: 1 },
+          decision: {
+            request: 'Approve Skill “Weekly Review”',
+            reason: 'This Skill changes reusable Agent instructions.',
+            outcome: 'Approval makes it eligible for activation.',
+            scope: 'Exact Skill revision · activation remains separate',
+            risk: 'agent-instructions',
+            facts: [{ label: 'PURPOSE', value: 'Guide a weekly review.' }],
+            approveLabel: 'APPROVE SKILL',
+            rejectLabel: 'REJECT',
+          },
+        }],
+        controlStrip: { pendingApprovals: 1, backgroundJobs: 0, mode: 'NEEDS_APPROVAL' },
+      }),
+      connected: true,
+      sending: false,
+      draft: '',
+      onDraft() {},
+      onSend() {},
+      onApprove() {},
+      onReject() {},
+      onRecovery() {},
+    }))
+    assert.match(skillApproval, /data-kind="skill"/)
+    assert.match(skillApproval, /data-risk="agent-instructions"/)
+    assert.match(skillApproval, /EXACT SKILL/)
+    assert.match(skillApproval, /APPROVE SKILL/)
+    assert.match(skillApproval, /who may invoke the Skill/i)
 
     const rejected = renderToStaticMarkup(createElement(MissionControlScreen, {
       view: fixtureView({

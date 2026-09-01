@@ -19,8 +19,15 @@ export function projectApprovalCards(input: WorkspaceSnapshotInput): readonly Ap
       ...(input.approvalOrigins?.[approval.id] ? { sessionId: input.approvalOrigins[approval.id] } : {}),
     })
   }
+  for (const skill of input.skills ?? []) {
+    if (!skill.system && skill.lifecycle === 'approval-requested' && skill.approvalFingerprint) cards.push(skillApprovalCard(skill))
+  }
   for (const approval of input.dshApprovals ?? []) cards.push(dshToolCard(approval))
   return cards
+}
+
+export function hasPendingApproval(input: WorkspaceSnapshotInput): boolean {
+  return projectApprovalCards(input).some((card) => ['pending', 'approval-requested', 'unreviewed'].includes(card.status))
 }
 
 export function projectApprovalResolutions(input: WorkspaceSnapshotInput): readonly ApprovalResolution[] {
@@ -260,6 +267,10 @@ function sideEffectCard(ticket: WorkspaceSnapshotInput['pendingConfirmations'][n
 }
 
 function selfExtensionCard(approval: NonNullable<WorkspaceSnapshotInput['extensionApprovals']>[number]): ApprovalCard {
+  const capabilityDiff = formatDiff(approval.capabilitiesAdded, approval.capabilitiesRemoved, approval.capabilitiesChanged)
+  const permissionDiff = formatDiff(approval.permissionsAdded, approval.permissionsRemoved, approval.permissionsChanged)
+  const toolDiff = formatDiff(approval.toolsAdded ?? [], approval.toolsRemoved ?? [], approval.toolsChanged)
+  const workflowDiff = formatDiff(approval.workflowsAdded ?? [], approval.workflowsRemoved ?? [], approval.workflowsChanged)
   return {
     id: approval.id,
     kind: 'self-extension',
@@ -274,27 +285,94 @@ function selfExtensionCard(approval: NonNullable<WorkspaceSnapshotInput['extensi
     details: [
       `Candidate   ${approval.candidateId}`,
       `Digest      ${approval.digest}`,
-      `Capabilities +${approval.capabilitiesAdded.join(', ') || 'none'} −${approval.capabilitiesRemoved.join(', ') || 'none'}`,
-      `Permissions +${approval.permissionsAdded.join(', ') || 'none'} −${approval.permissionsRemoved.join(', ') || 'none'}`,
+      `Capabilities ${capabilityDiff}`,
+      `Permissions ${permissionDiff}`,
+      `Tools       ${toolDiff}`,
+      `Workflows   ${workflowDiff}`,
       `Effects     ${approval.effects.join('; ') || 'none'}`,
       'This is not self-authorization. Model/tools cannot mint approval.',
     ],
     decision: {
-      request: `Approve ${approval.owner}@${approval.candidateVersion}`,
+      request: approvalTitle(approval),
       reason: 'This revision changes the capabilities or authority available to TARS-NG. Only you can approve the exact reviewed artifact.',
       outcome: 'The exact revision becomes eligible for a separate activation decision. Approval alone does not put it live.',
       scope: 'Exact digest and diff · no future revisions · activation remains separate',
       risk: 'capability-authority',
       facts: [
-        { label: 'CAPABILITY', value: `${approval.owner}@${approval.candidateVersion}` },
-        { label: 'ADDS', value: approval.capabilitiesAdded.join(', ') || 'No capabilities' },
-        { label: 'PERMISSIONS', value: approval.permissionsAdded.join(', ') || 'No new permissions' },
-        { label: 'EFFECTS', value: approval.effects.join('; ') || 'None declared' },
+        { label: 'CAPABILITY CHANGE', value: capabilityDiff },
+        ...(toolDiff !== 'none' ? [{ label: 'TOOL CHANGE', value: toolDiff }] : []),
+        ...(workflowDiff !== 'none' ? [{ label: 'WORKFLOW CHANGE', value: workflowDiff }] : []),
+        { label: 'PERMISSION CHANGE', value: permissionDiff },
+        { label: 'SIDE EFFECTS', value: approval.effects.join('; ') || 'None declared' },
       ],
       approveLabel: 'APPROVE REVISION',
       rejectLabel: 'REJECT',
     },
   }
+}
+
+function skillApprovalCard(skill: NonNullable<WorkspaceSnapshotInput['skills']>[number]): ApprovalCard {
+  return {
+    id: `skill-approval:${skill.id}`,
+    kind: 'skill',
+    title: 'SKILL APPROVAL',
+    target: `${skill.name}@${skill.version}`,
+    sideEffect: 'changes the reusable instructions available to the Agent',
+    authorityChange: 'yes — exact Skill revision only',
+    fingerprint: skill.approvalFingerprint!,
+    status: skill.lifecycle,
+    digest: skill.digest,
+    skill: {
+      id: skill.id,
+      name: skill.name,
+      version: skill.version,
+      digest: skill.digest,
+      approvalFingerprint: skill.approvalFingerprint,
+      generation: skill.generation,
+    },
+    details: [
+      `Skill       ${skill.name}@${skill.version}`,
+      `Digest      ${skill.digest}`,
+      `Invocable   ${skill.modelInvocable ? 'model' : 'not model'} / ${skill.userInvocable ? 'user' : 'not user'}`,
+      `Resources   ${skill.resources.join(', ') || 'none'}`,
+      `Depends on  ${skill.dependsOn.join(', ') || 'none'}`,
+    ],
+    decision: {
+      request: `Approve Skill “${friendlyName(skill.name)}”`,
+      reason: 'This Skill can influence how the Agent handles matching requests. Only you can approve this exact reviewed instruction revision.',
+      outcome: 'The Skill becomes eligible for a separate activation decision. Approval alone does not make it available to the Agent.',
+      scope: `Exact Skill revision · ${skill.profile} Profile · activation remains separate`,
+      risk: 'agent-instructions',
+      facts: [
+        { label: 'PURPOSE', value: skill.description || skill.whenToUse || 'Reusable Agent instructions' },
+        { label: 'WHO CAN INVOKE IT', value: [skill.modelInvocable ? 'Agent' : '', skill.userInvocable ? 'User' : ''].filter(Boolean).join(' and ') || 'Neither' },
+        { label: 'RESOURCES', value: skill.resources.join(', ') || 'No bundled resources' },
+        { label: 'DEPENDENCIES', value: skill.dependsOn.join(', ') || 'No Skill dependencies' },
+      ],
+      approveLabel: 'APPROVE SKILL',
+      rejectLabel: 'REJECT',
+    },
+  }
+}
+
+function approvalTitle(approval: NonNullable<WorkspaceSnapshotInput['extensionApprovals']>[number]): string {
+  if (approval.capabilitiesAdded.length === 1 && (approval.capabilitiesChanged?.length ?? 0) === 0 && approval.capabilitiesRemoved.length === 0) {
+    return `Approve capability “${friendlyName(approval.capabilitiesAdded[0]!)}”`
+  }
+  return `Approve capability update “${friendlyName(approval.owner.split('/').at(-1) ?? approval.owner)}”`
+}
+
+function friendlyName(value: string): string {
+  return value.split(/[._-]+/).filter(Boolean).map((part) => `${part[0]?.toUpperCase() ?? ''}${part.slice(1)}`).join(' ')
+}
+
+function formatDiff(added: readonly string[], removed: readonly string[], changed: readonly string[] = []): string {
+  const values = [
+    ...added.map((item) => `+${item}`),
+    ...removed.map((item) => `−${item}`),
+    ...changed.map((item) => `~${item}`),
+  ]
+  return values.join(' · ') || 'none'
 }
 
 function splitDetail(line: string): { readonly label: string; readonly value: string } {
