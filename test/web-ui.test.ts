@@ -2626,6 +2626,50 @@ export function apply(ctx) {
     assert.match(activation, /NOT NOW/)
     assert.doesNotMatch(activation, /NOT APPROVED/)
 
+    const blockedActivation = renderToStaticMarkup(createElement(MissionControlScreen, {
+      view: fixtureView({
+        activations: [{
+          id: 'apr-blocked-act',
+          kind: 'self-extension-activate',
+          title: 'SELF-EXTENSION ACTIVATION',
+          owner: 'managed/ui-control-surface',
+          version: '0.1.1',
+          candidateId: 'managed--ui-control-surface@0.1.1',
+          digest: 'blocked-digest',
+          fingerprint: 'blocked-fingerprint',
+          isolatedRuntime: true,
+          capabilitiesAdded: ['ui.markdown'],
+          capabilitiesRemoved: [],
+          capabilitiesChanged: [],
+          permissionsAdded: [],
+          permissionsRemoved: [],
+          permissionsChanged: [],
+          toolsAdded: ['markdown_render'],
+          toolsRemoved: [],
+          toolsChanged: [],
+          effects: [],
+          eligibilityOk: false,
+          eligibilityDenials: [
+            'isolated-runtime-forbids-services-or-providers',
+            'host-owned-owner-not-replaceable',
+            'host-product-change-required',
+          ],
+          status: 'APPROVED_NOT_ACTIVE',
+          details: ['Not eligible: host-owned-owner-not-replaceable'],
+        }],
+      }),
+      connected: true,
+      sending: false,
+      draft: '',
+      onDraft() {},
+      onSend() {},
+      onApprove() {},
+      onReject() {},
+      onRecovery() {},
+    }))
+    assert.doesNotMatch(blockedActivation, /data-activation-id="apr-blocked-act"/)
+    assert.doesNotMatch(blockedActivation, /managed--ui-control-surface@0\.1\.1/)
+
     const extensionsPane = renderToStaticMarkup(createElement(MissionControlScreen, {
       view: fixtureView({
         approvals: [{

@@ -222,7 +222,10 @@ export function MissionControlScreen(input: MissionControlScreenProps) {
             sending: props.sending,
             draft: props.draft,
             error: props.error,
-            activations: (view.activations ?? []).filter((card) => !(props.deferredActivations ?? []).includes(card.id)),
+            activations: (view.activations ?? []).filter((card) => (
+              card.eligibilityOk
+              && !(props.deferredActivations ?? []).includes(card.id)
+            )),
             armedActivation: props.armedActivation,
             armedAbandonment: props.armedAbandonment,
           }}
