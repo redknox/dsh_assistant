@@ -1,0 +1,3 @@
+# Keep dynamic control in the Harness
+
+TARS-NG will keep DSH Harness as the only dynamic next-step decision maker and will act as its Governance Envelope: scoped context, governed Capabilities, approval, activation, evidence, cancellation, and recovery. We reject a parallel TARS-NG orchestrator or fixed product flow as the primary controller because it would duplicate the Agent Loop, make reusable capabilities scenario-specific, and turn the product into a workflow engine; a Workflow remains a governed Capability the Harness may choose for a stable sequence, never a source of broader authority.

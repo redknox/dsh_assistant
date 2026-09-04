@@ -115,6 +115,14 @@ The design principle is:
 
 > Dynamic planning inside fixed authority boundaries.
 
+### Harness first
+
+The Harness, not a product Workflow, decides the next useful step toward the user's goal. TARS-NG is the governance exoskeleton around that decision: it provides scoped context and governed Capabilities, records evidence, pauses at authority boundaries, and controls whether a reviewed result can become Live.
+
+This makes Capability reuse a product requirement. Tools, Skills, Connectors, Extensions, and Workflows are implementation forms behind user-visible Capabilities; they are not separate competing control planes. A stable reimbursement procedure may become a Workflow, but its travel lookup, policy retrieval, invoice checks, and report generation remain independently usable by the Harness for other requests.
+
+Goal, Plan, Todo, and Capability Delivery Session state make the Harness's work observable and resumable. They do not prescribe a fixed global sequence. Likewise, starting a dedicated Session for a requested Capability concentrates its conversation and decisions without moving lifecycle or approval authority into chat history.
+
 ## Current baseline
 
 Through v0.4.0, TARS-NG is validating the lower half of the stack: a usable reference assistant with one host-owned Runtime Context, plus governed self-development. The central proof is that a Home can bind Profile / Workspace / current Session, then move a missing capability through resolution, candidate authoring, validation, independent review, exact approval, isolated activation, discovery, use, restart, and recovery without self-authorization.
@@ -167,6 +175,8 @@ The first bounded slice is implemented for `finance.expense-risk.review`. The ho
 DSH is most valuable where the task path cannot be completely fixed in advance. TARS-NG should let the Agent dynamically choose and order governed capabilities, ask for missing evidence, react to partial results, and re-plan while remaining inside fixed authority boundaries.
 
 A reimbursement review, for example, may require a different sequence for every claim: load the request, match travel records, inspect invoices, retrieve the applicable policy, request missing material, evaluate anomalies, and propose an approval route. The Agent may plan this sequence dynamically; authoritative posting, payment, identity, accounting, retention, and mandatory approvals remain in enterprise systems and host policy.
+
+When repeated evidence shows that part of this sequence is stable, the Harness may select a host-registered Workflow that packages it as one governed Capability. Workflow adoption is an optimization for repeatability and operability, not a transfer of planning authority away from the Harness.
 
 ### 5. Durable professional workspaces
 

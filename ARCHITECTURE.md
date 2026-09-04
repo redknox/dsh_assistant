@@ -16,6 +16,22 @@ Normative contributor rules: [ENGINEERING.md](./ENGINEERING.md). Product boundar
 
 **TARS-NG is the governed construction and product layer, not merely a collection of assistant features.** Its current personal-assistant capabilities are a proving ground. A future professional system should add its domain semantics above TARS-NG and keep authoritative enterprise transactions behind typed, policy-controlled adapters.
 
+## Harness-first control
+
+The Harness is the only dynamic next-step decision maker. It interprets the current goal, inspects context, chooses among governed Capabilities, asks for missing information, reacts to results, and replans. TARS-NG must not introduce a parallel scheduler, frontend state machine, or product Workflow that decides the Agent's next business step.
+
+TARS-NG supplies a **Governance Envelope** around that freedom: it determines which Capabilities are visible, what context they receive, which effects require approval, whether a Candidate may become Live, and how activity is observed, stopped, unplugged, or recovered. Put compactly:
+
+> The Harness decides what to do next. TARS-NG decides what is available and allowed, and whether the result may enter the live system.
+
+A Workflow is one possible Capability selected by the Harness when a sequence has become stable and repeatable. It is not the product controller. Its child Agents and Tools inherit the same context, permissions, approval, cancellation, budget, and evidence rules; delegation never expands authority. The reusable operations beneath a Workflow remain available to other goals. For example, a travel-record lookup built for reimbursement review must also be usable when the user asks for a summary of first-half business travel.
+
+Before adding any orchestration module, apply this test:
+
+> Does it give the Harness a reusable Capability or a clear governance constraint, or does it replace the Harness's next-step decision?
+
+If it replaces that decision, it is outside the TARS-NG product architecture. See [ADR 0001](./docs/adr/0001-harness-first-control.md).
+
 A TARS-NG Home is a single-writer authority domain. A PID is liveness metadata, not process identity. Durable authority, LKG, Workbench, memory, and recovery state are never written by competing processes.
 
 Production boot resolves one host-owned **Runtime Context** before the lease: Home + Profile + Workspace + Session Root + current Session ID. A Session Catalog under that context owns topic conversations. Workspace is context, not filesystem authority. Session Root is DSH session persistence, not Candidate Workbench. See [docs/runtime-context.md](./docs/runtime-context.md) and [docs/session-catalog.md](./docs/session-catalog.md).
@@ -41,7 +57,7 @@ LLMs / storage / external systems
 | Layer | Responsibility |
 | --- | --- |
 | **UI / Channels** | Local Mission-Control Web UI plus CLI. Presentation and channel adapters only. No home for domain rules. |
-| **Domain Product / Personal Assistant Layer** | Product orchestration and domain experience: user intent, vocabulary, workflows, UI, and which services participate. Independent of any one model. |
+| **Domain Product / Personal Assistant Layer** | Domain experience: user intent, vocabulary, reusable capabilities, bounded Workflow definitions, and UI projections. It supplies choices and context to the Harness; it does not orchestrate the Agent Loop. |
 | **TARS-NG Construction + Governance Layer** | Capability resolution, candidate authoring, validation, independent review, exact approval, isolated activation, rollback, Safe Mode, and recovery. It turns proposed behavior into governed runtime capability; it cannot self-authorize. |
 | **Domain / Personal Services** | Durable capabilities: domain rules, memory, knowledge, policy, thin tool facades, and integrations. Usable without a model and without a UI where practical. |
 | **DSH public APIs** | Plugin composition, public services/providers, tools, events, jobs, session APIs. The **only** allowed coupling to Harness. |
@@ -122,6 +138,8 @@ professional intent
 ```
 
 Natural-language intent is never itself execution authority. Dynamic Agent planning may decide how to pursue a goal, select tools, request missing information, and react to results. It may not rewrite policy, bypass approval, expand permissions, certify its own output, or directly own authoritative payment/identity/recording rules.
+
+A dedicated Capability Delivery Session keeps one requested addition understandable from proposal through Live or Stopped. It owns conversation context and navigation only. Specifications, Resolution Plans, Candidates, approvals, activation, and Registry state remain in their existing authoritative modules rather than being copied into Session state.
 
 The current v0.4.0 seal covers the governed construction/control substrate. Domain-facing authoring, reusable domain kits, generated product UI, and composition of multiple capabilities into a complete professional application are later milestones and remain **Designed**, not Implemented. See [docs/product-vision.md](./docs/product-vision.md).
 

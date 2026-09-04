@@ -6,6 +6,8 @@ Date: 2026-09-01
 
 Governed native DSH Workflow support has passed the current end-to-end acceptance test. Do not deepen or optimize Workflow further in the current product phase. Return to the main product and UI usability track.
 
+Workflow remains a governed Capability selected by the Harness for a stable sequence; it is not a parallel Agent Loop or the product's next-step controller. The durable architectural decision is recorded in [ADR 0001](./adr/0001-harness-first-control.md).
+
 ## Accepted evidence
 
 - Candidate `generated--analysis-workflow-dual-perspective-review@0.1.1` completed validation, sealing, Independent Review, exact human approval, and trusted activation.
