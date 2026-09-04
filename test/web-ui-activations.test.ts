@@ -148,7 +148,11 @@ describe('Web UI activations', () => {
 
   it('offers to archive the originating delivery conversation after activation', async () => {
     const card = activationCard({ sessionId: 'delivery-session' })
-    const result = await handleWebUiActivationRequest(request('/api/activate', body(card)), context({ activations: () => [card] }))
+    const reconciled: string[] = []
+    const result = await handleWebUiActivationRequest(request('/api/activate', body(card)), context({
+      activations: () => [card],
+      reconcileDeliveryGoal: async (sessionId) => { reconciled.push(sessionId) },
+    }))
     const acknowledgement = (result?.body as { acknowledgement?: WebUiAcknowledgement }).acknowledgement
     assert.match(acknowledgement?.text ?? '', /can now be archived/)
     assert.deepEqual(acknowledgement?.action, {
@@ -156,6 +160,7 @@ describe('Web UI activations', () => {
       label: 'ARCHIVE DELIVERY',
       sessionId: 'delivery-session',
     })
+    assert.deepEqual(reconciled, ['delivery-session'])
   })
 
   it('rejects missing confirmation, busy state, and stale evidence before activation', async () => {

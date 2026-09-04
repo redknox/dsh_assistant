@@ -101,6 +101,23 @@ describe('Web UI Capability Workbench adapter', () => {
     assert.deepEqual(received, { specificationId: 'spec-1', sessionId: 'trusted-current-session' })
   })
 
+  it('lets the host settle Goal state after stopping delivery', async () => {
+    let settled: string | undefined
+    const base = fakeContext()
+    const stopped = await handleWebUiWorkbenchRequest(request('POST', '/api/workbench/specification/stop', {}, {
+      specificationId: 'spec-1',
+    }), {
+      ...base,
+      stopDelivery: async (specificationId) => {
+        settled = specificationId
+        return { specificationId, status: 'stopped' }
+      },
+    })
+
+    assert.equal(stopped?.status, 200)
+    assert.equal(settled, 'spec-1')
+  })
+
   it('starts a proposal only through the host Session seam', async () => {
     let started: string | undefined
     const context = fakeContext()

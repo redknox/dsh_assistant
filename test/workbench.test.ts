@@ -1598,7 +1598,9 @@ describe('capability delivery proposals', () => {
 
     const plan = workbench.plan({ specificationId: specification.id })
     const context = workbench.inspectDeliverySession('delivery-1')
-    assert.equal(context?.stage, 'building')
+    assert.equal(plan.kind, 'insufficient-information')
+    assert.equal(context?.stage, 'defining')
+    assert.equal(context?.status, 'waiting')
     assert.equal(context?.planId, plan.planId)
     assert.equal(context?.specificationId, specification.id)
     assert.equal(workbench.inspectDeliverySession('unrelated'), undefined)

@@ -208,8 +208,23 @@ export function startWebUiServer(options: WebUiServerOptions): Promise<WebUiServ
             const proposal = options.workbench!.listCapabilityProposals().find((item) => item.id === proposalId)
             if (!proposal || proposal.status !== 'pending') throw new Error('capability-proposal-not-pending')
             if (proposal.originSessionId !== options.surface.sessionId) throw new Error('capability-proposal-session-mismatch')
-            const catalog = await options.sessionHost!.create(`Build · ${proposal.review.capability}`, expected)
-            options.workbench!.decideCapabilityProposal(proposalId, 'started', catalog.currentSessionId)
+            const catalog = await options.sessionHost!.createGoalSession(
+              `Build · ${proposal.review.capability}`,
+              proposal.review.need,
+              expected,
+              (deliverySessionId) => {
+                const started = options.workbench!.decideCapabilityProposal(proposalId, 'started', deliverySessionId)
+                if (started.status !== 'started' || started.deliverySessionId !== deliverySessionId) {
+                  throw new Error('capability-proposal-decision-raced')
+                }
+              },
+            )
+            if (catalog.currentSessionId !== options.surface.sessionId) throw new Error('capability-delivery-session-mismatch')
+          } : undefined,
+          stopDelivery: options.sessionHost ? async (specificationId) => {
+            const stopped = options.workbench!.stopSpecification(specificationId, { sessionId: options.surface.sessionId })
+            await options.sessionHost!.reconcileDeliveryGoal(options.surface.sessionId)
+            return stopped
           } : undefined,
         })
         if (workbench) {
@@ -306,6 +321,9 @@ export function startWebUiServer(options: WebUiServerOptions): Promise<WebUiServ
         },
         mutations,
         activations: () => snapshot().activations,
+        ...(options.sessionHost ? {
+          reconcileDeliveryGoal: (sessionId: string) => options.sessionHost!.reconcileDeliveryGoal(sessionId),
+        } : {}),
         project: (acknowledgement) => envelope(acknowledgement ? { acknowledgement } : {}),
       })
       if (activation) {

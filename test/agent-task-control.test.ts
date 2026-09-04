@@ -1,7 +1,11 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 import { CallId } from '@deepseek-ai/dsh-llm'
-import { MAX_AUTONOMOUS_GOAL_ROUNDS } from '../src/product/agent-task-control.js'
+import {
+  createSessionGoal,
+  MAX_AUTONOMOUS_GOAL_ROUNDS,
+  reconcileDeliveryGoal,
+} from '../src/product/agent-task-control.js'
 import { bootAssistantControl, bootSafeModeRuntime, createAssistantAgent } from '../src/runtime/boot.js'
 import { AssistantControlSurface } from '../src/ui/controller.js'
 
@@ -87,6 +91,126 @@ describe('Agent Task Control', () => {
     } finally {
       await first.dispose()
       await second.dispose()
+      await control.ctx.fiber.dispose()
+    }
+  })
+
+  it('injects the native Goal and authoritative delivery stage before every model step', async () => {
+    const control = await bootAssistantControl()
+    const handle = await createAssistantAgent(control.ctx, 'delivery-goal-context')
+    try {
+      const proposal = control.ctx.candidateWorkbench.proposeCapability({
+        capability: 'documents.summarize',
+        need: 'Summarize supplied documents repeatedly.',
+        sessionId: 'main',
+      })
+      control.ctx.candidateWorkbench.decideCapabilityProposal(proposal.id, 'started', 'delivery-goal-context')
+      const goal = createSessionGoal(control.ctx, handle.agent, proposal.review.need)
+      control.ctx.goals.pause(handle.agent, { id: goal.id, revision: goal.revision })
+
+      const assembly = await control.ctx.systemPrompt.assemble({ scope: handle.agent, agent: handle.agent })
+      const context = assembly.contexts.find((item) => item.name === 'product:session-work-context')?.text ?? ''
+      assert.match(context, /Summarize supplied documents repeatedly/)
+      assert.match(context, /Capability: "documents\.summarize"/)
+      assert.match(context, /Delivery: defining; active/)
+      assert.match(context, /not a fixed Workflow/)
+    } finally {
+      await handle.dispose()
+      await control.ctx.fiber.dispose()
+    }
+  })
+
+  it('settles a native Goal when its delivery is explicitly stopped', async () => {
+    const control = await bootAssistantControl()
+    const handle = await createAssistantAgent(control.ctx, 'delivery-goal-stop')
+    try {
+      const proposal = control.ctx.candidateWorkbench.proposeCapability({
+        capability: 'documents.summarize',
+        need: 'Summarize supplied documents repeatedly.',
+        sessionId: 'main',
+      })
+      control.ctx.candidateWorkbench.decideCapabilityProposal(proposal.id, 'started', 'delivery-goal-stop')
+      const goal = createSessionGoal(control.ctx, handle.agent, proposal.review.need)
+      const specification = control.ctx.candidateWorkbench.defineSpecification({
+        capability: proposal.review.capability,
+        goal: proposal.review.need,
+        origin: { sessionId: 'delivery-goal-stop' },
+      })
+      control.ctx.candidateWorkbench.stopSpecification(specification.id, { sessionId: 'delivery-goal-stop' })
+
+      const settled = reconcileDeliveryGoal(control.ctx, handle.agent)
+      assert.equal(settled?.phase, 'complete')
+      assert.equal(control.ctx.goals.get(handle.agent)?.phase, 'complete')
+      assert.equal(control.ctx.candidateWorkbench.inspectDeliverySession('delivery-goal-stop')?.status, 'complete')
+      assert.equal(goal.objective, proposal.review.need)
+    } finally {
+      await handle.dispose()
+      await control.ctx.fiber.dispose()
+    }
+  })
+
+  it('does not let an autonomous author complete delivery before the governed lifecycle is terminal', async () => {
+    const control = await bootAssistantControl()
+    const handle = await createAssistantAgent(control.ctx, 'delivery-goal-guard')
+    try {
+      const proposal = control.ctx.candidateWorkbench.proposeCapability({
+        capability: 'documents.summarize',
+        need: 'Summarize supplied documents repeatedly.',
+        sessionId: 'main',
+      })
+      control.ctx.candidateWorkbench.decideCapabilityProposal(proposal.id, 'started', 'delivery-goal-guard')
+      const goal = createSessionGoal(control.ctx, handle.agent, proposal.review.need)
+      control.ctx.goals.disarm(handle.agent)
+
+      const result = await control.ctx.tools.execute({
+        callId: CallId('premature-delivery-complete'),
+        name: 'update_goal',
+        arguments: { goal_id: String(goal.id), revision: goal.revision, action: 'complete' },
+        agent: handle.agent,
+        signal: AbortSignal.timeout(5_000),
+      })
+      assert.equal(result.isError, true)
+      assert.match(result.error?.message ?? '', /cannot complete its Goal while stage defining is active/)
+      assert.equal(control.ctx.goals.get(handle.agent)?.phase, 'active')
+    } finally {
+      await handle.dispose()
+      await control.ctx.fiber.dispose()
+    }
+  })
+
+  it('pauses autonomous rounds when a Resolution Plan needs user consent', async () => {
+    const control = await bootAssistantControl()
+    const handle = await createAssistantAgent(control.ctx, 'delivery-plan-consent')
+    try {
+      const proposal = control.ctx.candidateWorkbench.proposeCapability({
+        capability: 'documents.summarize',
+        need: 'Summarize supplied documents repeatedly.',
+        sessionId: 'main',
+      })
+      control.ctx.candidateWorkbench.decideCapabilityProposal(proposal.id, 'started', 'delivery-plan-consent')
+      createSessionGoal(control.ctx, handle.agent, proposal.review.need)
+      control.ctx.goals.disarm(handle.agent)
+      const specification = control.ctx.candidateWorkbench.defineSpecification({
+        capability: proposal.review.capability,
+        goal: proposal.review.need,
+        businessRules: ['Preserve the source meaning.'],
+        acceptanceExamples: [{
+          name: 'plain document',
+          given: ['A supplied document.'],
+          when: 'The capability summarizes it.',
+          then: ['A concise faithful summary is returned.'],
+        }],
+        origin: { sessionId: 'delivery-plan-consent' },
+      })
+      const plan = control.ctx.candidateWorkbench.plan({ specificationId: specification.id })
+      assert.equal(plan.canCreate, true)
+      assert.equal(control.ctx.candidateWorkbench.inspectDeliverySession('delivery-plan-consent')?.status, 'waiting')
+
+      const reconciled = reconcileDeliveryGoal(control.ctx, handle.agent)
+      assert.equal(reconciled?.phase, 'paused')
+      assert.equal(reconciled?.activation, 'disarmed')
+    } finally {
+      await handle.dispose()
       await control.ctx.fiber.dispose()
     }
   })

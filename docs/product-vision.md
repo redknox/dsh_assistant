@@ -123,6 +123,8 @@ This makes Capability reuse a product requirement. Tools, Skills, Connectors, Ex
 
 Goal, Plan, Todo, and Capability Delivery Session state make the Harness's work observable and resumable. They do not prescribe a fixed global sequence. Likewise, starting a dedicated Session for a requested Capability concentrates its conversation and decisions without moving lifecycle or approval authority into chat history.
 
+An accepted Capability Proposal is bound to one native same-session DSH Goal. TARS-NG materializes the current Goal plus authoritative delivery stage as dynamic model context before each step, pauses autonomous rounds at human decision points, and permits completion only after the governed delivery is terminal. This is objective endurance for the Harness, not a Workflow state machine.
+
 ## Current baseline
 
 Through v0.4.0, TARS-NG is validating the lower half of the stack: a usable reference assistant with one host-owned Runtime Context, plus governed self-development. The central proof is that a Home can bind Profile / Workspace / current Session, then move a missing capability through resolution, candidate authoring, validation, independent review, exact approval, isolated activation, discovery, use, restart, and recovery without self-authorization.

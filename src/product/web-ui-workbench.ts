@@ -47,6 +47,7 @@ export interface WebUiWorkbenchContext {
   readonly project?: () => unknown
   readonly startProposal?: (proposalId: string, expected: { readonly sessionId: string; readonly revision: number }) => Promise<void>
   readonly declineProposal?: (proposalId: string) => void
+  readonly stopDelivery?: (specificationId: string) => Promise<unknown>
 }
 
 export async function handleWebUiWorkbenchRequest(
@@ -115,7 +116,9 @@ export async function handleWebUiWorkbenchRequest(
     }
     return {
       status: 200,
-      body: context.workbench.stopSpecification(body.specificationId, { sessionId: context.currentSessionId() }),
+      body: context.stopDelivery
+        ? await context.stopDelivery(body.specificationId)
+        : context.workbench.stopSpecification(body.specificationId, { sessionId: context.currentSessionId() }),
       broadcast: true,
     }
   }

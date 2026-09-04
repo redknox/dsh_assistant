@@ -14,6 +14,8 @@ import type { AgentTaskControlView } from '../domain/workspace/types.js'
 
 export const MAX_AUTONOMOUS_GOAL_ROUNDS = 8
 
+const DELIVERY_GOAL_CONTEXT_ORDER = 20
+
 const PLAN_READ_TOOLS = new Set([
   'exit_plan_mode',
   'todo_write',
@@ -152,13 +154,29 @@ export async function mountAgentTaskControl(ctx: Context): Promise<void> {
     section: 'Plan Mode is read-only exploration. Inspect current state, maintain todo_write, and present the complete plan through exit_plan_mode. Do not claim that changes were executed. TARS-NG enforces this restriction at tool dispatch.',
   })
 
+  ctx.systemPrompt.context({
+    name: 'product:session-work-context',
+    order: DELIVERY_GOAL_CONTEXT_ORDER,
+    text: ({ agent }) => renderSessionWorkContext(ctx, agent),
+  })
+
   ctx.effect(() => ctx.on('tools/pre-execute', async (exec, next) => {
     if (exec.name === 'create_goal' || exec.name === 'update_goal') {
-      const requested = (exec.arguments as Record<string, unknown> | undefined)?.max_goal_rounds
+      const args = exec.arguments as Record<string, unknown> | undefined
+      const requested = args?.max_goal_rounds
       if (typeof requested === 'number' && requested > MAX_AUTONOMOUS_GOAL_ROUNDS) {
         return {
           kind: 'deny',
           reason: `TARS-NG limits autonomous goals to ${MAX_AUTONOMOUS_GOAL_ROUNDS} rounds`,
+        }
+      }
+      if (exec.name === 'update_goal' && args?.action === 'complete' && exec.agent) {
+        const delivery = ctx.get('candidateWorkbench')?.inspectDeliverySession(String(exec.agent.id))
+        if (delivery && delivery.status !== 'complete') {
+          return {
+            kind: 'deny',
+            reason: `Capability delivery cannot complete its Goal while stage ${delivery.stage} is ${delivery.status}`,
+          }
         }
       }
     }
@@ -171,6 +189,40 @@ export async function mountAgentTaskControl(ctx: Context): Promise<void> {
     }
     return next()
   }))
+
+  ctx.effect(() => ctx.on('tools/result', (exec, result) => {
+    // A human-authorized resume must survive its own tool result so the current
+    // turn can cross the decision point. The next delivery mutation reconciles again.
+    if (exec.agent && exec.name !== 'update_goal' && !result.isError) reconcileDeliveryGoal(ctx, exec.agent)
+  }))
+}
+
+/** Create the durable native Goal that owns one dedicated delivery Session. */
+export function createSessionGoal(ctx: Context, agent: Agent, objective: string): GoalView {
+  if (!ctx.get('goals')) throw new Error('Goal control is unavailable')
+  const current = ctx.goals.get(agent)
+  if (current && current.phase !== 'complete') {
+    if (current.objective === objective) return current
+    throw new Error('the delivery Session already has a different active Goal')
+  }
+  return ctx.goals.create(agent, { objective, maxGoalRounds: MAX_AUTONOMOUS_GOAL_ROUNDS })
+}
+
+/** Settle or hold a delivery Goal from authoritative Workbench state. */
+export function reconcileDeliveryGoal(ctx: Context, agent: Agent): GoalView | undefined {
+  const goal = ctx.get('goals')?.get(agent)
+  const delivery = ctx.get('candidateWorkbench')?.inspectDeliverySession(String(agent.id))
+  if (!goal || !delivery || goal.phase === 'complete') return goal
+  const ref = { id: goal.id, revision: goal.revision }
+  if (delivery.status === 'complete') return ctx.goals.complete(agent, ref)
+  if (delivery.status === 'blocked' && goal.phase !== 'blocked') {
+    return ctx.goals.block(agent, ref, {
+      code: 'capability-delivery-blocked',
+      message: `Capability delivery is blocked at ${delivery.stage}.`,
+    })
+  }
+  if (delivery.status === 'waiting' && goal.phase === 'active') return ctx.goals.pause(agent, ref)
+  return goal
 }
 
 /** Browser-safe current-session task projection. */
@@ -188,6 +240,27 @@ export function inspectAgentTaskControl(ctx: Context, agent: Agent | undefined):
     plan,
     ...(question ? { question } : {}),
   }
+}
+
+function renderSessionWorkContext(ctx: Context, agent: Agent | undefined): string {
+  if (!agent || !ctx.get('goals')) return ''
+  const goal = ctx.goals.get(agent)
+  if (!goal) return ''
+  const delivery = ctx.get('candidateWorkbench')?.inspectDeliverySession(String(agent.id))
+  const lines = [
+    '<session_work_context>',
+    `Objective: ${JSON.stringify(goal.objective)}`,
+    `Goal: ${goal.phase}; round ${goal.roundsStarted}/${goal.maxGoalRounds}.`,
+  ]
+  if (delivery) {
+    lines.push(`Capability: ${JSON.stringify(delivery.capability)}.`)
+    if (delivery.objective !== goal.objective) lines.push(`Current capability specification objective: ${JSON.stringify(delivery.objective)}.`)
+    lines.push(`Delivery: ${delivery.stage}; ${delivery.status}.`)
+    lines.push('The Workbench lifecycle is authoritative. Do not skip validation, review, approval, or activation, and do not mark this Goal complete before delivery is live or stopped.')
+  }
+  lines.push('Choose the next useful step dynamically from current evidence; this context is an objective, not a fixed Workflow.')
+  lines.push('</session_work_context>')
+  return lines.join('\n')
 }
 
 export function controlPlanMode(ctx: Context, agent: Agent, active: boolean): void {

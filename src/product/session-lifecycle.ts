@@ -1,4 +1,5 @@
 import type { Context } from '@deepseek-ai/cordis'
+import type { Agent } from '@deepseek-ai/dsh-agent'
 import { SessionId, type Session, type SessionEvent } from '@deepseek-ai/dsh-session'
 import { createAssistantAgent } from '../runtime/boot.js'
 import { AssistantControlSurface } from '../ui/controller.js'
@@ -12,6 +13,7 @@ import {
   type SessionCatalogFile,
 } from './session-catalog.js'
 import { DEFAULT_SESSION_ID } from './runtime-context.js'
+import { createSessionGoal, reconcileDeliveryGoal as reconcileAgentDeliveryGoal } from './agent-task-control.js'
 
 export type SessionLifecycleFault =
   | 'after-flush'
@@ -23,7 +25,7 @@ export type SessionLifecycleFault =
 
 export interface SessionHandle {
   dispose(): Promise<void>
-  readonly agent: { readonly session: Session; readonly status?: string }
+  readonly agent: Agent
 }
 
 export class LiveSessionHost {
@@ -88,6 +90,39 @@ export class LiveSessionHost {
         expected,
         apply: (nextExpected) => this.catalog.createAndSwitch(createdId, title, nextExpected),
       })
+    })
+  }
+
+  /** Create, adopt, and arm one Session whose objective is durable DSH Goal state. */
+  async createGoalSession(
+    title: string | undefined,
+    objective: string,
+    expected: { readonly sessionId: string; readonly revision: number },
+    beforeArm?: (sessionId: string) => void,
+  ): Promise<PublicSessionCatalog> {
+    const catalog = await this.create(title, expected)
+    beforeArm?.(catalog.currentSessionId)
+    createSessionGoal(this.ctx, this.handle.agent, objective)
+    return catalog
+  }
+
+  /** Reconcile one delivery Goal after a host-side lifecycle transition. */
+  async reconcileDeliveryGoal(sessionId: string): Promise<void> {
+    await this.serialize(async () => {
+      if (sessionId === this.surface.sessionId) {
+        reconcileAgentDeliveryGoal(this.ctx, this.handle.agent)
+        await this.ctx.sessions.flush(this.handle.agent.session)
+        return
+      }
+      const session = this.catalog.inspect().sessions.find((item) => item.id === sessionId)
+      if (!session) return
+      const handle = await createAssistantAgent(this.ctx, sessionId, undefined, this.workspace)
+      try {
+        reconcileAgentDeliveryGoal(this.ctx, handle.agent)
+        await this.ctx.sessions.flush(handle.agent.session)
+      } finally {
+        await handle.dispose()
+      }
     })
   }
 

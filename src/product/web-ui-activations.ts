@@ -25,6 +25,7 @@ export interface WebUiActivationContext {
     readonly webUi: string
     readonly acknowledgement?: WebUiAcknowledgement
   }
+  readonly reconcileDeliveryGoal?: (sessionId: string) => Promise<void>
 }
 
 export interface WebUiActivationResponse {
@@ -77,6 +78,9 @@ async function activate(card: ActivationCard, context: WebUiActivationContext): 
         broadcast: true,
       }
     }
+    // Activation is already authoritative here; Goal bookkeeping must not relabel
+    // a successful release as an activation failure. Session resume can reconcile it again.
+    if (card.sessionId) await context.reconcileDeliveryGoal?.(card.sessionId).catch(() => undefined)
     return { status: 200, body: context.project(activationAcknowledgement(card)), broadcast: true }
   } catch (error) {
     if (error instanceof ActivationDeniedError) {

@@ -11,6 +11,7 @@ import { catalogBindingOf, SessionCatalog, SessionCatalogError } from '../src/pr
 import { LiveSessionHost } from '../src/product/session-lifecycle.js'
 import { inspectRuntimeContext } from '../src/product/runtime-context.js'
 import { AssistantControlSurface } from '../src/ui/controller.js'
+import { MAX_AUTONOMOUS_GOAL_ROUNDS } from '../src/product/agent-task-control.js'
 
 class GateAdapter extends LlmAdapter {
   constructor(private readonly release: Promise<void>) {
@@ -70,6 +71,32 @@ async function liveHost(input: {
 }
 
 describe('Session lifecycle transactions', () => {
+  it('creates a dedicated Session with one durable native Goal', async () => {
+    const { catalog, host, control } = await liveHost()
+    try {
+      const before = catalog.inspect()
+      let boundBeforeArm = false
+      const created = await host.createGoalSession('Build · documents.summarize', 'Summarize supplied documents.', {
+        sessionId: before.currentSessionId,
+        revision: before.revision,
+      }, (sessionId) => {
+        assert.equal(sessionId, String(host.currentHandle().agent.id))
+        assert.equal(control.ctx.goals.get(host.currentHandle().agent), undefined)
+        boundBeforeArm = true
+      })
+      const goal = control.ctx.goals.get(host.currentHandle().agent)
+      assert.equal(boundBeforeArm, true)
+      assert.equal(created.currentSessionId, String(host.currentHandle().agent.id))
+      assert.equal(goal?.objective, 'Summarize supplied documents.')
+      assert.equal(goal?.phase, 'active')
+      assert.equal(goal?.maxGoalRounds, MAX_AUTONOMOUS_GOAL_ROUNDS)
+      control.ctx.goals.disarm(host.currentHandle().agent)
+    } finally {
+      await host.currentHandle().dispose()
+      await control.ctx.fiber.dispose()
+    }
+  })
+
   it('projects automatic titles and pins explicit current-session renames in the DSH log', async () => {
     const { catalog, host, surface, control } = await liveHost()
     try {

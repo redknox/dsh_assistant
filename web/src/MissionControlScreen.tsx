@@ -328,7 +328,6 @@ export function MissionControlScreen(input: MissionControlScreenProps) {
               action: 'decide-capability-proposal',
               id: proposal.id,
               decision,
-              ...(decision === 'started' ? { draft: `我已确认开始建设能力 ${proposal.review.capability}。请先定义 Capability Specification，并基于提案建议 ${proposal.review.recommendation} 继续。` } : {}),
             }),
           }}
         />

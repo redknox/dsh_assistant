@@ -216,6 +216,7 @@ export class WorkbenchService implements CandidateWorkbench {
         status = 'blocked'
       } else {
         stage = 'building'
+        status = 'waiting'
       }
     } else if (specification) {
       stage = specification.status === 'needs-clarification' ? 'defining' : 'resolving'
