@@ -27,6 +27,7 @@ export function projectMissionControl(input: WorkspaceSnapshotInput): MissionCon
     systemState,
     ...(input.objective ? { objective: input.objective } : {}),
     ...(input.taskControl ? { taskControl: input.taskControl } : {}),
+    ...(input.workContext ? { workContext: input.workContext } : {}),
     conversation: input.conversation.filter(isDialogueItem).map((item) => ({
       kind: workKind(item.kind),
       text: item.text,

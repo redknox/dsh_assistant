@@ -1565,6 +1565,44 @@ describe('capability delivery proposals', () => {
     assert.equal(started.deliverySessionId, 'delivery-1')
     assert.equal(workbench.list().proposals[0]?.status, 'started')
   })
+
+  it('projects one delivery Session across existing authoritative records', () => {
+    const setup = isolatedWorkbench()
+    const { workbench } = setup
+    const proposal = workbench.proposeCapability({
+      capability: 'documents.summarize',
+      need: 'Summarize documents repeatedly.',
+      sessionId: 'main',
+    })
+    assert.equal(workbench.inspectDeliverySession('main'), undefined)
+
+    workbench.decideCapabilityProposal(proposal.id, 'started', 'delivery-1')
+    assert.deepEqual(workbench.inspectDeliverySession('delivery-1'), {
+      sessionId: 'delivery-1',
+      capability: 'documents.summarize',
+      objective: 'Summarize documents repeatedly.',
+      stage: 'defining',
+      status: 'active',
+      proposalId: proposal.id,
+      resolutionKind: proposal.review.kind,
+    })
+
+    const specification = workbench.defineSpecification({
+      capability: 'documents.summarize',
+      goal: 'Summarize one supplied document.',
+      businessRules: ['Preserve the source meaning.'],
+      acceptanceExamples: [{ name: 'plain document', given: ['A document'], when: 'summarized', then: ['A concise summary is returned'] }],
+      origin: { sessionId: 'delivery-1' },
+    })
+    assert.equal(workbench.inspectDeliverySession('delivery-1')?.stage, 'resolving')
+
+    const plan = workbench.plan({ specificationId: specification.id })
+    const context = workbench.inspectDeliverySession('delivery-1')
+    assert.equal(context?.stage, 'building')
+    assert.equal(context?.planId, plan.planId)
+    assert.equal(context?.specificationId, specification.id)
+    assert.equal(workbench.inspectDeliverySession('unrelated'), undefined)
+  })
 })
 
 function isolatedWorkbench(provider?: PolicyReviewerProvider, options: { persist?: (state: WorkbenchPersistState) => void } = {}) {

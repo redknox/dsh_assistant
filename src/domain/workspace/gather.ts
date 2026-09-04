@@ -11,6 +11,8 @@ import { projectMissionControl } from './project.js'
 import { inspectContextEndurance } from '../../product/context-endurance.js'
 import { inspectMaterialInput } from '../../product/material-input.js'
 import { inspectAgentTaskControl } from '../../product/agent-task-control.js'
+import type { CandidateWorkbench } from '../workbench/types.js'
+import { projectSessionWorkContext } from './work-context.js'
 
 export interface GatherWorkspaceInput {
   readonly ctx: Context
@@ -29,6 +31,9 @@ export function gatherWorkspaceSnapshot(input: GatherWorkspaceInput): WorkspaceS
   const contextEndurance = inspectContextEndurance(ctx, agent?.session)
   const materialInput = inspectMaterialInput(ctx)
   const taskControl = inspectAgentTaskControl(ctx, agent)
+  const delivery = (ctx.get('candidateWorkbench') as Pick<CandidateWorkbench, 'inspectDeliverySession'> | undefined)
+    ?.inspectDeliverySession(sessionId)
+  const workContext = projectSessionWorkContext({ sessionId, ...(taskControl ? { taskControl } : {}), ...(delivery ? { delivery } : {}) })
   const actionPolicy = ctx.get('actionPolicy') as {
     policy: {
       confirmations(): WorkspaceSnapshotInput['pendingConfirmations']
@@ -170,10 +175,13 @@ export function gatherWorkspaceSnapshot(input: GatherWorkspaceInput): WorkspaceS
     ...(contextEndurance ? { contextEndurance } : {}),
     materialInput,
     ...(taskControl ? { taskControl } : {}),
+    ...(workContext ? { workContext } : {}),
     ...(input.objective
       ? { objective: input.objective }
       : taskControl?.goal
         ? { objective: { text: taskControl.goal.objective, status: objectiveStatus(taskControl.goal.phase) } }
+        : workContext
+          ? { objective: { text: workContext.objective, status: workContext.status } }
         : {}),
     personality: {
       humor: personality.humor,

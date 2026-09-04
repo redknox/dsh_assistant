@@ -47,6 +47,21 @@ export interface ObjectiveView {
   readonly status: ObjectiveStatus
 }
 
+export interface SessionWorkContextView {
+  readonly kind: 'goal' | 'capability-delivery'
+  readonly sessionId: string
+  readonly objective: string
+  readonly status: ObjectiveStatus
+  readonly stage: string
+  readonly capability?: string
+  readonly resolutionKind?: string
+  readonly goalPhase?: NonNullable<AgentTaskControlView['goal']>['phase']
+  readonly proposalId?: string
+  readonly specificationId?: string
+  readonly planId?: string
+  readonly candidateId?: string
+}
+
 export interface AgentTaskControlView {
   readonly maxAutonomousRounds: number
   readonly driver: 'active' | 'held'
@@ -340,6 +355,7 @@ export interface MissionControlView {
   readonly identity: 'TARS-NG'
   readonly systemState: SystemState
   readonly objective?: ObjectiveView
+  readonly workContext?: SessionWorkContextView
   readonly taskControl?: AgentTaskControlView
   readonly conversation: readonly { readonly kind: WorkObjectKind; readonly text: string }[]
   readonly activity: readonly ActivityItem[]
@@ -587,6 +603,7 @@ export interface WorkspaceSnapshotInput {
   readonly contextEndurance?: ContextEnduranceView
   readonly materialInput?: MaterialInputView
   readonly objective?: ObjectiveView
+  readonly workContext?: SessionWorkContextView
   readonly taskControl?: AgentTaskControlView
   readonly personality: MissionControlView['personality']
   readonly blockedReason?: string

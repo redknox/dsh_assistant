@@ -73,6 +73,33 @@ export interface CapabilityDeliveryStop {
   readonly stoppedAt: string
 }
 
+export const CAPABILITY_DELIVERY_STAGES = [
+  'defining',
+  'resolving',
+  'building',
+  'validating',
+  'reviewing',
+  'waiting-approval',
+  'waiting-activation',
+  'live',
+  'stopped',
+] as const
+export type CapabilityDeliveryStage = (typeof CAPABILITY_DELIVERY_STAGES)[number]
+
+/** Read-only relationship projection; authoritative records remain in their owning modules. */
+export interface CapabilityDeliveryContext {
+  readonly sessionId: string
+  readonly capability: string
+  readonly objective: string
+  readonly stage: CapabilityDeliveryStage
+  readonly status: 'active' | 'waiting' | 'blocked' | 'complete'
+  readonly proposalId?: string
+  readonly specificationId?: string
+  readonly planId?: string
+  readonly candidateId?: string
+  readonly resolutionKind?: string
+}
+
 export interface WorkbenchPlanView {
   readonly planId: string
   readonly kind: ResolutionKind
@@ -164,6 +191,7 @@ export interface CandidateWorkbench {
   proposeCapability(input: { readonly capability: string; readonly need: string; readonly behavior?: string; readonly sessionId: string }): CapabilityDeliveryProposal
   listCapabilityProposals(): readonly CapabilityDeliveryProposal[]
   decideCapabilityProposal(id: string, decision: 'declined' | 'started', deliverySessionId?: string): CapabilityDeliveryProposal
+  inspectDeliverySession(sessionId: string): CapabilityDeliveryContext | undefined
   defineSpecification(input: CapabilitySpecificationInput): CapabilitySpecification
   reviseSpecification(specificationId: string, patch: CapabilitySpecificationPatch): CapabilitySpecification
   compareSpecifications(fromSpecificationId: string, toSpecificationId: string): CapabilitySpecificationDiff

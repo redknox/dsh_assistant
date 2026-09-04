@@ -57,6 +57,15 @@ export function sanitizeMissionControlView(view: MissionControlView): MissionCon
   return {
     ...view,
     ...(view.objective ? { objective: { ...view.objective, text: redactText(view.objective.text) } } : {}),
+    ...(view.workContext
+      ? {
+          workContext: {
+            ...view.workContext,
+            objective: redactText(view.workContext.objective),
+            ...(view.workContext.capability ? { capability: redactText(view.workContext.capability) } : {}),
+          },
+        }
+      : {}),
     conversation: view.conversation.map((item) => ({ ...item, text: redactText(item.text) })),
     activity: view.activity.map((item) => ({ ...item, summary: redactText(item.summary) })),
     approvalResolutions: (view.approvalResolutions ?? []).map((item) => ({

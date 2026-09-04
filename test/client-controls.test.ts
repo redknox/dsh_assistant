@@ -102,6 +102,38 @@ async function flush(): Promise<void> {
 }
 
 describe('client control hooks', () => {
+  it('renders the authoritative Session work context above conversation history', async () => {
+    const container = dom.window.document.createElement('div')
+    dom.window.document.body.append(container)
+    const root = createRoot(container)
+    mounted.push(root)
+    const actions: ConversationWorkspaceActions = {
+      draft() {}, send() {}, approve() {}, reject() {}, activate() {}, abandonActivation() {}, deferActivation() {},
+    }
+
+    await act(async () => root.render(createElement(ConversationWorkspace, {
+      view: {
+        ...fixtureView(),
+        workContext: {
+          kind: 'capability-delivery', sessionId: 'session-1', objective: 'Connect travel records',
+          status: 'active', stage: 'validating', capability: 'travel.records.read', resolutionKind: 'implement-provider',
+          specificationId: 'spec-1', candidateId: 'candidate-1',
+        },
+        conversation: [{ kind: 'assistant-response', text: 'Validation is running.' }],
+      },
+      state: { connected: true, sending: false, draft: '', activations: [] },
+      actions,
+    })))
+
+    const context = container.querySelector('[data-work-context="capability-delivery"]')
+    assert.ok(context)
+    assert.match(context.textContent ?? '', /Connect travel records/)
+    assert.match(context.textContent ?? '', /TRAVEL\.RECORDS\.READ/i)
+    assert.equal(context.querySelector('[data-step-state="current"]')?.textContent, 'VALIDATE')
+    const rendered = container.textContent ?? ''
+    assert.ok(rendered.indexOf('CAPABILITY DELIVERY') < rendered.indexOf('Validation is running.'))
+  })
+
   it('routes a unified Skill approval card through the exact Skill authority endpoint', async () => {
     const calls: { readonly url: string; readonly body: Record<string, unknown> }[] = []
     globalThis.fetch = async (input, init) => {

@@ -19,6 +19,7 @@ export class CandidateWorkbenchService extends Service implements CandidateWorkb
   decideCapabilityProposal(id: string, decision: 'declined' | 'started', deliverySessionId?: string) {
     return this.store.decideCapabilityProposal(id, decision, deliverySessionId)
   }
+  inspectDeliverySession(sessionId: string) { return this.store.inspectDeliverySession(sessionId) }
 
   defineSpecification(input: Parameters<CandidateWorkbench['defineSpecification']>[0]) { return this.store.defineSpecification(input) }
   reviseSpecification(specificationId: string, patch: Parameters<CandidateWorkbench['reviseSpecification']>[1]) {

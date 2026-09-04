@@ -8,6 +8,49 @@ import { formatDiff, isPendingApproval, skillInvocationSurfaceOpen } from './mis
 import { listFileReferences } from './api'
 import type { CapabilityDeliveryProposalView } from '../../src/product/web-ui-workbench-types'
 
+const DELIVERY_STEPS = ['define', 'resolve', 'build', 'validate', 'review', 'approve', 'activate', 'live'] as const
+
+function WorkContextCard(props: { readonly context: NonNullable<MissionControlView['workContext']> }) {
+  const { context } = props
+  const current = deliveryStep(context.stage)
+  return (
+    <section className="session-work-context" data-work-context={context.kind} data-work-status={context.status}>
+      <header>
+        <div><span className="session-work-lamp" aria-hidden="true" /><strong>{context.kind === 'capability-delivery' ? 'CAPABILITY DELIVERY' : 'ACTIVE GOAL'}</strong></div>
+        <small>{context.status.toUpperCase()} · {stageLabel(context.stage)}</small>
+      </header>
+      <div className="session-work-objective">
+        <span>{context.capability ?? 'SESSION OBJECTIVE'}</span>
+        <h1>{context.objective}</h1>
+        {context.resolutionKind ? <small>DELIVERY PATH · {context.resolutionKind.replaceAll('-', ' ').toUpperCase()}</small> : null}
+      </div>
+      {context.kind === 'capability-delivery' && context.stage !== 'stopped' ? (
+        <ol className="session-work-progress" aria-label={`Capability delivery stage: ${stageLabel(context.stage)}`}>
+          {DELIVERY_STEPS.map((step, index) => (
+            <li key={step} data-step-state={index < current ? 'complete' : index === current ? 'current' : 'pending'}>{step.toUpperCase()}</li>
+          ))}
+        </ol>
+      ) : null}
+    </section>
+  )
+}
+
+function deliveryStep(stage: string): number {
+  if (stage === 'defining') return 0
+  if (stage === 'resolving') return 1
+  if (stage === 'building') return 2
+  if (stage === 'validating') return 3
+  if (stage === 'reviewing') return 4
+  if (stage === 'waiting-approval') return 5
+  if (stage === 'waiting-activation') return 6
+  if (stage === 'live') return 7
+  return -1
+}
+
+function stageLabel(stage: string): string {
+  return stage.replaceAll('-', ' ').toUpperCase()
+}
+
 export interface ConversationWorkspaceState {
   readonly connected: boolean
   readonly sending: boolean
@@ -295,6 +338,7 @@ export function ConversationWorkspace(props: {
     && state.activations.length === 0
     && pendingProposals.length === 0
     && !props.view.workBrief?.markdown
+    && !props.view.workContext
   const scrollViewport = useRef<HTMLDivElement>(null)
   const composerInput = useRef<HTMLTextAreaElement>(null)
   const followingTail = useRef(true)
@@ -312,7 +356,7 @@ export function ConversationWorkspace(props: {
     : (state.commands ?? []).filter((command) => command.name.startsWith(commandQuery)), [commandQuery, state.commands])
   const commandMenuOpen = commandMatches.length > 0
   const commandExecuting = state.sending && state.executingCommand !== undefined
-  const tailRevision = `${props.view.conversation.length}:${props.view.conversation.at(-1)?.text.length ?? 0}:${pendingApprovals.length}:${pendingProposals.length}:${state.activations.length}:${state.sending ? 1 : 0}`
+  const tailRevision = `${props.view.conversation.length}:${props.view.conversation.at(-1)?.text.length ?? 0}:${pendingApprovals.length}:${pendingProposals.length}:${state.activations.length}:${props.view.workContext?.stage ?? ''}:${state.sending ? 1 : 0}`
   useEffect(() => {
     if (props.active === false || !followingTail.current) return
     const viewport = scrollViewport.current
@@ -374,6 +418,7 @@ export function ConversationWorkspace(props: {
           followingTail.current = viewport.scrollHeight - viewport.clientHeight - viewport.scrollTop <= 32
         }}
       >
+        {props.view.workContext ? <WorkContextCard context={props.view.workContext} /> : null}
         {props.view.workBrief?.markdown ? (
           <details className="work-brief-card" data-work-brief-status={props.view.workBrief.status} open>
             <summary>

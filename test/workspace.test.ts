@@ -91,6 +91,20 @@ describe('TARS-NG mission-control workspace', () => {
     assert.equal(view.developmentControlPlaneSeparated, true)
   })
 
+  it('keeps the Session work context as a redacted read-only projection', () => {
+    const view = projectMissionControl(snapshot({
+      workContext: {
+        kind: 'capability-delivery', sessionId: 'delivery-1', objective: 'Use Authorization: Bearer hidden.value',
+        status: 'active', stage: 'building', capability: 'travel.records.read', specificationId: 'spec-1',
+      },
+    }))
+
+    assert.equal(view.workContext?.stage, 'building')
+    assert.equal(view.workContext?.specificationId, 'spec-1')
+    assert.doesNotMatch(view.workContext?.objective ?? '', /Authorization: Bearer/)
+    assert.match(view.workContext?.objective ?? '', /\[redacted\]/)
+  })
+
   it('B. keeps the skeptical-partner preferred shape out of generic flattery', () => {
     const scenario = PERSONALITY_CORPUS.find((item) => item.id === 'architecture-flaw')
     assert.ok(scenario)

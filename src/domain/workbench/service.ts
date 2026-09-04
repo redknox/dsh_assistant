@@ -51,6 +51,7 @@ import {
   WORKBENCH_MAX_TRAVERSAL_ENTRIES,
   WORKBENCH_MAX_WORKSPACE_BYTES,
   type CandidateWorkbench,
+  type CapabilityDeliveryContext,
   type CapabilityDeliveryProposal,
   type CapabilityDeliveryStop,
   type WorkbenchCandidateView,
@@ -71,6 +72,15 @@ interface Binding {
   readonly runtimeContractVersion?: string
   readonly specificationId?: string
   readonly specificationDigest?: string
+}
+
+function deliveryStageFromCandidate(step: WorkbenchCandidateView['step']): CapabilityDeliveryContext['stage'] {
+  if (step === 'author') return 'building'
+  if (step === 'validate') return 'validating'
+  if (step === 'review' || step === 'repair') return 'reviewing'
+  if (step === 'request') return 'waiting-approval'
+  if (step === 'approved') return 'waiting-activation'
+  return 'live'
 }
 
 export class WorkbenchService implements CandidateWorkbench {
@@ -156,6 +166,75 @@ export class WorkbenchService implements CandidateWorkbench {
     this.proposals.set(id, next)
     this.flush()
     return next
+  }
+
+  inspectDeliverySession(sessionId: string): CapabilityDeliveryContext | undefined {
+    const proposals = [...this.proposals.values()].reverse()
+    const proposal = proposals.find((item) => item.deliverySessionId === sessionId)
+    const sessionSpecifications = [...this.specifications.values()].filter((item) => (
+      item.origin?.sessionId === sessionId
+      && (!proposal || item.capability === proposal.review.capability)
+    ))
+    const specification = sessionSpecifications
+      .filter((item) => !sessionSpecifications.some((successor) => successor.supersedesId === item.id))
+      .sort((left, right) => right.revision - left.revision)[0]
+    if (!proposal && !specification) return undefined
+
+    const capability = specification?.capability ?? proposal!.review.capability
+    const objective = specification?.goal ?? proposal!.review.need
+    const plan = specification
+      ? [...this.plans.values()].reverse().find((item) => item.specificationId === specification.id)
+      : undefined
+    const candidate = plan
+      ? [...this.workspace.list()].reverse().find((item) => this.bindings.get(item.id)?.planId === plan.id)
+      : undefined
+    const candidateView = candidate ? this.inspect(candidate.id) : undefined
+    const deliveryStop = specification ? this.deliveryStops.get(specification.id) : undefined
+
+    let stage: CapabilityDeliveryContext['stage']
+    let status: CapabilityDeliveryContext['status'] = 'active'
+    if (deliveryStop) {
+      stage = 'stopped'
+      status = 'complete'
+    } else if (candidateView) {
+      stage = deliveryStageFromCandidate(candidateView.step)
+      if (stage === 'waiting-approval' || stage === 'waiting-activation') status = 'waiting'
+      if (stage === 'live') status = 'complete'
+      if (candidateView.activationState === 'failed' || candidateView.lifecycle === 'validation-failed') status = 'blocked'
+    } else if (plan) {
+      if (plan.review.kind === 'reuse') {
+        stage = 'live'
+        status = 'complete'
+      } else if (plan.review.kind === 'insufficient-information') {
+        stage = 'defining'
+        status = 'waiting'
+      } else if (plan.review.kind === 'conflict') {
+        stage = 'resolving'
+        status = 'blocked'
+      } else if (plan.review.kind === 'host-product-change-required') {
+        stage = 'building'
+        status = 'blocked'
+      } else {
+        stage = 'building'
+      }
+    } else if (specification) {
+      stage = specification.status === 'needs-clarification' ? 'defining' : 'resolving'
+      if (specification.status === 'needs-clarification') status = 'waiting'
+    } else {
+      stage = 'defining'
+    }
+
+    return {
+      sessionId,
+      capability,
+      objective,
+      stage,
+      status,
+      ...(proposal ? { proposalId: proposal.id, resolutionKind: proposal.review.kind } : {}),
+      ...(specification ? { specificationId: specification.id } : {}),
+      ...(plan ? { planId: plan.id, resolutionKind: plan.review.kind } : {}),
+      ...(candidate ? { candidateId: candidate.id } : {}),
+    }
   }
 
   defineSpecification(input: CapabilitySpecificationInput): CapabilitySpecification {
