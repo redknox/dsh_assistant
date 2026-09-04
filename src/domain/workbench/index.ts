@@ -22,6 +22,7 @@ export type {
 } from './capability-specification.js'
 export type {
   CandidateWorkbench,
+  CapabilityDeliveryProposal,
   WorkbenchBinding,
   WorkbenchCandidateView,
   WorkbenchCreateInput,

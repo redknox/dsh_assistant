@@ -119,6 +119,26 @@ export function registerWorkbenchTools(
     }
   }
 
+  const disposeProposeCapability = tools.register(defineTool({
+    name: 'propose_capability_delivery',
+    description: 'Create a user-facing, advisory proposal for a clear durable capability gap. This does not define a specification, create code, request approval, activate anything, or start a Session. Call once, then wait for the user to decide on the proposal card.',
+    parameters: {
+      capability: { type: 'string', required: true },
+      need: { type: 'string', required: true },
+      behavior: { type: 'string' },
+    },
+    output: textOutput(),
+    async execute(args, exec) {
+      if (!exec.agent) throw new Error('capability proposal requires a trusted Session')
+      return JSON.stringify(workbench.proposeCapability({
+        capability: String(args.capability),
+        need: String(args.need),
+        ...(typeof args.behavior === 'string' && args.behavior !== '' ? { behavior: args.behavior } : {}),
+        sessionId: String(exec.agent.id),
+      }))
+    },
+  }))
+
 
   const disposeDefineSpecification = tools.register(defineTool({
     name: 'define_capability_specification',
@@ -336,6 +356,7 @@ export function registerWorkbenchTools(
     disposeInspectReview()
     disposeInspectSpecification()
     disposeCompareSpecifications()
+    disposeProposeCapability()
     disposeDefineSpecification()
     disposeReviseSpecification()
     disposePlan()

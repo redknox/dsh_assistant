@@ -3,6 +3,7 @@ import type { MissionControlView, WebUiAcknowledgement } from '../../src/domain/
 import type { CommandDescriptor } from '@deepseek-ai/dsh-commands'
 import type { ToolCatalogView } from '../../src/domain/tool-catalog/index'
 import type { WorkflowCatalogView } from '../../src/domain/workflow-catalog/index'
+import type { WorkbenchSnapshotView } from '../../src/product/web-ui-workbench-types'
 import {
   establishSession,
   fetchView,
@@ -16,6 +17,7 @@ export interface MissionControlRuntime {
   readonly commands: readonly CommandDescriptor[]
   readonly toolCatalog?: ToolCatalogView
   readonly workflowCatalog?: WorkflowCatalogView
+  readonly workbench?: WorkbenchSnapshotView
   readonly error?: string
   readonly acknowledgement?: WebUiAcknowledgement
   readonly perform: (
@@ -84,6 +86,7 @@ export function useMissionControlRuntime(): MissionControlRuntime {
     commands: envelope?.commands ?? [],
     toolCatalog: envelope?.toolCatalog,
     workflowCatalog: envelope?.workflowCatalog,
+    workbench: envelope?.workbench,
     connected,
     error,
     acknowledgement,

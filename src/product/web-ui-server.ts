@@ -23,7 +23,7 @@ import { WebUiHttpTransport } from './web-ui-http.js'
 import type { ProductSettings } from './settings.js'
 import { handleWebUiSettingsRequest } from './web-ui-settings.js'
 import { handleWebUiTaskControlRequest } from './web-ui-task-control.js'
-import { handleWebUiWorkbenchRequest } from './web-ui-workbench.js'
+import { handleWebUiWorkbenchRequest, projectWebUiWorkbench } from './web-ui-workbench.js'
 import type { CandidateWorkbench } from '../domain/workbench/index.js'
 import type { ExpenseRiskReviewModule } from '../domain/expense-review/index.js'
 import { handleWebUiExpenseReviewRequest } from './web-ui-expense-review.js'
@@ -39,7 +39,7 @@ export interface WebUiServerOptions extends WebUiListenOptions {
   readonly sessionHost?: LiveSessionHost
   readonly settings?: ProductSettings
   readonly workbench?: Pick<CandidateWorkbench,
-    'list' | 'inspectSpecification' | 'inspectSpecificationEvaluation' | 'defineSpecification' | 'reviseSpecification' | 'compareSpecifications' | 'stopSpecification'>
+    'list' | 'inspectSpecification' | 'inspectSpecificationEvaluation' | 'defineSpecification' | 'reviseSpecification' | 'compareSpecifications' | 'stopSpecification' | 'listCapabilityProposals' | 'decideCapabilityProposal'>
   readonly workbenchMutable?: boolean
   readonly expenseReview?: Pick<ExpenseRiskReviewModule, 'inspect' | 'review'>
 }
@@ -74,6 +74,7 @@ export function startWebUiServer(options: WebUiServerOptions): Promise<WebUiServ
     commands: options.surface.listCommands(),
     toolCatalog: options.surface.listTools(),
     workflowCatalog: options.surface.listWorkflows(),
+    ...(options.workbench ? { workbench: projectWebUiWorkbench(options.workbench.list({ limit: 50 }), options.workbenchMutable === true) } : {}),
     ...(extra.acknowledgement ? { acknowledgement: extra.acknowledgement } : {}),
   })
 
@@ -196,6 +197,20 @@ export function startWebUiServer(options: WebUiServerOptions): Promise<WebUiServ
           workbench: options.workbench,
           mutable: options.workbenchMutable === true,
           currentSessionId: () => options.surface.sessionId,
+          project: () => envelope(),
+          declineProposal: (proposalId) => {
+            const proposal = options.workbench!.listCapabilityProposals().find((item) => item.id === proposalId)
+            if (!proposal || proposal.status !== 'pending') throw new Error('capability-proposal-not-pending')
+            if (proposal.originSessionId !== options.surface.sessionId) throw new Error('capability-proposal-session-mismatch')
+            options.workbench!.decideCapabilityProposal(proposalId, 'declined')
+          },
+          startProposal: options.sessionHost ? async (proposalId, expected) => {
+            const proposal = options.workbench!.listCapabilityProposals().find((item) => item.id === proposalId)
+            if (!proposal || proposal.status !== 'pending') throw new Error('capability-proposal-not-pending')
+            if (proposal.originSessionId !== options.surface.sessionId) throw new Error('capability-proposal-session-mismatch')
+            const catalog = await options.sessionHost!.create(`Build · ${proposal.review.capability}`, expected)
+            options.workbench!.decideCapabilityProposal(proposalId, 'started', catalog.currentSessionId)
+          } : undefined,
         })
         if (workbench) {
           sendJson(res, workbench.status, workbench.body)

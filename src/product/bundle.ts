@@ -111,6 +111,7 @@ export const PRODUCT_TOOL_NAMES = [
   'list_capabilities',
   'lookup_capability',
   'review_capability_resolution',
+  'propose_capability_delivery',
   'inspect_extension_governance',
   'request_extension_approval',
   'remember_memory',

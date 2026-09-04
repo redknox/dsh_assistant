@@ -47,12 +47,23 @@ export interface WorkbenchBinding {
 }
 
 export interface WorkbenchPersistState {
+  readonly nextProposal?: number
   readonly nextPlan: number
   readonly nextSpecification: number
   readonly specifications: readonly CapabilitySpecification[]
   readonly plans: readonly WorkbenchPlan[]
   readonly bindings: readonly WorkbenchBinding[]
   readonly deliveryStops?: readonly CapabilityDeliveryStop[]
+  readonly proposals?: readonly CapabilityDeliveryProposal[]
+}
+
+export interface CapabilityDeliveryProposal {
+  readonly id: string
+  readonly review: ResolutionReview
+  readonly originSessionId: string
+  readonly status: 'pending' | 'declined' | 'started'
+  readonly createdAt: string
+  readonly deliverySessionId?: string
 }
 
 export interface CapabilityDeliveryStop {
@@ -150,6 +161,9 @@ export interface WorkbenchServiceOptions {
 }
 
 export interface CandidateWorkbench {
+  proposeCapability(input: { readonly capability: string; readonly need: string; readonly behavior?: string; readonly sessionId: string }): CapabilityDeliveryProposal
+  listCapabilityProposals(): readonly CapabilityDeliveryProposal[]
+  decideCapabilityProposal(id: string, decision: 'declined' | 'started', deliverySessionId?: string): CapabilityDeliveryProposal
   defineSpecification(input: CapabilitySpecificationInput): CapabilitySpecification
   reviseSpecification(specificationId: string, patch: CapabilitySpecificationPatch): CapabilitySpecification
   compareSpecifications(fromSpecificationId: string, toSpecificationId: string): CapabilitySpecificationDiff

@@ -30,7 +30,7 @@ type CompactSurface = 'conversation' | 'navigation' | 'operations'
 
 export interface MissionControlScreenProps {
   readonly view: MissionControlView
-  readonly runtime: Pick<MissionControlRuntime, 'connected' | 'error' | 'acknowledgement' | 'dismissAcknowledgement' | 'perform' | 'toolCatalog' | 'workflowCatalog'>
+  readonly runtime: Pick<MissionControlRuntime, 'connected' | 'error' | 'acknowledgement' | 'dismissAcknowledgement' | 'perform' | 'toolCatalog' | 'workflowCatalog' | 'workbench'>
   readonly conversation: ConversationControl
   readonly governance: GovernanceControl
   readonly workspace: WorkspaceControl
@@ -298,6 +298,7 @@ export function MissionControlScreen(input: MissionControlScreenProps) {
         ) : (
         <ConversationWorkspace
           view={view}
+          proposals={input.runtime.workbench?.proposals}
           active={compactSurface === 'conversation'}
           state={{
             connected: props.connected,
@@ -323,6 +324,12 @@ export function MissionControlScreen(input: MissionControlScreenProps) {
             abandonActivation: props.onAbandonActivation ?? (() => {}),
             deferActivation: props.onDeferActivation ?? (() => {}),
             pickSkill: props.onPickSkill,
+            decideCapabilityProposal: (proposal, decision) => input.conversation.dispatch({
+              action: 'decide-capability-proposal',
+              id: proposal.id,
+              decision,
+              ...(decision === 'started' ? { draft: `我已确认开始建设能力 ${proposal.review.capability}。请先定义 Capability Specification，并基于提案建议 ${proposal.review.recommendation} 继续。` } : {}),
+            }),
           }}
         />
         )}

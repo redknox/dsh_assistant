@@ -1,6 +1,6 @@
 import { useRef, useState } from 'react'
 import type { CommandDescriptor } from '@deepseek-ai/dsh-commands'
-import { runConversation, sendMessage } from './api'
+import { decideCapabilityProposal, runConversation, sendMessage } from './api'
 import type { MissionControlRuntime } from './useMissionControlRuntime'
 
 export type ConversationEvent =
@@ -9,6 +9,7 @@ export type ConversationEvent =
   | { readonly action: 'send' }
   | { readonly action: 'create' }
   | { readonly action: 'start-capability'; readonly title: string; readonly draft: string }
+  | { readonly action: 'decide-capability-proposal'; readonly id: string; readonly decision: 'declined' | 'started'; readonly draft?: string }
   | { readonly action: 'switch'; readonly id: string }
   | { readonly action: 'rename'; readonly id: string; readonly title: string }
   | { readonly action: 'archive'; readonly id: string }
@@ -59,6 +60,16 @@ export function useConversationControl(
     const reference = {
       sessionId: runtime.view?.runtimeContext?.sessionId ?? runtime.view?.sessions?.currentSessionId ?? 'main',
       revision: runtime.view?.sessions?.revision ?? 0,
+    }
+    if (event.action === 'decide-capability-proposal') {
+      void (async () => {
+        const next = await runtime.perform(
+          () => decideCapabilityProposal({ proposalId: event.id, decision: event.decision, ...reference }),
+          'unable to update capability proposal',
+        )
+        if (next && event.decision === 'started' && event.draft) setDraft(event.draft)
+      })()
+      return
     }
     if (event.action === 'create') {
       void runtime.perform(() => runConversation('create', reference))

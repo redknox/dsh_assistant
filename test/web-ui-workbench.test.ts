@@ -100,12 +100,29 @@ describe('Web UI Capability Workbench adapter', () => {
     assert.equal(stopped?.broadcast, true)
     assert.deepEqual(received, { specificationId: 'spec-1', sessionId: 'trusted-current-session' })
   })
+
+  it('starts a proposal only through the host Session seam', async () => {
+    let started: string | undefined
+    const context = fakeContext()
+    const result = await handleWebUiWorkbenchRequest(request('POST', '/api/workbench/proposal/decide', {}, {
+      proposalId: 'proposal-1', decision: 'started', sessionId: 'main', revision: 3,
+    }), {
+      ...context,
+      startProposal: async (id, expected) => { started = `${id}:${expected.sessionId}:${expected.revision}` },
+      project: () => ({ view: 'projected' }),
+    })
+    assert.equal(result?.status, 200)
+    assert.equal(result?.broadcast, true)
+    assert.equal(started, 'proposal-1:main:3')
+    assert.deepEqual(result?.body, { view: 'projected' })
+  })
 })
 
 function fakeContext(onRevise: () => void = () => {}): WebUiWorkbenchContext {
   return {
     mutable: true,
     currentSessionId: () => 'main',
+    declineProposal: () => {},
     workbench: {
       list: () => ({ specifications: [SPECIFICATION], plans: [], candidates: [] }) as never,
       inspectSpecification: () => SPECIFICATION as never,

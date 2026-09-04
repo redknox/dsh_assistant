@@ -676,13 +676,18 @@ button.nav-item::after { content: "›"; color: #7f857f; font: 500 22px/1 var(--
 .attention-routes .button { width: 100%; justify-content: flex-start; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .capability-card--focused { outline: 3px solid rgb(153 91 36 / 45%); outline-offset: 3px; }
 
-.approval-card {
+.approval-card,
+.capability-proposal-card {
   margin-top: 28px;
   border: 2px solid var(--line);
   border-radius: 10px;
   overflow: hidden;
   background: #e4d8c6;
 }
+.capability-proposal-card { border-color: #766342; box-shadow: 0 10px 22px rgb(56 43 24 / 16%), inset 0 1px #fff9; }
+.capability-proposal-implications { margin: 0; padding: 13px 40px; border-top: 1px solid var(--line-soft); color: #51483b; font: 500 12px/1.45 var(--font-body); }
+.capability-proposal-note { display: grid; gap: 5px; margin: 0; padding: 11px 20px; border-top: 1px solid var(--line-soft); color: #51483b; font-size: 12px; }
+.capability-proposal-note strong { color: #725126; font: 750 8px/1 var(--font-instrument); letter-spacing: .1em; }
 .approval-header { display: flex; align-items: center; gap: 12px; padding: 16px 20px; border-bottom: 1px solid var(--line-soft); }
 .approval-header h2 { margin: 0; font: 700 18px/1.2 var(--font-instrument); letter-spacing: .04em; }
 .approval-kicker { margin: 0 0 3px; color: var(--muted); font: 650 11px/1.2 var(--font-instrument); letter-spacing: .12em; }

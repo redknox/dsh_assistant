@@ -51,6 +51,7 @@ import {
   WORKBENCH_MAX_TRAVERSAL_ENTRIES,
   WORKBENCH_MAX_WORKSPACE_BYTES,
   type CandidateWorkbench,
+  type CapabilityDeliveryProposal,
   type CapabilityDeliveryStop,
   type WorkbenchCandidateView,
   type WorkbenchCreateInput,
@@ -73,12 +74,14 @@ interface Binding {
 }
 
 export class WorkbenchService implements CandidateWorkbench {
+  private nextProposal = 1
   private nextPlan = 1
   private nextSpecification = 1
   private readonly specifications = new Map<string, CapabilitySpecification>()
   private readonly plans = new Map<string, WorkbenchPlan>()
   private readonly bindings = new Map<string, Binding>()
   private readonly deliveryStops = new Map<string, CapabilityDeliveryStop>()
+  private readonly proposals = new Map<string, CapabilityDeliveryProposal>()
   private readonly evaluation = new CapabilityEvaluationHarness()
 
   constructor(
@@ -92,6 +95,7 @@ export class WorkbenchService implements CandidateWorkbench {
     const restore = options.restore
     if (restore === undefined) return
     this.nextPlan = restore.nextPlan
+    this.nextProposal = restore.nextProposal ?? 1
     this.nextSpecification = restore.nextSpecification
     for (const specification of restore.specifications) this.specifications.set(specification.id, specification)
     for (const plan of restore.plans) this.plans.set(plan.id, plan)
@@ -107,6 +111,51 @@ export class WorkbenchService implements CandidateWorkbench {
       })
     }
     for (const stop of restore.deliveryStops ?? []) this.deliveryStops.set(stop.specificationId, stop)
+    for (const proposal of restore.proposals ?? []) this.proposals.set(proposal.id, proposal)
+  }
+
+  proposeCapability(input: { capability: string; need: string; behavior?: string; sessionId: string }): CapabilityDeliveryProposal {
+    const existing = [...this.proposals.values()].find((proposal) => (
+      proposal.status === 'pending'
+      && proposal.originSessionId === input.sessionId
+      && proposal.review.capability === input.capability
+    ))
+    if (existing) return existing
+    const review = this.resolution.review({
+      capability: input.capability,
+      need: input.need,
+      ...(input.behavior ? { behavior: input.behavior } : {}),
+      ...(this.options.inventory ? { inventory: this.options.inventory.snapshot() } : {}),
+    })
+    const proposal: CapabilityDeliveryProposal = {
+      id: `proposal-${this.nextProposal++}`,
+      review,
+      originSessionId: input.sessionId,
+      status: 'pending',
+      createdAt: (this.options.now?.() ?? new Date()).toISOString(),
+    }
+    this.proposals.set(proposal.id, proposal)
+    this.flush()
+    return proposal
+  }
+
+  listCapabilityProposals(): readonly CapabilityDeliveryProposal[] {
+    return [...this.proposals.values()]
+  }
+
+  decideCapabilityProposal(id: string, decision: 'declined' | 'started', deliverySessionId?: string): CapabilityDeliveryProposal {
+    const current = this.proposals.get(id)
+    if (!current) throw new WorkbenchContractError(`unknown capability proposal: ${id}`)
+    if (current.status !== 'pending') return current
+    if (decision === 'started' && !deliverySessionId) throw new WorkbenchContractError('started proposal requires a delivery session')
+    const next: CapabilityDeliveryProposal = {
+      ...current,
+      status: decision,
+      ...(deliverySessionId ? { deliverySessionId } : {}),
+    }
+    this.proposals.set(id, next)
+    this.flush()
+    return next
   }
 
   defineSpecification(input: CapabilitySpecificationInput): CapabilitySpecification {
@@ -474,6 +523,7 @@ export class WorkbenchService implements CandidateWorkbench {
       })
       : undefined
     return {
+      proposals: this.listCapabilityProposals(),
       specifications: specificationSlice,
       plans: planSlice,
       candidates: candidateSlice,
@@ -654,6 +704,7 @@ export class WorkbenchService implements CandidateWorkbench {
 
   exportState(): WorkbenchPersistState {
     return {
+      nextProposal: this.nextProposal,
       nextPlan: this.nextPlan,
       nextSpecification: this.nextSpecification,
       specifications: [...this.specifications.values()],
@@ -669,6 +720,7 @@ export class WorkbenchService implements CandidateWorkbench {
         ...(binding.specificationDigest === undefined ? {} : { specificationDigest: binding.specificationDigest }),
       })),
       deliveryStops: [...this.deliveryStops.values()],
+      proposals: this.listCapabilityProposals(),
     }
   }
 

@@ -20,6 +20,7 @@ export interface UiEnvelope {
   readonly commands?: readonly CommandDescriptor[]
   readonly toolCatalog?: ToolCatalogView
   readonly workflowCatalog?: WorkflowCatalogView
+  readonly workbench?: WorkbenchSnapshotView
   readonly acknowledgement?: WebUiAcknowledgement
 }
 
@@ -151,6 +152,20 @@ export async function stopCapabilityDelivery(specificationId: string): Promise<v
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ specificationId }),
   }), 'capability delivery stop')
+}
+
+export async function decideCapabilityProposal(input: {
+  readonly proposalId: string
+  readonly decision: 'declined' | 'started'
+  readonly sessionId: string
+  readonly revision: number
+}): Promise<UiEnvelope> {
+  return parseEnvelope(await fetch('/api/workbench/proposal/decide', {
+    ...include,
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(input),
+  }))
 }
 
 async function parseJson<T>(response: Response, label: string): Promise<T> {

@@ -25,6 +25,23 @@ export interface CapabilityPlanSummaryView {
   readonly implications?: readonly string[]
 }
 
+export interface CapabilityDeliveryProposalView {
+  readonly id: string
+  readonly originSessionId: string
+  readonly status: 'pending' | 'declined' | 'started'
+  readonly createdAt: string
+  readonly deliverySessionId?: string
+  readonly review: {
+    readonly kind: string
+    readonly capability: string
+    readonly need: string
+    readonly recommendation: string
+    readonly rationale: string
+    readonly implications: readonly string[]
+    readonly unresolved: readonly string[]
+  }
+}
+
 export interface CapabilityCandidateSummaryView {
   readonly id: string
   readonly owner: string
@@ -123,6 +140,7 @@ export interface CapabilitySpecificationCreateInput {
 }
 
 export interface WorkbenchSnapshotView {
+  readonly proposals: readonly CapabilityDeliveryProposalView[]
   readonly specifications: readonly CapabilitySpecificationSummaryView[]
   readonly plans: readonly CapabilityPlanSummaryView[]
   readonly candidates: readonly CapabilityCandidateSummaryView[]

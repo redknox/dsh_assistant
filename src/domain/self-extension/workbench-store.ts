@@ -12,12 +12,14 @@ import { SELF_EXTENSION_SCHEMA_VERSION, type SelfExtensionHome } from './home.js
 
 export interface WorkbenchFile {
   readonly schemaVersion: number
+  readonly nextProposal?: number
   readonly nextPlan: number
   readonly nextSpecification?: number
   readonly specifications?: readonly CapabilitySpecification[]
   readonly plans: readonly WorkbenchPlan[]
   readonly bindings: WorkbenchPersistState['bindings']
   readonly deliveryStops?: WorkbenchPersistState['deliveryStops']
+  readonly proposals?: WorkbenchPersistState['proposals']
 }
 
 function isObject(value: unknown): value is Record<string, unknown> {
@@ -154,6 +156,14 @@ export function parseWorkbenchFile(parsed: unknown): WorkbenchFile {
   if (new Set(deliveryStops.map((item) => item.specificationId)).size !== deliveryStops.length) {
     throw new PersistenceIntegrityError('workbench delivery stop specification ids must be unique')
   }
+  const proposals = Array.isArray(parsed.proposals) ? parsed.proposals.map(parseProposal) : []
+  if (new Set(proposals.map((item) => item.id)).size !== proposals.length) {
+    throw new PersistenceIntegrityError('workbench capability proposal ids must be unique')
+  }
+  const nextProposal = Math.max(0, ...proposals.map((item) => /^proposal-(\d+)$/.exec(item.id)?.[1]).filter((item): item is string => item !== undefined).map(Number)) + 1
+  if (parsed.nextProposal !== undefined && (typeof parsed.nextProposal !== 'number' || !Number.isInteger(parsed.nextProposal) || parsed.nextProposal < nextProposal)) {
+    throw new PersistenceIntegrityError('workbench nextProposal must be greater than existing proposal ids')
+  }
   const nextSpecification = nextSpecificationAfter(specifications)
   if (parsed.nextSpecification !== undefined
     && (typeof parsed.nextSpecification !== 'number' || !Number.isInteger(parsed.nextSpecification) || parsed.nextSpecification < nextSpecification)) {
@@ -167,12 +177,14 @@ export function parseWorkbenchFile(parsed: unknown): WorkbenchFile {
     plans,
     bindings,
     deliveryStops,
+    nextProposal: (parsed.nextProposal as number | undefined) ?? nextProposal,
+    proposals,
   }
 }
 
 /** Host-owned Workbench plans and lineage bindings. Corrupt files fail closed. */
 export class DurableWorkbenchStore {
-  private state: WorkbenchPersistState = { nextPlan: 1, nextSpecification: 1, specifications: [], plans: [], bindings: [], deliveryStops: [] }
+  private state: WorkbenchPersistState = { nextProposal: 1, nextPlan: 1, nextSpecification: 1, specifications: [], plans: [], bindings: [], deliveryStops: [], proposals: [] }
 
   constructor(private readonly home: SelfExtensionHome) {
     if (!existsSync(home.workbenchPath)) return
@@ -191,12 +203,14 @@ export class DurableWorkbenchStore {
   save(state: WorkbenchPersistState): void {
     const file: WorkbenchFile = {
       schemaVersion: SELF_EXTENSION_SCHEMA_VERSION,
+      nextProposal: state.nextProposal,
       nextPlan: state.nextPlan,
       nextSpecification: state.nextSpecification,
       specifications: state.specifications,
       plans: state.plans,
       bindings: state.bindings,
       deliveryStops: state.deliveryStops ?? [],
+      proposals: state.proposals ?? [],
     }
     parseWorkbenchFile(file)
     this.state = snapshotOf(file)
@@ -206,12 +220,34 @@ export class DurableWorkbenchStore {
 
 function snapshotOf(file: WorkbenchFile): WorkbenchPersistState {
   return {
+    nextProposal: file.nextProposal ?? 1,
     nextPlan: file.nextPlan,
     nextSpecification: file.nextSpecification ?? nextSpecificationAfter(file.specifications ?? []),
     specifications: file.specifications ?? [],
     plans: file.plans,
     bindings: file.bindings,
     deliveryStops: file.deliveryStops ?? [],
+    proposals: file.proposals ?? [],
+  }
+}
+
+function parseProposal(value: unknown, index: number): NonNullable<WorkbenchPersistState['proposals']>[number] {
+  if (!isObject(value)
+    || typeof value.id !== 'string'
+    || typeof value.originSessionId !== 'string'
+    || !['pending', 'declined', 'started'].includes(String(value.status))
+    || typeof value.createdAt !== 'string'
+    || Number.isNaN(Date.parse(value.createdAt))
+    || (value.deliverySessionId !== undefined && typeof value.deliverySessionId !== 'string')) {
+    throw new PersistenceIntegrityError(`workbench capability proposal ${index} is invalid`)
+  }
+  return {
+    id: value.id,
+    review: parseReview(value.review, value.id),
+    originSessionId: value.originSessionId,
+    status: value.status as 'pending' | 'declined' | 'started',
+    createdAt: value.createdAt,
+    ...(typeof value.deliverySessionId === 'string' ? { deliverySessionId: value.deliverySessionId } : {}),
   }
 }
 

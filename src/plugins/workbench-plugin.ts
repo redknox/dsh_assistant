@@ -14,6 +14,12 @@ export class CandidateWorkbenchService extends Service implements CandidateWorkb
     super(ctx, 'candidateWorkbench')
   }
 
+  proposeCapability(input: Parameters<CandidateWorkbench['proposeCapability']>[0]) { return this.store.proposeCapability(input) }
+  listCapabilityProposals() { return this.store.listCapabilityProposals() }
+  decideCapabilityProposal(id: string, decision: 'declined' | 'started', deliverySessionId?: string) {
+    return this.store.decideCapabilityProposal(id, decision, deliverySessionId)
+  }
+
   defineSpecification(input: Parameters<CandidateWorkbench['defineSpecification']>[0]) { return this.store.defineSpecification(input) }
   reviseSpecification(specificationId: string, patch: Parameters<CandidateWorkbench['reviseSpecification']>[1]) {
     return this.store.reviseSpecification(specificationId, patch)
@@ -57,7 +63,9 @@ export interface WorkbenchPluginConfig extends WorkbenchServiceOptions {
 }
 
 export const WORKBENCH_CONVERSATION_GUIDANCE = [
-  'When the user asks to add a missing capability: define_capability_specification first, clarify unresolved questions with immutable revisions, compare revisions when useful, then resolve first with plan_capability_change and the chosen specificationId.',
+  'When a user request appears to need a durable or reusable capability that is currently missing, do not begin development immediately. Distinguish it from a one-off task, a question, or ordinary configuration. Ask a concise clarifying question when uncertain.',
+  'For a clear missing capability, call propose_capability_delivery once. Explain the recommended realization in user language and wait for the user to use the proposal card. The proposal tool cannot develop, approve, or activate anything.',
+  'Only after the host has moved the conversation into a dedicated capability-delivery Session may you define_capability_specification, clarify unresolved questions with immutable revisions, compare revisions when useful, then resolve first with plan_capability_change and the chosen specificationId.',
   'Prefer reuse, configure, or evolve an existing owner before new-plugin.',
   'Use Candidate Workbench tools. Read inspect_authoring_contract before scaffolding.',
   'Use scaffold_candidate, then bounded edits, then inspect_validation_diagnostics.',

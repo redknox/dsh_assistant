@@ -1535,6 +1535,38 @@ function rememberReplaceableEvolve(setup: ReturnType<typeof isolatedWorkbench>, 
   })
 }
 
+describe('capability delivery proposals', () => {
+  it('persists an advisory pre-development decision without creating a specification or candidate', () => {
+    let stored: WorkbenchPersistState | undefined
+    const setup = isolatedWorkbench(undefined, { persist: (state) => { stored = state } })
+    const { workbench } = setup
+    const proposal = workbench.proposeCapability({
+      capability: 'documents.summarize',
+      need: 'summarize documents repeatedly',
+      sessionId: 'main',
+    })
+    assert.equal(proposal.status, 'pending')
+    assert.equal(proposal.originSessionId, 'main')
+    assert.equal(workbench.list().specifications.length, 0)
+    assert.equal(workbench.list().candidates.length, 0)
+    assert.equal(stored?.proposals?.length, 1)
+
+    const restored = new WorkbenchService(
+      new ResolutionService(setup.registry),
+      setup.workspace,
+      setup.workspace,
+      setup.independent,
+      setup.governance,
+      { restore: stored },
+    )
+    assert.equal(restored.listCapabilityProposals()[0]?.id, proposal.id)
+
+    const started = workbench.decideCapabilityProposal(proposal.id, 'started', 'delivery-1')
+    assert.equal(started.deliverySessionId, 'delivery-1')
+    assert.equal(workbench.list().proposals[0]?.status, 'started')
+  })
+})
+
 function isolatedWorkbench(provider?: PolicyReviewerProvider, options: { persist?: (state: WorkbenchPersistState) => void } = {}) {
   const registry = new RegistryService(new InMemoryRegistryPersistence())
   bootstrapCoreInventory((input) => registry.register(input))

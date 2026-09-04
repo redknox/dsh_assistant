@@ -70,6 +70,7 @@ export interface WorkbenchListCandidateItem {
 }
 
 export interface WorkbenchListView {
+  readonly proposals: readonly import('./types.js').CapabilityDeliveryProposal[]
   readonly specifications: readonly WorkbenchListSpecificationItem[]
   readonly plans: readonly WorkbenchListPlanItem[]
   readonly candidates: readonly WorkbenchListCandidateItem[]

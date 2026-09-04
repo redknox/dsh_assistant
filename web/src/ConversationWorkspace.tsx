@@ -6,6 +6,7 @@ import { Glyph } from './icons'
 import { MarkdownMessage } from './MarkdownMessage'
 import { formatDiff, isPendingApproval, skillInvocationSurfaceOpen } from './missionControlPresentation'
 import { listFileReferences } from './api'
+import type { CapabilityDeliveryProposalView } from '../../src/product/web-ui-workbench-types'
 
 export interface ConversationWorkspaceState {
   readonly connected: boolean
@@ -28,6 +29,47 @@ export interface ConversationWorkspaceActions {
   readonly abandonActivation: (card: ActivationCard) => void
   readonly deferActivation: (card: ActivationCard) => void
   readonly pickSkill?: (skill: SkillProjection) => void
+  readonly decideCapabilityProposal?: (proposal: CapabilityDeliveryProposalView, decision: 'declined' | 'started') => void
+}
+
+function CapabilityProposalCard(props: {
+  readonly proposal: CapabilityDeliveryProposalView
+  readonly locked: boolean
+  readonly decide?: ConversationWorkspaceActions['decideCapabilityProposal']
+}) {
+  const { proposal } = props
+  const review = proposal.review
+  return (
+    <article className="capability-proposal-card" data-capability-proposal={proposal.id}>
+      <header className="approval-header">
+        <Glyph name="capabilities" className="glyph approval-symbol" />
+        <div><p className="approval-kicker">CAPABILITY PROPOSAL · NO DEVELOPMENT STARTED</p><h2>{review.need}</h2></div>
+        <span className="approval-scope-badge">{resolutionLabel(review.kind)}</span>
+      </header>
+      <div className="approval-explanation">
+        <section><strong>RECOMMENDED APPROACH</strong><p>{review.recommendation}</p></section>
+        <section><strong>WHY</strong><p>{review.rationale}</p></section>
+      </div>
+      {review.implications.length > 0 ? <ul className="capability-proposal-implications">{review.implications.map((item) => <li key={item}>{item}</li>)}</ul> : null}
+      {review.unresolved.length > 0 ? <p className="capability-proposal-note"><strong>TO CLARIFY DURING DELIVERY</strong>{review.unresolved.join(' · ')}</p> : null}
+      <p className="approval-scope"><Glyph name="shield" /><span><strong>WHAT CONFIRMATION DOES</strong>Creates a dedicated delivery Session. Specification, implementation, approval, and activation remain separate governed steps.</span></p>
+      <div className="approval-actions">
+        <button type="button" className="button button--secondary" disabled={props.locked} onClick={() => props.decide?.(proposal, 'declined')}>NOT NOW</button>
+        <button type="button" className="button button--approval" disabled={props.locked} onClick={() => props.decide?.(proposal, 'started')}>START DELIVERY</button>
+      </div>
+    </article>
+  )
+}
+
+function resolutionLabel(kind: string): string {
+  if (kind === 'reuse') return 'REUSE'
+  if (kind === 'configure') return 'CONFIGURE'
+  if (kind === 'evolve-owner') return 'EVOLVE'
+  if (kind === 'adopt-existing') return 'ADOPT'
+  if (kind === 'implement-provider') return 'CONNECT'
+  if (kind === 'new-plugin') return 'NEW CAPABILITY'
+  if (kind === 'host-product-change-required') return 'PRODUCT CHANGE'
+  return 'NEEDS CLARITY'
 }
 
 function isUserMessage(kind: WorkObjectKind): boolean {
@@ -233,6 +275,7 @@ function eligibilityMessage(reason: string): string {
 
 export function ConversationWorkspace(props: {
   readonly view: MissionControlView
+  readonly proposals?: readonly CapabilityDeliveryProposalView[]
   readonly state: ConversationWorkspaceState
   readonly actions: ConversationWorkspaceActions
   readonly active?: boolean
@@ -244,9 +287,13 @@ export function ConversationWorkspace(props: {
   const pendingApprovals = useMemo(() => props.view.approvals.filter((card) => (
     isPendingApproval(card.status) && (!card.sessionId || card.sessionId === currentSessionId)
   )), [currentSessionId, props.view.approvals])
+  const pendingProposals = useMemo(() => props.proposals?.filter((proposal) => (
+    proposal.status === 'pending' && proposal.originSessionId === currentSessionId
+  )) ?? [], [currentSessionId, props.proposals])
   const empty = props.view.conversation.length === 0
     && pendingApprovals.length === 0
     && state.activations.length === 0
+    && pendingProposals.length === 0
     && !props.view.workBrief?.markdown
   const scrollViewport = useRef<HTMLDivElement>(null)
   const composerInput = useRef<HTMLTextAreaElement>(null)
@@ -265,7 +312,7 @@ export function ConversationWorkspace(props: {
     : (state.commands ?? []).filter((command) => command.name.startsWith(commandQuery)), [commandQuery, state.commands])
   const commandMenuOpen = commandMatches.length > 0
   const commandExecuting = state.sending && state.executingCommand !== undefined
-  const tailRevision = `${props.view.conversation.length}:${props.view.conversation.at(-1)?.text.length ?? 0}:${pendingApprovals.length}:${state.activations.length}:${state.sending ? 1 : 0}`
+  const tailRevision = `${props.view.conversation.length}:${props.view.conversation.at(-1)?.text.length ?? 0}:${pendingApprovals.length}:${pendingProposals.length}:${state.activations.length}:${state.sending ? 1 : 0}`
   useEffect(() => {
     if (props.active === false || !followingTail.current) return
     const viewport = scrollViewport.current
@@ -362,6 +409,7 @@ export function ConversationWorkspace(props: {
             </article>
           )
         })}
+        {pendingProposals.map((proposal) => <CapabilityProposalCard key={proposal.id} proposal={proposal} locked={locked} decide={actions.decideCapabilityProposal} />)}
         {pendingApprovals.map((card) => (
           <ApprovalCardView key={card.id} card={card} locked={locked} actions={actions} />
         ))}
