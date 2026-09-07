@@ -5,7 +5,7 @@ import path from 'node:path'
 import { describe, it } from 'node:test'
 import { CallId } from '@deepseek-ai/dsh-llm'
 import { CandidateService } from '../src/domain/candidate/index.js'
-import { CAPABILITY_EVALUATION_SUITE_STAMP } from '../src/domain/evaluation/index.js'
+import { CAPABILITY_EVALUATION_RUNNER, CAPABILITY_EVALUATION_SUITE_STAMP, CapabilityEvaluationHarness } from '../src/domain/evaluation/index.js'
 import {
   GENERATED_EXTENSION_API_V1,
   WORKBENCH_MAX_FILE_BYTES,
@@ -175,6 +175,14 @@ describe('candidate workbench', () => {
         candidateId: candidate.id,
         effects: { filesystem: ['outside-workspace'] },
       })).isError, true)
+
+      ctx.candidateWorkspace.writeFile(String(candidate.id), CAPABILITY_EVALUATION_RUNNER, '// stale host runner\n')
+      const refreshedValidation = await tool(ctx, 'validate_candidate', { candidateId: candidate.id })
+      assert.equal(refreshedValidation.isError, false, refreshedValidation.error?.message)
+      assert.equal(
+        ctx.candidateWorkspace.readFile(String(candidate.id), CAPABILITY_EVALUATION_RUNNER),
+        new CapabilityEvaluationHarness().prepare(specification)[CAPABILITY_EVALUATION_RUNNER],
+      )
 
       writeFileSync(
         path.join(ctx.candidateWorkspace.get(String(candidate.id)).workspaceRoot, 'capability-specification.json'),

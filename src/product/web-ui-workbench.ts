@@ -41,13 +41,14 @@ export interface WebUiWorkbenchRequest {
 
 export interface WebUiWorkbenchContext {
   readonly workbench: Pick<CandidateWorkbench,
-    'list' | 'inspectSpecification' | 'inspectSpecificationEvaluation' | 'defineSpecification' | 'reviseSpecification' | 'compareSpecifications' | 'stopSpecification'>
+    'list' | 'inspectSpecification' | 'inspectSpecificationEvaluation' | 'defineSpecification' | 'reviseSpecification' | 'compareSpecifications' | 'stopSpecification' | 'acceptPlan'>
   readonly mutable: boolean
   readonly currentSessionId: () => string
   readonly project?: () => unknown
   readonly startProposal?: (proposalId: string, expected: { readonly sessionId: string; readonly revision: number }) => Promise<void>
   readonly declineProposal?: (proposalId: string) => void
   readonly stopDelivery?: (specificationId: string) => Promise<unknown>
+  readonly acceptPlan?: (planId: string, sessionId: string) => Promise<unknown>
 }
 
 export async function handleWebUiWorkbenchRequest(
@@ -119,6 +120,18 @@ export async function handleWebUiWorkbenchRequest(
       body: context.stopDelivery
         ? await context.stopDelivery(body.specificationId)
         : context.workbench.stopSpecification(body.specificationId, { sessionId: context.currentSessionId() }),
+      broadcast: true,
+    }
+  }
+  if (request.pathname === '/api/workbench/plan/accept') {
+    if (!isRecord(body) || typeof body.planId !== 'string' || typeof body.sessionId !== 'string') {
+      return { status: 400, body: { error: 'malformed-resolution-plan-acceptance' } }
+    }
+    return {
+      status: 200,
+      body: context.acceptPlan
+        ? await context.acceptPlan(body.planId, body.sessionId)
+        : context.workbench.acceptPlan(body.planId, { sessionId: body.sessionId }),
       broadcast: true,
     }
   }

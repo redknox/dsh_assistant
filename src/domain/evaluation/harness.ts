@@ -19,9 +19,9 @@ const REPORT_MARKER = 'TARS_NG_CAPABILITY_EVALUATION '
 const MAX_REPORT_CHARS = 32 * 1024
 
 class RestrictedCapabilityEvaluationExecutor implements CapabilityEvaluationExecutor {
-  run(workspaceRoot: string, runnerPath: string): CapabilityEvaluationExecutorResult {
+  run(workspaceRoot: string, runnerPath: string, toolName?: string): CapabilityEvaluationExecutorResult {
     try {
-      return { stdout: runRestrictedCandidateTests(workspaceRoot, [runnerPath]) }
+      return { stdout: runRestrictedCandidateTests(workspaceRoot, [runnerPath], toolName ? { TARS_NG_EVALUATION_TOOL: toolName } : undefined) }
     } catch (error) {
       const failure = error as { stdout?: string | Buffer; stderr?: string | Buffer; message?: string; code?: string }
       const stdout = typeof failure.stdout === 'string' ? failure.stdout : failure.stdout?.toString('utf8') ?? ''
@@ -57,7 +57,7 @@ export class CapabilityEvaluationHarness {
     }
   }
 
-  evaluate(input: { readonly candidateId: string; readonly workspaceRoot: string }): CapabilityEvaluationReport {
+  evaluate(input: { readonly candidateId: string; readonly workspaceRoot: string; readonly toolName?: string }): CapabilityEvaluationReport {
     const suitePath = path.join(input.workspaceRoot, CAPABILITY_EVALUATION_SUITE_STAMP)
     const runnerPath = path.join(input.workspaceRoot, CAPABILITY_EVALUATION_RUNNER)
     if (!existsSync(suitePath) && !existsSync(runnerPath)) {
@@ -71,7 +71,7 @@ export class CapabilityEvaluationHarness {
     }
     const suite = parseSuite(readFileSync(suitePath, 'utf8'))
     if (suite === undefined) return report(input.candidateId, 'failed', 'Capability Evaluation suite is malformed.')
-    const execution = this.executor.run(input.workspaceRoot, CAPABILITY_EVALUATION_RUNNER)
+    const execution = this.executor.run(input.workspaceRoot, CAPABILITY_EVALUATION_RUNNER, input.toolName)
     const parsed = parseRunnerReport(execution.stdout, input.candidateId, suite)
     if (parsed !== undefined) return parsed
     if (execution.unavailable) {
@@ -221,8 +221,10 @@ if (typeof entry !== 'string' || manifest.entryPoints.length !== 1) throw new Er
 const imported = await import(pathToFileURL(path.resolve(entry)).href)
 const plugin = imported.default ?? imported
 await (plugin.apply ?? imported.apply)(ctx)
-if (!Array.isArray(manifest.tools) || manifest.tools.length !== 1) throw new Error('Capability Evaluation requires one declared tool')
-const tool = tools.get(manifest.tools[0])
+if (!Array.isArray(manifest.tools) || manifest.tools.length === 0) throw new Error('Capability Evaluation requires at least one declared tool')
+const selectedTool = process.env.TARS_NG_EVALUATION_TOOL ?? (manifest.tools.length === 1 ? manifest.tools[0] : undefined)
+if (!selectedTool || !manifest.tools.includes(selectedTool)) throw new Error('Capability Evaluation requires one selected declared tool')
+const tool = tools.get(selectedTool)
 if (!tool?.execute) throw new Error('declared Capability Evaluation tool was not registered')
 const cases = []
 for (const fixture of suite.cases) {

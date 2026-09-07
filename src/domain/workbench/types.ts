@@ -33,6 +33,10 @@ export interface WorkbenchPlan {
   readonly review: ResolutionReview
   readonly specificationId: string
   readonly specificationDigest: string
+  readonly acceptance?: {
+    readonly sessionId: string
+    readonly acceptedAt: string
+  }
 }
 
 export interface WorkbenchBinding {
@@ -109,6 +113,7 @@ export interface WorkbenchPlanView {
   readonly rationale: string
   readonly target?: ResolutionReview['target']
   readonly canCreate: boolean
+  readonly accepted: boolean
   readonly unresolved: readonly string[]
   readonly specification: CapabilitySpecification
 }
@@ -204,6 +209,7 @@ export interface CandidateWorkbench {
     readonly report?: CapabilityEvaluationReport
   }
   plan(input: { capability: string; need: string; behavior?: string } | { specificationId: string }): WorkbenchPlanView
+  acceptPlan(planId: string, control: { readonly sessionId: string }): WorkbenchPlanView
   rememberPlan(review: ResolutionReview): WorkbenchPlanView
   getPlan(planId: string): WorkbenchPlan
   create(input: WorkbenchCreateInput): WorkbenchCandidateView

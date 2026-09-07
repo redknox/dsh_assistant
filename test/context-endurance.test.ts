@@ -47,6 +47,26 @@ describe('Context Endurance', () => {
     }
   })
 
+  it('losslessly packs bursty assistant deltas in durable Session storage', async () => {
+    const sessionRoot = mkdtempSync(path.join(tmpdir(), 'tars-packed-session-'))
+    const control = await bootAssistantControl({ sessionRoot })
+    const handle = await createAssistantAgent(control.ctx, 'packed-session')
+    try {
+      handle.agent.session.append('turn/start', { turn: 0 })
+      handle.agent.session.append('step/start', { turn: 0, step: 0 })
+      handle.agent.session.append('assistant/chunk', { turn: 0, step: 0, chunk: { type: 'block-start', index: 0, blockType: 'text' } })
+      for (const text of ['one', 'two', 'three', 'four']) {
+        handle.agent.session.append('assistant/chunk', { turn: 0, step: 0, chunk: { type: 'text-delta', index: 0, text } })
+      }
+      await control.ctx.sessions.flush(handle.agent.session)
+      const raw = await control.ctx.sessionPersistence.readRaw(handle.agent.session.header.id)
+      assert.match(raw?.content ?? '', /"type":"text-chunks"/)
+    } finally {
+      await handle.dispose()
+      await control.ctx.fiber.dispose()
+    }
+  })
+
   it('checkpoints persisted sessions before model and tool dispatch and fails closed on flush rejection', async () => {
     const home = mkdtempSync(path.join(tmpdir(), 'tars-checkpoint-'))
     const sessionRoot = path.join(home, 'sessions')

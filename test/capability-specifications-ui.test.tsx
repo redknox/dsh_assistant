@@ -32,7 +32,7 @@ describe('Capability Specifications workspace', () => {
         loading: false,
         saving: false,
         dirty: true,
-        load() {}, select() {}, change() {}, saveRevision() {},
+        load() {}, select() {}, change() {}, saveRevision() {}, acceptPlan() {},
       },
     }))
     assert.match(markup, /BUILD QUEUE/)
@@ -69,7 +69,7 @@ describe('Capability Specifications workspace', () => {
         },
         canCreate: true,
         loading: false, saving: false, dirty: false,
-        load() {}, select() {}, change() {}, saveRevision() {}, beginCreate() {}, cancelCreate() {}, changeCreate() {}, createSpecification() {},
+        load() {}, select() {}, change() {}, saveRevision() {}, beginCreate() {}, cancelCreate() {}, changeCreate() {}, createSpecification() {}, acceptPlan() {},
       },
     }))
 
@@ -101,7 +101,7 @@ describe('Capability Specifications workspace', () => {
         confirmingStopId: specification.id,
         createDraft: {} as never,
         loading: false, saving: false, dirty: false,
-        load() {}, select() {}, change() {}, saveRevision() {}, beginCreate() {}, askStop() {}, cancelStop() {}, stopDelivery() {},
+        load() {}, select() {}, change() {}, saveRevision() {}, beginCreate() {}, askStop() {}, cancelStop() {}, stopDelivery() {}, acceptPlan() {},
       },
     }))
 
@@ -136,7 +136,7 @@ describe('Capability Specifications workspace', () => {
         draft: { goal: specification.goal, nonGoals: '', businessRules: '', unresolved: '' },
         creating: false, createDraft: {} as never,
         loading: false, saving: false, dirty: false,
-        load() {}, select() {}, change() {}, saveRevision() {}, beginCreate() {}, askStop() {}, cancelStop() {}, stopDelivery() {},
+        load() {}, select() {}, change() {}, saveRevision() {}, beginCreate() {}, askStop() {}, cancelStop() {}, stopDelivery() {}, acceptPlan() {},
       },
       continueDelivery() {},
     }))
@@ -148,7 +148,7 @@ describe('Capability Specifications workspace', () => {
     assert.match(markup, /No active owner provides/)
     assert.match(markup, /Network access remains separately governed/)
     assert.match(markup, /data-plan-decision="accept"/)
-    assert.match(markup, /ACCEPT PLAN IN CHAT/)
+    assert.match(markup, /ACCEPT PLAN/)
     assert.match(markup, /NO CODE AUTHORIZED YET/)
   })
 })

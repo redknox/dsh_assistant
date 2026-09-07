@@ -93,7 +93,13 @@ export function CapabilitySpecificationsWorkspace(props: {
               </header>
               {selectedDelivery ? <DeliveryOverview
                 item={selectedDelivery}
-                onAction={props.continueDelivery}
+                onAction={(item) => {
+                  if (item.action?.kind === 'accept-plan' && item.action.planId && item.action.sessionId) {
+                    control.acceptPlan(item.action.planId, item.action.sessionId)
+                    return
+                  }
+                  props.continueDelivery?.(item)
+                }}
                 actionVisible={!(selectedDelivery.plan && !selectedDelivery.candidate)}
                 onAskStop={selectedDelivery.historical || selectedDelivery.stage === 'approve' || selectedDelivery.stage === 'activate'
                   ? undefined
@@ -104,7 +110,13 @@ export function CapabilitySpecificationsWorkspace(props: {
                 confirmStop={control.stopDelivery}
               /> : null}
               {selectedDelivery?.plan && !selectedDelivery.candidate ? (
-                <ImplementationProposal item={selectedDelivery} onAction={props.continueDelivery} />
+                <ImplementationProposal item={selectedDelivery} onAction={(item) => {
+                  if (item.action?.kind === 'accept-plan' && item.action.planId && item.action.sessionId) {
+                    control.acceptPlan(item.action.planId, item.action.sessionId)
+                    return
+                  }
+                  props.continueDelivery?.(item)
+                }} />
               ) : null}
               {control.comparison ? (
                 <div className="specification-diff" data-specification-diff="true">

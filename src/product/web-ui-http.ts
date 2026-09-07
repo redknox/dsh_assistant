@@ -86,6 +86,7 @@ export class WebUiHttpTransport {
   }
 
   broadcast(): void {
+    if (this.clients.size === 0) return
     let payload: string
     try {
       payload = this.safeProjection()

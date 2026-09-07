@@ -118,6 +118,24 @@ describe('Web UI Capability Workbench adapter', () => {
     assert.equal(settled, 'spec-1')
   })
 
+  it('records Resolution Plan acceptance through the trusted host seam', async () => {
+    let accepted: string | undefined
+    const base = fakeContext()
+    const result = await handleWebUiWorkbenchRequest(request('POST', '/api/workbench/plan/accept', {}, {
+      planId: 'plan-1', sessionId: 'delivery-1',
+    }), {
+      ...base,
+      acceptPlan: async (planId, sessionId) => {
+        accepted = `${planId}:${sessionId}`
+        return { planId, accepted: true }
+      },
+    })
+
+    assert.equal(result?.status, 200)
+    assert.equal(result?.broadcast, true)
+    assert.equal(accepted, 'plan-1:delivery-1')
+  })
+
   it('starts a proposal only through the host Session seam', async () => {
     let started: string | undefined
     const context = fakeContext()
@@ -170,6 +188,8 @@ function fakeContext(onRevise: () => void = () => {}): WebUiWorkbenchContext {
         changedFields: ['goal'],
         changes: { goal: { before: 'Echo text.', after: 'New goal.' } },
       }),
+      stopSpecification: () => ({ specificationId: 'spec-1', status: 'stopped', stoppedFromSessionId: 'main', stoppedAt: new Date(0).toISOString() }),
+      acceptPlan: () => ({ planId: 'plan-1', accepted: true }) as never,
     },
   }
 }

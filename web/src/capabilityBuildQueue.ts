@@ -11,10 +11,11 @@ export const CAPABILITY_DELIVERY_STEPS = ['DEFINE', 'RESOLVE', 'BUILD', 'VALIDAT
 export type CapabilityDeliveryStage = 'clarify' | 'resolve' | 'build' | 'validate' | 'review' | 'repair' | 'approve' | 'activate' | 'live' | 'failed' | 'blocked' | 'stopped'
 
 export interface CapabilityDeliveryAction {
-  readonly kind: 'conversation' | 'today'
+  readonly kind: 'conversation' | 'today' | 'accept-plan'
   readonly label: string
   readonly prompt?: string
   readonly sessionId?: string
+  readonly planId?: string
 }
 
 export interface CapabilityDeliveryContinuation {
@@ -34,6 +35,7 @@ export function continueCapabilityDelivery(
     }
     if (action.prompt) continuation.setDraft(action.prompt)
   }
+  if (action?.kind === 'accept-plan') return
   continuation.openToday()
 }
 
@@ -183,8 +185,10 @@ function deliveryState(
   if (candidate?.states.includes('failed')) return { stage: 'failed', completedSteps: stepNumber(candidate.step), stateLabel: 'BUILD FAILED', nextAction: 'TARS-NG must repair the failed validation or activation evidence.', needsUser: false, action: conversation('DIAGNOSE & REPAIR', specification, '请检查失败证据，修复候选并重新运行相应验证。') }
   if (!plan) return { stage: 'resolve', completedSteps: 1, stateLabel: 'CHOOSING IMPLEMENTATION', nextAction: 'TARS-NG needs to decide whether to reuse, configure, adopt, or develop an implementation.', needsUser: false, action: conversation('CONTINUE RESOLUTION', specification, '请继续执行 Capability Resolution，选择满足需求的最小实现路径。') }
   if (!candidate && plan.kind === 'host-product-change-required') return { stage: 'blocked', completedSteps: 2, stateLabel: 'TARS-NG UPDATE REQUIRED', nextAction: 'Resolution determined that this capability must be implemented in the TARS-NG product rather than as an isolated extension.', needsUser: true, action: conversation('CONTINUE AS PRODUCT UPDATE', specification, 'Capability Resolution 已判断需要修改宿主产品。请提出代码修改方案并等待我确认。') }
-  if (!candidate) return plan.canCreate
-    ? { stage: 'build', completedSteps: 2, stateLabel: 'PLAN READY FOR DECISION', nextAction: 'Review the proposed implementation path. Candidate authoring starts only after you accept it in the originating conversation.', needsUser: true, action: conversation('ACCEPT PLAN IN CHAT', specification, '我已审阅并同意当前 Resolution Plan。请按照该方案开始构建候选实现。') }
+  if (!candidate) return plan.canCreate && !plan.accepted
+    ? { stage: 'build', completedSteps: 2, stateLabel: 'PLAN READY FOR DECISION', nextAction: 'Review the proposed implementation path. Candidate authoring starts only after this trusted decision.', needsUser: true, action: { kind: 'accept-plan', label: 'ACCEPT PLAN', planId: plan.planId, sessionId: specification.originSessionId } }
+    : plan.canCreate
+      ? { stage: 'build', completedSteps: 2, stateLabel: 'PLAN ACCEPTED', nextAction: 'The delivery Goal is resuming under the accepted implementation path.', needsUser: false }
     : { stage: 'live', completedSteps: 8, stateLabel: 'FULFILLED BY EXISTING CAPABILITY', nextAction: 'Resolution selected an existing implementation; no governed build is required.', needsUser: false }
   if (candidate.step === 'author') return { stage: 'build', completedSteps: 2, stateLabel: 'BUILDING', nextAction: 'TARS-NG is authoring the governed implementation.', needsUser: false, action: conversation('CONTINUE BUILD', specification, '请继续完成候选实现，并在完成后进入验证。') }
   if (candidate.step === 'validate') return { stage: 'validate', completedSteps: 3, stateLabel: 'VALIDATING', nextAction: 'Deterministic checks and acceptance examples must pass.', needsUser: false, action: conversation('CONTINUE VALIDATION', specification, '请继续运行候选验证，并根据验证证据处理失败或未决项。') }

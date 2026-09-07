@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import type { CapabilityEvaluationView, CapabilitySpecificationDiffView, CapabilitySpecificationView } from '../../src/product/web-ui-workbench-types'
 import {
   compareCapabilitySpecificationRevisions,
+  acceptCapabilityResolutionPlan,
   defineCapabilitySpecification,
   fetchCapabilityEvaluation,
   fetchCapabilitySpecification,
@@ -64,6 +65,7 @@ export interface CapabilitySpecificationsControl {
   readonly askStop: (id: string) => void
   readonly cancelStop: () => void
   readonly stopDelivery: () => void
+  readonly acceptPlan: (planId: string, sessionId: string) => void
 }
 
 const EMPTY_DRAFT: CapabilitySpecificationDraft = { goal: '', nonGoals: '', businessRules: '', unresolved: '' }
@@ -244,11 +246,21 @@ export function useCapabilitySpecifications(active: boolean): CapabilitySpecific
     }).catch(fail(setError, 'unable to stop capability delivery')).finally(() => setStopping(false))
   }
 
+  const acceptPlan = (planId: string, sessionId: string) => {
+    if (!snapshot?.mutable || saving) return
+    setSaving(true)
+    setError(undefined)
+    void acceptCapabilityResolutionPlan(planId, sessionId).then(() => fetchWorkbench()).then((next) => {
+      setSnapshot(next)
+      setNotice('Resolution Plan accepted. The delivery Goal has resumed under the approved implementation path.')
+    }).catch(fail(setError, 'unable to accept Resolution Plan')).finally(() => setSaving(false))
+  }
+
   return {
     snapshot, selected, comparison, evaluation, draft, creating, createDraft, canCreate,
     loading, saving, stopping, confirmingStopId, error, notice, dirty, load, select, change, saveRevision,
     beginCreate, cancelCreate, changeCreate, createSpecification,
-    askStop, cancelStop, stopDelivery,
+    askStop, cancelStop, stopDelivery, acceptPlan,
   }
 }
 

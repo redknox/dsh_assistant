@@ -35,6 +35,7 @@ export interface WorkbenchListPlanItem {
   readonly capability: string
   readonly need: string
   readonly canCreate: boolean
+  readonly accepted: boolean
   readonly recommendation: string
   readonly rationale: string
   readonly implications: readonly string[]

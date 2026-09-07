@@ -502,6 +502,7 @@ export function runValidation(record: CandidateRecord, activeOwner?: OwnerExecut
   const evaluation = new CapabilityEvaluationHarness().evaluate({
     candidateId: record.id,
     workspaceRoot: record.workspaceRoot,
+    ...(evaluationToolName(record, activeOwner) ? { toolName: evaluationToolName(record, activeOwner) } : {}),
   })
   stages.push(stage(
     'business.acceptance',
@@ -524,6 +525,13 @@ export function runValidation(record: CandidateRecord, activeOwner?: OwnerExecut
     reliability,
     evaluation,
   }
+}
+
+function evaluationToolName(record: CandidateRecord, activeOwner?: OwnerExecutionFacts): string | undefined {
+  if (record.manifest.tools.length === 1) return record.manifest.tools[0]
+  const previous = new Set(activeOwner?.tools ?? [])
+  const added = record.manifest.tools.filter((name) => !previous.has(name))
+  return added.length === 1 ? added[0] : undefined
 }
 
 export function lifecycleFromReport(report: ValidationReport): 'validated' | 'validation-failed' | 'validation-incomplete' {

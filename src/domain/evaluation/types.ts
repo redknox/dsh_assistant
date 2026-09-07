@@ -44,7 +44,7 @@ export interface CapabilityEvaluationExecutorResult {
 }
 
 export interface CapabilityEvaluationExecutor {
-  run(workspaceRoot: string, runnerPath: string): CapabilityEvaluationExecutorResult
+  run(workspaceRoot: string, runnerPath: string, toolName?: string): CapabilityEvaluationExecutorResult
 }
 
 export interface EvaluationSpecificationInput {

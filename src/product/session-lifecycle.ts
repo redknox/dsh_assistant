@@ -126,6 +126,32 @@ export class LiveSessionHost {
     })
   }
 
+  /** Resume only after an explicit host-recorded Resolution Plan acceptance. */
+  async resumeDeliveryGoal(sessionId: string): Promise<void> {
+    await this.serialize(async () => {
+      const resume = (agent: Agent) => {
+        const goal = this.ctx.goals.get(agent)
+        if (goal?.phase === 'paused') {
+          this.ctx.goals.resume(agent, { id: goal.id, revision: goal.revision })
+        }
+      }
+      if (sessionId === this.surface.sessionId) {
+        resume(this.handle.agent)
+        await this.ctx.sessions.flush(this.handle.agent.session)
+        return
+      }
+      const session = this.catalog.inspect().sessions.find((item) => item.id === sessionId)
+      if (!session) throw new SessionCatalogError('not-found', `unknown delivery Session: ${sessionId}`)
+      const handle = await createAssistantAgent(this.ctx, sessionId, undefined, this.workspace)
+      try {
+        resume(handle.agent)
+        await this.ctx.sessions.flush(handle.agent.session)
+      } finally {
+        await handle.dispose()
+      }
+    })
+  }
+
   async switchTo(id: string, expected: { readonly sessionId: string; readonly revision: number }): Promise<PublicSessionCatalog> {
     return this.serialize(async () => {
       this.assertExpected(expected)

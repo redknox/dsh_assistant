@@ -97,7 +97,7 @@ async function bootStack(options: BootOptions = {}): Promise<AssistantControl> {
     await ctx.plugin(JsonlSessionPersistence, {
       root: options.sessionRoot,
       compression: 'none',
-      packChunks: false,
+      packChunks: true,
       writeBatchMaxDelayMs: 1,
     })
   }

@@ -39,7 +39,7 @@ export interface WebUiServerOptions extends WebUiListenOptions {
   readonly sessionHost?: LiveSessionHost
   readonly settings?: ProductSettings
   readonly workbench?: Pick<CandidateWorkbench,
-    'list' | 'inspectSpecification' | 'inspectSpecificationEvaluation' | 'defineSpecification' | 'reviseSpecification' | 'compareSpecifications' | 'stopSpecification' | 'listCapabilityProposals' | 'decideCapabilityProposal'>
+    'list' | 'inspectSpecification' | 'inspectSpecificationEvaluation' | 'defineSpecification' | 'reviseSpecification' | 'compareSpecifications' | 'stopSpecification' | 'acceptPlan' | 'listCapabilityProposals' | 'decideCapabilityProposal'>
   readonly workbenchMutable?: boolean
   readonly expenseReview?: Pick<ExpenseRiskReviewModule, 'inspect' | 'review'>
 }
@@ -65,7 +65,7 @@ export function startWebUiServer(options: WebUiServerOptions): Promise<WebUiServ
       .filter((card) => ['pending', 'approval-requested', 'unreviewed'].includes(card.status))
       .map((card) => card.id)
     if (pending.length > 0) options.sessionHost?.noteApprovals(pending)
-    return options.surface.workspace()
+    return view
   }
 
   const envelope = (extra: { readonly acknowledgement?: WebUiAcknowledgement } = {}) => ({
@@ -225,6 +225,11 @@ export function startWebUiServer(options: WebUiServerOptions): Promise<WebUiServ
             const stopped = options.workbench!.stopSpecification(specificationId, { sessionId: options.surface.sessionId })
             await options.sessionHost!.reconcileDeliveryGoal(options.surface.sessionId)
             return stopped
+          } : undefined,
+          acceptPlan: options.sessionHost ? async (planId, sessionId) => {
+            const accepted = options.workbench!.acceptPlan(planId, { sessionId })
+            await options.sessionHost!.resumeDeliveryGoal(sessionId)
+            return accepted
           } : undefined,
         })
         if (workbench) {
@@ -422,9 +427,18 @@ export function startWebUiServer(options: WebUiServerOptions): Promise<WebUiServ
 export function attachWebUiBroadcast(ctx: { on(event: string, listener: (...args: never[]) => void): unknown }, push: () => void): () => void {
   // Observe-only. tools/pre-execute is a waterfall gate; a void listener returns
   // undefined and every tool then fails with "Cannot read properties of undefined (reading 'kind')".
+  let pending: ReturnType<typeof setTimeout> | undefined
+  const schedule = () => {
+    if (pending) return
+    pending = setTimeout(() => {
+      pending = undefined
+      push()
+    }, 50)
+  }
   const names = ['agent/status', 'session/event', 'session/flush', 'tools/result']
-  const offs = names.map((name) => ctx.on(name, push))
+  const offs = names.map((name) => ctx.on(name, schedule))
   return () => {
+    if (pending) clearTimeout(pending)
     for (const off of offs) {
       if (typeof off === 'function') off()
     }

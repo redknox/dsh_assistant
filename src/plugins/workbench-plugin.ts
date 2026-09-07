@@ -34,6 +34,7 @@ export class CandidateWorkbenchService extends Service implements CandidateWorkb
   }
   inspectSpecificationEvaluation(specificationId: string) { return this.store.inspectSpecificationEvaluation(specificationId) }
   plan(input: Parameters<CandidateWorkbench['plan']>[0]) { return this.store.plan(input) }
+  acceptPlan(planId: string, control: Parameters<CandidateWorkbench['acceptPlan']>[1]) { return this.store.acceptPlan(planId, control) }
   rememberPlan(review: Parameters<CandidateWorkbench['rememberPlan']>[0]) { return this.store.rememberPlan(review) }
   getPlan(planId: string) { return this.store.getPlan(planId) }
   create(input: Parameters<CandidateWorkbench['create']>[0]) { return this.store.create(input) }

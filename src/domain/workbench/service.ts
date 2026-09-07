@@ -214,6 +214,9 @@ export class WorkbenchService implements CandidateWorkbench {
       } else if (plan.review.kind === 'host-product-change-required') {
         stage = 'building'
         status = 'blocked'
+      } else if (plan.acceptance) {
+        stage = 'building'
+        status = 'active'
       } else {
         stage = 'building'
         status = 'waiting'
@@ -341,20 +344,42 @@ export class WorkbenchService implements CandidateWorkbench {
 
   private rememberReview(review: ResolutionReview, specification: CapabilitySpecification): WorkbenchPlanView {
     const id = `plan-${this.nextPlan++}`
-    this.plans.set(id, {
+    const plan: WorkbenchPlan = {
       id,
       review,
       specificationId: specification.id,
       specificationDigest: specification.digest,
-    })
+    }
+    this.plans.set(id, plan)
     this.flush()
-    return viewPlan(id, review, specification)
+    return viewPlan(plan, specification)
   }
 
   getPlan(planId: string): WorkbenchPlan {
     const plan = this.plans.get(planId)
     if (!plan) throw new WorkbenchContractError(`unknown workbench plan: ${planId}`)
     return plan
+  }
+
+  acceptPlan(planId: string, control: { readonly sessionId: string }): WorkbenchPlanView {
+    const plan = this.getPlan(planId)
+    const specification = this.inspectSpecification(plan.specificationId)
+    if (specification.origin?.sessionId !== control.sessionId) {
+      throw new WorkbenchContractError('Resolution Plan consent must come from its originating delivery Session')
+    }
+    if (!WORKBENCH_CHANGE_KINDS.includes(plan.review.kind as (typeof WORKBENCH_CHANGE_KINDS)[number])) {
+      throw new WorkbenchContractError(`resolution kind ${plan.review.kind} does not require candidate authoring consent`)
+    }
+    const accepted = plan.acceptance ? plan : {
+      ...plan,
+      acceptance: {
+        sessionId: control.sessionId,
+        acceptedAt: (this.options.now?.() ?? new Date()).toISOString(),
+      },
+    }
+    this.plans.set(plan.id, accepted)
+    this.flush()
+    return viewPlan(accepted, specification)
   }
 
   create(input: WorkbenchCreateInput): WorkbenchCandidateView {
@@ -364,6 +389,9 @@ export class WorkbenchService implements CandidateWorkbench {
     const plan = this.getPlan(input.planId)
     this.assertSpecificationDeliveryOpen(plan.specificationId)
     const specification = this.inspectSpecification(plan.specificationId)
+    if (specification.source === 'explicit' && specification.origin?.sessionId && !plan.acceptance) {
+      throw new WorkbenchContractError('Resolution Plan requires human consent before candidate authoring')
+    }
     if (specification.digest !== plan.specificationDigest) {
       throw new WorkbenchContractError(`workbench plan ${plan.id} capability specification digest is stale`)
     }
@@ -563,6 +591,7 @@ export class WorkbenchService implements CandidateWorkbench {
       recommendation: plan.review.recommendation,
       rationale: plan.review.rationale,
       implications: plan.review.implications,
+      accepted: plan.acceptance !== undefined,
     }))
     const candidates = this.workspace.list().map((record) => {
       const view = this.inspect(record.id)
@@ -675,6 +704,7 @@ export class WorkbenchService implements CandidateWorkbench {
 
   validate(candidateId: string): WorkbenchCandidateView {
     this.assertCandidateDeliveryOpen(candidateId)
+    this.refreshEvaluationAssets(candidateId)
     this.assertSpecificationStamp(candidateId)
     this.validation.validate(candidateId)
     this.flush()
@@ -883,6 +913,23 @@ export class WorkbenchService implements CandidateWorkbench {
     }
   }
 
+  private refreshEvaluationAssets(candidateId: string): void {
+    const binding = this.bindings.get(candidateId)
+    if (binding?.specificationId === undefined) return
+    const specification = this.inspectSpecification(binding.specificationId)
+    if (binding.specificationDigest !== specification.digest) {
+      throw new WorkbenchContractError(`candidate ${candidateId} capability specification binding is stale`)
+    }
+    if (tryRead(this.workspace, candidateId, CAPABILITY_SPECIFICATION_STAMP) !== capabilitySpecificationStamp(specification)) {
+      throw new WorkbenchContractError(`candidate ${candidateId} capability specification stamp does not match host authority`)
+    }
+    for (const [relativePath, content] of Object.entries(this.evaluation.prepare(specification))) {
+      if (tryRead(this.workspace, candidateId, relativePath) !== content) {
+        this.workspace.writeFile(candidateId, relativePath, content)
+      }
+    }
+  }
+
   requestApproval(candidateId: string) {
     this.assertCandidateDeliveryOpen(candidateId)
     return this.governance.requestApproval(candidateId)
@@ -946,17 +993,18 @@ function assertImportedReadOnly(record: CandidateRecord): void {
   }
 }
 
-function viewPlan(id: string, review: ResolutionReview, specification: CapabilitySpecification): WorkbenchPlanView {
+function viewPlan(plan: WorkbenchPlan, specification: CapabilitySpecification): WorkbenchPlanView {
   return {
-    planId: id,
-    kind: review.kind,
-    capability: review.capability,
-    need: review.need,
-    recommendation: review.recommendation,
-    rationale: review.rationale,
-    target: review.target,
-    canCreate: WORKBENCH_CHANGE_KINDS.includes(review.kind as (typeof WORKBENCH_CHANGE_KINDS)[number]),
-    unresolved: review.unresolved,
+    planId: plan.id,
+    kind: plan.review.kind,
+    capability: plan.review.capability,
+    need: plan.review.need,
+    recommendation: plan.review.recommendation,
+    rationale: plan.review.rationale,
+    target: plan.review.target,
+    canCreate: WORKBENCH_CHANGE_KINDS.includes(plan.review.kind as (typeof WORKBENCH_CHANGE_KINDS)[number]),
+    accepted: plan.acceptance !== undefined,
+    unresolved: plan.review.unresolved,
     specification,
   }
 }

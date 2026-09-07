@@ -181,6 +181,26 @@ function uninstallBody(plugin: MissionControlView['plugins'][number]) {
 }
 
 describe('local Mission-Control Web UI', () => {
+  it('coalesces bursty runtime events into one UI projection per turn', async () => {
+    const listeners = new Map<string, () => void>()
+    const ctx = {
+      on(name: string, listener: () => void) {
+        listeners.set(name, listener)
+        return () => listeners.delete(name)
+      },
+    }
+    let projections = 0
+    const detach = attachWebUiBroadcast(ctx as never, () => { projections += 1 })
+    try {
+      for (let index = 0; index < 1_000; index += 1) listeners.get('session/event')?.()
+      assert.equal(projections, 0)
+      await new Promise<void>((resolve) => setTimeout(resolve, 75))
+      assert.equal(projections, 1)
+    } finally {
+      detach()
+    }
+  })
+
   it('binds loopback only and rejects public hosts', () => {
     assert.deepEqual(resolveWebUiListen({}), { host: '127.0.0.1', port: 8787 })
     assert.throws(() => resolveWebUiListen({ TARS_NG_UI_HOST: '0.0.0.0' }))

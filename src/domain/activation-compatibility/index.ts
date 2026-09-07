@@ -24,6 +24,7 @@ export interface OwnerExecutionFacts {
   readonly origin?: string
   readonly services?: readonly string[]
   readonly providers?: readonly string[]
+  readonly tools?: readonly string[]
 }
 
 export interface ActivationCompatibilityInput extends OwnerExecutionFacts {

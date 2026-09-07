@@ -234,6 +234,7 @@ export class CandidateService implements CandidateWorkspace, CandidateValidation
         origin: active.provenance.origin,
         services: active.services,
         providers: active.providers,
+        tools: active.tools,
       })
     record.digest = report.digest
     record.validation = report

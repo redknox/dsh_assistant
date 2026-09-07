@@ -43,9 +43,10 @@ describe('Capability Build Queue projection', () => {
 
     assert.equal(queue.summary.needsUser, 1)
     assert.equal(queue.open[0]?.stateLabel, 'PLAN READY FOR DECISION')
-    assert.equal(queue.open[0]?.action?.label, 'ACCEPT PLAN IN CHAT')
+    assert.equal(queue.open[0]?.action?.label, 'ACCEPT PLAN')
+    assert.equal(queue.open[0]?.action?.kind, 'accept-plan')
+    assert.equal(queue.open[0]?.action?.planId, 'plan-ready')
     assert.equal(queue.open[0]?.action?.sessionId, 'capability-chat')
-    assert.match(queue.open[0]?.action?.prompt ?? '', /我已审阅并同意/)
   })
 
   it('moves live and legacy records out of the active queue', () => {

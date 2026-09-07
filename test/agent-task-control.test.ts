@@ -209,6 +209,28 @@ describe('Agent Task Control', () => {
       const reconciled = reconcileDeliveryGoal(control.ctx, handle.agent)
       assert.equal(reconciled?.phase, 'paused')
       assert.equal(reconciled?.activation, 'disarmed')
+
+      const attemptedContinuation = await control.ctx.tools.execute({
+        callId: CallId('candidate-before-plan-consent'),
+        name: 'create_candidate',
+        arguments: { planId: plan.planId },
+        agent: handle.agent,
+        signal: AbortSignal.timeout(5_000),
+      })
+      assert.equal(attemptedContinuation.isError, true)
+      assert.match(attemptedContinuation.error?.message ?? '', /Resolution Plan.*human consent/i)
+      assert.equal(control.ctx.candidateWorkbench.list().candidates.length, 0)
+
+      control.ctx.candidateWorkbench.acceptPlan(plan.planId, { sessionId: 'delivery-plan-consent' })
+      const authorizedContinuation = await control.ctx.tools.execute({
+        callId: CallId('candidate-after-plan-consent'),
+        name: 'create_candidate',
+        arguments: { planId: plan.planId },
+        agent: handle.agent,
+        signal: AbortSignal.timeout(5_000),
+      })
+      assert.equal(authorizedContinuation.isError, false, authorizedContinuation.error?.message)
+      assert.equal(control.ctx.candidateWorkbench.list().candidates.length, 1)
     } finally {
       await handle.dispose()
       await control.ctx.fiber.dispose()

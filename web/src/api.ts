@@ -154,6 +154,15 @@ export async function stopCapabilityDelivery(specificationId: string): Promise<v
   }), 'capability delivery stop')
 }
 
+export async function acceptCapabilityResolutionPlan(planId: string, sessionId: string): Promise<void> {
+  await parseJson(await fetch('/api/workbench/plan/accept', {
+    ...include,
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ planId, sessionId }),
+  }), 'Resolution Plan acceptance')
+}
+
 export async function decideCapabilityProposal(input: {
   readonly proposalId: string
   readonly decision: 'declined' | 'started'

@@ -23,7 +23,11 @@ export function runnerUnavailable(error: { message?: string; stdout?: string; st
   return /bad option|unknown option|not supported|is not a valid/i.test(text)
 }
 
-export function runRestrictedCandidateTests(root: string, testFiles: readonly string[]): string {
+export function runRestrictedCandidateTests(
+  root: string,
+  testFiles: readonly string[],
+  environment?: Readonly<Record<string, string>>,
+): string {
   const sandbox = detectOsNetworkSandbox()
   if (sandbox === undefined) {
     const error = new Error('OS network sandbox is not available on this host')
@@ -47,7 +51,7 @@ export function runRestrictedCandidateTests(root: string, testFiles: readonly st
       encoding: 'utf8',
       timeout: VALIDATION_TEST_TIMEOUT_MS,
       stdio: ['ignore', 'pipe', 'pipe'],
-      env: restrictedValidationEnv(),
+      env: { ...restrictedValidationEnv(), ...environment },
     }))
   }
   return chunks.join('\n')

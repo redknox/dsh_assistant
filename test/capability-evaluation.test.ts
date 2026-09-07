@@ -84,6 +84,21 @@ describe('Capability Evaluation Harness', () => {
     assert.equal(report.cases.every((item) => item.status === 'passed'), true)
   })
 
+  it('evaluates the selected new tool when an evolved owner declares multiple tools', () => {
+    const root = candidateRootWithExistingTool(expensePlugin())
+    const harness = new CapabilityEvaluationHarness()
+    for (const [relative, content] of Object.entries(harness.prepare(expenseSpecification()))) {
+      write(root, relative, content)
+    }
+    const report = harness.evaluate({
+      candidateId: 'generated--expense-risk@0.1.1',
+      workspaceRoot: root,
+      toolName: 'expense_risk_review',
+    })
+    assert.equal(report.status, 'passed', JSON.stringify(report))
+    assert.equal(report.executed, 3)
+  })
+
   it('returns the expected and actual business output when a fixture fails', () => {
     const root = candidateRoot(expensePlugin(true))
     const harness = new CapabilityEvaluationHarness()
@@ -176,6 +191,18 @@ function candidateRoot(source: string): string {
     tools: ['expense_risk_review'],
   }, null, 2)}\n`)
   write(root, 'src/plugin.js', source)
+  return root
+}
+
+function candidateRootWithExistingTool(source: string): string {
+  const root = mkdtempSync(path.join(tmpdir(), 'tars-ng-evaluation-evolved-candidate-'))
+  write(root, 'candidate.manifest.json', `${JSON.stringify({
+    entryPoints: ['src/plugin.js'],
+    tools: ['existing_owner_tool', 'expense_risk_review'],
+  }, null, 2)}\n`)
+  write(root, 'src/plugin.js', `${source}\nexport function registerExisting(ctx) {
+  return ctx.tools.register({ name: 'existing_owner_tool', async execute() { return 'existing' } })
+}\n`)
   return root
 }
 
