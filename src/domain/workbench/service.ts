@@ -1072,6 +1072,7 @@ function mergeManifestPatch(
     services: patch.services ?? current.services,
     providers: patch.providers ?? current.providers,
     workflows: patch.workflows ?? current.workflows,
+    commands: patch.commands ?? current.commands,
     secrets: patch.secrets ?? current.secrets,
     configRequired: patch.configRequired ?? current.configRequired,
     effects: {

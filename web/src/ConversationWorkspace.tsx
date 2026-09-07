@@ -291,6 +291,7 @@ function fallbackRelease(card: ActivationCard): NonNullable<ActivationCard['rele
       { label: 'CAPABILITIES', value: formatDiff(card.capabilitiesAdded, card.capabilitiesRemoved, card.capabilitiesChanged) },
       { label: 'TOOLS', value: formatDiff(card.toolsAdded, card.toolsRemoved, card.toolsChanged) },
       { label: 'WORKFLOWS', value: formatDiff(card.workflowsAdded ?? [], card.workflowsRemoved ?? [], card.workflowsChanged ?? []) },
+      { label: 'COMMANDS', value: formatDiff(card.commandsAdded ?? [], card.commandsRemoved ?? [], card.commandsChanged ?? []) },
       { label: 'PERMISSIONS', value: formatDiff(card.permissionsAdded, card.permissionsRemoved, card.permissionsChanged) },
     ],
   }

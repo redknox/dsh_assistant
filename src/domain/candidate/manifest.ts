@@ -2,7 +2,7 @@ import { parseCapabilityId, parseOwnerId, parsePermission, parseVersion } from '
 import type { ExtensionProvenance } from '../registry/types.js'
 import type { ResolutionKind, ResolutionReview } from '../resolution/types.js'
 import { CandidateContractError } from './errors.js'
-import type { CandidateManifest, CandidateManifestInput, CandidateWorkflowDeclaration, OperationalEffects, PluginCapabilityDependency, RemoteSideEffect } from './types.js'
+import type { CandidateCommandDeclaration, CandidateManifest, CandidateManifestInput, CandidateWorkflowDeclaration, OperationalEffects, PluginCapabilityDependency, RemoteSideEffect } from './types.js'
 import { PLUGIN_DEPENDENCY_STRENGTHS, REMOTE_SIDE_EFFECTS } from './types.js'
 
 const CHANGE_KINDS: readonly ResolutionKind[] = [
@@ -73,6 +73,7 @@ export function normalizeManifest(
     services: [...(input.services ?? [])],
     providers: [...(input.providers ?? [])],
     workflows: normalizeWorkflows(input.workflows),
+    commands: normalizeCommands(input.commands, input.tools ?? [], input.workflows ?? []),
     secrets: [...(input.secrets ?? [])],
     configRequired: [...(input.configRequired ?? [])],
     effects: {
@@ -93,6 +94,46 @@ export function normalizeManifest(
     runtimeContractVersion,
     pluginDependencies: normalizePluginDependencies(input.pluginDependencies),
   }
+}
+
+const RESERVED_COMMANDS = new Set(['archive', 'compact', 'help', 'plan'])
+
+function normalizeCommands(
+  input: readonly CandidateCommandDeclaration[] | undefined,
+  tools: readonly string[],
+  workflows: readonly CandidateWorkflowDeclaration[],
+): readonly CandidateCommandDeclaration[] {
+  const commands = input ?? []
+  const names = new Set<string>()
+  const declaredTools = new Set(tools)
+  const declaredWorkflows = new Set(workflows.map((item) => item.name))
+  return commands.map((command, index) => {
+    if (!command || typeof command !== 'object') throw new CandidateContractError(`malformed commands[${index}]`)
+    if (!/^[a-z][a-z0-9_-]*$/.test(command.name) || names.has(command.name)) {
+      throw new CandidateContractError(`invalid or duplicate commands[${index}].name`)
+    }
+    if (RESERVED_COMMANDS.has(command.name)) throw new CandidateContractError(`commands[${index}].name is reserved`)
+    names.add(command.name)
+    if (typeof command.description !== 'string' || command.description.trim() === '' || command.description.length > 200) {
+      throw new CandidateContractError(`invalid commands[${index}].description`)
+    }
+    if (!command.target || (command.target.kind !== 'tool' && command.target.kind !== 'workflow')) {
+      throw new CandidateContractError(`invalid commands[${index}].target.kind`)
+    }
+    const targets = command.target.kind === 'tool' ? declaredTools : declaredWorkflows
+    if (typeof command.target.name !== 'string' || !targets.has(command.target.name)) {
+      throw new CandidateContractError(`commands[${index}] must target a declared ${command.target.kind}`)
+    }
+    if (command.inputHint !== undefined && (typeof command.inputHint !== 'string' || command.inputHint.trim() === '' || command.inputHint.length > 160)) {
+      throw new CandidateContractError(`invalid commands[${index}].inputHint`)
+    }
+    return {
+      name: command.name,
+      description: command.description,
+      target: { ...command.target },
+      ...(command.inputHint === undefined ? {} : { inputHint: command.inputHint }),
+    }
+  })
 }
 
 function normalizeWorkflows(input?: readonly CandidateWorkflowDeclaration[]): readonly CandidateWorkflowDeclaration[] {

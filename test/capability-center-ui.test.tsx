@@ -21,7 +21,7 @@ describe('Capability Center workspace', () => {
       view: {
         plugins: [{
           id: 'uninst-generated/review@0.1.0', owner: 'generated/review', version: '0.1.0', provenance: 'generated',
-          candidateId: 'ext-1', digest: 'digest', capabilities: ['review.read'], tools: ['review'], mounted: true,
+          candidateId: 'ext-1', digest: 'digest', capabilities: ['review.read'], tools: ['review'], commands: ['review-now'], mounted: true,
           registryGeneration: 1, dependency: { severity: 'optional', dependents: [{ owner: 'generated/report', version: '0.1.0', requiredCapability: 'review.read', kind: 'optional' }] }, uninstallable: true,
         }, {
           id: 'uninst-managed/ui-control-surface@0.1.1', owner: 'managed/ui-control-surface', version: '0.1.1', provenance: 'generated',
@@ -87,6 +87,7 @@ describe('Capability Center workspace', () => {
     assert.match(markup, /optional dependents will continue with reduced functionality/)
     assert.match(markup, /IMPLEMENTATION &amp; GOVERNANCE/)
     assert.match(markup, /DELIVERY EVIDENCE/)
+    assert.match(markup, /COMMANDS[\s\S]*\/review-now/)
     assert.match(markup, /VALIDATED · INDEPENDENT REVIEW COMPLETE · HUMAN APPROVED · ACTIVE/)
     assert.match(markup, /EXACT REVISION/)
     assert.doesNotMatch(markup, /Ui Control Surface|Pending Probe|system-runtime-guide|Internal Boot Workflow/)

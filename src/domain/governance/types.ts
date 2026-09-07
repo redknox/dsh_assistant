@@ -65,6 +65,7 @@ export interface ApprovalSummary {
   readonly services: NamedDiff
   readonly providers: NamedDiff
   readonly workflows: NamedDiff
+  readonly commands: NamedDiff
   readonly runtimeSeams: NamedDiff
   readonly effects: OperationalEffects
   readonly secrets: readonly string[]

@@ -27,6 +27,7 @@ export function approvalSummary(record: CandidateRecord, diff: CandidateDiff): A
     services: diff.services,
     providers: diff.providers,
     workflows: diff.workflows,
+    commands: diff.commands ?? { added: [], removed: [], changed: [] },
     runtimeSeams: diff.runtimeSeams,
     effects: diff.effects,
     secrets: record.manifest.secrets,

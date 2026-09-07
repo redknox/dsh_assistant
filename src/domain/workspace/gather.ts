@@ -116,7 +116,7 @@ export function gatherWorkspaceSnapshot(input: GatherWorkspaceInput): WorkspaceS
         ...(availability.reason ? { reason: availability.reason } : {}),
         ...(availability.provider ? { provider: availability.provider } : {}),
       })),
-    registry: (ctx.get('capabilityRegistry') as { list(): { owner: string; version: string; provenance: { kind: string }; status: string; capabilities: { id: string }[]; permissions?: readonly string[]; provider?: string; providers?: readonly string[]; tools?: readonly string[]; runtimeSeams?: readonly string[]; pluginDependencies?: readonly { capability: string; strength: 'hard' | 'optional' }[] }[] } | undefined)
+    registry: (ctx.get('capabilityRegistry') as { list(): { owner: string; version: string; provenance: { kind: string }; status: string; capabilities: { id: string }[]; permissions?: readonly string[]; provider?: string; providers?: readonly string[]; tools?: readonly string[]; commands?: readonly string[]; runtimeSeams?: readonly string[]; pluginDependencies?: readonly { capability: string; strength: 'hard' | 'optional' }[] }[] } | undefined)
       ?.list().map((record) => ({
         owner: record.owner,
         version: record.version,
@@ -127,6 +127,7 @@ export function gatherWorkspaceSnapshot(input: GatherWorkspaceInput): WorkspaceS
         ...(record.provider ? { provider: record.provider } : {}),
         ...(record.providers ? { providers: [...record.providers] } : {}),
         ...(record.tools ? { tools: [...record.tools] } : {}),
+        ...(record.commands ? { commands: [...record.commands] } : {}),
         ...(record.runtimeSeams ? { runtimeSeams: [...record.runtimeSeams] } : {}),
         ...(record.pluginDependencies ? { pluginDependencies: [...record.pluginDependencies] } : {}),
       })) ?? [],
@@ -610,6 +611,7 @@ function extensionApprovals(ctx: Context): WorkspaceSnapshotInput['extensionAppr
       permissions: { added: readonly string[]; removed: readonly string[]; changed?: readonly string[] }
       tools?: { added: readonly string[]; removed: readonly string[]; changed?: readonly string[] }
       workflows?: { added: readonly string[]; removed: readonly string[]; changed?: readonly string[] }
+      commands?: { added: readonly string[]; removed: readonly string[]; changed?: readonly string[] }
       secrets: readonly string[]
       effects: { filesystem: readonly string[]; network: readonly string[]; process: readonly string[]; secrets: readonly string[]; externalSystems: readonly string[] }
     }
@@ -649,6 +651,9 @@ function extensionApprovals(ctx: Context): WorkspaceSnapshotInput['extensionAppr
       workflowsAdded: [...(summary.workflows?.added ?? [])],
       workflowsRemoved: [...(summary.workflows?.removed ?? [])],
       workflowsChanged: [...(summary.workflows?.changed ?? [])],
+      commandsAdded: [...(summary.commands?.added ?? [])],
+      commandsRemoved: [...(summary.commands?.removed ?? [])],
+      commandsChanged: [...(summary.commands?.changed ?? [])],
       ...(contract ? { runtimeContractVersion: contract } : {}),
       eligibilityOk: eligibility?.ok !== false,
       eligibilityDenials: eligibility?.denials.map((item) => item.reason) ?? [],

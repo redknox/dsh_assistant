@@ -24,6 +24,7 @@ export function projectUserPlugins(input: WorkspaceSnapshotInput): readonly User
       digest: candidate?.digest,
       capabilities: [...record.capabilities],
       tools: [...(record.tools ?? [])],
+      commands: [...(record.commands ?? [])],
       mounted: input.activation?.mounted?.includes(candidate?.id ?? '') === true,
       registryGeneration: generation,
       dependency,

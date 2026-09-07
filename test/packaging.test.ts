@@ -13,6 +13,7 @@ import LlmRuntime from '@deepseek-ai/dsh-llm'
 import SessionStore from '@deepseek-ai/dsh-session'
 import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
 import ToolRuntime from '@deepseek-ai/dsh-tools'
+import CommandRuntime from '@deepseek-ai/dsh-commands'
 import SubagentRuntime from '@deepseek-ai/dsh-subagent'
 import * as SpawnSubagent from '@deepseek-ai/dsh-subagent-spawn-in-process'
 import WorkerThreadWorkflowEngine from '@deepseek-ai/dsh-workflow-worker-thread'
@@ -32,6 +33,7 @@ async function bootHarness() {
   await ctx.plugin(LlmRuntime)
   await ctx.plugin(SystemPrompt, {})
   await ctx.plugin(ToolRuntime)
+  await ctx.plugin(CommandRuntime)
   await ctx.plugin(LocalJobRegistry)
   await ctx.plugin(AgentLoop, { agents: [] })
   await ctx.plugin(SubagentRuntime)

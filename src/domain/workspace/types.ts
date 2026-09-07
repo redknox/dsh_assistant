@@ -216,6 +216,9 @@ export interface ActivationCard {
   readonly workflowsAdded: readonly string[]
   readonly workflowsRemoved: readonly string[]
   readonly workflowsChanged: readonly string[]
+  readonly commandsAdded: readonly string[]
+  readonly commandsRemoved: readonly string[]
+  readonly commandsChanged: readonly string[]
   readonly effects: readonly string[]
   readonly eligibilityOk: boolean
   readonly eligibilityDenials: readonly string[]
@@ -255,6 +258,7 @@ export interface ExtensionRecord {
   readonly provenanceOrigin?: string
   readonly capabilities: readonly string[]
   readonly tools: readonly string[]
+  readonly commands?: readonly string[]
   readonly lifecycle: ExtensionLifecycleState
   readonly registryStatus: string
   readonly mounted: boolean
@@ -275,6 +279,7 @@ export interface UserPluginView {
   readonly digest?: string
   readonly capabilities: readonly string[]
   readonly tools: readonly string[]
+  readonly commands?: readonly string[]
   readonly mounted: boolean
   readonly registryGeneration: number
   readonly dependency: {
@@ -543,6 +548,7 @@ export interface WorkspaceSnapshotInput {
     readonly provider?: string
     readonly providers?: readonly string[]
     readonly tools?: readonly string[]
+    readonly commands?: readonly string[]
     readonly runtimeSeams?: readonly string[]
     readonly pluginDependencies?: readonly { readonly capability: string; readonly strength: 'hard' | 'optional' }[]
   }[]
@@ -567,6 +573,9 @@ export interface WorkspaceSnapshotInput {
     readonly workflowsAdded?: readonly string[]
     readonly workflowsRemoved?: readonly string[]
     readonly workflowsChanged?: readonly string[]
+    readonly commandsAdded?: readonly string[]
+    readonly commandsRemoved?: readonly string[]
+    readonly commandsChanged?: readonly string[]
     readonly runtimeContractVersion?: string
     readonly eligibilityOk?: boolean
     readonly eligibilityDenials?: readonly string[]

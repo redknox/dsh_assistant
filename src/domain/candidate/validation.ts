@@ -183,6 +183,7 @@ function inspectManifest(record: CandidateRecord): ValidationStageResult {
       services: record.manifest.services,
       providers: record.manifest.providers,
       workflows: record.manifest.workflows.map((item) => item.name),
+      commands: record.manifest.commands.map((item) => item.name),
       pluginDependencies: record.manifest.pluginDependencies,
     })
     return stage('manifest.validate', 'passed', `Manifest for ${record.owner}@${record.version} is well-formed.`)

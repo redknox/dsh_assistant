@@ -146,6 +146,7 @@ export class RegistryService implements CapabilityRegistry {
       services: [...current.services],
       providers: patch.providers ?? [...current.providers],
       workflows: patch.workflows ?? [...current.workflows],
+      commands: patch.commands ?? [...(current.commands ?? [])],
       pluginDependencies: [...(current.pluginDependencies ?? [])],
     })
     const next = { ...normalized, approval: current.approval, status: current.status }

@@ -1258,6 +1258,7 @@ export class GovernanceService implements ExtensionGovernance, ExtensionActivati
       services: record.manifest.services,
       providers: record.manifest.providers,
       workflows: record.manifest.workflows,
+      commands: record.manifest.commands,
       runtimeSeams: record.manifest.runtimeSeams,
       permissions: record.manifest.permissions,
       provenanceKind: record.provenance.kind,
@@ -1298,6 +1299,7 @@ export class GovernanceService implements ExtensionGovernance, ExtensionActivati
       services: record.manifest.services,
       providers: record.manifest.providers,
       workflows: record.manifest.workflows.map((item) => item.name),
+      commands: record.manifest.commands.map((item) => item.name),
       provider: record.manifest.providers[0],
       pluginDependencies: [...(record.manifest.pluginDependencies ?? [])],
     }
@@ -1355,6 +1357,7 @@ function manifestInputFrom(record: CandidateRecord, runtimeContractVersion: stri
     services: [...record.manifest.services],
     providers: [...record.manifest.providers],
     workflows: record.manifest.workflows.map((item) => ({ ...item })),
+    commands: record.manifest.commands.map((item) => ({ ...item, target: { ...item.target } })),
     secrets: [...record.manifest.secrets],
     configRequired: [...record.manifest.configRequired],
     effects: record.manifest.effects,

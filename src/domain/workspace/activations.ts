@@ -92,6 +92,9 @@ function skillActivationCard(
     workflowsAdded: [],
     workflowsRemoved: [],
     workflowsChanged: [],
+    commandsAdded: [],
+    commandsRemoved: [],
+    commandsChanged: [],
     effects: [],
     eligibilityOk: true,
     eligibilityDenials: [],
@@ -146,9 +149,11 @@ function selfExtensionActivationCard(
   const permissionsChanged = approval.permissionsChanged ?? []
   const toolsChanged = approval.toolsChanged ?? []
   const workflowsChanged = approval.workflowsChanged ?? []
+  const commandsChanged = approval.commandsChanged ?? []
   const capabilityDiff = formatExactDiff(approval.capabilitiesAdded, approval.capabilitiesRemoved, capabilitiesChanged)
   const toolDiff = formatExactDiff(approval.toolsAdded ?? [], approval.toolsRemoved ?? [], toolsChanged)
   const workflowDiff = formatExactDiff(approval.workflowsAdded ?? [], approval.workflowsRemoved ?? [], workflowsChanged)
+  const commandDiff = formatExactDiff(approval.commandsAdded ?? [], approval.commandsRemoved ?? [], commandsChanged)
   const permissionDiff = formatExactDiff(approval.permissionsAdded, approval.permissionsRemoved, permissionsChanged)
   return {
     id: activationCardId(approval.id, status, attempt?.generation === undefined ? undefined : {
@@ -180,6 +185,9 @@ function selfExtensionActivationCard(
     workflowsAdded: approval.workflowsAdded ?? [],
     workflowsRemoved: approval.workflowsRemoved ?? [],
     workflowsChanged,
+    commandsAdded: approval.commandsAdded ?? [],
+    commandsRemoved: approval.commandsRemoved ?? [],
+    commandsChanged,
     effects: approval.effects,
     eligibilityOk,
     eligibilityDenials: denials,
@@ -193,6 +201,7 @@ function selfExtensionActivationCard(
       `Capabilities ${capabilityDiff}`,
       `Tools       ${toolDiff}`,
       `Workflows   ${workflowDiff}`,
+      `Commands    ${commandDiff}`,
       `Permissions ${permissionDiff}`,
       `Effects     ${approval.effects.join('; ') || 'none'}`,
       `Contract    ${approval.runtimeContractVersion || 'unspecified'}`,
@@ -218,12 +227,13 @@ function selfExtensionActivationCard(
         : status === 'ACTIVATION_FAILED'
           ? 'The previous activation attempt failed. Retry is available only after the host rechecks the sealed artifact and current eligibility.'
           : 'Review and approval authorize this exact revision, but only this separate trusted action can put it into service.',
-      outcome: releaseOutcome(capabilityDiff, toolDiff, workflowDiff),
+      outcome: releaseOutcome(capabilityDiff, toolDiff, workflowDiff, commandDiff),
       scope: `${approval.owner}@${approval.candidateVersion} · isolated runtime · exact digest · reversible`,
       facts: [
         { label: 'CAPABILITIES', value: capabilityDiff },
         { label: 'TOOLS', value: toolDiff },
         { label: 'WORKFLOWS', value: workflowDiff },
+        { label: 'COMMANDS', value: commandDiff },
         { label: 'PERMISSIONS', value: permissionDiff },
         { label: 'EFFECTS', value: approval.effects.join('; ') || 'None declared' },
       ],
@@ -238,11 +248,12 @@ function releaseRequest(status: ActivationCard['status'], owner: string): string
   return `Put ${name} online`
 }
 
-function releaseOutcome(capabilities: string, tools: string, workflows: string): string {
+function releaseOutcome(capabilities: string, tools: string, workflows: string, commands: string): string {
   const surfaces = [
     capabilities !== 'none' ? `capabilities ${capabilities}` : '',
     tools !== 'none' ? `tools ${tools}` : '',
     workflows !== 'none' ? `workflows ${workflows}` : '',
+    commands !== 'none' ? `commands ${commands}` : '',
   ].filter(Boolean)
   return surfaces.length > 0
     ? `The isolated revision will become live and publish ${surfaces.join('; ')}.`

@@ -10,7 +10,8 @@ import { GENERATED_EXTENSION_API_V1 } from '../src/domain/workbench/authoring-co
 import { GENERATED_MAX_MESSAGE_BYTES, generatedRuntimeDiagnosis } from '../src/domain/generated-runtime/index.js'
 import type { ExtensionProvenance } from '../src/domain/registry/index.js'
 import type { ResolutionKind, ResolutionReview } from '../src/domain/resolution/index.js'
-import { bootAssistantControl } from '../src/runtime/boot.js'
+import { bootAssistantControl, createAssistantAgent } from '../src/runtime/boot.js'
+import type { CandidateCommandDeclaration } from '../src/domain/candidate/types.js'
 
 function review(capability = 'r0.transform', kind: ResolutionKind = 'new-plugin'): ResolutionReview {
   return {
@@ -53,6 +54,7 @@ async function activateGenerated(ctx: Awaited<ReturnType<typeof bootAssistantCon
   readonly services?: readonly string[]
   readonly providers?: readonly string[]
   readonly reviewKind?: ResolutionKind
+  readonly commands?: readonly CandidateCommandDeclaration[]
 }) {
   const created = ctx.candidateWorkspace.create({
     review: review('r0.transform', input.reviewKind ?? 'new-plugin'),
@@ -67,6 +69,7 @@ async function activateGenerated(ctx: Awaited<ReturnType<typeof bootAssistantCon
       providers: [...(input.providers ?? [])],
       entryPoints: ['src/plugin.js'],
       permissions: [...(input.permissions ?? [])],
+      commands: input.commands,
     },
   })
   ctx.candidateWorkspace.writeFile(created.id, 'package.json', `${JSON.stringify({ name: 'dsh-generated-r0', type: 'module', main: 'src/plugin.js' }, null, 2)}\n`)
@@ -91,6 +94,34 @@ async function execTool(ctx: { tools: { execute(input: unknown): Promise<{ isErr
 }
 
 describe('isolated generated-extension runtime', () => {
+  it('publishes governed slash-command triggers and removes them on rollback', async () => {
+    const { ctx, recoveryRoot } = await bootAssistantControl()
+    try {
+      const { status, human } = await activateGenerated(ctx, recoveryRoot, {
+        tool: 'r0_transform',
+        source: R0,
+        commands: [{
+          name: 'upper',
+          description: 'Uppercase JSON text input.',
+          target: { kind: 'tool', name: 'r0_transform' },
+          inputHint: '{"text":"hello"}',
+        }],
+      })
+      assert.equal(status.state, 'active', status.lastFailure?.diagnostics)
+      const handle = await createAssistantAgent(ctx, 'command-trigger')
+      assert.equal(ctx.commands.list(handle.agent).some((item) => item.name === 'upper'), true)
+      const execution = await ctx.commands.execute(handle.agent, '/upper {"text":"hello"}', [], AbortSignal.timeout(8000))
+      assert.equal(execution?.result.kind, 'success')
+      assert.equal(execution?.result.text, 'HELLO')
+      const invalid = await ctx.commands.execute(handle.agent, '/upper nope', [], AbortSignal.timeout(8000))
+      assert.deepEqual(invalid?.result, { kind: 'error', text: '/upper input must be valid JSON' })
+      await recoveryRoot.rollback(human)
+      assert.equal(ctx.commands.list(handle.agent).some((item) => item.name === 'upper'), false)
+    } finally {
+      await ctx.fiber.dispose()
+    }
+  })
+
   it('A. activates a generated candidate without importing it into the host process', async () => {
     const { ctx, recoveryRoot } = await bootAssistantControl()
     try {
@@ -508,7 +539,11 @@ export function apply(ctx) {
     const home = mkdtempSync(path.join(tmpdir(), 'tars-ng-r0-recon-'))
     const first = await bootAssistantControl({ home })
     try {
-      const { status } = await activateGenerated(first.ctx, first.recoveryRoot, { tool: 'r0_transform', source: R0 })
+      const { status } = await activateGenerated(first.ctx, first.recoveryRoot, {
+        tool: 'r0_transform',
+        source: R0,
+        commands: [{ name: 'upper', description: 'Uppercase text.', target: { kind: 'tool', name: 'r0_transform' }, inputHint: '{"text":"hello"}' }],
+      })
       assert.equal(status.state, 'active', status.lastFailure?.diagnostics)
       const result = await execTool(first.ctx, 'r0_transform', { text: 're' })
       assert.equal(String(result.value), 'RE')
@@ -518,6 +553,10 @@ export function apply(ctx) {
     const second = await bootAssistantControl({ home })
     try {
       assert.ok(second.ctx.tools.get('r0_transform'), 'reconstructed proxy must be present')
+      const handle = await createAssistantAgent(second.ctx, 'command-restart')
+      assert.equal(second.ctx.commands.list(handle.agent).some((item) => item.name === 'upper'), true)
+      const command = await second.ctx.commands.execute(handle.agent, '/upper {"text":"boot"}', [], AbortSignal.timeout(8000))
+      assert.equal(command?.result.text, 'BOOT')
       const result = await execTool(second.ctx, 'r0_transform', { text: 'boot' })
       assert.equal(result.isError, false, String(result.value))
       assert.equal(String(result.value), 'BOOT')

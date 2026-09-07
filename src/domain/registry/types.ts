@@ -51,6 +51,7 @@ export interface RegistryRecord {
   readonly services: readonly string[]
   readonly providers: readonly string[]
   readonly workflows: readonly string[]
+  readonly commands: readonly string[]
   readonly pluginDependencies: readonly { readonly capability: string; readonly strength: 'hard' | 'optional' }[]
 }
 
@@ -78,6 +79,7 @@ export interface RegistryRevisePatch {
   readonly provider?: string
   readonly providers?: readonly string[]
   readonly workflows?: readonly string[]
+  readonly commands?: readonly string[]
 }
 
 export interface RegistryRegisterInput {
@@ -94,6 +96,7 @@ export interface RegistryRegisterInput {
   readonly services?: readonly string[]
   readonly providers?: readonly string[]
   readonly workflows?: readonly string[]
+  readonly commands?: readonly string[]
   readonly pluginDependencies?: readonly { readonly capability: string; readonly strength: 'hard' | 'optional' }[]
 }
 

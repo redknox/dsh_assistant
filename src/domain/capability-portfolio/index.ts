@@ -23,6 +23,7 @@ export interface CapabilityPortfolioCard {
   readonly capabilities: readonly string[]
   readonly tools: readonly string[]
   readonly workflows: readonly string[]
+  readonly commands: readonly string[]
   readonly assurance: {
     readonly validation: 'passed' | 'not-recorded'
     readonly review: 'complete' | 'not-recorded'
@@ -69,7 +70,7 @@ export function projectCapabilityPortfolio(input: {
       id: `extension:${ownerKey(plugin.owner, plugin.version)}`,
       title: friendlyOwner(plugin.owner),
       purpose: capabilityPurpose(plugin.capabilities, tools, workflows),
-      usage: usageOf(input.tools, input.workflows, plugin.owner, plugin.tools, workflows),
+      usage: usageOf(input.tools, input.workflows, plugin.owner, plugin.tools, workflows, plugin.commands ?? []),
       status: 'active',
       implementation: unique<CapabilityImplementationKind>([
         'extension',
@@ -82,6 +83,7 @@ export function projectCapabilityPortfolio(input: {
       capabilities: plugin.capabilities,
       tools: plugin.tools,
       workflows,
+      commands: plugin.commands ?? [],
       assurance: assuranceOf(extension, 'active', plugin.digest),
       dependency: dependencyOf(plugin),
       unplug: { kind: 'plugin', plugin },
@@ -99,7 +101,7 @@ export function projectCapabilityPortfolio(input: {
       id: `extension:${ownerKey(extension.owner, extension.version)}`,
       title: friendlyOwner(extension.owner),
       purpose: capabilityPurpose(extension.capabilities, tools, workflows),
-      usage: usageOf(input.tools, input.workflows, extension.owner, extension.tools, workflows),
+      usage: usageOf(input.tools, input.workflows, extension.owner, extension.tools, workflows, extension.commands ?? []),
       status: extension.lifecycle === 'ACTIVE' ? 'active' : 'disabled',
       implementation: unique<CapabilityImplementationKind>([
         'extension',
@@ -112,6 +114,7 @@ export function projectCapabilityPortfolio(input: {
       capabilities: extension.capabilities,
       tools: extension.tools,
       workflows,
+      commands: extension.commands ?? [],
       assurance: assuranceOf(extension, extension.lifecycle === 'ACTIVE' ? 'active' : 'disabled', extension.digest),
       dependency: { severity: 'none', dependents: [] },
     })
@@ -132,6 +135,7 @@ export function projectCapabilityPortfolio(input: {
       capabilities: [],
       tools: [],
       workflows: [],
+      commands: [],
       assurance: {
         validation: skill.validationPassed ? 'passed' : 'not-recorded',
         review: skill.reviewComplete ? 'complete' : 'not-recorded',
@@ -220,7 +224,9 @@ function usageOf(
   owner: string,
   declaredTools: readonly string[],
   workflowNames: readonly string[],
+  commands: readonly string[],
 ): string {
+  if (commands.length > 0) return `Run ${commands.map((name) => `/${name}`).join(' or ')} in the conversation composer.`
   const workflow = workflows?.workflows.find((item) => item.owner === owner && workflowNames.includes(item.name))
   if (workflow) return workflow.whenToUse || `Ask TARS-NG to run “${workflow.title}” when you need: ${workflow.description}`
   const tool = tools?.tools.find((item) => item.owner === owner && declaredTools.includes(item.name))

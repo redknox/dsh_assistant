@@ -303,6 +303,7 @@ function selfExtensionCard(approval: NonNullable<WorkspaceSnapshotInput['extensi
   const permissionDiff = formatDiff(approval.permissionsAdded, approval.permissionsRemoved, approval.permissionsChanged)
   const toolDiff = formatDiff(approval.toolsAdded ?? [], approval.toolsRemoved ?? [], approval.toolsChanged)
   const workflowDiff = formatDiff(approval.workflowsAdded ?? [], approval.workflowsRemoved ?? [], approval.workflowsChanged)
+  const commandDiff = formatDiff(approval.commandsAdded ?? [], approval.commandsRemoved ?? [], approval.commandsChanged)
   return {
     id: approval.id,
     kind: 'self-extension',
@@ -321,6 +322,7 @@ function selfExtensionCard(approval: NonNullable<WorkspaceSnapshotInput['extensi
       `Permissions ${permissionDiff}`,
       `Tools       ${toolDiff}`,
       `Workflows   ${workflowDiff}`,
+      `Commands    ${commandDiff}`,
       `Effects     ${approval.effects.join('; ') || 'none'}`,
       'This is not self-authorization. Model/tools cannot mint approval.',
     ],
@@ -334,6 +336,7 @@ function selfExtensionCard(approval: NonNullable<WorkspaceSnapshotInput['extensi
         { label: 'CAPABILITY CHANGE', value: capabilityDiff },
         ...(toolDiff !== 'none' ? [{ label: 'TOOL CHANGE', value: toolDiff }] : []),
         ...(workflowDiff !== 'none' ? [{ label: 'WORKFLOW CHANGE', value: workflowDiff }] : []),
+        ...(commandDiff !== 'none' ? [{ label: 'COMMAND CHANGE', value: commandDiff }] : []),
         { label: 'PERMISSION CHANGE', value: permissionDiff },
         { label: 'SIDE EFFECTS', value: approval.effects.join('; ') || 'None declared' },
       ],

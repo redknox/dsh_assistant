@@ -47,6 +47,7 @@ export class CandidateService implements CandidateWorkspace, CandidateValidation
         manifest: {
           ...record.manifest,
           workflows: record.manifest.workflows ?? [],
+          commands: record.manifest.commands ?? [],
         },
       })
     }

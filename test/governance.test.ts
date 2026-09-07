@@ -30,7 +30,7 @@ import * as governancePlugin from '../src/plugins/governance-plugin.js'
 import * as registryPlugin from '../src/plugins/registry-plugin.js'
 import * as reviewPlugin from '../src/plugins/review-plugin.js'
 import type { IndependentReview } from '../src/domain/review/index.js'
-import { bootAssistantControl, bootSafeModeRuntime } from '../src/runtime/boot.js'
+import { bootAssistantControl, bootSafeModeRuntime, createAssistantAgent } from '../src/runtime/boot.js'
 
 function review(overrides: Partial<ResolutionReview> = {}): ResolutionReview {
   return {
@@ -971,6 +971,12 @@ export function apply() {}
             maxTotalAgents: 1,
             inputFields: [{ name: 'text', required: true }],
           }],
+          commands: [{
+            name: 'approved-echo',
+            description: 'Run the approved echo Workflow.',
+            target: { kind: 'workflow', name: 'approved-echo' },
+            inputHint: '{"text":"hello"}',
+          }],
         },
       })
       ctx.candidateWorkspace.writeFile(candidate.id, 'src/approved-echo.workflow.js', 'return { echoed: args.text }\n')
@@ -980,6 +986,7 @@ export function apply() {}
       ctx.independentReview.reviewCandidate(sealed.id)
       const requested = ctx.extensionGovernance.requestApproval(sealed.id)
       assert.deepEqual(requested.summary.workflows.added, ['approved-echo'])
+      assert.deepEqual(requested.summary.commands.added, ['approved-echo'])
       const human = recoveryRoot.issueAuthority({ kind: 'human-control', source: 'application-ui' })
       recoveryRoot.recordApproval(human, { candidateId: sealed.id, fingerprint: requested.fingerprint, decision: 'approved-for-exact-diff' })
       const active = await recoveryRoot.activate(sealed.id, human)
@@ -987,8 +994,13 @@ export function apply() {}
       assert.ok(ctx.workflowCatalog.list().workflows.some((item) => item.name === 'approved-echo' && item.governance === 'generated-governed'))
       const result = await ctx.workflowCatalog.execute('approved-echo', { text: 'hello' }, { parent: {} as never })
       assert.deepEqual(result.result, { echoed: 'hello' })
+      const handle = await createAssistantAgent(ctx, 'workflow-command')
+      const command = await ctx.commands.execute(handle.agent, '/approved-echo {"text":"command"}', [], AbortSignal.timeout(8000))
+      assert.equal(command?.result.kind, 'success')
+      assert.match(command?.result.text ?? '', /command/)
       await recoveryRoot.rollback(human)
       assert.equal(ctx.workflowCatalog.list().workflows.some((item) => item.name === 'approved-echo'), false)
+      assert.equal(ctx.commands.list(handle.agent).some((item) => item.name === 'approved-echo'), false)
     } finally {
       await ctx.fiber.dispose()
     }

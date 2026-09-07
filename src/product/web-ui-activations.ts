@@ -140,6 +140,8 @@ function publishedSurfaceSummary(card: ActivationCard): string {
     ...card.toolsChanged,
     ...(card.workflowsAdded ?? []),
     ...(card.workflowsChanged ?? []),
+    ...(card.commandsAdded ?? []).map((name) => `/${name}`),
+    ...(card.commandsChanged ?? []).map((name) => `/${name}`),
   ]
   if (surfaces.length === 0) return 'The capability is ready to use.'
   return `${surfaces.join(', ')} ${surfaces.length === 1 ? 'is' : 'are'} ready to use.`

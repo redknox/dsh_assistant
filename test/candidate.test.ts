@@ -44,6 +44,37 @@ function seeded(area = mkdtempSync(path.join(tmpdir(), 'dsh-cand-'))) {
 }
 
 describe('candidate workspace and validation', () => {
+  it('accepts commands only as triggers for surfaces declared by the same candidate', () => {
+    const { workspace } = seeded()
+    const candidate = workspace.create({
+      review: review(),
+      owner: 'generated/command-probe',
+      version: '0.1.0',
+      manifest: {
+        capabilities: ['r0.candidate.probe'],
+        tools: ['command_probe'],
+        commands: [{ name: 'probe', description: 'Run the probe.', target: { kind: 'tool', name: 'command_probe' } }],
+      },
+    })
+    assert.deepEqual(candidate.manifest.commands.map((item) => item.name), ['probe'])
+    assert.deepEqual(workspace.diff(candidate.id).commands?.added, ['probe'])
+
+    assert.throws(() => workspace.create({
+      review: review(), owner: 'generated/bad-command', version: '0.1.0',
+      manifest: {
+        capabilities: ['r0.candidate.probe'], tools: ['owned_tool'],
+        commands: [{ name: 'foreign', description: 'Invalid target.', target: { kind: 'tool', name: 'other_tool' } }],
+      },
+    }), /must target a declared tool/)
+    assert.throws(() => workspace.create({
+      review: review(), owner: 'generated/reserved-command', version: '0.1.0',
+      manifest: {
+        capabilities: ['r0.candidate.probe'], tools: ['owned_tool'],
+        commands: [{ name: 'compact', description: 'Invalid name.', target: { kind: 'tool', name: 'owned_tool' } }],
+      },
+    }), /reserved/)
+  })
+
   it('rejects malformed Workflow metadata before it reaches validation', () => {
     const { workspace } = seeded()
     assert.throws(() => workspace.create({

@@ -73,6 +73,7 @@ export interface CandidateManifest {
   readonly services: readonly string[]
   readonly providers: readonly string[]
   readonly workflows: readonly CandidateWorkflowDeclaration[]
+  readonly commands: readonly CandidateCommandDeclaration[]
   readonly secrets: readonly string[]
   readonly configRequired: readonly string[]
   readonly effects: OperationalEffects
@@ -99,6 +100,7 @@ export interface CandidateManifestInput {
   readonly services?: readonly string[]
   readonly providers?: readonly string[]
   readonly workflows?: readonly CandidateWorkflowDeclaration[]
+  readonly commands?: readonly CandidateCommandDeclaration[]
   readonly secrets?: readonly string[]
   readonly configRequired?: readonly string[]
   readonly effects?: Partial<OperationalEffects>
@@ -147,6 +149,8 @@ export interface CandidateDiff {
   readonly services: NamedDiff
   readonly providers: NamedDiff
   readonly workflows: NamedDiff
+  /** Omitted when empty so approvals created before command support keep their exact fingerprint. */
+  readonly commands?: NamedDiff
   readonly runtimeSeams: NamedDiff
   readonly effects: OperationalEffects
   readonly runtimeContractVersion?: string
@@ -163,6 +167,18 @@ export interface CandidateWorkflowDeclaration {
   readonly maxInputBytes: number
   readonly maxTotalAgents: number
   readonly inputFields?: readonly { readonly name: string; readonly required: boolean; readonly description?: string }[]
+}
+
+/** Governed human-facing trigger for one tool or Workflow owned by this capability. */
+export interface CandidateCommandDeclaration {
+  readonly name: string
+  readonly description: string
+  readonly target: {
+    readonly kind: 'tool' | 'workflow'
+    readonly name: string
+  }
+  /** Omit for a no-argument command; otherwise input is one JSON object. */
+  readonly inputHint?: string
 }
 
 export interface ValidationStageResult {

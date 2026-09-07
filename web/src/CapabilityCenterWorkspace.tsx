@@ -172,6 +172,7 @@ function CapabilityCard(props: {
               <Contract label="CAPABILITIES" values={card.capabilities} empty="No separate capability claims" />
               <Contract label="TOOLS" values={card.tools} empty="No callable tools" />
               <Contract label="WORKFLOWS" values={card.workflows} empty="No registered workflows" />
+              <Contract label="COMMANDS" values={card.commands.map((name) => `/${name}`)} empty="No slash-command trigger" />
               <Contract label="DELIVERY EVIDENCE" values={deliveryEvidence(card)} empty="No lifecycle evidence recorded" />
               <Contract label="EXACT REVISION" values={card.assurance.digest ? [card.assurance.digest] : []} empty="Digest not recorded" />
               <Contract label="PROVIDER" values={card.provider ? [card.provider] : []} empty="Local or host runtime" />

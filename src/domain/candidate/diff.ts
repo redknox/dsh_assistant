@@ -12,6 +12,7 @@ function namedDiff(current: readonly string[], next: readonly string[]): NamedDi
 }
 
 export function diffAgainstBase(manifest: CandidateManifest, base?: RegistryRecord): CandidateDiff {
+  const commands = namedDiff(base?.commands ?? [], manifest.commands.map((item) => item.name))
   return {
     owner: manifest.owner,
     baseVersion: base?.version ?? manifest.baseVersion,
@@ -22,6 +23,7 @@ export function diffAgainstBase(manifest: CandidateManifest, base?: RegistryReco
     services: namedDiff(base?.services ?? [], manifest.services),
     providers: namedDiff(base?.providers ?? [], manifest.providers),
     workflows: namedDiff(base?.workflows ?? [], manifest.workflows.map((item) => item.name)),
+    ...(commands.added.length === 0 && commands.removed.length === 0 && commands.changed.length === 0 ? {} : { commands }),
     runtimeSeams: namedDiff(base?.runtimeSeams ?? [], manifest.runtimeSeams),
     effects: manifest.effects,
     ...(manifest.runtimeContractVersion === undefined ? {} : { runtimeContractVersion: manifest.runtimeContractVersion }),

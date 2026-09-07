@@ -479,6 +479,27 @@ function manifestParameters() {
         },
       },
     },
+    commands: {
+      type: 'array' as const,
+      description: 'Optional governed slash-command triggers. Each command must target a Tool or Workflow declared by this same manifest.',
+      items: {
+        type: 'object' as const,
+        additionalProperties: false,
+        properties: {
+          name: { type: 'string' as const },
+          description: { type: 'string' as const },
+          target: {
+            type: 'object' as const,
+            additionalProperties: false,
+            properties: {
+              kind: { type: 'string' as const },
+              name: { type: 'string' as const },
+            },
+          },
+          inputHint: { type: 'string' as const },
+        },
+      },
+    },
     secrets: strings,
     configRequired: strings,
     entryPoints: strings,
@@ -518,6 +539,7 @@ function manifestFromArgs(args: Record<string, unknown>): CandidateManifestInput
     services: asStringList(args.services),
     providers: asStringList(args.providers),
     workflows: parseWorkflows(args.workflows),
+    commands: parseCommands(args.commands),
     secrets: asStringList(args.secrets),
     configRequired: asStringList(args.configRequired),
     effects: parseEffects(args.effects),
@@ -525,6 +547,23 @@ function manifestFromArgs(args: Record<string, unknown>): CandidateManifestInput
     riskModel: parseRiskModel(args.riskModel),
     pluginDependencies: parsePluginDependencies(args.pluginDependencies),
   }
+}
+
+function parseCommands(value: unknown): CandidateManifestInput['commands'] {
+  if (!Array.isArray(value)) return undefined
+  return value.map((item) => {
+    const row = item as Record<string, unknown>
+    const target = row.target as Record<string, unknown> | undefined
+    return {
+      name: typeof row.name === 'string' ? row.name : '',
+      description: typeof row.description === 'string' ? row.description : '',
+      target: {
+        kind: target?.kind as 'tool' | 'workflow',
+        name: typeof target?.name === 'string' ? target.name : '',
+      },
+      ...(typeof row.inputHint === 'string' ? { inputHint: row.inputHint } : {}),
+    }
+  })
 }
 
 function parseWorkflows(value: unknown): CandidateManifestInput['workflows'] {

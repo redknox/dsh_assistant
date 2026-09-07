@@ -1,5 +1,8 @@
 import { pathToFileURL } from 'node:url'
+import { randomUUID } from 'node:crypto'
 import type { Context, Plugin } from '@deepseek-ai/cordis'
+import { CallId } from '@deepseek-ai/dsh-llm'
+import type CommandRuntime from '@deepseek-ai/dsh-commands'
 import { defineTool, type ParameterSchemaSpec, type ValueSchemaSpec } from '@deepseek-ai/dsh-tools'
 import type { ActivationPrepareContext, ActivationRuntime, IsolatedRuntimeFailure } from '../../domain/governance/runtime.js'
 import type { ActivationSnapshot } from '../../domain/governance/types.js'
@@ -109,6 +112,8 @@ export class CordisActivationRuntime implements ActivationRuntime {
   private readonly parkedBy = new Map<string, Array<{ id: string; runner: IsolatedGeneratedRunner }>>()
   private readonly isolatedRecipes = new Map<string, ActivationPrepareContext>()
   private readonly workflowDisposers = new Map<string, Array<() => void>>()
+  private readonly commandDisposers = new Map<string, Array<() => void>>()
+  private readonly mountedCommands = new Map<string, readonly string[]>()
   private readonly parkedWorkflowsBy = new Map<string, string[]>()
   private readonly generatedBroker
 
@@ -201,6 +206,11 @@ export class CordisActivationRuntime implements ActivationRuntime {
       if (missingWorkflows.length > 0) {
         return { ok: false, diagnostics: missingWorkflows.map((name) => `workflow:${name} missing after candidate mount`).join('; ') }
       }
+      const activeCommands = new Set(this.mountedCommands.get(candidateId) ?? [])
+      const missingCommands = declared.commands.map((item) => item.name).filter((name) => !activeCommands.has(name))
+      if (missingCommands.length > 0) {
+        return { ok: false, diagnostics: missingCommands.map((name) => `command:${name} missing after candidate mount`).join('; ') }
+      }
       if (declaredTools.length === 0 && declared.workflows.length === 0) {
         return { ok: false, diagnostics: 'candidate declared no tools, workflows, services, or providers to verify' }
       }
@@ -211,6 +221,9 @@ export class CordisActivationRuntime implements ActivationRuntime {
       const active = new Set(catalog?.list().workflows.map((item) => item.name) ?? [])
       const missing = declared.workflows.map((item) => item.name).filter((name) => !active.has(name))
       if (missing.length > 0) return { ok: false, diagnostics: missing.map((name) => `workflow:${name} missing after candidate mount`).join('; ') }
+      const activeCommands = new Set(this.mountedCommands.get(candidateId) ?? [])
+      const missingCommands = declared.commands.map((item) => item.name).filter((name) => !activeCommands.has(name))
+      if (missingCommands.length > 0) return { ok: false, diagnostics: missingCommands.map((name) => `command:${name} missing after candidate mount`).join('; ') }
       return { ok: true }
     }
     if (!this.fibers.has(candidateId)) return { ok: false, diagnostics: 'candidate artifact is not mounted' }
@@ -250,6 +263,9 @@ export class CordisActivationRuntime implements ActivationRuntime {
     for (const id of [...this.workflowDisposers.keys()]) {
       if (!snapshot.mounted.includes(id)) this.dropWorkflows(id)
     }
+    for (const id of [...this.commandDisposers.keys()]) {
+      if (!snapshot.mounted.includes(id)) this.dropCommands(id)
+    }
     for (const id of new Set([...this.parkedBy.keys(), ...this.priorOwners.keys()])) {
       if (snapshot.mounted.includes(id)) {
         await this.discardParked(id)
@@ -259,14 +275,14 @@ export class CordisActivationRuntime implements ActivationRuntime {
     }
     await Promise.all(waiting)
     for (const id of snapshot.mounted) {
-      if (this.generated.has(id) || this.fibers.has(id) || this.workflowDisposers.has(id)) continue
+      if (this.generated.has(id) || this.fibers.has(id) || this.workflowDisposers.has(id) || this.commandDisposers.has(id)) continue
       const recipe = this.isolatedRecipes.get(id)
       if (recipe === undefined) continue
       const remounted = await this.prepareGeneratedComposite(id, recipe)
       if (!remounted.ok) throw new Error(remounted.diagnostics ?? `failed to remount isolated candidate ${id}`)
       await this.commit(id)
     }
-    this.currentMounted = snapshot.mounted.filter((id) => this.generated.has(id) || this.fibers.has(id) || this.workflowDisposers.has(id))
+    this.currentMounted = snapshot.mounted.filter((id) => this.generated.has(id) || this.fibers.has(id) || this.workflowDisposers.has(id) || this.commandDisposers.has(id))
   }
 
   async unloadGenerated(candidateId?: string): Promise<void> {
@@ -276,12 +292,14 @@ export class CordisActivationRuntime implements ActivationRuntime {
         await this.dropGenerated(candidateId, runner)
       }
       this.dropWorkflows(candidateId)
+      this.dropCommands(candidateId)
       await this.discardParked(candidateId)
       return
     }
     const runners = [...this.generated.entries()]
     await Promise.all(runners.map(([id, runner]) => this.dropGenerated(id, runner)))
     for (const id of [...this.workflowDisposers.keys()]) this.dropWorkflows(id)
+    for (const id of [...this.commandDisposers.keys()]) this.dropCommands(id)
     for (const id of [...this.parkedBy.keys()]) await this.discardParked(id)
   }
 
@@ -294,7 +312,17 @@ export class CordisActivationRuntime implements ActivationRuntime {
   }
 
   private async prepareGeneratedComposite(candidateId: string, context: ActivationPrepareContext): Promise<{ ok: boolean; diagnostics?: string }> {
-    if (context.workflows.length === 0) return this.prepareGenerated(candidateId, context)
+    if (context.workflows.length === 0) {
+      const prepared = await this.prepareGenerated(candidateId, context)
+      if (!prepared.ok) return prepared
+      const commands = this.mountGeneratedCommands(candidateId, context)
+      if (!commands.ok) {
+        const runner = this.generated.get(candidateId)
+        if (runner) await this.dropGenerated(candidateId, runner)
+        await this.restoreIsolatedSwap(candidateId)
+      }
+      return commands
+    }
     if (context.services.length > 0 || context.providers.length > 0) {
       return { ok: false, diagnostics: 'generated runtime does not proxy services or providers' }
     }
@@ -312,6 +340,8 @@ export class CordisActivationRuntime implements ActivationRuntime {
     try {
       const mounted = await this.mountGeneratedWorkflows(candidateId, context)
       if (!mounted.ok) throw new Error(mounted.diagnostics ?? 'Workflow mount failed')
+      const commands = this.mountGeneratedCommands(candidateId, context)
+      if (!commands.ok) throw new Error(commands.diagnostics ?? 'Command mount failed')
       return { ok: true }
     } catch (error) {
       this.dropWorkflows(candidateId)
@@ -373,6 +403,7 @@ export class CordisActivationRuntime implements ActivationRuntime {
   }
 
   private dropWorkflows(candidateId: string): void {
+    this.dropCommands(candidateId)
     for (const dispose of this.workflowDisposers.get(candidateId)?.slice().reverse() ?? []) dispose()
     this.workflowDisposers.delete(candidateId)
   }
@@ -399,6 +430,8 @@ export class CordisActivationRuntime implements ActivationRuntime {
       if (!recipe) continue
       const mounted = await this.mountGeneratedWorkflows(id, recipe)
       if (!mounted.ok) throw new Error(mounted.diagnostics ?? `failed to restore Workflow candidate ${id}`)
+      const commands = this.mountGeneratedCommands(id, recipe)
+      if (!commands.ok) throw new Error(commands.diagnostics ?? `failed to restore commands for ${id}`)
       if (!this.currentMounted.includes(id)) this.currentMounted = [...this.currentMounted, id]
     }
   }
@@ -505,6 +538,7 @@ export class CordisActivationRuntime implements ActivationRuntime {
   }
 
   private parkGenerated(candidateId: string, runner: IsolatedGeneratedRunner): void {
+    this.dropCommands(candidateId)
     const disposers = this.proxyDisposers.get(candidateId) ?? []
     this.proxyDisposers.delete(candidateId)
     for (const dispose of disposers) dispose()
@@ -531,6 +565,11 @@ export class CordisActivationRuntime implements ActivationRuntime {
     this.proxyDisposers.set(id, disposers)
     this.candidateOwners.set(id, runner.owner)
     this.attachFatalHandler(id, runner)
+    const recipe = this.isolatedRecipes.get(id)
+    if (recipe) {
+      const commands = this.mountGeneratedCommands(id, recipe)
+      if (!commands.ok) throw new Error(commands.diagnostics ?? `failed to restore commands for ${id}`)
+    }
     if (!this.currentMounted.includes(id)) this.currentMounted = [...this.currentMounted, id]
   }
 
@@ -563,6 +602,7 @@ export class CordisActivationRuntime implements ActivationRuntime {
   }
 
   private async dropGenerated(candidateId: string, runner: IsolatedGeneratedRunner, alreadyExited = false): Promise<void> {
+    this.dropCommands(candidateId)
     const disposers = this.proxyDisposers.get(candidateId) ?? []
     this.proxyDisposers.delete(candidateId)
     for (const dispose of disposers) dispose()
@@ -581,6 +621,51 @@ export class CordisActivationRuntime implements ActivationRuntime {
     this.currentMounted = this.currentMounted.filter((id) => id !== candidateId)
   }
 
+  private mountGeneratedCommands(candidateId: string, context: ActivationPrepareContext): { ok: boolean; diagnostics?: string } {
+    if (context.commands.length === 0 || this.commandDisposers.has(candidateId)) return { ok: true }
+    const disposers: Array<() => void> = []
+    try {
+      const commands = this.ctx.get('commands') as CommandRuntime | undefined
+      if (!commands) throw new Error('Command Runtime is unavailable')
+      for (const command of context.commands) {
+        disposers.push(commands.register({
+          name: command.name,
+          description: command.description,
+          ...(command.inputHint === undefined ? {} : { input: { hint: command.inputHint } }),
+          handler: async (invocation) => {
+            const parsed = parseCommandInput(command.name, invocation.rawInput, command.inputHint !== undefined)
+            if (!parsed.ok) return { kind: 'error' as const, text: parsed.error }
+            const target = command.target.kind === 'tool' ? command.target.name : 'run_registered_workflow'
+            const args = command.target.kind === 'tool'
+              ? parsed.value
+              : { name: command.target.name, input: parsed.value }
+            const result = await this.ctx.tools.execute({
+              callId: CallId(`command-${command.name}-${randomUUID()}`),
+              name: target,
+              arguments: args,
+              agent: invocation.agent,
+              signal: invocation.signal,
+            })
+            if (result.isError) return { kind: 'error' as const, text: result.error.message }
+            return { kind: 'success' as const, text: renderCommandValue(result.value) }
+          },
+        }))
+      }
+      this.commandDisposers.set(candidateId, disposers)
+      this.mountedCommands.set(candidateId, context.commands.map((item) => item.name))
+      return { ok: true }
+    } catch (error) {
+      for (const dispose of disposers.reverse()) dispose()
+      return { ok: false, diagnostics: error instanceof Error ? error.message : String(error) }
+    }
+  }
+
+  private dropCommands(candidateId: string): void {
+    for (const dispose of this.commandDisposers.get(candidateId)?.slice().reverse() ?? []) dispose()
+    this.commandDisposers.delete(candidateId)
+    this.mountedCommands.delete(candidateId)
+  }
+
   private async restorePriorOwner(candidateId: string, mounts: readonly PriorOwnerMount[]): Promise<void> {
     for (const prior of mounts) {
       const fiber = await this.ctx.plugin(prior.plugin, prior.config)
@@ -592,6 +677,36 @@ export class CordisActivationRuntime implements ActivationRuntime {
       }
     }
     this.priorOwners.delete(candidateId)
+  }
+}
+
+function parseCommandInput(name: string, rawInput: string, acceptsInput: boolean):
+  | { readonly ok: true; readonly value: Record<string, unknown> }
+  | { readonly ok: false; readonly error: string } {
+  const text = rawInput.trim()
+  if (!acceptsInput) {
+    return text === ''
+      ? { ok: true, value: {} }
+      : { ok: false, error: `Usage: /${name} (no arguments)` }
+  }
+  if (text === '') return { ok: false, error: `Usage: /${name} <JSON object>` }
+  try {
+    const value: unknown = JSON.parse(text)
+    if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+      return { ok: false, error: `/${name} input must be a JSON object` }
+    }
+    return { ok: true, value: value as Record<string, unknown> }
+  } catch {
+    return { ok: false, error: `/${name} input must be valid JSON` }
+  }
+}
+
+function renderCommandValue(value: unknown): string {
+  if (typeof value === 'string') return value
+  try {
+    return JSON.stringify(value, null, 2)
+  } catch {
+    return 'Command completed.'
   }
 }
 

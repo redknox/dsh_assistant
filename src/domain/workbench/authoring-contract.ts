@@ -42,6 +42,14 @@ export interface AuthoringContractV1 {
     readonly runtimeGlobals: 'ECMAScript intrinsics only; no Node, Web, timer, URL, TextEncoder, or fetch globals; maxInputBytes is host-enforced'
     readonly example: string
   }
+  readonly command: {
+    readonly role: 'governed trigger only; not an independent capability'
+    readonly manifestShape: 'commands[].{ name, description, target: { kind, name }, inputHint? }'
+    readonly targets: readonly ['tool', 'workflow']
+    readonly input: 'one JSON object, or no arguments when inputHint is omitted'
+    readonly authority: 'inherits the target capability and executes through the normal Tool Runtime policy pipeline'
+    readonly reserved: readonly ['archive', 'compact', 'help', 'plan']
+  }
   readonly sizeBounds: {
     readonly maxFileBytes: number
     readonly maxWorkspaceBytes: number
@@ -113,6 +121,14 @@ const [risk, opportunity] = await parallel([
 phase('Synthesize')
 const synthesis = await agent('Synthesize: ' + JSON.stringify({ risk, opportunity }), { label: 'synthesis', phase: 'Synthesize' })
 return { risk, opportunity, synthesis }`,
+    },
+    command: {
+      role: 'governed trigger only; not an independent capability',
+      manifestShape: 'commands[].{ name, description, target: { kind, name }, inputHint? }',
+      targets: ['tool', 'workflow'],
+      input: 'one JSON object, or no arguments when inputHint is omitted',
+      authority: 'inherits the target capability and executes through the normal Tool Runtime policy pipeline',
+      reserved: ['archive', 'compact', 'help', 'plan'],
     },
     sizeBounds: {
       maxFileBytes: 256 * 1024,
