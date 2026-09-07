@@ -178,6 +178,33 @@ function MaterialInputPanel(props: { readonly value: MissionControlView['materia
   )
 }
 
+function DevelopmentExecutorsPanel(props: { readonly value: MissionControlView['developmentExecutors'] }) {
+  const value = props.value
+  if (!value || value.length === 0) return null
+  const external = value.filter((item) => !item.native)
+  const ready = external.filter((item) => item.available).length
+  return (
+    <section className="development-executor-status" aria-labelledby="development-executor-title">
+      <div className="ops-section-heading">
+        <h2 id="development-executor-title">DEVELOPMENT EXECUTORS</h2>
+        <span>{ready} / {external.length} EXTERNAL READY</span>
+      </div>
+      <dl className="development-executor-list">
+        {value.map((item) => (
+          <div key={item.id} data-executor={item.id} data-executor-state={item.available ? 'ready' : 'unavailable'}>
+            <dt>
+              <span className={`status-lamp status-lamp--${item.available ? 'ready' : 'offline'}`} aria-hidden="true" />
+              <strong>{item.label}</strong>
+              <small>{item.native ? 'BUILT IN' : item.detail}</small>
+            </dt>
+            <dd>{item.available ? 'READY' : 'NOT INSTALLED'}</dd>
+          </div>
+        ))}
+      </dl>
+    </section>
+  )
+}
+
 function lifecycleLabel(item: WorkbenchProjection): string {
   if (item.extensionLifecycle === 'ACTIVE') return 'ACTIVE'
   if (item.extensionLifecycle === 'APPROVED_NOT_ACTIVE') return 'READY TO ACTIVATE'
@@ -304,6 +331,7 @@ export function OperationsPanel(props: {
       </section>
       <ContextEndurancePanel value={props.view.contextEndurance} />
       <MaterialInputPanel value={props.view.materialInput} />
+      <DevelopmentExecutorsPanel value={props.view.developmentExecutors} />
       <TaskControlPanel value={props.view.taskControl} locked={!props.connected} control={props.actions.controlGoal} controlPlan={props.actions.controlPlan} answerQuestion={props.actions.answerQuestion} />
       <section className="capability-section" id="capabilities" aria-labelledby="capability-title">
         <div className="ops-section-heading capability-heading"><h2 id="capability-title">CONNECTED CAPABILITIES</h2><span>{props.view.capabilities.length} CHANNELS</span></div>

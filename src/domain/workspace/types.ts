@@ -356,6 +356,14 @@ export interface WorkBriefView {
   readonly markdown?: string
 }
 
+export interface DevelopmentExecutorStatusView {
+  readonly id: 'native' | 'codex' | 'claude-code'
+  readonly label: string
+  readonly available: boolean
+  readonly native: boolean
+  readonly detail: string
+}
+
 export interface MissionControlView {
   readonly identity: 'TARS-NG'
   readonly systemState: SystemState
@@ -385,6 +393,7 @@ export interface MissionControlView {
   readonly workBrief?: WorkBriefView
   readonly contextEndurance?: ContextEnduranceView
   readonly materialInput?: MaterialInputView
+  readonly developmentExecutors?: readonly DevelopmentExecutorStatusView[]
   readonly recovery?: RecoveryView
   readonly controlStrip: ControlStrip
   readonly personality: {
@@ -611,6 +620,7 @@ export interface WorkspaceSnapshotInput {
   readonly knowledge: readonly WorkspaceKnowledgeItem[]
   readonly contextEndurance?: ContextEnduranceView
   readonly materialInput?: MaterialInputView
+  readonly developmentExecutors?: readonly DevelopmentExecutorStatusView[]
   readonly objective?: ObjectiveView
   readonly workContext?: SessionWorkContextView
   readonly taskControl?: AgentTaskControlView

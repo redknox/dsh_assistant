@@ -24,6 +24,8 @@ import * as governancePlugin from '../plugins/governance-plugin.js'
 import type { GovernancePluginConfig } from '../plugins/governance-plugin.js'
 import * as workbenchPlugin from '../plugins/workbench-plugin.js'
 import type { WorkbenchPluginConfig } from '../plugins/workbench-plugin.js'
+import * as developmentExecutorPlugin from '../plugins/development-executor-plugin.js'
+import type { DevelopmentExecutorPluginConfig } from '../plugins/development-executor-plugin.js'
 import * as skillPlugin from '../plugins/skill-plugin.js'
 import type { SkillPluginConfig } from '../plugins/skill-plugin.js'
 import * as dshApprovalBridgePlugin from '../plugins/dsh-approval-bridge-plugin.js'
@@ -52,6 +54,7 @@ export interface AssistantBundleConfig {
   readonly safeMode?: boolean
   readonly governance?: GovernancePluginConfig
   readonly workbench?: WorkbenchPluginConfig
+  readonly developmentExecutors?: DevelopmentExecutorPluginConfig
   readonly skills?: SkillPluginConfig
   readonly boundedWorkbenchRoot?: string
 }
@@ -69,6 +72,10 @@ export async function apply(ctx: Context, config: AssistantBundleConfig = {}) {
   })
   await ctx.plugin(workbenchPlugin, {
     ...config.workbench,
+    inspectOnly: config.safeMode === true,
+  })
+  await ctx.plugin(developmentExecutorPlugin, {
+    ...config.developmentExecutors,
     inspectOnly: config.safeMode === true,
   })
   await ctx.plugin(skillPlugin, {
@@ -106,6 +113,7 @@ export const SAFE_MODE_TOOL_NAMES = [
   'inspect_capability_specification',
   'compare_capability_specifications',
   'inspect_validation_diagnostics',
+  'inspect_development_executors',
   'inspect_skill',
 ] as const
 
@@ -157,4 +165,6 @@ export const PRODUCT_TOOL_NAMES = [
   'inspect_capability_specification',
   'compare_capability_specifications',
   'repair_candidate',
+  'inspect_development_executors',
+  'delegate_candidate_development',
 ] as const

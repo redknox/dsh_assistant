@@ -26,6 +26,7 @@ export class CandidateWorkspaceService extends Service implements CandidateWorks
   writeFile(id: string, relativePath: string, content: string) { return this.store.writeFile(id, relativePath, content) }
   readFile(id: string, relativePath: string) { return this.store.readFile(id, relativePath) }
   listFiles(id: string) { return this.store.listFiles(id) }
+  refresh(id: string) { return this.store.refresh(id) }
   link(id: string, relativePath: string, target: string): never { return this.store.link(id, relativePath, target) }
   setManifest(id: string, manifest: Parameters<CandidateWorkspace['setManifest']>[1]) { return this.store.setManifest(id, manifest) }
   diff(id: string) { return this.store.diff(id) }

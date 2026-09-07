@@ -156,6 +156,7 @@ export const PRODUCT_ONLY_SEAMS = Object.freeze([
   { runtime: 'dsh-assistant-resolution', when: 'always', reason: 'capability resolution' },
   { runtime: 'dsh-assistant-review', when: 'always', reason: 'independent review' },
   { runtime: 'dsh-assistant-workbench', when: 'always', reason: 'Candidate Workbench' },
+  { runtime: 'dsh-assistant-development-executors', when: 'always', reason: 'replaceable Native, Codex, and Claude Code authoring seam' },
   { runtime: 'dsh-assistant-integrations', when: 'ready', reason: 'product integration hub' },
   { runtime: 'dsh-assistant-jobs', when: 'ready', reason: 'assistant job workflows' },
   { runtime: 'dsh-assistant-governed-subagent-provider', when: 'ready', reason: 'shared depth, concurrency, persona, and tool authority for direct delegation and Workflow' },

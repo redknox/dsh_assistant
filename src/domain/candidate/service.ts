@@ -160,6 +160,18 @@ export class CandidateService implements CandidateWorkspace, CandidateValidation
     return listSourceFiles(this.require(id).workspaceRoot)
   }
 
+  refresh(id: string): CandidateRecord {
+    const record = this.require(id)
+    this.assertImportedReadOnly(record)
+    this.assertMutable(record)
+    // Traverse now so an unsafe or unreadable host-side mutation fails before
+    // stale validation evidence is discarded.
+    listSourceFiles(record.workspaceRoot)
+    const next = this.snapshot(this.markDeveloping(record))
+    this.flush()
+    return next
+  }
+
   link(_id: string, _relativePath: string, _target: string): never {
     throw new WorkspaceEscapeError('symlink creation is not allowed in candidate workspaces')
   }

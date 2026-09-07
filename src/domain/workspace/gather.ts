@@ -175,6 +175,9 @@ export function gatherWorkspaceSnapshot(input: GatherWorkspaceInput): WorkspaceS
       })) ?? [],
     ...(contextEndurance ? { contextEndurance } : {}),
     materialInput,
+    developmentExecutors: (ctx.get('developmentExecutors') as {
+      inspect(): WorkspaceSnapshotInput['developmentExecutors']
+    } | undefined)?.inspect(),
     ...(taskControl ? { taskControl } : {}),
     ...(workContext ? { workContext } : {}),
     ...(input.objective

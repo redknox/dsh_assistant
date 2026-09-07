@@ -2346,6 +2346,11 @@ export function apply(ctx) {
           imageStore: 'ready',
           imageInput: 'ready',
         },
+        developmentExecutors: [
+          { id: 'native', label: 'TARS-NG Native', available: true, native: true, detail: 'Built-in candidate authoring tools' },
+          { id: 'codex', label: 'Codex', available: true, native: false, detail: 'codex-cli 0.150.1' },
+          { id: 'claude-code', label: 'Claude Code', available: false, native: false, detail: 'Claude Code CLI is not installed' },
+        ],
         workBrief: {
           status: 'completed',
           runId: 'run-brief-1',
@@ -2381,6 +2386,11 @@ export function apply(ctx) {
     assert.match(ready, /@FILE REFERENCES · ACTIVE/)
     assert.match(ready, /IMAGE STORE · READY/)
     assert.match(ready, /VISION INPUT · READY/)
+    assert.match(ready, /DEVELOPMENT EXECUTORS/)
+    assert.match(ready, /1 \/ 2 EXTERNAL READY/)
+    assert.match(ready, /data-executor="codex" data-executor-state="ready"/)
+    assert.match(ready, /data-executor="claude-code" data-executor-state="unavailable"/)
+    assert.match(ready, /NOT INSTALLED/)
     assert.match(ready, /REFERENCE/)
     assert.match(ready, /@FILE/)
     assert.match(ready, /class="work-brief-card"/)

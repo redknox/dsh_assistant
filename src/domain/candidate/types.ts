@@ -220,6 +220,8 @@ export interface CandidateWorkspace {
   writeFile(id: string, relativePath: string, content: string): CandidateRecord
   readFile(id: string, relativePath: string): string
   listFiles(id: string): readonly string[]
+  /** Reconcile a trusted host-side edit and invalidate stale validation evidence. */
+  refresh(id: string): CandidateRecord
   link(id: string, relativePath: string, target: string): never
   setManifest(id: string, manifest: CandidateManifestInput): CandidateRecord
   diff(id: string): CandidateDiff
