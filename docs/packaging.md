@@ -74,7 +74,7 @@ Optional capability providers (replaceable, not required to boot):
 
 | Provider | Default in product CLI | Status |
 | --- | --- | --- |
-| LLM adapter | `deepseek-official` / `deepseek-v4-flash` via `@deepseek-ai/dsh-llm-deepseek` | **Implemented** in the product runtime; live calls need `DEEPSEEK_API_KEY`. Fake adapters remain for tests/`ui`/`slice` |
+| LLM adapter | `deepseek-official` / `deepseek-v4-flash-vision-exp` via `@deepseek-ai/dsh-llm-deepseek` | **Implemented** with durable image input in the product runtime; live calls need `DEEPSEEK_API_KEY`. Fake adapters remain for tests/`ui`/`slice` |
 | Calendar | **unavailable** unless live token+mode or explicit fixtures | Fake suite **Verified** for tests; product default does not return fixture events as live data |
 | Memory persistence | `$TARS_NG_HOME/data/memory.json` | JSON adapter **Verified**; hosted DB **Unsupported** |
 | Knowledge ingest | none, explicit fixture paths, or one Obsidian Vault | Local lexical index **Verified**; configured Vault is re-indexed at boot. Note creation and append are L4 actions bound to an exact path/content/version; overwrite and delete are unsupported |

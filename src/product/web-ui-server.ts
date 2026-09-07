@@ -19,7 +19,7 @@ import { handleWebUiActivationRequest } from './web-ui-activations.js'
 import { handleWebUiGovernanceLifecycleRequest } from './web-ui-governance-lifecycle.js'
 import { WebUiGovernanceMutations } from './web-ui-governance-mutations.js'
 import { handleWebUiSkillRequest, type WebUiSkillCommand } from './web-ui-skills.js'
-import { WebUiHttpTransport } from './web-ui-http.js'
+import { MAX_IMAGE_MESSAGE_REQUEST_BYTES, WebUiHttpTransport } from './web-ui-http.js'
 import type { ProductSettings } from './settings.js'
 import { handleWebUiSettingsRequest } from './web-ui-settings.js'
 import { handleWebUiTaskControlRequest } from './web-ui-task-control.js'
@@ -274,10 +274,10 @@ export function startWebUiServer(options: WebUiServerOptions): Promise<WebUiServ
         method: req.method,
         pathname: requestUrl.pathname,
         query: requestUrl.searchParams.get('query') ?? undefined,
-        readJson: () => transport.readJson(req),
+        readJson: () => transport.readJson(req, requestUrl.pathname === '/api/message' ? MAX_IMAGE_MESSAGE_REQUEST_BYTES : undefined),
       }, {
         currentSessionId: () => options.surface.sessionId,
-        sendMessage: (text) => options.surface.sendMessage(text),
+        sendMessage: (text, images) => options.surface.sendMessage(text, images),
         listCommands: () => options.surface.listCommands(),
         executeCommand: (line, signal) => options.surface.executeCommand(line, signal),
         listFileReferences: (query, signal) => options.surface.listFileReferences(query, signal),

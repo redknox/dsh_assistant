@@ -23,6 +23,12 @@ export interface Availability {
   readonly configured?: boolean
   /** Public provider label for operational status; never contains credentials or account ids. */
   readonly provider?: string
+  readonly authorization?: {
+    readonly state: 'ready' | 'expiring' | 'expired' | 'unavailable'
+    readonly expiresAt?: string
+    readonly daysRemaining?: number
+    readonly reauthenticateCommand: string
+  }
 }
 
 export interface PageQuery {

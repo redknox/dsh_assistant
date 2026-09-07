@@ -183,12 +183,18 @@ async function parseJson<T>(response: Response, label: string): Promise<T> {
   return body
 }
 
-export async function sendMessage(text: string, sessionId: string): Promise<UiEnvelope> {
+export interface EncodedConversationImage {
+  readonly mediaType: 'image/png' | 'image/jpeg' | 'image/webp' | 'image/gif'
+  readonly data: string
+  readonly name?: string
+}
+
+export async function sendMessage(text: string, sessionId: string, images: readonly EncodedConversationImage[] = []): Promise<UiEnvelope> {
   return parseEnvelope(await fetch('/api/message', {
     ...include,
     method: 'POST',
     headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ text, sessionId }),
+    body: JSON.stringify({ text, sessionId, ...(images.length > 0 ? { images } : {}) }),
   }))
 }
 

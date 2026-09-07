@@ -103,7 +103,17 @@ async function bootStack(options: BootOptions = {}): Promise<AssistantControl> {
   }
   await ctx.plugin(AgentRegistry)
   await ctx.plugin(LlmRuntime)
-  await ctx.plugin(DeepSeekLlm, { apiKeyEnv: DEFAULT_LLM_CREDENTIAL })
+  await ctx.plugin(DeepSeekLlm, {
+    apiKeyEnv: DEFAULT_LLM_CREDENTIAL,
+    models: [{
+      id: DEFAULT_LLM_MODEL,
+      name: 'DeepSeek-V4-Flash-Vision-Exp',
+      description: 'Experimental multimodal model with text and image input.',
+      contextWindow: 1_000_000,
+      maxTokens: 384_000,
+      inputModalities: ['text', 'image'],
+    }],
+  })
   await ctx.plugin(AgentDefaultModel, { provider: DEFAULT_LLM_PROVIDER, model: DEFAULT_LLM_MODEL })
   await ctx.plugin(SystemPrompt, {})
   await ctx.plugin(ToolRuntime)

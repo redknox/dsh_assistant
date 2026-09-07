@@ -38,6 +38,7 @@ export class IntegrationsService extends Service {
     ctx: Context,
     readonly hub: IntegrationHub,
     readonly googleCalendarTransport: BoundedGoogleCalendarTransport,
+    readonly feishuAuthorization?: import('../domain/integrations/types.js').Availability['authorization'],
   ) {
     super(ctx, 'integrations')
   }
@@ -63,6 +64,7 @@ export async function apply(ctx: Context, config: IntegrationsPluginConfig = {})
   }
   const googleCalendarTransport = createHostGoogleCalendarTransport()
   let meetingNotes: MeetingNotesProvider | undefined
+  let feishuAuthorization: import('../domain/integrations/types.js').Availability['authorization']
   if (liveCalendarConfigured()) {
     fakes.hub.replaceCalendar(createGoogleCalendarProvider({
       transport: googleCalendarTransport,
@@ -73,10 +75,12 @@ export async function apply(ctx: Context, config: IntegrationsPluginConfig = {})
     const runner = createHostFeishuCliRunner({
       profile: process.env.DSH_ASSISTANT_FEISHU_PROFILE ?? DEFAULT_FEISHU_PROFILE,
     })
+    const profile = process.env.DSH_ASSISTANT_FEISHU_PROFILE ?? DEFAULT_FEISHU_PROFILE
     if (process.env.DSH_ASSISTANT_FEISHU_MODE === 'cli') {
       fakes.state.notConfigured.delete('mail')
       fakes.state.notConfigured.delete('contacts')
-      const availability = await inspectFeishuCli(runner, FEISHU_MAIL_CONTACT_SCOPES)
+      const availability = await inspectFeishuCli(runner, FEISHU_MAIL_CONTACT_SCOPES, { profile })
+      feishuAuthorization = availability.authorization
       if (availability.available) {
         fakes.hub.replaceMail(createFeishuMailProvider({ runner }))
         fakes.hub.replaceContacts(createFeishuContactsProvider({ runner }))
@@ -88,14 +92,15 @@ export async function apply(ctx: Context, config: IntegrationsPluginConfig = {})
       }
     }
     if (process.env.DSH_ASSISTANT_FEISHU_CALENDAR_MODE === 'cli') {
-      const calendarAvailability = await inspectFeishuCli(runner, FEISHU_CALENDAR_SCOPES)
+      const calendarAvailability = await inspectFeishuCli(runner, FEISHU_CALENDAR_SCOPES, { profile })
+      feishuAuthorization ??= calendarAvailability.authorization
       if (calendarAvailability.available) {
         fakes.hub.replaceCalendar(createFeishuCalendarProvider({ runner, allowCreate: true }))
         delete fakes.state.unavailable.calendar
       } else {
         fakes.state.unavailable.calendar = calendarAvailability.reason ?? 'Feishu Calendar authorization is unavailable'
       }
-      const meetingNotesAvailability = await inspectFeishuCli(runner, FEISHU_MEETING_NOTES_SCOPES)
+      const meetingNotesAvailability = await inspectFeishuCli(runner, FEISHU_MEETING_NOTES_SCOPES, { profile })
       if (meetingNotesAvailability.available) meetingNotes = createFeishuMeetingNotesProvider({ runner })
     }
   }
@@ -111,7 +116,7 @@ export async function apply(ctx: Context, config: IntegrationsPluginConfig = {})
   if (registry) applySandboxAuthorityStamp(registry, sandbox.configured && sandbox.ok)
   await ctx.plugin(class extends IntegrationsService {
     constructor(scope: Context) {
-      super(scope, fakes.hub, googleCalendarTransport)
+      super(scope, fakes.hub, googleCalendarTransport, feishuAuthorization)
     }
   })
   ctx.systemPrompt.section({

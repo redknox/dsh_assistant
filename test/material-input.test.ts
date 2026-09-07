@@ -47,7 +47,7 @@ describe('Material input', () => {
       assert.deepEqual(inspectMaterialInput(control.ctx), {
         fileReferences: 'active',
         imageStore: 'ready',
-        imageInput: 'unsupported',
+        imageInput: 'ready',
       })
       const view = new AssistantControlSurface(control.ctx, 'material-input').workspace()
       assert.equal(view.materialInput?.fileReferences, 'active')
@@ -68,7 +68,7 @@ describe('Material input', () => {
       assert.deepEqual(inspectMaterialInput(control.ctx), {
         fileReferences: 'unavailable',
         imageStore: 'unavailable',
-        imageInput: 'unsupported',
+        imageInput: 'unavailable',
       })
     } finally {
       await control.ctx.fiber.dispose()

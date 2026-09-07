@@ -1,7 +1,7 @@
 import { chmodSync, closeSync, existsSync, fsyncSync, mkdirSync, openSync, readFileSync, renameSync, statSync, writeSync } from 'node:fs'
 import { createHash } from 'node:crypto'
 import path from 'node:path'
-import type { SettingsFieldKind, SettingsFieldView, SettingsGroup, SettingsSnapshot, SettingsUpdate } from './settings-types.js'
+import type { SettingsFieldKind, SettingsFieldView, SettingsGroup, SettingsOperationsView, SettingsSnapshot, SettingsUpdate } from './settings-types.js'
 
 type Definition = {
   readonly id: string
@@ -28,7 +28,11 @@ const IDS = new Set(DEFINITIONS.map((item) => item.id))
 
 /** Governed editor for the Home env file. Its Interface never returns secret values. */
 export class ProductSettings {
-  constructor(private readonly envFile: string, private readonly env: NodeJS.ProcessEnv = process.env) {}
+  constructor(
+    private readonly envFile: string,
+    private readonly env: NodeJS.ProcessEnv = process.env,
+    private readonly operations?: () => SettingsOperationsView,
+  ) {}
 
   inspect(): SettingsSnapshot {
     const contents = this.contents()
@@ -38,6 +42,7 @@ export class ProductSettings {
       fields: DEFINITIONS.map((definition) => fieldView(definition, home, this.env)),
       restartRequired: false,
       envFileReady: !existsSync(this.envFile) || ((statSync(this.envFile).mode & 0o077) === 0),
+      ...(this.operations ? { operations: this.operations() } : {}),
     }
   }
 

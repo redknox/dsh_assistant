@@ -120,7 +120,7 @@ export interface ContextEnduranceView {
 export interface MaterialInputView {
   readonly fileReferences: 'active' | 'unavailable'
   readonly imageStore: 'ready' | 'unavailable'
-  readonly imageInput: 'unsupported'
+  readonly imageInput: 'ready' | 'unavailable'
 }
 
 export interface ActivityItem {

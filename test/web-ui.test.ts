@@ -2344,7 +2344,7 @@ export function apply(ctx) {
         materialInput: {
           fileReferences: 'active',
           imageStore: 'ready',
-          imageInput: 'unsupported',
+          imageInput: 'ready',
         },
         workBrief: {
           status: 'completed',
@@ -2380,6 +2380,7 @@ export function apply(ctx) {
     assert.match(ready, /MATERIAL INPUT/)
     assert.match(ready, /@FILE REFERENCES · ACTIVE/)
     assert.match(ready, /IMAGE STORE · READY/)
+    assert.match(ready, /VISION INPUT · READY/)
     assert.match(ready, /REFERENCE/)
     assert.match(ready, /@FILE/)
     assert.match(ready, /class="work-brief-card"/)

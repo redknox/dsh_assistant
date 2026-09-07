@@ -36,7 +36,7 @@ Default soak LLM:
 
 ```text
 provider: deepseek-official
-model: deepseek-v4-flash
+model: deepseek-v4-flash-vision-exp
 credential: DEEPSEEK_API_KEY
 ```
 
@@ -61,7 +61,7 @@ Default soak LLM:
 
 ```text
 provider: deepseek-official
-model: deepseek-v4-flash
+model: deepseek-v4-flash-vision-exp
 credential: DEEPSEEK_API_KEY
 ```
 

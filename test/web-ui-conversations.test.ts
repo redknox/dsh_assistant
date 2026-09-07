@@ -104,6 +104,33 @@ describe('Web UI conversations', () => {
     assert.deepEqual(previews, ['hello'])
   })
 
+  it('submits an ordered image batch with an optional text prompt', async () => {
+    const sent: unknown[] = []
+    const previews: string[] = []
+    const images = [{ mediaType: 'image/png', data: 'aGVsbG8=', name: 'screen.png' }]
+    const result = await handleWebUiConversationRequest(request('/api/message', {
+      text: '',
+      images,
+      sessionId: 'current',
+    }), context({
+      sendMessage: (text, submitted) => { sent.push(text, submitted) },
+      sessionHost: sessionHost({ touchPreview: (text) => { previews.push(text) } }),
+    }))
+    assert.equal(result?.status, 202)
+    assert.deepEqual(sent, ['', images])
+    assert.deepEqual(previews, ['[1 image]'])
+  })
+
+  it('rejects malformed image input and images attached to slash commands', async () => {
+    const base = context({ executeCommand: async () => ({ result: { kind: 'success', text: 'ok' } }) })
+    assert.equal((await handleWebUiConversationRequest(request('/api/message', {
+      text: 'look', sessionId: 'current', images: [{ mediaType: 'image/svg+xml', data: 'bad' }],
+    }), base))?.status, 400)
+    assert.deepEqual((await handleWebUiConversationRequest(request('/api/message', {
+      text: '/compact', sessionId: 'current', images: [{ mediaType: 'image/png', data: 'aA==' }],
+    }), base))?.body, { error: 'command-images-unsupported' })
+  })
+
   it('rejects malformed, stale, and routing-busy messages without sending', async () => {
     let sends = 0
     const base = context({ sendMessage: () => { sends += 1 } })

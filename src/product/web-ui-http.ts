@@ -21,6 +21,7 @@ const MIME: Record<string, string> = {
 
 const MUTATING = new Set(['POST', 'PUT', 'PATCH', 'DELETE'])
 const MAX_REQUEST_BYTES = 65_536
+export const MAX_IMAGE_MESSAGE_REQUEST_BYTES = 28 * 1024 * 1024
 
 export function defaultWebAssetRoot(): string {
   return path.join(path.dirname(fileURLToPath(import.meta.url)), '../../dist/web')
@@ -47,12 +48,12 @@ export class WebUiHttpTransport {
     return sessionMatches(cookie, this.sessionToken)
   }
 
-  async readJson(req: IncomingMessage): Promise<unknown> {
+  async readJson(req: IncomingMessage, maxBytes = MAX_REQUEST_BYTES): Promise<unknown> {
     const chunks: Buffer[] = []
     let size = 0
     for await (const chunk of req) {
       size += chunk.length
-      if (size > MAX_REQUEST_BYTES) throw new Error('request too large')
+      if (size > maxBytes) throw new Error('request too large')
       chunks.push(chunk)
     }
     return JSON.parse(Buffer.concat(chunks).toString('utf8')) as unknown

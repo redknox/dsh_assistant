@@ -323,7 +323,7 @@ describe('product package and profile', () => {
     assert.match(doctor, /DEEPSEEK_API_KEY: missing/)
     assert.match(doctor, /GOOGLE_SEARCH_API_KEY: missing/)
     assert.match(doctor, /llm-provider: deepseek-official/)
-    assert.match(doctor, /llm-model: deepseek-v4-flash/)
+    assert.match(doctor, /llm-model: deepseek-v4-flash-vision-exp/)
     assert.match(doctor, /llm-route: available/)
     assert.match(doctor, /ai-runtime: LLM not configured\/unavailable/)
     assert.doesNotMatch(doctor, /ya29\.installed-secret/)

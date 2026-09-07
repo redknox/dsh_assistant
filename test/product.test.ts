@@ -70,7 +70,7 @@ describe('TARS-NG product runtime', () => {
       assert.match(text, /GOOGLE_SEARCH_ENGINE_ID: missing/)
       assert.match(text, /DEEPSEEK_API_KEY: missing/)
       assert.match(text, /llm-provider: deepseek-official/)
-      assert.match(text, /llm-model: deepseek-v4-flash/)
+      assert.match(text, /llm-model: deepseek-v4-flash-vision-exp/)
       assert.match(text, /llm-route: available/)
       assert.match(text, /ai-runtime: LLM not configured\/unavailable/)
       assert.doesNotMatch(text, /ya29\.pack-test-secret|search-secret-value/)
@@ -185,7 +185,7 @@ describe('TARS-NG product runtime', () => {
     )
   })
 
-  it('composes deepseek-official / deepseek-v4-flash without a live API call', async () => {
+  it('composes the DeepSeek vision model with image input without a live API call', async () => {
     const previous = process.env.DEEPSEEK_API_KEY
     delete process.env.DEEPSEEK_API_KEY
     const { ctx } = await bootAssistantControl()
@@ -199,6 +199,7 @@ describe('TARS-NG product runtime', () => {
       const info = await ctx.llm.resolveModelInfo(DEFAULT_LLM_PROVIDER, DEFAULT_LLM_MODEL)
       assert.equal(info.id, DEFAULT_LLM_MODEL)
       assert.equal(info.provider, DEFAULT_LLM_PROVIDER)
+      assert.deepEqual(info.inputModalities, ['text', 'image'])
       const llm = await inspectLlmRuntime(ctx)
       assert.equal(llm.routeAvailable, true)
       assert.equal(llm.credentialPresent, false)

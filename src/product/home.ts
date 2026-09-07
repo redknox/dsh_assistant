@@ -17,6 +17,7 @@ export interface ProductHomeLayout {
   readonly envFile: string
   readonly productConfigFile: string
   readonly memoryFile: string
+  readonly reliabilityFile: string
   readonly logFile: string
   readonly pidFile: string
   readonly lastStatusFile: string
@@ -58,6 +59,7 @@ export function productHomeLayout(root: string): ProductHomeLayout {
     envFile: path.join(config, 'env'),
     productConfigFile: path.join(config, 'product.json'),
     memoryFile: path.join(resolved, 'data', 'memory.json'),
+    reliabilityFile: path.join(resolved, 'data', 'reliability-events.jsonl'),
     logFile: path.join(resolved, 'logs', 'tars-ng.log'),
     pidFile: path.join(resolved, 'state', 'tars-ng.pid'),
     lastStatusFile: path.join(resolved, 'state', 'last-status.json'),

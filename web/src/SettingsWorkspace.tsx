@@ -21,6 +21,7 @@ export function SettingsWorkspace(props: { readonly control: SettingsControl; re
       {control.error ? <p className="settings-alert" role="alert">{control.error}</p> : null}
       {control.notice ? <p className="settings-notice" role="status">{control.notice}</p> : null}
       {control.snapshot && !control.snapshot.envFileReady ? <p className="settings-alert">The Home env file has unsafe permissions. Saving will repair it to owner-only mode.</p> : null}
+      {control.snapshot?.operations ? <Operations operations={control.snapshot.operations} /> : null}
       {control.snapshot ? (
         <div className="settings-groups">
           {GROUPS.map((group) => {
@@ -45,6 +46,23 @@ export function SettingsWorkspace(props: { readonly control: SettingsControl; re
         </button>
       </footer>
     </main>
+  )
+}
+
+function Operations(props: { readonly operations: NonNullable<import('../../src/product/settings-types').SettingsSnapshot['operations']> }) {
+  const { backup, feishu, reliability } = props.operations
+  const copyAuth = () => {
+    if (feishu) void navigator.clipboard?.writeText(feishu.reauthenticateCommand)
+  }
+  return (
+    <section className="settings-operations" aria-label="Operational readiness">
+      <div className="settings-group-heading"><span className="control-lamp" aria-hidden="true" /><h2>OPERATIONAL READINESS</h2></div>
+      <div className="settings-operation-grid">
+        {backup ? <article className={`settings-operation settings-operation--${backup.state}`}><strong>DAILY BACKUP</strong><span>{backup.message}</span>{backup.restoreVerifiedAt ? <small>Restore drill verified {new Date(backup.restoreVerifiedAt).toLocaleString()}</small> : null}</article> : null}
+        {feishu ? <article className={`settings-operation settings-operation--${feishu.state}`}><strong>FEISHU AUTHORIZATION</strong><span>{feishu.message}</span>{feishu.expiresAt ? <small>Expires {new Date(feishu.expiresAt).toLocaleString()}</small> : null}<code>{feishu.reauthenticateCommand}</code><button type="button" className="button button--secondary" onClick={copyAuth}>COPY REAUTH COMMAND</button></article> : null}
+        {reliability ? <article className={`settings-operation settings-operation--${reliability.state}`}><strong>STABILITY · LAST 7 DAYS</strong><span>{reliability.p0} P0 · {reliability.p1} P1 · {reliability.total} recorded events</span><small>Startup, tool, approval and compaction failures are recorded locally.</small>{reliability.recent.slice(0, 3).map((event) => <code key={event.id}>{event.severity} · {event.category} · {event.code}</code>)}</article> : null}
+      </div>
+    </section>
   )
 }
 

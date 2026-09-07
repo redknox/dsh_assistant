@@ -12,6 +12,7 @@ const mountedFileReferences = new WeakSet<Context>()
 const mountedImageStores = new WeakSet<Context>()
 
 import type { MaterialInputView } from '../domain/workspace/types.js'
+import { DEFAULT_LLM_MODEL } from './constants.js'
 
 class SandboxFileReferenceService extends FileReferenceService {
   constructor(ctx: Context) {
@@ -74,6 +75,8 @@ export function inspectMaterialInput(ctx: Context): MaterialInputView {
   return {
     fileReferences: mountedFileReferences.has(ctx) && filesAvailable ? 'active' : 'unavailable',
     imageStore: mountedImageStores.has(ctx) ? 'ready' : 'unavailable',
-    imageInput: 'unsupported',
+    imageInput: mountedImageStores.has(ctx) && DEFAULT_LLM_MODEL === 'deepseek-v4-flash-vision-exp'
+      ? 'ready'
+      : 'unavailable',
   }
 }

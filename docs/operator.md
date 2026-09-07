@@ -57,7 +57,7 @@ Soak LLM baseline (shipped with the product, not assembled by the operator):
 
 ```text
 provider: deepseek-official
-model: deepseek-v4-flash
+model: deepseek-v4-flash-vision-exp
 credential: DEEPSEEK_API_KEY
 ```
 
@@ -112,7 +112,7 @@ Do not invent an internal plaintext vault.
 
 ## Default LLM (soak baseline)
 
-The packed runtime mounts `@deepseek-ai/dsh-llm-deepseek` and sets the Agent default to `deepseek-official` / `deepseek-v4-flash`. Operators do not wire DSH provider internals.
+The packed runtime mounts `@deepseek-ai/dsh-llm-deepseek` and sets the Agent default to `deepseek-official` / `deepseek-v4-flash-vision-exp`. The Web conversation composer accepts PNG, JPEG, WebP, and GIF input; images are admitted into the durable local attachment store and referenced from the Session rather than embedded in its JSONL events. Operators do not wire DSH provider internals.
 
 `DEEPSEEK_API_KEY` is required for a usable AI runtime. `tars-ng doctor` and `tars-ng status` may run without it. `tars-ng start` fails fast with `LLM not configured/unavailable`, names `DEEPSEEK_API_KEY` if missing, and does not write a pid or enter the long-running state. Product start is not equivalent to a usable AI runtime.
 
@@ -137,6 +137,16 @@ Calendar in the core product is **unavailable** unless you explicitly opt in:
 Missing token: live transport fails with `DSH_ASSISTANT_GOOGLE_CALENDAR_ACCESS_TOKEN is missing` and does not call Google. Expired/invalid token: `Calendar access token expired or invalid; replace DSH_ASSISTANT_GOOGLE_CALENDAR_ACCESS_TOKEN`. Messages are sanitized; values are not logged.
 
 A generated Google Calendar provider still requires the existing M1–M4 approval/activation path. `review-complete` is not approval.
+
+## Feishu authorization lifetime
+
+Settings → Operational Readiness reports the authenticated `lark-cli` profile as ready, expiring (seven days or less), expired, or unavailable. When the CLI exposes an expiry timestamp, TARS-NG shows the exact time and remaining days. The reauthentication entry copies the bounded command for the configured profile:
+
+```sh
+lark-cli --profile tars-ng auth login
+```
+
+Run it in an interactive terminal, complete the browser authorization, restart TARS-NG, and refresh Settings. TARS-NG never receives or backs up the CLI credential itself.
 
 ## Operator sandbox (files / tasks)
 
@@ -176,10 +186,10 @@ Doctor never prints Authorization headers, token values, credential-bearing URLs
 ```text
 $TARS_NG_HOME/          # TARS_NG_HOME, else DSH_ASSISTANT_HOME, else ~/.local/share/tars-ng
   config/               # product.json, optional env
-  data/                 # personal memory JSON
+  data/                 # personal memory JSON and structured reliability event journal
   state/                # pid, last-status, exclusive runtime.lock identity (no secrets in operator output)
   logs/                 # tars-ng.log (rotated ~2 MiB)
-  backups/              # operator-chosen backup destination may live here
+  backups/daily/        # one product-owned user-asset snapshot per local day
   generated/            # reserved; not trusted core
   self-extension/       # M1 durable authority / candidates / review lineage
 ```
@@ -192,6 +202,8 @@ Runtime data does not depend on the process working directory. Reinstalling pack
 
 Location: `$TARS_NG_HOME/logs/tars-ng.log`. Lifecycle, Safe Mode, and failure summaries only. Credentials and hidden chain-of-thought are not written. Provider errors pass through the existing sanitizer. Uncertain Calendar side effects stay distinct from definite failures (M3). This is not an observability platform.
 
+The structured soak journal is `$TARS_NG_HOME/data/reliability-events.jsonl`. It records bounded, sanitized startup failures, unexpected tool failures, approvals pending for more than 30 minutes, compaction failures, backup failures, and Feishu authorization warnings. Settings summarizes P0/P1 counts for the last seven days and shows the latest event codes; expected cancellation, denial, approval, and argument errors are P2 rather than false P1 alarms.
+
 ## Backup / recovery / Safe Mode / uninstall
 
 | Action | Effect |
@@ -202,7 +214,9 @@ Location: `$TARS_NG_HOME/logs/tars-ng.log`. Lifecycle, Safe Mode, and failure su
 | Restore backup | `tars-ng self-extension restore <dir>` (Recovery Root; no secrets in backup) |
 | Safe Mode recovery | Durable integrity failure or `self-extension safe-mode enter` |
 
-Backups exclude secrets, credentials, personal memory, env files, and unsealed workspaces. See [self-extension-durability.md](./self-extension-durability.md) and [self-extension-operations.md](./self-extension-operations.md).
+On each normal start, and hourly while the runtime remains up, TARS-NG ensures one backup for the local day under `backups/daily/YYYY-MM-DD`. It includes persisted Sessions, durable image attachments, Memory, `product.json`, a sanitized copy of non-secret connector/path settings, and committed capability/Skill governance. Every new backup is restored into a temporary Home and its file digests and governance artifacts are verified before `restore-drill.json` is written. Fourteen daily snapshots are retained.
+
+Daily product backups exclude secret values, `lark-cli` credentials, logs, spill/cache data, derived indexes, and unsealed candidate workspaces. The older `self-extension` backup command remains a narrower Recovery Root tool. There is deliberately no production-wide restore command yet; this phase proves recoverability without making broad replacement easy to trigger. See [self-extension-durability.md](./self-extension-durability.md) and [self-extension-operations.md](./self-extension-operations.md).
 
 ## Upgrade / rollback
 

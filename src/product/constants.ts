@@ -6,7 +6,7 @@ export const PRODUCT_STATE_SCHEMA_VERSION = 1
 export const DEFAULT_HOME_DIRNAME = 'tars-ng'
 
 export const DEFAULT_LLM_PROVIDER = 'deepseek-official'
-export const DEFAULT_LLM_MODEL = 'deepseek-v4-flash'
+export const DEFAULT_LLM_MODEL = 'deepseek-v4-flash-vision-exp'
 export const DEFAULT_LLM_CREDENTIAL = 'DEEPSEEK_API_KEY'
 export const PRODUCT_UI_SESSION_ID = 'main'
 export const DEFAULT_UI_HOST = '127.0.0.1'

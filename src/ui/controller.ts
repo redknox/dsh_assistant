@@ -2,6 +2,7 @@ import type { Context } from '@deepseek-ai/cordis'
 import type { CommandDescriptor, CommandExecution } from '@deepseek-ai/dsh-commands'
 import type { FileReferenceCandidate } from '@deepseek-ai/dsh-file-reference'
 import { createUserMessage } from '@deepseek-ai/dsh-llm'
+import { admitEncodedImages, type EncodedImageAttachment } from '@deepseek-ai/dsh-attachment'
 import { SessionId } from '@deepseek-ai/dsh-session'
 import { GoalId } from '@deepseek-ai/dsh-goal'
 import type { KnowledgeRetrieval } from '../domain/knowledge/types.js'
@@ -98,10 +99,14 @@ export class AssistantControlSurface {
     return preview
   }
 
-  sendMessage(text: string): void {
+  async sendMessage(text: string, images: readonly EncodedImageAttachment[] = []): Promise<void> {
     const agent = this.requireAgent()
+    const refs = images.length > 0 ? await admitEncodedImages(this.ctx.attachments, images) : []
     const message = createUserMessage({
-      content: [{ type: 'text', text }],
+      content: [
+        ...(text ? [{ type: 'text' as const, text }] : []),
+        ...refs.map((attachment) => ({ type: 'image' as const, attachment })),
+      ],
       source: { kind: 'user' },
     })
     agent.followup(message)

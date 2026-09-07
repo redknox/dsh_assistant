@@ -89,23 +89,75 @@ export function buildFeishuCliArgv(args: readonly string[], profile?: string): s
   return ['--profile', profile, ...args]
 }
 
-export async function inspectFeishuCli(runner: FeishuCliRunner, requiredScopes: readonly string[] = []): Promise<Availability> {
+export async function inspectFeishuCli(
+  runner: FeishuCliRunner,
+  requiredScopes: readonly string[] = [],
+  options: { readonly profile?: string; readonly now?: Date } = {},
+): Promise<Availability> {
+  const reauthenticateCommand = `lark-cli --profile ${options.profile ?? 'tars-ng'} auth login`
   try {
     const result = dataOf(await runner.run(['auth', 'status', '--json', '--verify']))
     const identities = objectOf(result.identities)
     const user = objectOf(identities.user)
     if (user.status === 'authenticated' || user.status === 'logged-in' || user.status === 'ready' || user.verified === true || result.verified === true) {
+      const authorization = authorizationOf(user, result, options.now ?? new Date(), reauthenticateCommand)
       const granted = new Set((stringOf(user.scope) ?? '').split(/\s+/).filter(Boolean))
       const missing = requiredScopes.filter((scope) => !granted.has(scope))
       if (missing.length > 0) {
-        return { available: false, configured: true, reason: `Feishu profile is missing required scopes: ${missing.join(', ')}` }
+        return { available: false, configured: true, reason: `Feishu profile is missing required scopes: ${missing.join(', ')}`, authorization }
       }
-      return { available: true, configured: true, provider: 'feishu' }
+      if (authorization.state === 'expired') return { available: false, configured: true, reason: 'Feishu user authorization has expired', authorization }
+      return { available: true, configured: true, provider: 'feishu', authorization }
     }
-    return { available: false, configured: true, reason: 'Feishu user authorization is unavailable' }
+    return { available: false, configured: true, reason: 'Feishu user authorization is unavailable', authorization: { state: 'unavailable', reauthenticateCommand } }
   } catch (error) {
-    return { available: false, configured: true, reason: safeMessage(error) }
+    return { available: false, configured: true, reason: safeMessage(error), authorization: { state: 'unavailable', reauthenticateCommand } }
   }
+}
+
+function authorizationOf(user: JsonObject, root: JsonObject, now: Date, reauthenticateCommand: string): NonNullable<Availability['authorization']> {
+  const expiresAt = expiryOf(user, root, now)
+  if (expiresAt === undefined) return { state: 'ready', reauthenticateCommand }
+  const milliseconds = Date.parse(expiresAt) - now.getTime()
+  const daysRemaining = Math.ceil(milliseconds / 86_400_000)
+  return {
+    state: milliseconds <= 0 ? 'expired' : milliseconds <= 7 * 86_400_000 ? 'expiring' : 'ready',
+    expiresAt,
+    daysRemaining,
+    reauthenticateCommand,
+  }
+}
+
+function expiryOf(user: JsonObject, root: JsonObject, now: Date): string | undefined {
+  // Access tokens refresh automatically. The refresh credential defines when
+  // the human must authenticate again; only fall back to access-token expiry.
+  for (const raw of [
+    user.refresh_expires_at,
+    user.refreshExpiresAt,
+    root.refresh_expires_at,
+    root.refreshExpiresAt,
+    user.expires_at,
+    user.expiresAt,
+    user.expire_time,
+    user.token_expire_time,
+    root.expires_at,
+    root.expiresAt,
+  ]) {
+    if (typeof raw === 'string') {
+      const parsed = Date.parse(raw)
+      if (Number.isFinite(parsed)) return new Date(parsed).toISOString()
+      const numeric = Number(raw)
+      if (Number.isFinite(numeric)) return epochIso(numeric)
+    }
+    if (typeof raw === 'number' && Number.isFinite(raw)) return epochIso(raw)
+  }
+  const expiresIn = user.expires_in ?? root.expires_in
+  if (typeof expiresIn === 'number' && Number.isFinite(expiresIn)) return new Date(now.getTime() + expiresIn * 1000).toISOString()
+  return undefined
+}
+
+function epochIso(value: number): string {
+  return new Date(value < 10_000_000_000 ? value * 1000 : value).toISOString()
 }
 
 export function createFeishuMailProvider(options: { runner: FeishuCliRunner }): MailProvider {

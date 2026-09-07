@@ -41,7 +41,28 @@ describe('Feishu read-only integrations', () => {
       available: false,
       configured: true,
       reason: 'Feishu profile is missing required scopes: calendar:calendar.free_busy:read',
+      authorization: { state: 'ready', reauthenticateCommand: 'lark-cli --profile tars-ng auth login' },
     })
+  })
+
+  it('surfaces expiring and expired authorization with a reauthentication command', async () => {
+    const now = new Date('2026-09-07T00:00:00.000Z')
+    const expiring = await inspectFeishuCli(new StubRunner([{
+      ok: true,
+      data: { identities: { user: { status: 'needs_refresh', verified: true, expiresAt: '2026-09-07T02:00:00.000Z', refreshExpiresAt: '2026-09-10T00:00:00.000Z' } } },
+    }]), [], { profile: 'assistant', now })
+    assert.deepEqual(expiring.authorization, {
+      state: 'expiring',
+      expiresAt: '2026-09-10T00:00:00.000Z',
+      daysRemaining: 3,
+      reauthenticateCommand: 'lark-cli --profile assistant auth login',
+    })
+    const expired = await inspectFeishuCli(new StubRunner([{
+      ok: true,
+      data: { identities: { user: { status: 'ready', expires_at: 1_788_652_800 } } },
+    }]), [], { now })
+    assert.equal(expired.available, false)
+    assert.equal(expired.authorization?.state, 'expired')
   })
 
   it('maps Feishu agenda, detail, freebusy, and confirmed create into the calendar seam', async () => {

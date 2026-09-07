@@ -1,5 +1,6 @@
 import type { MissionControlView } from '../domain/workspace/types.js'
 import type { CommandDescriptor, CommandExecution } from '@deepseek-ai/dsh-commands'
+import type { EncodedImageAttachment, ImageMediaType } from '@deepseek-ai/dsh-attachment'
 import { SessionCatalogError } from './session-catalog.js'
 
 interface ConversationSessionHost {
@@ -27,7 +28,7 @@ export interface WebUiConversationRequest {
 
 export interface WebUiConversationContext {
   readonly currentSessionId: () => string
-  readonly sendMessage: (text: string) => void
+  readonly sendMessage: (text: string, images?: readonly EncodedImageAttachment[]) => void | Promise<void>
   readonly listCommands?: () => readonly CommandDescriptor[]
   readonly executeCommand?: (line: string, signal: AbortSignal) => Promise<CommandExecution | undefined>
   readonly listFileReferences?: (query: string, signal: AbortSignal) => Promise<readonly { readonly path: string; readonly kind: 'file' | 'directory' }[]>
@@ -74,9 +75,11 @@ export async function handleWebUiConversationRequest(
 }
 
 async function handleMessage(body: unknown, context: WebUiConversationContext): Promise<WebUiConversationResponse> {
-  if (!isRecord(body) || typeof body.text !== 'string' || body.text.trim() === '' || typeof body.sessionId !== 'string') {
+  if (!isRecord(body) || typeof body.text !== 'string' || typeof body.sessionId !== 'string') {
     return { status: 400, body: { error: 'malformed' } }
   }
+  const images = encodedImagesOf(body.images)
+  if (images === undefined || (body.text.trim() === '' && images.length === 0)) return { status: 400, body: { error: 'malformed' } }
   if (body.sessionId !== context.currentSessionId()) {
     return conflict('stale-session', 'request targeted a different current session', context)
   }
@@ -88,6 +91,7 @@ async function handleMessage(body: unknown, context: WebUiConversationContext): 
   }
   const text = body.text.trim()
   if (text.startsWith('/')) {
+    if (images.length > 0) return { status: 400, body: { error: 'command-images-unsupported' } }
     if (!context.executeCommand) return { status: 503, body: { error: 'commands-unavailable' } }
     const execution = await context.executeCommand(text, new AbortController().signal)
     if (!execution) {
@@ -100,9 +104,30 @@ async function handleMessage(body: unknown, context: WebUiConversationContext): 
     const acknowledgement = { text: execution.result.text ?? 'Command completed.' }
     return { status: 200, body: context.project(acknowledgement), broadcast: true }
   }
-  context.sendMessage(text)
-  context.sessionHost?.touchPreview(text)
+  await context.sendMessage(text, images)
+  context.sessionHost?.touchPreview(text || `[${images.length} image${images.length === 1 ? '' : 's'}]`)
   return { status: 202, body: context.project(), broadcast: true }
+}
+
+const IMAGE_MEDIA_TYPES = new Set<ImageMediaType>(['image/png', 'image/jpeg', 'image/webp', 'image/gif'])
+
+function encodedImagesOf(value: unknown): readonly EncodedImageAttachment[] | undefined {
+  if (value === undefined) return []
+  if (!Array.isArray(value) || value.length > 20) return undefined
+  const images: EncodedImageAttachment[] = []
+  for (const item of value) {
+    if (!isRecord(item)
+      || typeof item.mediaType !== 'string'
+      || !IMAGE_MEDIA_TYPES.has(item.mediaType as ImageMediaType)
+      || typeof item.data !== 'string'
+      || (item.name !== undefined && (typeof item.name !== 'string' || item.name.length > 255))) return undefined
+    images.push({
+      mediaType: item.mediaType as ImageMediaType,
+      data: item.data,
+      ...(typeof item.name === 'string' ? { name: item.name } : {}),
+    })
+  }
+  return images
 }
 
 async function handleConversation(body: unknown, context: WebUiConversationContext): Promise<WebUiConversationResponse> {

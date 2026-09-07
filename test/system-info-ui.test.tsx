@@ -21,7 +21,7 @@ describe('System Info workspace', () => {
           sessionPersistence: 'persistent', safeMode: false,
         },
         contextEndurance: { status: 'ready', compaction: 'automatic', checkpoint: 'active', outputRetention: { maxInlineBytes: 1000, spill: 'ready' } },
-        materialInput: { fileReferences: 'active', imageStore: 'ready', imageInput: 'unsupported' },
+        materialInput: { fileReferences: 'active', imageStore: 'ready', imageInput: 'ready' },
       },
     }))
 

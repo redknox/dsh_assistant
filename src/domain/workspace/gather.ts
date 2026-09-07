@@ -241,9 +241,9 @@ function ctxPersonality(ctx: Context): TarsPersonality | undefined {
 
 function visibleText(blocks: readonly ContentBlock[]): string {
   return blocks
-    .filter((block) => block.type === 'text' || block.type === 'tool-result')
     .map((block) => {
       if (block.type === 'text') return block.text
+      if (block.type === 'image') return `\n\n[Image: ${block.attachment.name ?? 'attached image'}]`
       if (block.type === 'tool-result') return visibleText(block.content)
       return ''
     })

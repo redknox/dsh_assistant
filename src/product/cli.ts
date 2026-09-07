@@ -53,6 +53,9 @@ import { catalogBindingOf, inspectSessionCatalog, inspectSessionJournal, migrate
 import { LiveSessionHost } from './session-lifecycle.js'
 import { attachWebUiBroadcast, startWebUiServer, type WebUiServer } from './web-ui-server.js'
 import { ExpenseRiskReviewModule } from '../domain/expense-review/index.js'
+import { ensureDailyUserAssetBackup, type DailyBackupResult } from './user-assets-backup.js'
+import { ReliabilityJournal, RuntimeReliabilityObserver } from './reliability.js'
+import type { SettingsOperationsView } from './settings-types.js'
 
 export interface ProductCliOptions {
   readonly command: string
@@ -381,7 +384,7 @@ function firstRunText(layout: ProductHomeLayout, allowFixtures: boolean): string
     `${PRODUCT_NAME} first run`,
     `Home: ${layout.root} (reinstalling package code does not delete this directory)`,
     'Required: Node >=22; DSH 0.1.0-rc.8 arrives via npm, not a DSH clone.',
-    'Required for AI: DEEPSEEK_API_KEY (deepseek-official / deepseek-v4-flash). Product start is not a usable AI runtime until this key is present.',
+    'Required for AI: DEEPSEEK_API_KEY (deepseek-official / deepseek-v4-flash-vision-exp). Product start is not a usable AI runtime until this key is present.',
     'Open the local Web UI URL printed by tars-ng start (loopback only).',
     'Optional: Google Calendar live token (DSH_ASSISTANT_GOOGLE_CALENDAR_ACCESS_TOKEN) and MODE=live.',
     'Optional: GOOGLE_SEARCH_API_KEY / GOOGLE_SEARCH_ENGINE_ID are diagnosed but Search is not shipped.',
@@ -412,6 +415,7 @@ export async function runProductCli(
   }
 
   const layout = ensureProductHome(resolveProductHome(parsed.home))
+  const reliability = new ReliabilityJournal(layout.reliabilityFile)
   process.env.TARS_NG_HOME = layout.root
   if (parsed.command === 'self-extension') {
     const code = await runSelfExtensionCli([...parsed.rest])
@@ -458,7 +462,9 @@ export async function runProductCli(
         sessionId: parsed.sessionId,
       }, userConfig.config.runtime)
     } catch (error) {
-      io.error(error instanceof Error ? error.message : 'runtime context failed')
+      const message = error instanceof Error ? error.message : 'runtime context failed'
+      io.error(message)
+      if (parsed.command === 'start') reliability.record({ severity: 'P0', category: 'startup', code: 'RUNTIME_CONTEXT_FAILED', message })
       return 1
     }
     if (runtimeContext) runtimeContext = withProductSafeMode(runtimeContext)
@@ -466,7 +472,10 @@ export async function runProductCli(
   const compatibility = inspectCompatibility()
   if (!compatibility.ok && (parsed.command === 'start' || parsed.command === 'doctor')) {
     io.error(compatibility.problems.join('\n'))
-    if (parsed.command === 'start') return 1
+    if (parsed.command === 'start') {
+      reliability.record({ severity: 'P0', category: 'startup', code: 'COMPATIBILITY_FAILED', message: compatibility.problems.join('; ') })
+      return 1
+    }
   }
 
   if (parsed.command === 'stop') {
@@ -575,6 +584,7 @@ export async function runProductCli(
     } : undefined)
     if (!lease.ok) {
       io.error(`${lease.error}: ${lease.detail}`)
+      if (parsed.command === 'start') reliability.record({ severity: 'P1', category: 'startup', code: 'HOME_LEASE_FAILED', message: `${lease.error}: ${lease.detail}` })
       return 1
     }
     const hold = lease.hold
@@ -615,7 +625,9 @@ export async function runProductCli(
         partition?.release()
         if (runtimeContext.ephemeralRecovery) discardEphemeralRecoverySessions(layout)
         hold.release()
-        io.error(error instanceof Error ? error.message : 'runtime context commit failed')
+        const message = error instanceof Error ? error.message : 'runtime context commit failed'
+        io.error(message)
+        reliability.record({ severity: 'P0', category: 'startup', code: 'SESSION_PARTITION_FAILED', message })
         return 1
       }
     }
@@ -625,9 +637,20 @@ export async function runProductCli(
     let sessionHost: LiveSessionHost | undefined
     let web: WebUiServer | undefined
     let detach = () => {}
+    let detachReliability = () => {}
+    let backupTimer: ReturnType<typeof setInterval> | undefined
+    let reliabilityTimer: ReturnType<typeof setInterval> | undefined
+    let dailyBackup: DailyBackupResult | undefined
+    let backupFailure: string | undefined
     let writerStillActive = false
     const shutdownWriter = async (): Promise<boolean> => {
       try {
+        if (backupTimer) clearInterval(backupTimer)
+        if (reliabilityTimer) clearInterval(reliabilityTimer)
+        backupTimer = undefined
+        reliabilityTimer = undefined
+        detachReliability()
+        detachReliability = () => {}
         detach()
         detach = () => {}
         if (web !== undefined) {
@@ -663,7 +686,24 @@ export async function runProductCli(
       }
     }
     try {
+      if (parsed.command === 'start' && runtimeContext && !runtimeContext.ephemeralRecovery) {
+        try {
+          dailyBackup = ensureDailyUserAssetBackup({ layout, sessionDirectory: runtimeContext.sessionRoot.value })
+          appendProductLog(layout.logFile, `backup daily ${dailyBackup.state} restore-drill=passed files=${dailyBackup.drill.filesVerified}`)
+        } catch (error) {
+          backupFailure = error instanceof Error ? error.message : 'daily backup failed'
+          reliability.record({ severity: 'P1', category: 'backup', code: 'DAILY_BACKUP_FAILED', message: backupFailure })
+        }
+      }
       booted = await boot(layout, allowFixtures)
+      const reliabilityObserver = new RuntimeReliabilityObserver(reliability)
+      detachReliability = reliabilityObserver.attach(booted.ctx)
+      const feishuAuthorization = booted.ctx.get('integrations')?.feishuAuthorization
+      if (feishuAuthorization?.state === 'expired' || feishuAuthorization?.state === 'unavailable') {
+        reliability.recordOncePerDay({ severity: 'P1', category: 'connector', code: 'FEISHU_AUTH_UNAVAILABLE', message: 'Feishu authorization is expired or unavailable; reauthentication is required' })
+      } else if (feishuAuthorization?.state === 'expiring') {
+        reliability.recordOncePerDay({ severity: 'P2', category: 'connector', code: 'FEISHU_AUTH_EXPIRING', message: `Feishu authorization expires in ${feishuAuthorization.daysRemaining ?? '?'} days` })
+      }
       const operator = await operatorFromBoot(booted)
       const llm = await inspectLlmRuntime(booted.ctx)
       report = attachRuntimeDoctor(report, {
@@ -704,6 +744,7 @@ export async function runProductCli(
       if (!llm.usable) {
         io.error(formatUnusableLlmError(llm))
         appendProductLog(layout.logFile, 'lifecycle start failed LLM not configured/unavailable')
+        reliability.record({ severity: 'P0', category: 'startup', code: 'LLM_UNAVAILABLE', message: formatUnusableLlmError(llm) })
         return 1
       }
       if (parsed.once) {
@@ -756,10 +797,27 @@ export async function runProductCli(
         process.once('SIGTERM', resolve)
       })
       try {
+        const settingsOperations = (): SettingsOperationsView => {
+          const auth = booted?.ctx.get('integrations')?.feishuAuthorization
+          const feishuConfigured = process.env.DSH_ASSISTANT_FEISHU_MODE === 'cli' || process.env.DSH_ASSISTANT_FEISHU_CALENDAR_MODE === 'cli'
+          return {
+            backup: backupFailure
+              ? { state: 'failed', message: backupFailure }
+              : dailyBackup
+                ? { state: 'ready', day: dailyBackup.manifest.day, createdAt: dailyBackup.manifest.createdAt, restoreVerifiedAt: dailyBackup.drill.verifiedAt, assets: dailyBackup.drill.assets, message: `${dailyBackup.drill.assets.join(', ') || 'No persisted assets yet'} · ${dailyBackup.drill.filesVerified} files verified` }
+                : { state: 'not-run', message: 'The first daily backup will run on normal startup.' },
+            feishu: !feishuConfigured
+              ? { state: 'not-configured', message: 'Feishu is not connected.', reauthenticateCommand: `lark-cli --profile ${process.env.DSH_ASSISTANT_FEISHU_PROFILE ?? 'tars-ng'} auth login` }
+              : auth
+                ? { ...auth, message: auth.state === 'expiring' ? `Authorization expires in ${auth.daysRemaining ?? '?'} days. Reauthenticate before it interrupts service.` : auth.state === 'expired' ? 'Authorization expired. Reauthenticate to restore Calendar, Mail and Contacts.' : auth.state === 'unavailable' ? 'Authorization cannot be verified. Reauthenticate and refresh.' : 'Authorization is valid.' }
+                : { state: 'unavailable', message: 'Authorization status is unavailable.', reauthenticateCommand: `lark-cli --profile ${process.env.DSH_ASSISTANT_FEISHU_PROFILE ?? 'tars-ng'} auth login` },
+            reliability: reliability.summary(),
+          }
+        }
         web = await startWebUiServer({
           surface,
           recoveryRoot: booted.recoveryRoot,
-          settings: new ProductSettings(layout.envFile),
+          settings: new ProductSettings(layout.envFile, process.env, settingsOperations),
           workbench: booted.ctx.candidateWorkbench,
           workbenchMutable: !booted.diagnostics.safeMode,
           expenseReview: new ExpenseRiskReviewModule(booted.ctx.capabilityRegistry, booted.ctx.tools),
@@ -791,11 +849,27 @@ export async function runProductCli(
         const message = error instanceof Error ? error.message : 'Web UI failed to bind'
         io.error(message)
         appendProductLog(layout.logFile, `lifecycle start failed web-ui ${message}`)
+        reliability.record({ severity: 'P0', category: 'startup', code: 'WEB_UI_BIND_FAILED', message })
         return 1
       }
       writerStillActive = true
       const bound = web
       detach = attachWebUiBroadcast(booted.ctx, () => bound.notify())
+      reliabilityTimer = setInterval(() => reliabilityObserver.inspectApprovals(surface.workspace().approvals), 60_000)
+      backupTimer = setInterval(() => {
+        void (async () => {
+          if (!runtimeContext || runtimeContext.ephemeralRecovery) return
+          try {
+            const live = sessionHost?.currentHandle() ?? handle
+            if (live) await booted?.ctx.sessions.flush(live.agent.session as never)
+            dailyBackup = ensureDailyUserAssetBackup({ layout, sessionDirectory: runtimeContext.sessionRoot.value })
+            backupFailure = undefined
+          } catch (error) {
+            backupFailure = error instanceof Error ? error.message : 'daily backup failed'
+            reliability.record({ severity: 'P1', category: 'backup', code: 'DAILY_BACKUP_FAILED', message: backupFailure })
+          }
+        })()
+      }, 60 * 60_000)
       if (!hold.publishControlEndpoint(bound.url)) {
         throw new Error('failed to publish loopback control endpoint')
       }
@@ -827,6 +901,7 @@ export async function runProductCli(
       return 0
     } catch (error) {
       const message = error instanceof Error ? error.message : 'start failed'
+      reliability.record({ severity: 'P0', category: 'startup', code: 'START_FAILED', message })
       if (writerStillActive) {
         if (await shutdownWriter()) {
           io.error(message)

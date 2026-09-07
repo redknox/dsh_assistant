@@ -7,6 +7,7 @@ import { MarkdownMessage } from './MarkdownMessage'
 import { formatDiff, isPendingApproval, skillInvocationSurfaceOpen } from './missionControlPresentation'
 import { listFileReferences } from './api'
 import type { CapabilityDeliveryProposalView } from '../../src/product/web-ui-workbench-types'
+import type { EncodedConversationImage } from './api'
 
 const DELIVERY_STEPS = ['define', 'resolve', 'build', 'validate', 'review', 'approve', 'activate', 'live'] as const
 
@@ -56,6 +57,8 @@ export interface ConversationWorkspaceState {
   readonly sending: boolean
   readonly executingCommand?: string
   readonly draft: string
+  readonly images?: readonly EncodedConversationImage[]
+  readonly imageError?: string
   readonly commands?: readonly CommandDescriptor[]
   readonly error?: string
   readonly activations: readonly ActivationCard[]
@@ -66,6 +69,8 @@ export interface ConversationWorkspaceState {
 export interface ConversationWorkspaceActions {
   readonly draft: (value: string) => void
   readonly send: () => void
+  readonly addImages?: (files: readonly File[]) => void
+  readonly removeImage?: (index: number) => void
   readonly approve: (card: ApprovalCard) => void
   readonly reject: (card: ApprovalCard) => void
   readonly activate: (card: ActivationCard) => void
@@ -326,7 +331,7 @@ export function ConversationWorkspace(props: {
 }) {
   const { state, actions } = props
   const locked = !state.connected
-  const sendDisabled = state.sending || locked || state.draft.trim() === ''
+  const sendDisabled = state.sending || locked || (state.draft.trim() === '' && (state.images?.length ?? 0) === 0)
   const currentSessionId = props.view.runtimeContext?.sessionId ?? props.view.sessions?.currentSessionId
   const pendingApprovals = useMemo(() => props.view.approvals.filter((card) => (
     isPendingApproval(card.status) && (!card.sessionId || card.sessionId === currentSessionId)
@@ -342,6 +347,7 @@ export function ConversationWorkspace(props: {
     && !props.view.workContext
   const scrollViewport = useRef<HTMLDivElement>(null)
   const composerInput = useRef<HTMLTextAreaElement>(null)
+  const imageInput = useRef<HTMLInputElement>(null)
   const followingTail = useRef(true)
   const [referenceOpen, setReferenceOpen] = useState(false)
   const [referenceQuery, setReferenceQuery] = useState('')
@@ -517,6 +523,18 @@ export function ConversationWorkspace(props: {
             <div><strong>EXECUTING {state.executingCommand}</strong><small>HOST COMMAND ACCEPTED · WAITING FOR RESULT</small></div>
           </section>
         ) : null}
+        {(state.images?.length ?? 0) > 0 ? (
+          <div className="composer-images" aria-label="Images attached to this message">
+            {state.images?.map((item, index) => (
+              <figure key={`${item.name ?? 'image'}-${index}`}>
+                <img src={`data:${item.mediaType};base64,${item.data}`} alt={item.name ?? `Attached image ${index + 1}`} />
+                <figcaption>{item.name ?? `IMAGE ${index + 1}`}</figcaption>
+                <button type="button" aria-label={`Remove ${item.name ?? `image ${index + 1}`}`} onClick={() => actions.removeImage?.(index)}>×</button>
+              </figure>
+            ))}
+          </div>
+        ) : null}
+        {state.imageError ? <p className="composer-image-error" role="alert">{state.imageError}</p> : null}
         <form className="composer" aria-label="Send a message" onSubmit={(event: FormEvent) => { event.preventDefault(); actions.send() }}>
           <label className="sr-only" htmlFor="message">Message TARS-NG</label>
           <textarea
@@ -559,6 +577,21 @@ export function ConversationWorkspace(props: {
           />
           <button className="icon-button" type="button" aria-label="Reference file" title="Reference a file from the governed Files sandbox" aria-expanded={referenceOpen} disabled={locked || !referencesReady} onClick={() => setReferenceOpen((open) => !open)}>
             <Glyph name="attach" /><span className="composer-button-label">REFERENCE</span><small>{referencesReady ? '@FILE' : 'INOP'}</small>
+          </button>
+          <input
+            ref={imageInput}
+            className="sr-only"
+            type="file"
+            accept="image/png,image/jpeg,image/webp,image/gif"
+            multiple
+            onChange={(event) => {
+              const files = Array.from(event.target.files ?? [])
+              if (files.length > 0) actions.addImages?.(files)
+              event.target.value = ''
+            }}
+          />
+          <button className="icon-button" type="button" aria-label="Attach images" title="Attach images for the vision model" disabled={locked || props.view.materialInput?.imageInput !== 'ready'} onClick={() => imageInput.current?.click()}>
+            <Glyph name="image" /><span className="composer-button-label">IMAGE</span><small>{props.view.materialInput?.imageInput === 'ready' ? 'VISION' : 'INOP'}</small>
           </button>
           <button className="send-button" type="submit" aria-label="Send message" disabled={sendDisabled}>
             <Glyph name="send" /><span className="composer-button-label">{commandExecuting ? 'EXECUTING' : state.sending ? 'SENDING' : 'SEND'}</span>

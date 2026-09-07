@@ -41,6 +41,19 @@ describe('Product settings', () => {
     }, { DSH_ASSISTANT_FEISHU_PROFILE: 'external-profile' })
   })
 
+  it('projects operational readiness without mixing it into editable configuration', () => {
+    withSettings('', (_settings, envFile) => {
+      const settings = new ProductSettings(envFile, {}, () => ({
+        backup: { state: 'ready', day: '2026-09-07', message: '4 files verified' },
+        feishu: { state: 'expiring', daysRemaining: 3, message: 'Reauthenticate soon', reauthenticateCommand: 'lark-cli --profile tars-ng auth login' },
+      }))
+      const snapshot = settings.inspect()
+      assert.equal(snapshot.operations?.backup?.state, 'ready')
+      assert.equal(snapshot.operations?.feishu?.state, 'expiring')
+      assert.equal(snapshot.fields.length, 8)
+    })
+  })
+
   it('atomically updates allowlisted fields while preserving unrelated configuration', () => {
     withSettings('# operator note\nUNRELATED=value\nDSH_ASSISTANT_FEISHU_MODE=cli\n', (settings, envFile) => {
       const before = settings.inspect()

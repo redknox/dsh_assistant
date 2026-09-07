@@ -162,7 +162,7 @@ function ContextEndurancePanel(props: { readonly value: MissionControlView['cont
 function MaterialInputPanel(props: { readonly value: MissionControlView['materialInput'] }) {
   const value = props.value
   if (!value) return null
-  const ready = value.fileReferences === 'active' && value.imageStore === 'ready'
+  const ready = value.fileReferences === 'active' && value.imageStore === 'ready' && value.imageInput === 'ready'
   return (
     <section className="material-input-status" aria-labelledby="material-input-title">
       <div className="ops-section-heading">
@@ -172,7 +172,7 @@ function MaterialInputPanel(props: { readonly value: MissionControlView['materia
       <div className="context-meter-state">
         <span>@FILE REFERENCES · {value.fileReferences === 'active' ? 'ACTIVE' : 'INOP'}</span>
         <span>IMAGE STORE · {value.imageStore === 'ready' ? 'READY' : 'INOP'}</span>
-        <span>IMAGE MODEL INPUT · NOT CONFIGURED</span>
+        <span>VISION INPUT · {value.imageInput === 'ready' ? 'READY' : 'INOP'}</span>
       </div>
     </section>
   )
