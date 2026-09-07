@@ -105,11 +105,14 @@ function capabilitySignal(status: UserCapabilityStatus): 'active' | 'governed' |
   return 'unavailable'
 }
 
-function capabilityLabel(status: UserCapabilityStatus): string {
-  if (status === 'active') return 'READY'
-  if (status === 'approval-required') return 'CONFIRM TO USE'
-  if (status === 'not-connected') return 'NOT CONNECTED'
-  if (status === 'safe-mode-disabled') return 'SAFE MODE OFF'
+function capabilityLabel(item: MissionControlView['capabilities'][number]): string {
+  if (item.status === 'active') return 'READY'
+  if (item.status === 'approval-required') {
+    if (item.area === 'Calendar' && item.action === 'Create event') return 'CONFIRM TO CREATE'
+    return 'CONFIRM TO USE'
+  }
+  if (item.status === 'not-connected') return 'NOT CONNECTED'
+  if (item.status === 'safe-mode-disabled') return 'SAFE MODE OFF'
   return 'UNAVAILABLE'
 }
 
@@ -318,7 +321,7 @@ export function OperationsPanel(props: {
                 <span className="capability-action">{item.area === 'Knowledge' ? `${props.view.knowledge.length} sources indexed` : item.action}</span>
               </dt>
               <dd data-status={item.status} data-capability-state={capabilitySignal(item.status)}>
-                {item.area === 'Knowledge' && item.status === 'active' && props.view.knowledge.length === 0 ? 'EMPTY' : capabilityLabel(item.status)}
+                {item.area === 'Knowledge' && item.status === 'active' && props.view.knowledge.length === 0 ? 'EMPTY' : capabilityLabel(item)}
               </dd>
             </div>
           ))}

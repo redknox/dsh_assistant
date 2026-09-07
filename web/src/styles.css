@@ -325,6 +325,13 @@ button:active > .control-lamp {
   background: var(--signal-amber);
 }
 .nav-item--idle { color: #8d928c; cursor: default; border-style: dashed; }
+.nav-item--available { color: #c7d4c4; cursor: default; }
+.nav-item--available > .control-lamp {
+  border-color: #7fbc79;
+  background: #68a36d;
+  box-shadow: 0 0 5px #68a36d, 0 0 11px rgb(64 145 75 / 48%), inset 0 0 2px #e0ffdd;
+}
+.nav-item--available::after { content: "READY"; color: #a8c9a4; font: 650 14px/1 var(--font-instrument); letter-spacing: .04em; }
 .nav-item--idle > .control-lamp {
   border-color: #ff8b86;
   background: var(--fault-red);
@@ -1372,6 +1379,11 @@ button.nav-item::after { content: "›"; color: #7f857f; font: 500 22px/1 var(--
 .chassis[data-shuttle-variant] .nav-item--idle {
   border-color: #723b37;
   background: #171817;
+  box-shadow: inset 0 2px 5px #080908;
+}
+.chassis[data-shuttle-variant] .nav-item--available {
+  border-color: #476044;
+  background: #171b17;
   box-shadow: inset 0 2px 5px #080908;
 }
 .chassis[data-shuttle-variant] .nav-item--idle::after { content: "INOP"; }

@@ -15,6 +15,24 @@ const EVENT = {
 }
 
 describe('action policy', () => {
+  it('does not reuse confirmation identities across runtime lifetimes', () => {
+    const request = {
+      capability: 'files',
+      operation: 'write',
+      intent: 'execute' as const,
+      payload: { path: 'session-archive/example.md', content: 'archive' },
+    }
+    const first = new PolicyService(EXAMPLE_PERSONAL_POLICY, { confirmationNamespace: 'runtime-a' }).decide(request)
+    const second = new PolicyService(EXAMPLE_PERSONAL_POLICY, { confirmationNamespace: 'runtime-b' }).decide(request)
+
+    assert.equal(first.kind, 'pending_confirmation')
+    assert.equal(second.kind, 'pending_confirmation')
+    if (first.kind !== 'pending_confirmation' || second.kind !== 'pending_confirmation') return
+    assert.equal(first.confirmationId, 'conf-runtime-a-1')
+    assert.equal(second.confirmationId, 'conf-runtime-b-1')
+    assert.notEqual(first.confirmationId, second.confirmationId)
+  })
+
   it('allows read and propose without creating an execute side effect', async () => {
     let executed = 0
     const policy = new PolicyService(EXAMPLE_PERSONAL_POLICY)

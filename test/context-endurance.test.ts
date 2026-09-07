@@ -23,7 +23,7 @@ describe('Context Endurance', () => {
       assert.ok(control.ctx.get('compaction'))
       assert.ok(control.ctx.get('spillStore'))
       assert.ok(control.ctx.get('commands'))
-      assert.deepEqual(control.ctx.commands.list(handle.agent).map((item) => item.name), ['compact', 'plan'])
+      assert.deepEqual(control.ctx.commands.list(handle.agent).map((item) => item.name), ['archive', 'compact', 'plan'])
     } finally {
       await handle.dispose()
       await control.ctx.fiber.dispose()

@@ -15,6 +15,7 @@ export function WorkspaceNavigation(props: {
   readonly pane: WorkspacePane
   readonly actions: WorkspaceNavigationActions
 }) {
+  const calendarAvailable = props.view.capabilities.some((item) => item.area === 'Calendar' && item.status === 'active')
   const recentSessions = (props.view.sessions?.sessions ?? [])
     .filter((item) => item.lifecycle === 'active' && !item.management && item.id !== 'main')
     .slice()
@@ -50,7 +51,13 @@ export function WorkspaceNavigation(props: {
         >
           <span className="control-lamp" aria-hidden="true" /><Glyph name="today" /><span>TODAY</span>
         </button>
-        <span className="nav-item nav-item--idle" aria-disabled="true" title="Calendar is not connected">
+        <span
+          className={`nav-item ${calendarAvailable ? 'nav-item--available' : 'nav-item--idle'}`}
+          data-nav="calendar"
+          data-availability={calendarAvailable ? 'active' : 'unavailable'}
+          aria-label={calendarAvailable ? 'Calendar connected' : 'Calendar not connected'}
+          title={calendarAvailable ? 'Calendar is connected and available through conversation' : 'Calendar is not connected'}
+        >
           <span className="control-lamp" aria-hidden="true" /><Glyph name="calendar" /><span>CALENDAR</span>
         </span>
         <button

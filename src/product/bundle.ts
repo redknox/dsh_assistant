@@ -32,6 +32,7 @@ import * as registeredWorkflows from './registered-workflows.js'
 import * as governedSubagentProvider from './governed-subagent-provider.js'
 import * as governedSubagents from './governed-subagents.js'
 import * as governedWeb from './governed-web.js'
+import * as sessionArchive from './session-archive.js'
 
 export const name = 'dsh-assistant'
 export const inject = ['systemPrompt', 'agents']
@@ -83,6 +84,7 @@ export async function apply(ctx: Context, config: AssistantBundleConfig = {}) {
   await ctx.plugin(integrationsPlugin, config.integrations)
   await mountBoundedWorkbench(ctx, config.boundedWorkbenchRoot)
   await ctx.plugin(policyPlugin, config.policy)
+  await ctx.plugin(sessionArchive)
   await ctx.plugin(dshApprovalBridgePlugin)
   await ctx.plugin(jobsPlugin, config.jobs)
   await ctx.plugin(governedSubagentProvider)
@@ -134,6 +136,7 @@ export const PRODUCT_TOOL_NAMES = [
   'files_write',
   'files_delete',
   'confirm_action',
+  'request_session_archive',
   'define_capability_specification',
   'revise_capability_specification',
   'plan_capability_change',

@@ -166,6 +166,7 @@ export const PRODUCT_ONLY_SEAMS = Object.freeze([
   { runtime: 'dsh-assistant-knowledge', when: 'ready', reason: 'personal knowledge' },
   { runtime: 'dsh-assistant-memory', when: 'ready', reason: 'personal memory' },
   { runtime: 'dsh-assistant-policy', when: 'ready', reason: 'product trust policy' },
+  { runtime: 'dsh-assistant-session-archive', when: 'ready', reason: 'approval-gated current Session archival' },
   { runtime: 'ApprovalService', when: 'ready', reason: 'DSH one-shot approval service' },
   { runtime: 'dsh-assistant-approval-bridge', when: 'ready', reason: 'unified DSH approval control surface' },
   { runtime: 'SandboxFileReferenceService', when: 'ready', reason: 'browser-safe references aligned to governed Files' },

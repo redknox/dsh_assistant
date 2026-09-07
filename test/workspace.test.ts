@@ -277,6 +277,26 @@ describe('TARS-NG mission-control workspace', () => {
     assert.match(renderMissionControlAsHtml(view), /CREATE CALENDAR EVENT/)
   })
 
+  it('projects Session archival as a reversible conversation action', () => {
+    const view = projectMissionControl(snapshot({
+      pendingConfirmations: [{
+        id: 'conf-archive',
+        capability: 'sessions',
+        operation: 'archive',
+        fingerprint: 'fp-archive',
+        status: 'pending',
+        level: 'L2',
+        payload: { id: 'delivery-1', title: 'Build · text.morse.encode', revision: 7 },
+      }],
+    }))
+    const card = view.approvals[0]
+    assert.equal(card?.title, 'ARCHIVE CONVERSATION')
+    assert.equal(card?.target, 'Build · text.morse.encode')
+    assert.equal(card?.decision?.approveLabel, 'ARCHIVE SESSION')
+    assert.match(card?.decision?.outcome ?? '', /Memory · Archived/)
+    assert.match(card?.details.join('\n') ?? '', /Preserved and restorable/)
+  })
+
   it('projects an exact Obsidian write as a reviewable approval card', () => {
     const view = projectMissionControl(snapshot({
       pendingConfirmations: [{

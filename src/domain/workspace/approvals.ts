@@ -175,6 +175,38 @@ function resolutionFromTicket(ticket: WorkspaceSnapshotInput['pendingConfirmatio
 
 function sideEffectCard(ticket: WorkspaceSnapshotInput['pendingConfirmations'][number]): ApprovalCard {
   const payload = allowedApprovalPayload(ticket.payload)
+  if (ticket.capability === 'sessions' && ticket.operation === 'archive') {
+    const title = String(payload.title ?? 'Current conversation')
+    return {
+      id: ticket.id,
+      kind: 'other-side-effect',
+      title: 'ARCHIVE CONVERSATION',
+      target: title,
+      sideEffect: 'move this conversation out of the active workspace',
+      authorityChange: 'none — the conversation remains restorable',
+      fingerprint: ticket.fingerprint,
+      status: ticket.status,
+      details: [
+        `Conversation ${title}`,
+        'Destination  Memory · Archived',
+        'History      Preserved and restorable',
+      ],
+      decision: {
+        request: `Archive “${title}”`,
+        reason: 'Archiving changes the active workspace and switches away from this conversation.',
+        outcome: 'This conversation will move to Memory · Archived and another active conversation will open.',
+        scope: 'One conversation · reversible',
+        risk: 'local-write',
+        facts: [
+          { label: 'CONVERSATION', value: title },
+          { label: 'HISTORY', value: 'Preserved' },
+          { label: 'RESTORE', value: 'Available from Memory' },
+        ],
+        approveLabel: 'ARCHIVE SESSION',
+        rejectLabel: 'KEEP ACTIVE',
+      },
+    }
+  }
   if (ticket.capability === 'calendar' && ticket.operation === 'create_event') {
     const title = String(payload.title ?? '(untitled)')
     const when = formatWhen(payload)

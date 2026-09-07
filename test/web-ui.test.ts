@@ -223,7 +223,7 @@ describe('local Mission-Control Web UI', () => {
       assert.equal(first.view.systemState, 'READY')
       assert.ok(Array.isArray(first.view.skills))
       assert.match(first.webUi, /^http:\/\/127\.0\.0\.1:\d+$/)
-      assert.deepEqual(first.commands.map((item) => item.name), ['compact', 'plan'])
+      assert.deepEqual(first.commands.map((item) => item.name), ['archive', 'compact', 'plan'])
       assert.ok(first.toolCatalog.tools.some((item) => item.name === 'define_capability_specification'))
       assert.ok(first.workflowCatalog.workflows.some((item) => item.name === 'parallel-analysis'))
       assert.doesNotMatch(JSON.stringify(first), /reasoning_content|"type":"reasoning"/)
@@ -2403,7 +2403,10 @@ export function apply(ctx) {
 
     const governed = renderToStaticMarkup(createElement(MissionControlScreen, {
       view: fixtureView({
-        capabilities: [{ area: 'Files', action: 'Manage files', status: 'approval-required' }],
+        capabilities: [
+          { area: 'Calendar', action: 'Read schedule', status: 'active', advanced: { provider: 'feishu' } },
+          { area: 'Calendar', action: 'Create event', status: 'approval-required', advanced: { provider: 'feishu' } },
+        ],
       }),
       pane: 'today',
       connected: true,
@@ -2415,7 +2418,10 @@ export function apply(ctx) {
       onReject() {},
       onRecovery() {},
     }))
-    assert.match(governed, />CONFIRM TO USE</)
+    assert.match(governed, /data-nav="calendar"[^>]*data-availability="active"/)
+    assert.doesNotMatch(governed, /Calendar is not connected/)
+    assert.match(governed, />CONFIRM TO CREATE</)
+    assert.doesNotMatch(governed, />CONFIRM TO USE</)
     assert.doesNotMatch(governed, />APPROVAL</)
 
     const memory = renderToStaticMarkup(createElement(MissionControlScreen, {

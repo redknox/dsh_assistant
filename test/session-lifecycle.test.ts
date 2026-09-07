@@ -3,7 +3,7 @@ import { mkdirSync, mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { describe, it } from 'node:test'
-import { createUserMessage, LlmAdapter, type GenerateOptions, type StreamChunk } from '@deepseek-ai/dsh-llm'
+import { CallId, createUserMessage, LlmAdapter, type GenerateOptions, type StreamChunk } from '@deepseek-ai/dsh-llm'
 import { bootAssistantControl, createAssistantAgent } from '../src/runtime/boot.js'
 import { FakeReplyAdapter } from '../src/adapters/llm/fake-reply-adapter.js'
 import { ensureProductHome } from '../src/product/home.js'
@@ -71,6 +71,32 @@ async function liveHost(input: {
 }
 
 describe('Session lifecycle transactions', () => {
+  it('archives the current delivery Session and adopts Today after exact approval', async () => {
+    const { catalog, extra, host, surface, control } = await liveHost()
+    try {
+      await host.switchTo(extra.id, { sessionId: 'main', revision: catalog.inspect().revision })
+      control.ctx.sessionArchive.bind(host)
+      const requested = await control.ctx.tools.execute({
+        callId: CallId('archive-live-session'),
+        name: 'request_session_archive',
+        arguments: {},
+        agent: host.currentHandle().agent,
+        signal: new AbortController().signal,
+      })
+      const outcome = JSON.parse(String(requested.value)) as { confirmationId: string }
+      assert.equal(catalog.inspect().currentSessionId, extra.id)
+
+      const approved = await control.ctx.actionPolicy.policy.resolve(outcome.confirmationId, 'approve')
+      assert.equal(approved.kind, 'allow')
+      assert.equal(surface.sessionId, 'main')
+      assert.equal(catalog.inspect().currentSessionId, 'main')
+      assert.equal(catalog.inspect().sessions.find((item) => item.id === extra.id)?.lifecycle, 'archived')
+    } finally {
+      await host.currentHandle().dispose()
+      await control.ctx.fiber.dispose()
+    }
+  })
+
   it('creates a dedicated Session with one durable native Goal', async () => {
     const { catalog, host, control } = await liveHost()
     try {

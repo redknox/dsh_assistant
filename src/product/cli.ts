@@ -746,6 +746,7 @@ export async function runProductCli(
           handle,
           boundContext.safeMode,
         )
+        booted.ctx.get('sessionArchive')?.bind(sessionHost)
         if (recoveredJournal) await sessionHost.finishCommittedJournal(recoveredJournal)
       }
       let requestStop = () => {}

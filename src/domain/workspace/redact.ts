@@ -16,6 +16,7 @@ const APPROVAL_PAYLOAD_ALLOWLIST = [
   'path',
   'content',
   'expectedDigest',
+  'revision',
 ] as const
 
 export function isSensitiveKey(key: string): boolean {

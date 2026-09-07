@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto'
 import { actionFingerprint } from './fingerprint.js'
 import type {
   ActionExecutor,
@@ -15,8 +16,16 @@ export class PolicyService {
   private readonly executors = new Map<string, ActionExecutor>()
   private readonly audit: AuditRecord[] = []
   private nextId = 1
+  private readonly confirmationNamespace: string
 
-  constructor(private readonly config: PolicyConfig) {}
+  constructor(
+    private readonly config: PolicyConfig,
+    options: { readonly confirmationNamespace?: string } = {},
+  ) {
+    const namespace = options.confirmationNamespace ?? randomUUID()
+    if (!/^[A-Za-z0-9][A-Za-z0-9-]{0,127}$/.test(namespace)) throw new Error('invalid confirmation namespace')
+    this.confirmationNamespace = namespace
+  }
 
   levelFor(capability: string, intent: ActionRequest['intent']): TrustLevel {
     const rule = this.config.rules.find((entry) => entry.capability === capability && entry.intent === intent)
@@ -177,7 +186,7 @@ export class PolicyService {
 
   private createTicket(request: ActionRequest, level: TrustLevel, fingerprint: string): ConfirmationTicket {
     const ticket: ConfirmationTicket = {
-      id: `conf-${this.nextId++}`,
+      id: `conf-${this.confirmationNamespace}-${this.nextId++}`,
       fingerprint,
       capability: request.capability,
       operation: request.operation,
