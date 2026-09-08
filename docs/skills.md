@@ -1,6 +1,6 @@
 # DSH-native Skill lifecycle
 
-Status: **Implemented**. The host lifecycle is packaged in this repository. Feature soak for Issue #94 is recorded in [skill-lifecycle-soak.md](./skill-lifecycle-soak.md). The v0.4.0 packaged product seal is [v0.4.0-seal.md](./v0.4.0-seal.md) (prepared / release candidate; not human acceptance).
+Status: **Implemented**. The host lifecycle is packaged in this repository. Feature soak for Issue #94 is recorded in [skill-lifecycle-soak.md](./skill-lifecycle-soak.md). The current product claim is [v0.5.0-baseline.md](./v0.5.0-baseline.md); [v0.4.0-seal.md](./v0.4.0-seal.md) remains an untagged historical evidence record.
 
 A Skill is declarative instruction plus bounded resources. It cannot create a tool, grant permission, execute code, or replace policy. Missing executable capability still goes through Capability Resolution and the governed extension lifecycle.
 
@@ -53,4 +53,4 @@ Local import remains operator-only (`tars-ng skill import-local`) and is not on 
 
 ## Scope
 
-v0.4.0 Skills are Profile-scoped (`assistant`) inside one bound Home. Workspace-specific and cross-Profile scopes are future work.
+v0.5.0 Skills are Profile-scoped (`assistant`) inside one bound Home. Workspace-specific and cross-Profile scopes are future work.

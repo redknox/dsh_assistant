@@ -17,14 +17,14 @@ npm pack
 Install the tarball on the machine that will run TARS-NG:
 
 ```sh
-npm install -g ./dsh-assistant-0.4.0.tgz
+npm install -g ./dsh-assistant-0.5.0.tgz
 tars-ng doctor
 ```
 
 or a local install:
 
 ```sh
-npm install ./dsh-assistant-0.4.0.tgz
+npm install ./dsh-assistant-0.5.0.tgz
 npx tars-ng doctor
 ```
 
@@ -220,11 +220,13 @@ Daily product backups exclude secret values, `lark-cli` credentials, logs, spill
 
 ## Upgrade / rollback
 
-- Product version: `tars-ng doctor` / package.json `0.4.0`
+- Product version: `tars-ng doctor` / package.json `0.5.0`
 - Durable authority schema: `1` (unknown/newer fails closed into Safe Mode; it is not reinterpreted)
 - Product config schema: `1` (newer `product.json` fails clearly)
 - Package rollback: reinstall the previous tarball; home is unchanged
 - No cloud auto-updater
+
+The 0.5.0 baseline reset does not itself migrate either durable schema. Stop the currently verified runtime before replacing package code; then run `doctor` and `start`. Do not run old and new package binaries against the same Home concurrently.
 
 ## Troubleshooting
 
@@ -241,4 +243,4 @@ Daily product backups exclude secret values, `lark-cli` credentials, logs, spill
 
 ## Feature freeze / soak
 
-After annotated tag `v0.4.0` exists on `main`, TARS-NG enters feature freeze. See [soak.md](./soak.md). Seal record: [v0.4.0-seal.md](./v0.4.0-seal.md). Historical v0.3.0: [v0.3.0-seal.md](./v0.3.0-seal.md).
+The current v0.5.0 package remains under stabilization until [v0.5.0-baseline.md](./v0.5.0-baseline.md) exit criteria are accepted against one exact packed artifact. See [soak.md](./soak.md). The untagged v0.4.0 evidence record remains historical in [v0.4.0-seal.md](./v0.4.0-seal.md); v0.3.0 remains the latest historical tagged seal.

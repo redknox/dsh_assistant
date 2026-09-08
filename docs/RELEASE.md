@@ -1,6 +1,6 @@
 # Release notes
 
-Personal-assistant product layer on DeepSeek Harness **0.1.0-rc.8**. Current package version: **0.4.0**. Release status: **prepared / release candidate** until human acceptance of [docs/v0.4.0-seal.md](./v0.4.0-seal.md). Not a production security certification. Not published to a public registry.
+Personal-assistant product layer on DeepSeek Harness **0.1.0-rc.8**. Current package version: **0.5.0**. Release status: **stabilization candidate** against [v0.5.0-baseline.md](./v0.5.0-baseline.md). Not a production security certification, annotated release, or public registry publication.
 
 ## Version baseline
 
@@ -9,27 +9,34 @@ Personal-assistant product layer on DeepSeek Harness **0.1.0-rc.8**. Current pac
 | **v0.1.0** | Assistant Core MVP baseline |
 | **v0.2.0** | Governed Self-Extension baseline |
 | **v0.3.0** | Governance + Mission-Control product baseline (historical soak seal) |
-| **v0.4.0** | Runtime Foundation + Governed Extension Baseline + DSH-native Skill lifecycle |
+| **v0.4.0** | Prepared Runtime Foundation evidence record; never tagged |
+| **v0.5.0** | Current Governed Personal Harness stabilization baseline |
 
-The repository package version is `0.4.0`. The annotated `v0.4.0` git tag is created only on the exact `main` commit after this seal is merged **and** a human confirms acceptance. Do not tag from a feature branch. Do not move or recreate `v0.3.0`.
+The repository package version is `0.5.0`. The accumulated product moved beyond the untagged v0.4.0 candidate, so v0.5.0 restores one truthful baseline instead of retroactively widening the v0.4.0 claim. Do not tag from a feature branch. Do not move or recreate historical tags.
+
+This version reset does not change durable authority or product-config schema versions; both remain `1`. Existing Homes are retained. Stop the old runtime before installing or starting the new package so one Home and loopback port have one authoritative owner.
 
 DSH dependency versions stay at **0.1.0-rc.8**. They are not changed by this product version bump.
 
-`npm run verify:v0.2` remains the regression contract for the historical Governed Self-Extension baseline. v0.4.0 must still pass it.
+`npm run verify:v0.2` remains the regression contract for the historical Governed Self-Extension baseline. v0.5.0 must still pass it.
 
-Seal evidence: [docs/v0.4.0-seal.md](./v0.4.0-seal.md). Historical v0.3.0: [docs/v0.3.0-seal.md](./v0.3.0-seal.md). Feature freeze: [docs/soak.md](./soak.md).
+Current claim and exit criteria: [v0.5.0-baseline.md](./v0.5.0-baseline.md). Historical prepared v0.4.0 evidence: [v0.4.0-seal.md](./v0.4.0-seal.md). Historical v0.3.0 seal: [v0.3.0-seal.md](./v0.3.0-seal.md). Stabilization policy: [soak.md](./soak.md).
 
-## v0.4.0 Runtime Foundation (current package)
+## v0.5.0 Governed Personal Harness (current package)
 
-This is the current package. It is a **release candidate** until the packaged cross-slice soak in [v0.4.0-seal.md](./v0.4.0-seal.md) is accepted:
+This is the current package. It is a **stabilization candidate** until the exit criteria in [v0.5.0-baseline.md](./v0.5.0-baseline.md) are satisfied against one exact packed artifact:
 
 ```text
 Host-owned Profile / Workspace / Session Runtime Context
-Topic conversations / Session Catalog
-Governed generated-extension lifecycle (isolated activation)
-Governed local third-party plugin import
-DSH-native Profile-scoped Skill lifecycle
-Mission-Control trusted actions, Safe Mode, Recovery, backup/restore
+Durable topic and Capability Delivery Sessions
+Context endurance / material references / task control
+Memory / Knowledge / governed connectors
+Capability Specification / Resolution / Candidate lifecycle
+Unified approval / activation / unplug / rollback
+Skill / Tool / Slash Command / Workflow catalogs
+Bounded Subagent delegation
+Native authoring plus Experimental Codex / Claude executors
+Mission-Control / Settings / Safe Mode / Recovery / daily backup drill
 ```
 
 Default soak LLM:
@@ -42,7 +49,11 @@ credential: DEEPSEEK_API_KEY
 
 Daily soak surface: loopback Mission-Control Web UI from `tars-ng start` (`http://127.0.0.1:8787`).
 
-Marketplace discovery, remote install, multi-user/cloud operation, and production security certification are **not** claimed.
+External provider availability remains conditional on configuration and authentication. Marketplace discovery, remote install, multi-user/cloud operation, durable Workflow resume, and production security certification are **not** claimed.
+
+## v0.4.0 Runtime Foundation (historical prepared candidate)
+
+v0.4.0 prepared a packaged Runtime Foundation and governed Skill/Extension evidence record, but no `v0.4.0` tag was created. Its exact evidence remains in [v0.4.0-seal.md](./v0.4.0-seal.md) and is not rewritten after the fact. Later work is claimed only by the v0.5.0 baseline.
 
 ## v0.3.0 Product Soak baseline (historical)
 
@@ -61,24 +72,24 @@ Default soak LLM:
 
 ```text
 provider: deepseek-official
-model: deepseek-v4-flash-vision-exp
+model: deepseek-v4-flash
 credential: DEEPSEEK_API_KEY
 ```
 
 Daily soak surface: loopback Mission-Control Web UI from `tars-ng start` (`http://127.0.0.1:8787`).
 
-## Direction after v0.4.0
+## Direction after v0.5.0
 
-v0.4.0 is the governed construction/control substrate, not the completion of a no-code professional-system builder. After it is sealed, real daily use should drive defects and usability fixes before broad platform expansion.
+v0.5.0 is a governed personal Harness baseline, not the completion of a no-code professional-system builder. Stabilization and truthful daily operation take precedence over broad platform expansion.
 
 The directional milestones are:
 
 | Milestone | Product question |
 | --- | --- |
-| **v0.4.0 — Runtime Foundation + Governed Extension Baseline** | Can TARS-NG bind one Home to a Profile, Workspace, and durable current Session, then construct or locally import, validate, review, approve, activate, observe, and recover a generated or third-party capability without self-authorization? |
-| **Typed Capability Broker** | Can a generated capability safely compose narrowly scoped host operations without receiving arbitrary runtime, filesystem, network, process, or secret access? |
-| **Domain Construction Slice** | Can a professional who does not know TypeScript or DSH describe one bounded domain need and obtain an explicit, testable, governed capability? |
-| **Host-Rendered Domain UI** | Can that governed capability produce a useful professional work surface without creating frontend-owned authority or state? |
+| **v0.5.0 — Governed Personal Harness** | Can TARS-NG remain truthful, recoverable and useful through daily Sessions while constructing and operating governed Capabilities without self-authorization? |
+| **Typed Capability Broker expansion** | Can each new host operation remain narrow, call-bound, observable and exactly approved rather than becoming a generic escape hatch? |
+| **Domain Construction proof** | Can a professional who does not know TypeScript or DSH complete one real bounded domain need through clarification, evidence, acceptance and operation? |
+| **Host-rendered domain UI expansion** | Can that governed Capability produce a useful professional work surface without creating frontend-owned authority or state? |
 | **Professional Application Composition** | Can several governed capabilities, domain adapters, policies, and UI components be composed into a coherent professional AI system? |
 
 These later names are directional, not release commitments. The longer hypothesis also includes durable domain workspaces, governed triggers, professional capability packs, and domain-professional vibe coding. Finance, HR, Legal, and Operations kits remain future product layers. They must reuse the same governance invariants rather than introducing a privileged generation or activation path. See [product-vision.md](./product-vision.md).
@@ -140,6 +151,6 @@ Historical Assistant Core MVP baseline. These remain true and are not rewritten 
 - Vector DB, crawler, hosted production persistence
 - Durable user-level reminders (prefer a future official DSH Schedule seam)
 - Public npm publish from this repository
-- Automatic install/upgrade/remove or self-authorization
+- Automatic product-package install/upgrade or self-authorization
 - OAuth refresh for Google Calendar (replace the expiring access token manually)
 - New Google Search product wiring (credentials are diagnosed by name only)

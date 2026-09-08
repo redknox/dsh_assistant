@@ -1,15 +1,16 @@
 # Feature freeze and real-world soak
 
-Status: **Implemented** as policy. The current package is **v0.4.0 prepared / release candidate**. Duration is operational, not a release metric. Do not treat this file as human acceptance of the seal.
+Status: **Implemented** as policy. The current package is **v0.5.0 stabilization candidate**. Duration is operational, not a release metric. Do not treat this file as acceptance, a tag, or a production security certification.
 
 ```text
 v0.3.0 = Governance + Mission-Control product baseline (historical)
-v0.4.0 = Runtime Foundation + Governed Extension Baseline + DSH-native Skill lifecycle
+v0.4.0 = prepared Runtime Foundation evidence record (historical, never tagged)
+v0.5.0 = Governed Personal Harness stabilization baseline (current)
 ```
 
-`v0.3.0` remains an immutable historical seal. After `v0.4.0` is tagged on `main`, TARS-NG enters feature freeze for that baseline. Self-development is allowed; self-authorization is not.
+`v0.3.0` remains the latest immutable historical tagged seal. v0.4.0 was prepared but never tagged; its evidence remains intact. v0.5.0 now enters stabilization against [v0.5.0-baseline.md](./v0.5.0-baseline.md). Self-development is allowed; self-authorization is not.
 
-For any remaining v0.4.x soak-line fixes:
+For v0.5.0 stabilization fixes:
 
 - do not add unrelated user-facing capabilities;
 - do not add providers merely because they are interesting;
@@ -18,13 +19,13 @@ For any remaining v0.4.x soak-line fixes:
 
 The question to answer is: **can I depend on this product every day?**
 
-Allowed v0.4.x work: security, authority/governance, data-loss, reliability/recovery, packaging/install/upgrade, secret/configuration, performance/resource leaks found during soak, usability that makes the existing product operable, documentation corrections.
+Allowed work: security, authority/governance, data-loss, truthful readiness, reliability/recovery, packaging/install/upgrade, secret/configuration, isolated-runtime E2E closure, performance/resource leaks found during soak, usability that makes the existing product operable, and documentation corrections.
 
 Normally deferred: new integrations, new tool categories, new providers for optionality, new Self-Extension authority, marketplace, additional product features unrelated to a real soak defect.
 
 ## Window
 
-Recommended: **2–4 weeks of daily use** after `v0.4.0` is tagged. Adjust for usage density, not calendar vanity.
+Recommended: **at least seven active daily-use days** plus every exit criterion in [v0.5.0-baseline.md](./v0.5.0-baseline.md). Extend the window when defects or sparse usage make the evidence weak.
 
 ## Classification
 
@@ -50,4 +51,4 @@ Trust: no silent authority escalation; no secret leakage; no fixture/live confus
 
 `review-complete` remains distinct from approval and activation.
 
-Soak configuration and release evidence: [v0.4.0-seal.md](./v0.4.0-seal.md). Historical v0.3.0: [v0.3.0-seal.md](./v0.3.0-seal.md).
+Current claim and stabilization criteria: [v0.5.0-baseline.md](./v0.5.0-baseline.md). Historical prepared v0.4.0 evidence: [v0.4.0-seal.md](./v0.4.0-seal.md). Historical tagged v0.3.0 seal: [v0.3.0-seal.md](./v0.3.0-seal.md).

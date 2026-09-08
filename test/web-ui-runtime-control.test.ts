@@ -12,7 +12,7 @@ function control(onStop: () => void = () => {}): WebUiRuntimeControl {
   return {
     pid: 4321,
     startedAt: '2026-08-27T00:00:00.000Z',
-    productVersion: '0.4.0',
+    productVersion: '0.5.0',
     normalizedHome: '/private/tars-ng',
     runId,
     onStop,
@@ -44,7 +44,7 @@ describe('Web UI runtime control', () => {
       body: {
         pid: 4321,
         startedAt: '2026-08-27T00:00:00.000Z',
-        productVersion: '0.4.0',
+        productVersion: '0.5.0',
       },
     })
   })
@@ -65,7 +65,7 @@ describe('Web UI runtime control', () => {
       body: {
         pid: 4321,
         startedAt: '2026-08-27T00:00:00.000Z',
-        productVersion: '0.4.0',
+        productVersion: '0.5.0',
         normalizedHome: '/private/tars-ng',
         safeMode: false,
         recoveryRequired: false,

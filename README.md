@@ -4,7 +4,7 @@ A governed AI-native product foundation on [DeepSeek Harness (DSH)](https://gith
 
 Operators install and run `tars-ng`; they do not assemble DSH packages by hand or keep secrets in the repository.
 
-Package name: `dsh-assistant` (private). Product command: **`tars-ng`**. DSH compatibility: **0.1.0-rc.8**. Node: **>=22**.
+Package name: `dsh-assistant` (private). Current product baseline: **0.5.0 stabilization candidate**. Product command: **`tars-ng`**. DSH compatibility: **0.1.0-rc.8**. Node: **>=22**.
 
 ## Install
 
@@ -12,7 +12,7 @@ Package name: `dsh-assistant` (private). Product command: **`tars-ng`**. DSH com
 npm install
 npm run build
 npm pack
-npm install -g ./dsh-assistant-0.4.0.tgz   # or: npm install ./dsh-assistant-0.4.0.tgz && npx tars-ng
+npm install -g ./dsh-assistant-0.5.0.tgz   # or: npm install ./dsh-assistant-0.5.0.tgz && npx tars-ng
 ```
 
 The tarball install pulls Cordis/DSH runtime dependencies through npm. A public registry publish is not required. `src/` and `tsx` are not part of the runtime contract.
@@ -48,7 +48,7 @@ mkdir -p ~/.config/tars-ng && chmod 700 ~/.config/tars-ng
 chmod 600 ~/.config/tars-ng/env
 ```
 
-`tars-ng doctor` reports missing **names** only. Soak LLM baseline is `deepseek-official` / `deepseek-v4-flash`, shipped with the package. Missing `DEEPSEEK_API_KEY` does not block `doctor`/`status`, but `tars-ng start` exits non-zero with `LLM not configured/unavailable` and does not enter the running state. Core start does not require Google credentials. Default Calendar is **unavailable**, not a realistic fixture. Live Calendar: `DSH_ASSISTANT_GOOGLE_CALENDAR_MODE=live` plus the access token. When the token expires, replace it; TARS-NG does not implement Google OAuth refresh in this release.
+`tars-ng doctor` reports missing **names** only. The current LLM baseline is `deepseek-official` / `deepseek-v4-flash-vision-exp`, shipped with the package. Missing `DEEPSEEK_API_KEY` does not block `doctor`/`status`, but `tars-ng start` exits non-zero with `LLM not configured/unavailable` and does not enter the running state. Core start does not require Google credentials. Default Calendar is **unavailable**, not a realistic fixture. Live Calendar: `DSH_ASSISTANT_GOOGLE_CALENDAR_MODE=live` plus the access token. When the token expires, replace it; TARS-NG does not implement Google OAuth refresh in this release.
 
 Feishu Mail/Contacts are optional and read-only. `DSH_ASSISTANT_FEISHU_MODE=cli` enables allowlisted host `lark-cli` read commands under the authenticated user identity. Calls are pinned to `DSH_ASSISTANT_FEISHU_PROFILE` (default `tars-ng`) so the product does not inherit the default CLI application's broader authority. Credentials remain in the CLI credential store and are never passed to the Agent. Without this mode, these capabilities are `NOT LINKED` and do not degrade the core runtime.
 
@@ -58,7 +58,7 @@ Operator manual: [docs/operator.md](./docs/operator.md). Soak / feature freeze: 
 
 ## What this is
 
-A governed AI-native product layer and reference assistant: TARS-NG personality, Mission-Control workspace, memory, knowledge, trust/policy, integrations, governed Self-Extension, DSH-native Skill lifecycle, and operator lifecycle (`start` / `status` / `doctor`).
+A governed AI-native product layer and reference assistant: TARS-NG personality, Mission-Control workspace, durable Sessions, context endurance, material input, task control, memory, knowledge, integrations, governed Capability construction, Skill/Tool/Workflow catalogs, optional development executors, and operator lifecycle (`start` / `status` / `doctor`).
 
 DSH owns agent loop, sessions, tool execution, events, LLM/provider seams, jobs, lifecycle, and plugin composition. This project **composes and extends** those public APIs. It does not reimplement them.
 
@@ -116,10 +116,14 @@ See [ARCHITECTURE.md](./ARCHITECTURE.md) for layers. See [ENGINEERING.md](./ENGI
 | DSH public plugin boot + one agent | yes | **Verified** by `npm test` | No custom Agent Loop |
 | Personal memory + local JSON adapter | no (in-memory default; product CLI uses home JSON) | **Verified** by `npm test` | Hosted DB **Unsupported** |
 | Personal knowledge (local lexical index) | no | **Verified** by `npm test` | Vector DB / crawler **Unsupported** |
-| Integration seams | product default: unavailable | **Verified** (fake providers in tests; product CLI disables fixtures) | Live vendor OAuth refresh **Unsupported** |
+| Context endurance | no | **Implemented** | Token meter, compaction, output retention/spill and pre-dispatch Session checkpoints |
+| Attachments / file references | no | **Implemented** | Durable local material references; image input uses the configured vision model |
+| Goal / Plan / Todo / questions | no | **Implemented** | Observable task structure; does not replace the Agent Loop with a fixed global workflow |
+| Integration seams | product default: unavailable | **Implemented** for Google/Feishu/Obsidian and **Verified** by bounded provider-contract tests | Live availability depends on credentials/scopes; fixtures stay disabled; vendor OAuth refresh **Unsupported** |
 | Trust/policy L0–L4 | yes | **Verified** by `npm test` | Confirmation binds fingerprint |
 | Process-local jobs / morning brief | yes | **Verified** by `npm test` | Cross-restart durability **Unsupported** |
 | Governed native DSH Workflow Catalog | no | **Verified** by `test/registered-workflows.test.ts`, `test/workflow-catalog.test.ts`, and governance tests | Host-managed plus approved generated/third-party scripts; foreground runs only, restart resume **Unsupported** |
+| Governed Tool / Slash Command catalogs | no | **Implemented** | Commands are Capability-owned entry points and inherit the Capability lifecycle |
 | UI projection + control surface | no | **Verified** by `npm test` | Framework-independent DTOs remain |
 | Local Mission-Control Web UI | no | **Verified** by `test/web-ui.test.ts` and packaging | Loopback-only; pixel/mobile **Unsupported** |
 | Plan My Day vertical slice | no | **Verified** by `test/vertical-slice.test.ts` | Scripted adapter + fake calendar |
@@ -129,15 +133,18 @@ See [ARCHITECTURE.md](./ARCHITECTURE.md) for layers. See [ENGINEERING.md](./ENGI
 | Candidate workspace + reliability + independent review | no | **Verified** | `review-complete` is not approval |
 | Capability Evaluation fixtures | no | **Verified** by `test/capability-evaluation.test.ts` | Exact JSON input/output, pure single-tool Candidates, OS-isolated and digest-bound; not review or approval |
 | Expense Risk Review workspace | no | **Verified** by `test/expense-review.test.ts` and `test/expense-review-ui.test.tsx` | Host-rendered decision support over one active `finance.expense-risk.review` capability; no approval or posting authority |
-| Runtime Context (Profile / Workspace / Session) | yes (product start) | **Implemented** | [docs/runtime-context.md](./docs/runtime-context.md); packaged seal [docs/v0.4.0-seal.md](./docs/v0.4.0-seal.md) |
+| Runtime Context (Profile / Workspace / Session) | yes (product start) | **Implemented** | [docs/runtime-context.md](./docs/runtime-context.md); current baseline [docs/v0.5.0-baseline.md](./docs/v0.5.0-baseline.md) |
 | Topic conversations / Session Catalog | yes (product start) | **Implemented** | [docs/session-catalog.md](./docs/session-catalog.md) |
 | Generated authoring contract `generated-extension-api/v1` | no | **Implemented** | Host-owned; call-bound Broker supports the contract probe and bounded read-only Knowledge retrieval; [docs/generated-extension-api-v1.md](./docs/generated-extension-api-v1.md) |
 | Local third-party import (`import-local`) | no | **Implemented** | CLI-only quarantine into an inactive `third-party/import` candidate. Marketplace is out of scope. |
 | DSH-native Skill lifecycle | no | **Implemented** | Profile-scoped; [docs/skills.md](./docs/skills.md). Feature soak: [docs/skill-lifecycle-soak.md](./docs/skill-lifecycle-soak.md) |
+| Governed Capability delivery Sessions | no | **Implemented** | Conversation proposal → accepted plan → dedicated Session/Goal → candidate lifecycle → activation/archive |
+| Native / Codex / Claude development executors | no | **Experimental** | Native remains default; external execution is approval-bound and transactional; executable discovery is not authentication proof |
+| Daily user-asset backup + restore drill | no | **Implemented** | Sessions, attachments, Memory, sanitized configuration and committed governance; no one-click production restore |
 | TARS-NG personality + Mission-Control workspace | no | **Verified** | [docs/tars-ng-personality.md](./docs/tars-ng-personality.md) |
-| Production persistence, public npm publish | no | **Unsupported** | Package is `private` |
+| Hosted/multi-user persistence, public npm publish | no | **Unsupported** | Local product persistence is implemented; package is `private` |
 
-Known limitations: no OAuth refresh, no production security certification, no durable user-level Schedule, no persisted/resumable native Workflow runs, no mobile distribution, no public or LAN Web UI, no marketplace or remote Skill/plugin install. Release status: [docs/RELEASE.md](./docs/RELEASE.md). Current seal: [docs/v0.4.0-seal.md](./docs/v0.4.0-seal.md) (prepared / release candidate).
+Known limitations: no Google OAuth refresh, no production security certification, no durable user-level Schedule, no persisted/resumable native Workflow runs, no mobile distribution, no public or LAN Web UI, no marketplace or remote Skill/plugin install. Two generated integration E2E slices remain quarantined pending isolated-runtime Broker migration, and external development executors remain Experimental. Release status: [docs/RELEASE.md](./docs/RELEASE.md). Current claim: [docs/v0.5.0-baseline.md](./docs/v0.5.0-baseline.md).
 
 ## Develop
 
@@ -169,7 +176,8 @@ npm run pack:inspect
 | [docs/self-extension.md](./docs/self-extension.md) | Self-Extension contract |
 | [docs/tars-ng-personality.md](./docs/tars-ng-personality.md) | Personality contract |
 | [docs/mission-control-workspace.md](./docs/mission-control-workspace.md) | Mission-Control IA |
-| [docs/product-vision.md](./docs/product-vision.md) | Product thesis, target users, boundaries, and post-v0.4 direction |
-| [docs/RELEASE.md](./docs/RELEASE.md) | 0.4.0 release candidate status |
-| [docs/v0.4.0-seal.md](./docs/v0.4.0-seal.md) | v0.4.0 claim → evidence record (prepared) |
+| [docs/product-vision.md](./docs/product-vision.md) | Product thesis, target users, boundaries, and long-term direction |
+| [docs/RELEASE.md](./docs/RELEASE.md) | Current and historical version status |
+| [docs/v0.5.0-baseline.md](./docs/v0.5.0-baseline.md) | Current capability claims, gaps and stabilization exit criteria |
+| [docs/v0.4.0-seal.md](./docs/v0.4.0-seal.md) | Historical v0.4.0 prepared evidence record; never tagged |
 | [docs/v0.3.0-seal.md](./docs/v0.3.0-seal.md) | Historical v0.3.0 soak seal |

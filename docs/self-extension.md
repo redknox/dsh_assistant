@@ -1,6 +1,6 @@
 # Self-Extension architecture and governance
 
-Status: governance contract is **Designed** and remains normative. The Capability Registry, Resolution Review, candidate workspace/validation, engineering reliability, independent review, governed activation/recovery, and the Obsidian Vault plus Calendar generated slices are **Verified**. See [docs/capability-registry.md](./capability-registry.md), [docs/capability-resolution.md](./capability-resolution.md), [docs/candidate-workspace.md](./candidate-workspace.md), [docs/engineering-reliability.md](./engineering-reliability.md), [docs/independent-review.md](./independent-review.md), [docs/extension-governance.md](./extension-governance.md), [docs/obsidian-self-extension.md](./obsidian-self-extension.md), and [docs/calendar-self-extension.md](./calendar-self-extension.md).
+Status: governance contract is **Designed** and remains normative. The Capability Registry, Resolution Review, candidate workspace/validation, engineering reliability, independent review, and governed activation/recovery are **Verified**. Obsidian Vault and Calendar have historical generated-slice evidence, but their current E2E tests are quarantined pending isolated-runtime Broker migration; v0.5.0 does not claim those two vertical tests as passing. See [docs/capability-registry.md](./capability-registry.md), [docs/capability-resolution.md](./capability-resolution.md), [docs/candidate-workspace.md](./candidate-workspace.md), [docs/engineering-reliability.md](./engineering-reliability.md), [docs/independent-review.md](./independent-review.md), [docs/extension-governance.md](./extension-governance.md), [docs/obsidian-self-extension.md](./obsidian-self-extension.md), and [docs/calendar-self-extension.md](./calendar-self-extension.md).
 
 Companion documents: [ARCHITECTURE.md](../ARCHITECTURE.md) (layers and public seams), [ENGINEERING.md](../ENGINEERING.md) (normative contributor rules), [README.md](../README.md) (product boundary).
 
@@ -20,12 +20,13 @@ A trusted operator may import one local directory with `tars-ng self-extension i
 
 ```text
 v0.3.0 = Governance + Mission-Control product baseline (historical)
-v0.4.0 = Runtime Foundation + Governed Extension Baseline + DSH-native Skill lifecycle
+v0.4.0 = prepared Runtime Foundation evidence record (historical, never tagged)
+v0.5.0 = Governed Personal Harness stabilization baseline (current)
 ```
 
 Self-development is allowed; self-authorization is not. The Candidate Workbench is a bounded conversation-to-review loop (`generated-extension-api/v1` + host scaffold + diagnostics + list/resume). It is not self-approval or arbitrary software development. Real-model soak: [docs/m6c-conversation-soak.md](./m6c-conversation-soak.md).
 
-The v0.1.0 Assistant Core MVP remains the stable product/runtime baseline underneath Self-Extension. Self-Extension sits beside that baseline; it does not replace it. v0.2.0 is the Governed Self-Extension baseline. v0.3.0 is the historical Governance + Mission-Control baseline. v0.4.0 adds host-owned Runtime Context, topic Sessions, governed local import, and DSH-native Skill lifecycle on that same governance contract.
+The v0.1.0 Assistant Core MVP remains the stable product/runtime baseline underneath Self-Extension. Self-Extension sits beside that baseline; it does not replace it. v0.2.0 is the Governed Self-Extension baseline. v0.3.0 is the historical Governance + Mission-Control tagged baseline. The untagged v0.4.0 candidate added host-owned Runtime Context, topic Sessions, governed local import, and DSH-native Skill lifecycle. v0.5.0 adds the unified Capability-delivery experience, task/context/material controls, governed catalogs and Experimental external development executors while preserving the same authority contract.
 
 ## Three separate questions
 
@@ -233,12 +234,11 @@ Capability Resolution Review:
 
 ## Non-goals (still later)
 
-**Verified** by the Obsidian Vault slice (`test/obsidian-e2e.test.ts`, [docs/obsidian-self-extension.md](./obsidian-self-extension.md)). Still **Unsupported**:
+Historical Obsidian evidence is documented in [docs/obsidian-self-extension.md](./obsidian-self-extension.md); its current isolated-runtime E2E remains quarantined. Still **Unsupported**:
 
-- Arbitrary software development, host shell, or package installers
-- Runtime loader / version manager
-- Automatic install, upgrade, or remove
-- Sandbox or container execution framework
+- Unrestricted host-product self-modification, shell access, or package installation
+- A general runtime loader, version manager, sandbox, or container platform
+- Model-authorized approval, activation, product upgrade, push, merge, or destructive removal
 - Any change to DSH Agent Loop internals
 
-Registry, Resolution, candidate validation, governed activation/recovery, the first Obsidian Vault generated-plugin slice, and durable restart reconstruction / operator control (`docs/self-extension-durability.md`, `docs/self-extension-operations.md`) are **Verified**.
+Registry, Resolution, candidate validation, governed activation/recovery, and durable restart reconstruction / operator control (`docs/self-extension-durability.md`, `docs/self-extension-operations.md`) are **Verified**. Optional Codex and Claude authoring adapters are **Experimental** and remain inside a mutable Candidate transaction; executable discovery is not proof of provider authentication or live-run acceptance.

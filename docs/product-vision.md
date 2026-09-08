@@ -127,13 +127,13 @@ An accepted Capability Proposal is bound to one native same-session DSH Goal. TA
 
 ## Current baseline
 
-Through v0.4.0, TARS-NG is validating the lower half of the stack: a usable reference assistant with one host-owned Runtime Context, plus governed self-development. The central proof is that a Home can bind Profile / Workspace / current Session, then move a missing capability through resolution, candidate authoring, validation, independent review, exact approval, isolated activation, discovery, use, restart, and recovery without self-authorization.
+At v0.5.0, TARS-NG has implemented the lower half of the stack as a local governed personal Harness. One Home binds Profile, Workspace and durable Sessions; the assistant has context endurance, material input, task control, local Memory/Knowledge, governed connectors and a unified Capability-delivery path. A missing Capability can move from conversational clarification through Specification, Resolution, candidate authoring, validation, Independent Review, exact approval, activation, discovery, use, unplug and recovery without self-authorization. Native authoring remains the default; Codex and Claude development executors are Experimental alternatives inside the same Candidate boundary.
 
-This baseline is necessary but not sufficient for domain-professional vibe coding.
+This baseline is necessary but not sufficient for domain-professional vibe coding. Its immediate task is stabilization: runtime ownership, truthful readiness, isolated-runtime integration E2E coverage, long-Session behavior and real executor acceptance. See [v0.5.0-baseline.md](./v0.5.0-baseline.md).
 
 ## Long-term roadmap
 
-The roadmap after v0.4.0 is a product hypothesis, not a sequence of committed releases. Each stage should be justified by daily use and one bounded domain proof before TARS-NG expands into a broader platform.
+The roadmap after v0.5.0 is a product hypothesis, not a sequence of committed releases. Each stage should be justified by daily use and one bounded domain proof before TARS-NG expands into a broader platform.
 
 ### 1. Typed Capability Broker
 
@@ -214,7 +214,7 @@ The professional remains responsible for business meaning and acceptance example
 
 ## Reference domain proof
 
-The recommended first proof after the v0.4.0 soak is a low-risk finance slice: **expense risk review and approval recommendation**, without payment or automatic authoritative approval.
+The first bounded implementation is a low-risk finance slice: **expense risk review and approval recommendation**, without payment or automatic authoritative approval. The host-rendered workspace and governed pure evaluation path are Verified; real finance-system adapters, representative live claims and durable claim history are not yet claimed.
 
 A finance professional should be able to describe rules such as different over-standard approval paths for different company entities. TARS-NG should:
 
@@ -247,7 +247,7 @@ A suggested first proof is one low-risk finance capability, such as invoice anom
 
 ## Product discipline
 
-- Daily use comes before broad capability expansion after v0.4.0.
+- Daily use and v0.5.0 stabilization come before broad capability expansion.
 - Establish TARS-NG as a trusted enterprise knowledge entry point before broadening its mutation authority.
 - Treat “read-only” as reduced system-change risk, never as a substitute for confidentiality, permission fidelity, or prompt-injection defenses.
 - Real failures are classified as defects, usability gaps, or genuinely missing capabilities.

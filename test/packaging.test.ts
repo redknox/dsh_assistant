@@ -59,7 +59,7 @@ describe('product package and profile', () => {
       tarsNg?: { dsh: string }
       dependencies: Record<string, string>
     }
-    assert.equal(pkg.version, '0.4.0')
+    assert.equal(pkg.version, '0.5.0')
     assert.equal(pkg.private, true)
     assert.equal(pkg.engines.node, '>=22')
     assert.equal(pkg.dsh.bundle.patch, './cordis.patch.yml')
@@ -267,7 +267,7 @@ describe('product package and profile', () => {
     assert.equal(existsSync(join(pkgRoot, 'dist', 'product', 'bin.js')), true)
     assert.equal(existsSync(join(pkgRoot, 'dist', 'web', 'index.html')), true)
     const installedPkg = JSON.parse(readFileSync(join(pkgRoot, 'package.json'), 'utf8')) as { version: string }
-    assert.equal(installedPkg.version, '0.4.0')
+    assert.equal(installedPkg.version, '0.5.0')
     const uiIndex = readFileSync(join(pkgRoot, 'dist', 'web', 'index.html'), 'utf8')
     assert.doesNotMatch(uiIndex, /\btsx\b/)
     assert.doesNotMatch(uiIndex, /@vitejs\/plugin-react/)

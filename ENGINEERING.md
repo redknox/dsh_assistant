@@ -86,6 +86,6 @@ These are **Unsupported** unless a later issue explicitly promotes them:
 - Self-authorizing capability changes
 - Privileged runtime paths for assistant-generated plugins
 
-## 10. Feature freeze (v0.3.x soak)
+## 10. Stabilization baseline
 
-`v0.3.0` is the historical Governance + Mission-Control baseline. `v0.4.0` is Runtime Foundation + Governed Extension Baseline + DSH-native Skill lifecycle: self-development is allowed; self-authorization is not. Generated candidates must activate only through the isolated runner. Policy: [docs/soak.md](./docs/soak.md). Seal: [docs/v0.4.0-seal.md](./docs/v0.4.0-seal.md).
+`v0.3.0` is the latest historical tagged Governance + Mission-Control baseline. `v0.4.0` is an untagged prepared Runtime Foundation evidence record. `v0.5.0` is the current Governed Personal Harness stabilization baseline: self-development is allowed; self-authorization is not. Generated candidates must activate only through the isolated runner. Policy: [docs/soak.md](./docs/soak.md). Current claim: [docs/v0.5.0-baseline.md](./docs/v0.5.0-baseline.md).
