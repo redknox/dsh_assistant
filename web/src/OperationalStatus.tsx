@@ -16,6 +16,7 @@ export interface OperationsActions {
   readonly controlPlan?: (active: boolean) => void
   readonly answerQuestion?: (id: string, selected: string) => void
   readonly openSession?: (id: string) => void
+  readonly cancelDevelopmentRun?: (runId: string) => void
 }
 
 function TaskControlPanel(props: {
@@ -203,29 +204,54 @@ function MaterialInputPanel(props: { readonly value: MissionControlView['materia
   )
 }
 
-function DevelopmentExecutorsPanel(props: { readonly value: MissionControlView['developmentExecutors'] }) {
+function DevelopmentExecutorsPanel(props: {
+  readonly value: MissionControlView['developmentExecutors']
+  readonly runs: MissionControlView['developmentRuns']
+  readonly cancel?: (runId: string) => void
+}) {
   const value = props.value
   if (!value || value.length === 0) return null
   const external = value.filter((item) => !item.native)
-  const installed = external.filter((item) => item.verification === 'installed-unverified').length
+  const ready = external.filter((item) => item.executionReady).length
   return (
     <section className="development-executor-status" aria-labelledby="development-executor-title">
       <div className="ops-section-heading">
         <h2 id="development-executor-title">DEVELOPMENT EXECUTORS</h2>
-        <span>{installed} / {external.length} EXTERNAL INSTALLED</span>
+        <span>{ready} / {external.length} AVAILABLE</span>
       </div>
       <dl className="development-executor-list">
         {value.map((item) => (
           <div key={item.id} data-executor={item.id} data-executor-state={item.verification}>
             <dt>
-              <span className={`status-lamp status-lamp--${item.available ? 'ready' : 'offline'}`} aria-hidden="true" />
+              <span className={`status-lamp status-lamp--${item.executionReady ? 'ready' : item.available ? 'degraded' : 'offline'}`} aria-hidden="true" />
               <strong>{item.label}</strong>
               <small>{item.native ? 'BUILT IN' : item.detail}</small>
             </dt>
-            <dd>{item.native ? 'BUILT IN' : item.available ? 'INSTALLED · AUTH CHECKED ON RUN' : 'NOT INSTALLED'}</dd>
+            <dd>{item.native
+              ? 'BUILT IN'
+              : item.verification === 'execution-verified'
+                ? 'EXECUTION VERIFIED · EXPERIMENTAL'
+                : item.verification === 'authenticated'
+                  ? 'ACCOUNT AUTHENTICATED · EXPERIMENTAL'
+                  : item.verification === 'custom-route-configured'
+                    ? 'CUSTOM ROUTE · VERIFY ON RUN'
+                    : item.available ? 'ROUTE NOT USABLE' : 'NOT INSTALLED'}</dd>
           </div>
         ))}
       </dl>
+      {props.runs && props.runs.length > 0 ? (
+        <div className="development-run-list" aria-label="Recent development runs">
+          {props.runs.map((run) => (
+            <article key={run.runId} data-development-run={run.runId} data-run-status={run.status}>
+              <div><strong>{run.executor === 'claude-code' ? 'CLAUDE CODE' : 'CODEX'}</strong><span>{run.status.replaceAll('-', ' ').toUpperCase()}</span></div>
+              <small>{run.candidateId}</small>
+              <p>{run.detail}</p>
+              <div><span>{(run.progressBytes / 1024).toFixed(1)} KB OUTPUT</span><span>{run.changedFiles.length} FILES</span></div>
+              {run.status === 'preparing' || run.status === 'running' ? <button type="button" className="button button--secondary" onClick={() => props.cancel?.(run.runId)}>CANCEL RUN</button> : null}
+            </article>
+          ))}
+        </div>
+      ) : null}
     </section>
   )
 }
@@ -357,7 +383,7 @@ export function OperationsPanel(props: {
       </section>
       <ContextEndurancePanel value={props.view.contextEndurance} />
       <MaterialInputPanel value={props.view.materialInput} />
-      <DevelopmentExecutorsPanel value={props.view.developmentExecutors} />
+      <DevelopmentExecutorsPanel value={props.view.developmentExecutors} runs={props.view.developmentRuns} cancel={props.actions.cancelDevelopmentRun} />
       <TaskControlPanel value={props.view.taskControl} locked={!props.connected} control={props.actions.controlGoal} controlPlan={props.actions.controlPlan} answerQuestion={props.actions.answerQuestion} />
       <section className="capability-section" id="capabilities" aria-labelledby="capability-title">
         <div className="ops-section-heading capability-heading"><h2 id="capability-title">CONNECTED CAPABILITIES</h2><span>{props.view.capabilities.length} CHANNELS</span></div>

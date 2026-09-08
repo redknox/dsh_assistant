@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { cpSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs'
+import { cpSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, it } from 'node:test'
@@ -54,7 +54,7 @@ function reviewObsidian(ctx: { capabilityResolution: { review(input: object): { 
   })
 }
 
-describe.skip('Obsidian Self-Extension vertical slice (quarantined: needs isolated-runtime broker migration)', () => {
+describe('Obsidian Self-Extension vertical slice', () => {
   it('A. does not treat files.read as complete Obsidian support', async () => {
     const { ctx } = await bootAssistantControl()
     try {
@@ -73,11 +73,10 @@ describe.skip('Obsidian Self-Extension vertical slice (quarantined: needs isolat
   })
 
   it('runs review → candidate → validation → approval → activation → vault use → rollback', async () => {
-    const previous = process.env.DSH_ASSISTANT_OBSIDIAN_VAULT
     const vault = mkdtempSync(join(tmpdir(), 'obsidian-e2e-'))
     cpSync(fixtureVault, vault, { recursive: true })
-    process.env.DSH_ASSISTANT_OBSIDIAN_VAULT = vault
-    const { ctx, recoveryRoot } = await bootAssistantControl()
+    mkdirSync(join(vault, '.obsidian'))
+    const { ctx, recoveryRoot } = await bootAssistantControl({ knowledge: { obsidianVaultPath: vault } })
     try {
       assert.equal(ctx.capabilityRegistry.resolveActiveOwner('obsidian.notes.read').kind, 'unknown')
       for (const name of OBSIDIAN_TOOLS) assert.equal(ctx.tools.get(name), undefined)
@@ -92,19 +91,17 @@ describe.skip('Obsidian Self-Extension vertical slice (quarantined: needs isolat
         version: '0.1.0',
         manifest: {
           capabilities: ['obsidian.notes.list', 'obsidian.notes.read', 'obsidian.notes.search', 'obsidian.notes.create'],
-          permissions: ['filesystem.vault.read', 'filesystem.vault.write'],
-          runtimeSeams: ['obsidian.notes'],
+          permissions: ['host.obsidian.read', 'host.obsidian.mutate'],
+          runtimeSeams: ['host.obsidian'],
           tools: [...OBSIDIAN_TOOLS],
           services: [],
-          configRequired: ['vaultRoot'],
+          configRequired: [],
           effects: { filesystem: [vault], network: [], process: [] },
           entryPoints: ['src/plugin.js'],
           riskModel: obsidianVaultRiskModel(),
         },
       })
       copyCandidateSources(ctx.candidateWorkspace, created.id)
-      ctx.candidateWorkspace.writeFile(created.id, 'vault.json', `${JSON.stringify({ vaultRoot: vault }, null, 2)}\n`)
-
       const report = ctx.candidateValidation.validate(created.id)
       assert.equal(report.passed, true, report.stages.map((item) => `${item.name}:${item.status}`).join(', '))
       assert.equal(report.stages.find((item) => item.name === 'tests')?.status, 'passed')
@@ -115,10 +112,10 @@ describe.skip('Obsidian Self-Extension vertical slice (quarantined: needs isolat
       assert.ok(diff.capabilities.added.includes('obsidian.notes.read'))
       const summary = ctx.extensionGovernance.inspectSummary(sealed.id)
       assert.equal(summary.validationPassed, true)
-      assert.ok(summary.permissions.added.includes('filesystem.vault.read'))
-      assert.ok(summary.permissions.added.includes('filesystem.vault.write'))
+      assert.ok(summary.permissions.added.includes('host.obsidian.read'))
+      assert.ok(summary.permissions.added.includes('host.obsidian.mutate'))
       assert.ok(summary.effects.filesystem.includes(vault))
-      assert.ok(summary.configRequired.includes('vaultRoot'))
+      assert.deepEqual(summary.configRequired, [])
       assert.deepEqual(summary.effects.network, [])
       assert.deepEqual(summary.effects.process, [])
       assert.deepEqual(summary.secrets, [])
@@ -150,25 +147,23 @@ describe.skip('Obsidian Self-Extension vertical slice (quarantined: needs isolat
       const tagged = await tool(ctx, 'obsidian_notes_search', { tag: 'person' })
       assert.ok(tagged.some((item: { id: string }) => item.id === 'People/Alice.md'))
 
-      const createdNote = await tool(ctx, 'obsidian_notes_create', {
+      const pending = await tool(ctx, 'obsidian_notes_create', {
         id: 'Projects/Beta.md',
         title: 'Beta',
         body: 'Spawned from the governed slice.',
         tags: 'project',
         wikilinks: 'Alice,Projects/Alpha',
       })
-      assert.equal(createdNote.id, 'Projects/Beta.md')
+      assert.equal(pending.kind, 'pending_confirmation')
+      const approved = await tool(ctx, 'confirm_action', { confirmationId: pending.confirmationId, decision: 'approve' })
+      assert.equal(approved.kind, 'allow')
       const reread = await tool(ctx, 'obsidian_notes_read', { id: 'Projects/Beta.md' })
       assert.ok(reread.wikilinks.includes('Alice'))
       assert.ok(reread.wikilinks.includes('Projects/Alpha'))
 
-      const files = ctx.integrations.hub.files()
-      const accesses = files.confinedAccesses()
-      assert.ok(accesses.some((item) => item.op === 'list' && item.root === vault))
-      assert.ok(accesses.some((item) => item.op === 'read' && item.path === 'Projects/Alpha.md'))
-      assert.ok(accesses.some((item) => item.op === 'write' && item.path === 'Projects/Beta.md'))
       for (const source of ['src/plugin.js', 'src/notes.js']) {
         assert.doesNotMatch(readFileSync(join(candidateSource, source), 'utf8'), /node:fs/)
+        assert.doesNotMatch(readFileSync(join(candidateSource, source), 'utf8'), /process\.env|ctx\.integrations/)
       }
 
       const outside = mkdtempSync(join(tmpdir(), 'obsidian-outside-'))
@@ -179,17 +174,24 @@ describe.skip('Obsidian Self-Extension vertical slice (quarantined: needs isolat
       const leaked = await tool(ctx, 'obsidian_notes_search', { tag: 'leaked' })
       assert.equal(leaked.length, 0)
       await assert.rejects(() => tool(ctx, 'obsidian_notes_read', { id: 'link/secret.md' }))
-      await assert.rejects(() => tool(ctx, 'obsidian_notes_create', {
+      const unsafeLink = await tool(ctx, 'obsidian_notes_create', {
         id: 'link/nested.md',
         title: 'nope',
-      }))
+      })
+      assert.equal(unsafeLink.kind, 'pending_confirmation')
+      const unsafeLinkResult = await tool(ctx, 'confirm_action', { confirmationId: unsafeLink.confirmationId, decision: 'approve' })
+      assert.equal(unsafeLinkResult.kind, 'deny')
+      assert.equal(unsafeLinkResult.code, 'failed')
       rmSync(outside, { recursive: true, force: true })
 
       await assert.rejects(() => tool(ctx, 'obsidian_notes_read', { id: '../outside.md' }))
-      await assert.rejects(() => tool(ctx, 'obsidian_notes_create', {
+      const unsafeTraversal = await tool(ctx, 'obsidian_notes_create', {
         id: '../../secret.md',
         title: 'nope',
-      }))
+      })
+      assert.equal(unsafeTraversal.kind, 'pending_confirmation')
+      const unsafeTraversalResult = await tool(ctx, 'confirm_action', { confirmationId: unsafeTraversal.confirmationId, decision: 'approve' })
+      assert.equal(unsafeTraversalResult.kind, 'deny')
 
       const restored = await recoveryRoot.rollback(human)
       assert.equal(restored.state, 'rolled-back')
@@ -199,8 +201,6 @@ describe.skip('Obsidian Self-Extension vertical slice (quarantined: needs isolat
       assert.ok(ctx.tools.get('calendar_list_events'))
       assert.ok(ctx.personalMemory)
     } finally {
-      if (previous === undefined) delete process.env.DSH_ASSISTANT_OBSIDIAN_VAULT
-      else process.env.DSH_ASSISTANT_OBSIDIAN_VAULT = previous
       await ctx.fiber.dispose()
       rmSync(vault, { recursive: true, force: true })
     }
@@ -216,6 +216,7 @@ describe.skip('Obsidian Self-Extension vertical slice (quarantined: needs isolat
         version: '0.1.0',
         manifest: {
           capabilities: ['obsidian.notes.read'],
+          permissions: ['host.obsidian.read', 'host.obsidian.mutate'],
           tools: ['obsidian_notes_read'],
           entryPoints: ['src/plugin.js'],
         },

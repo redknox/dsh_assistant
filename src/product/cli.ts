@@ -821,6 +821,7 @@ export async function runProductCli(
           workbench: booted.ctx.candidateWorkbench,
           workbenchMutable: !booted.diagnostics.safeMode,
           expenseReview: new ExpenseRiskReviewModule(booted.ctx.capabilityRegistry, booted.ctx.tools),
+          developmentExecutors: booted.ctx.developmentExecutors,
           ...(sessionHost ? { sessionHost } : {}),
           diagnostics: { persistence: booted.diagnostics.persistence, reasons: booted.diagnostics.reasons },
           runtimeControl: {

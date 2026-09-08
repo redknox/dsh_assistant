@@ -24,6 +24,7 @@ import { WORKBENCH_CONVERSATION_GUIDANCE } from '../src/plugins/workbench-plugin
 import { googleCalendarWriteRiskModel } from '../src/domain/reliability/index.js'
 import { RecoveryRoot } from '../src/domain/governance/index.js'
 import { CatalogDiscovery } from '../src/domain/discovery/index.js'
+import { GENERATED_BROKER_OPS } from '../src/domain/generated-runtime/index.js'
 import { InMemoryRegistryPersistence, RegistryService, bootstrapCoreInventory } from '../src/domain/registry/index.js'
 import { ResolutionService } from '../src/domain/resolution/index.js'
 import { PolicyReviewerProvider, ReviewService, finding, reviewPackageFromCandidate } from '../src/domain/review/index.js'
@@ -1007,7 +1008,7 @@ describe('candidate workbench', () => {
         String((contract.ctxSemantics as { brokerPermissions?: string }).brokerPermissions),
         /manifest\.permissions.*exact diff/,
       )
-      assert.deepEqual(contract.brokerOps, ['host.text.echo', 'host.knowledge.retrieve'])
+      assert.deepEqual(contract.brokerOps, [...GENERATED_BROKER_OPS])
       assert.equal(
         (contract.workflow as { scriptFormat?: string }).scriptFormat,
         'JavaScript async-function body',
@@ -1283,7 +1284,7 @@ describe('candidate workbench', () => {
       assert.equal(bad.isError, true)
       const contract = parse(await tool(ctx, 'inspect_authoring_contract', {}))
       assert.equal(contract.id, GENERATED_EXTENSION_API_V1)
-      assert.deepEqual(contract.brokerOps, ['host.text.echo', 'host.knowledge.retrieve'])
+      assert.deepEqual(contract.brokerOps, [...GENERATED_BROKER_OPS])
       const plan = parse(await tool(ctx, 'plan_capability_change', {
         capability: 'text.slugify',
         need: 'lowercase URL-safe slug',

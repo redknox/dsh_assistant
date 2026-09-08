@@ -44,6 +44,7 @@
     "self-extension": "tsx src/runtime/self-extension-cli.ts",
     "tars-ng": "node dist/product/bin.js",
     "verify:v0.2": "tsx --test test/v0.2-regression.test.ts",
+    "verify:development-executors:live": "TARS_NG_LIVE_DEVELOPMENT_EXECUTORS=1 tsx --test test/development-executor-live-e2e.test.ts",
     "pack:inspect": "npm pack --dry-run --json"
   },
   "engines": {

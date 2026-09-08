@@ -1,6 +1,6 @@
 # Self-Extension architecture and governance
 
-Status: governance contract is **Designed** and remains normative. The Capability Registry, Resolution Review, candidate workspace/validation, engineering reliability, independent review, and governed activation/recovery are **Verified**. Obsidian Vault and Calendar have historical generated-slice evidence, but their current E2E tests are quarantined pending isolated-runtime Broker migration; v0.5.0 does not claim those two vertical tests as passing. See [docs/capability-registry.md](./capability-registry.md), [docs/capability-resolution.md](./capability-resolution.md), [docs/candidate-workspace.md](./candidate-workspace.md), [docs/engineering-reliability.md](./engineering-reliability.md), [docs/independent-review.md](./independent-review.md), [docs/extension-governance.md](./extension-governance.md), [docs/obsidian-self-extension.md](./obsidian-self-extension.md), and [docs/calendar-self-extension.md](./calendar-self-extension.md).
+Status: governance contract is **Designed** and remains normative. The Capability Registry, Resolution Review, candidate workspace/validation, engineering reliability, independent review, governed activation/recovery, and the Calendar/Obsidian isolated-runtime Broker slices are **Verified**. See [docs/capability-registry.md](./capability-registry.md), [docs/capability-resolution.md](./capability-resolution.md), [docs/candidate-workspace.md](./candidate-workspace.md), [docs/engineering-reliability.md](./engineering-reliability.md), [docs/independent-review.md](./independent-review.md), [docs/extension-governance.md](./extension-governance.md), [docs/obsidian-self-extension.md](./obsidian-self-extension.md), and [docs/calendar-self-extension.md](./calendar-self-extension.md).
 
 Companion documents: [ARCHITECTURE.md](../ARCHITECTURE.md) (layers and public seams), [ENGINEERING.md](../ENGINEERING.md) (normative contributor rules), [README.md](../README.md) (product boundary).
 
@@ -234,11 +234,11 @@ Capability Resolution Review:
 
 ## Non-goals (still later)
 
-Historical Obsidian evidence is documented in [docs/obsidian-self-extension.md](./obsidian-self-extension.md); its current isolated-runtime E2E remains quarantined. Still **Unsupported**:
+Calendar and Obsidian Broker evidence is documented in [docs/calendar-self-extension.md](./calendar-self-extension.md) and [docs/obsidian-self-extension.md](./obsidian-self-extension.md). Still **Unsupported**:
 
 - Unrestricted host-product self-modification, shell access, or package installation
 - A general runtime loader, version manager, sandbox, or container platform
 - Model-authorized approval, activation, product upgrade, push, merge, or destructive removal
 - Any change to DSH Agent Loop internals
 
-Registry, Resolution, candidate validation, governed activation/recovery, and durable restart reconstruction / operator control (`docs/self-extension-durability.md`, `docs/self-extension-operations.md`) are **Verified**. Optional Codex and Claude authoring adapters are **Experimental** and remain inside a mutable Candidate transaction; executable discovery is not proof of provider authentication or live-run acceptance.
+Registry, Resolution, candidate validation, governed activation/recovery, and durable restart reconstruction / operator control (`docs/self-extension-durability.md`, `docs/self-extension-operations.md`) are **Verified**. Optional Codex and Claude authoring adapters are **Experimental** and remain inside a mutable Candidate transaction. Their Development Runs are durable, cancellable, timed out and restart-recovered, but they gain no approval or activation authority and cannot modify the TARS-NG host. Current live acceptance evidence is recorded in [development-executors.md](./development-executors.md).

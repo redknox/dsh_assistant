@@ -183,6 +183,7 @@ async function bootStack(options: BootOptions = {}): Promise<AssistantControl> {
       restore: persistBroken ? undefined : durable.workbench.restore(),
       persist: persistBroken ? undefined : (state) => durable.workbench.save(state),
     },
+    developmentExecutors: options.home ? { runRoot: productHomeLayout(options.home).developmentRuns } : undefined,
     governance: {
       hydrate: persistBroken || durable === undefined ? undefined : hydrateFromAuthority(durable.authority),
       persist: durable === undefined ? undefined : () => {
@@ -199,6 +200,7 @@ async function bootStack(options: BootOptions = {}): Promise<AssistantControl> {
           appendProductLog(layout.logFile, line)
         },
       attachRecoveryRoot: (root) => {
+        if (safeMode) root.withholdGeneratedForSafeBoot()
         holder.root = root
         recoveryRoot = root
       },

@@ -26,6 +26,7 @@ import { handleWebUiTaskControlRequest } from './web-ui-task-control.js'
 import { handleWebUiWorkbenchRequest, projectWebUiWorkbench } from './web-ui-workbench.js'
 import type { CandidateWorkbench } from '../domain/workbench/index.js'
 import type { ExpenseRiskReviewModule } from '../domain/expense-review/index.js'
+import type { DevelopmentExecutorHub } from '../domain/development-executor/index.js'
 import { handleWebUiExpenseReviewRequest } from './web-ui-expense-review.js'
 
 export type { WebUiRuntimeControl } from './web-ui-runtime-control.js'
@@ -42,6 +43,7 @@ export interface WebUiServerOptions extends WebUiListenOptions {
     'list' | 'inspectSpecification' | 'inspectSpecificationEvaluation' | 'defineSpecification' | 'reviseSpecification' | 'compareSpecifications' | 'stopSpecification' | 'acceptPlan' | 'listCapabilityProposals' | 'decideCapabilityProposal'>
   readonly workbenchMutable?: boolean
   readonly expenseReview?: Pick<ExpenseRiskReviewModule, 'inspect' | 'review'>
+  readonly developmentExecutors?: Pick<DevelopmentExecutorHub, 'cancel'>
 }
 
 export interface WebUiServer {
@@ -149,6 +151,25 @@ export function startWebUiServer(options: WebUiServerOptions): Promise<WebUiServ
       }
       if (req.method === 'GET' && requestUrl.pathname === '/api/view') {
         sendJson(res, 200, envelope())
+        return
+      }
+      if (req.method === 'POST' && requestUrl.pathname === '/api/development-runs/cancel') {
+        if (!options.developmentExecutors) {
+          sendJson(res, 503, { error: 'development-runs-unavailable' })
+          return
+        }
+        const body = await transport.readJson(req) as { runId?: unknown }
+        if (typeof body.runId !== 'string' || body.runId === '') {
+          sendJson(res, 400, { error: 'invalid-development-run' })
+          return
+        }
+        try {
+          options.developmentExecutors.cancel(body.runId)
+          sendJson(res, 200, envelope())
+          broadcast()
+        } catch (error) {
+          sendJson(res, 409, { error: 'development-run-not-cancellable', detail: error instanceof Error ? error.message : String(error), ...envelope() })
+        }
         return
       }
       if (req.method === 'GET' && requestUrl.pathname === '/api/events') {

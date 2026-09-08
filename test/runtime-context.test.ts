@@ -717,11 +717,11 @@ describe('runtime context', () => {
       })
       assert.match(liveDoctor, /safe-mode: true/)
       assert.match(liveDoctor, /doctor-source: live-runtime/)
-      assert.match(liveDoctor, /activation: idle/)
+      assert.match(liveDoctor, /activation: safe-mode/)
       assert.doesNotMatch(liveDoctor, /activation: not-booted/)
       assert.match(liveDoctor, /catalog=withheld/)
       assert.match(liveStatus, /operator-source: live-runtime/)
-      assert.match(liveStatus, /activation: idle/)
+      assert.match(liveStatus, /activation: safe-mode/)
       assert.match(liveStatus, /skills: profile=assistant catalog=withheld/)
       writeFileSync(
         path.join(profiles, 'assistant', 'cordis.patch.yml'),

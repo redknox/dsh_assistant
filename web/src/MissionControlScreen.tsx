@@ -15,7 +15,7 @@ import type { MissionControlRuntime } from './useMissionControlRuntime'
 import type { SkillControl } from './useSkillControl'
 import type { WorkspaceControl } from './useWorkspaceControl'
 import type { SettingsControl } from './useSettingsControl'
-import { answerTaskQuestion, controlGoal, controlPlan } from './api'
+import { answerTaskQuestion, cancelDevelopmentRun, controlGoal, controlPlan } from './api'
 import { CapabilitySpecificationsWorkspace } from './CapabilitySpecificationsWorkspace'
 import type { CapabilitySpecificationsControl } from './useCapabilitySpecifications'
 import { ExpenseReviewWorkspace } from './ExpenseReviewWorkspace'
@@ -106,6 +106,9 @@ function projectScreenControls(input: MissionControlScreenProps) {
     },
     onQuestionAnswer: (id: string, selected: string) => {
       void input.runtime.perform(() => answerTaskQuestion(id, selected), 'unable to submit answer')
+    },
+    onCancelDevelopmentRun: (runId: string) => {
+      void input.runtime.perform(() => cancelDevelopmentRun(runId), 'unable to cancel development run')
     },
   }
 }
@@ -357,6 +360,7 @@ export function MissionControlScreen(input: MissionControlScreenProps) {
               props.onSwitchConversation?.(id)
               navigate('today')
             },
+            cancelDevelopmentRun: props.onCancelDevelopmentRun,
           }}
         />
       </div>

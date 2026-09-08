@@ -11,6 +11,8 @@ import {
   type CandidateWorkbench,
 } from '../workbench/index.js'
 import type {
+  DevelopmentRun,
+  DevelopmentRunStore,
   DevelopmentExecutor,
   DevelopmentExecutorAvailability,
   DevelopmentExecutorHub,
@@ -19,6 +21,20 @@ import type {
 } from './types.js'
 
 type Snapshot = ReadonlyMap<string, Buffer>
+
+class InMemoryDevelopmentRunStore implements DevelopmentRunStore {
+  private readonly runs = new Map<string, DevelopmentRun>()
+  private readonly snapshots = new Map<string, Snapshot>()
+  list() { return [...this.runs.values()] }
+  save(run: DevelopmentRun) { this.runs.set(run.runId, structuredClone(run)) }
+  stageSnapshot(runId: string, workspaceRoot: string) { this.snapshots.set(runId, snapshot(workspaceRoot)) }
+  restoreSnapshot(runId: string, workspaceRoot: string) {
+    const staged = this.snapshots.get(runId)
+    if (!staged) throw new DevelopmentExecutorContractError(`development run snapshot is missing: ${runId}`)
+    restore(workspaceRoot, staged)
+  }
+  discardSnapshot(runId: string) { this.snapshots.delete(runId) }
+}
 
 export class DevelopmentExecutorContractError extends Error {
   constructor(message: string) {
@@ -33,32 +49,88 @@ export class DevelopmentExecutorContractError extends Error {
  */
 export class DevelopmentExecutorService implements DevelopmentExecutorHub {
   private readonly executors = new Map<ExternalDevelopmentExecutorId, DevelopmentExecutor>()
-  private readonly active = new Set<string>()
+  private readonly active = new Map<string, { readonly runId: string; readonly controller: AbortController }>()
   private availabilityCache?: { readonly at: number; readonly value: readonly DevelopmentExecutorAvailability[] }
 
   constructor(
     private readonly workspace: CandidateWorkspace,
     private readonly workbench: CandidateWorkbench,
     executors: readonly DevelopmentExecutor[],
+    private readonly store: DevelopmentRunStore = new InMemoryDevelopmentRunStore(),
+    private readonly now: () => Date = () => new Date(),
+    recoverInterrupted = true,
   ) {
     for (const executor of executors) this.executors.set(executor.id, executor)
+    if (recoverInterrupted) this.recoverInterruptedRuns()
   }
 
   inspect(): readonly DevelopmentExecutorAvailability[] {
     if (this.availabilityCache && Date.now() - this.availabilityCache.at < 30_000) return this.availabilityCache.value
+    const latestExternalRuns = new Map<ExternalDevelopmentExecutorId, DevelopmentRun>()
+    for (const run of [...this.store.list()].sort((left, right) => right.startedAt.localeCompare(left.startedAt))) {
+      if (!latestExternalRuns.has(run.executor)) latestExternalRuns.set(run.executor, run)
+    }
     const value: readonly DevelopmentExecutorAvailability[] = [
       {
         id: 'native',
         label: 'TARS-NG Native',
         available: true,
+        executionReady: true,
         native: true,
         detail: 'Built-in candidate authoring tools; default and fallback path.',
         verification: 'built-in',
+        authenticated: true,
+        route: 'built-in',
       },
-      ...[...this.executors.values()].map((executor) => executor.inspect()),
+      ...[...this.executors.values()].map((executor) => {
+        const inspected = executor.inspect()
+        const latest = latestExternalRuns.get(executor.id)
+        if (latest?.status === 'failed' && isAuthenticationFailure(latest.output)) {
+          return {
+            ...inspected,
+            executionReady: false,
+            authenticated: inspected.route === 'provider-account' ? false : inspected.authenticated,
+            verification: 'authentication-failed' as const,
+            detail: `${executor.label} execution route failed authentication during its most recent Development Run; repair that route before retrying.`,
+          }
+        }
+        return latest?.status === 'completed'
+          ? {
+              ...inspected,
+              executionReady: true,
+              verification: 'execution-verified' as const,
+              detail: `${inspected.detail}; execution verified by the most recent Development Run.`,
+            }
+          : inspected
+      }),
     ]
     this.availabilityCache = { at: Date.now(), value }
     return value
+  }
+
+  runs(input: { readonly candidateId?: string; readonly limit?: number } = {}): readonly DevelopmentRun[] {
+    const limit = Math.max(1, Math.min(50, input.limit ?? 10))
+    return this.store.list()
+      .filter((run) => input.candidateId === undefined || run.candidateId === input.candidateId)
+      .sort((left, right) => right.startedAt.localeCompare(left.startedAt))
+      .slice(0, limit)
+      .map((run) => structuredClone(run))
+  }
+
+  cancel(runId: string): DevelopmentRun {
+    const run = this.requireRun(runId)
+    if (run.status !== 'preparing' && run.status !== 'running') {
+      throw new DevelopmentExecutorContractError(`development run is not cancellable: ${run.status}`)
+    }
+    const active = [...this.active.values()].find((item) => item.runId === runId)
+    if (!active) throw new DevelopmentExecutorContractError('development run is no longer owned by this process')
+    const next = this.updateRun(run, { status: 'cancelling', detail: 'Cancellation requested; terminating the external executor.' })
+    active.controller.abort()
+    return next
+  }
+
+  shutdown(): void {
+    for (const active of this.active.values()) active.controller.abort()
   }
 
   async develop(input: {
@@ -74,7 +146,12 @@ export class DevelopmentExecutorService implements DevelopmentExecutorHub {
     if (!executor) throw new DevelopmentExecutorContractError(`unknown development executor: ${input.executor}`)
     const available = executor.inspect()
     if (!available.available) throw new DevelopmentExecutorContractError(available.detail)
+    if (!available.executionReady) throw new DevelopmentExecutorContractError(`${executor.label} is installed but has no usable execution route`)
     if (this.active.has(input.candidateId)) throw new DevelopmentExecutorContractError('candidate already has an active development executor')
+    const unresolved = this.store.list().find((run) => run.candidateId === input.candidateId && run.status === 'interrupted' && !run.rolledBack)
+    if (unresolved) {
+      throw new DevelopmentExecutorContractError(`candidate is frozen after interrupted Development Run ${unresolved.runId}; restore its snapshot before retrying`)
+    }
 
     const candidate = this.workspace.get(input.candidateId)
     if (candidate.sealed) throw new DevelopmentExecutorContractError('sealed candidates cannot be edited by a development executor')
@@ -90,17 +167,67 @@ export class DevelopmentExecutorService implements DevelopmentExecutorHub {
     const manifestBefore = before.get('candidate.manifest.json')
     if (!manifestBefore) throw new DevelopmentExecutorContractError('candidate manifest is missing')
     const runId = `dev-${randomUUID()}`
-    this.active.add(candidate.id)
+    const controller = new AbortController()
+    const forwardAbort = () => controller.abort()
+    input.signal?.addEventListener('abort', forwardAbort, { once: true })
+    if (input.signal?.aborted) controller.abort()
+    let run: DevelopmentRun = {
+      runId,
+      candidateId: candidate.id,
+      executor: input.executor,
+      status: 'preparing',
+      startedAt: this.now().toISOString(),
+      updatedAt: this.now().toISOString(),
+      progressBytes: 0,
+      changedFiles: [],
+      outputTruncated: false,
+      rolledBack: false,
+      detail: 'Capturing a transactional Candidate Workspace snapshot.',
+    }
+    this.store.save(run)
+    try {
+      this.store.stageSnapshot(runId, candidate.workspaceRoot)
+    } catch (error) {
+      this.updateRun(run, {
+        status: 'failed',
+        finishedAt: this.now().toISOString(),
+        detail: 'Could not capture a safe Candidate snapshot; the external executor was not started.',
+      })
+      throw new DevelopmentExecutorContractError(error instanceof Error ? error.message : 'could not capture Candidate snapshot')
+    }
+    this.active.set(candidate.id, { runId, controller })
+    let progressBytes = 0
+    let lastProgressSave = 0
     try {
       const execution = await executor.execute({
+        runId,
         candidateId: candidate.id,
         workspaceRoot: candidate.workspaceRoot,
         prompt: taskPrompt(view, this.workbench.inspectAuthoringContract(view.contractVersion), input.instructions),
-        signal: input.signal,
+        signal: controller.signal,
+        onSpawn: (pid) => {
+          const current = this.requireRun(runId)
+          run = this.updateRun(current, {
+            ...(current.status === 'cancelling' ? {} : { status: 'running' as const }),
+            pid,
+            detail: current.status === 'cancelling'
+              ? 'Cancellation requested; terminating the external executor.'
+              : `${executor.label} is editing the bounded Candidate Workspace.`,
+          })
+        },
+        onProgress: (bytes) => {
+          progressBytes += bytes
+          if (Date.now() - lastProgressSave < 500) return
+          lastProgressSave = Date.now()
+          run = this.updateRun(this.requireRun(runId), { progressBytes })
+        },
       })
-      if (execution.exitCode !== 0) {
-        restore(candidate.workspaceRoot, before)
-        return result(runId, candidate.id, input.executor, input.signal?.aborted ? 'cancelled' : 'failed', [], execution, true)
+      if (execution.exitCode !== 0 || execution.termination !== 'exited') {
+        this.store.restoreSnapshot(runId, candidate.workspaceRoot)
+        this.store.discardSnapshot(runId)
+        const status = execution.termination === 'timed-out' ? 'timed-out' : execution.termination === 'cancelled' ? 'cancelled' : 'failed'
+        run = this.finishRun(this.requireRun(runId), status, execution, [], true, progressBytes)
+        return resultFromRun(run)
       }
 
       let after: Snapshot
@@ -116,13 +243,95 @@ export class DevelopmentExecutorService implements DevelopmentExecutorHub {
       }
       const changedFiles = changed(before, after).filter((file) => file !== 'candidate.manifest.json')
       this.workspace.refresh(candidate.id)
-      return result(runId, candidate.id, input.executor, 'completed', changedFiles, execution, false)
+      run = this.finishRun(this.requireRun(runId), 'completed', execution, changedFiles, false, progressBytes)
+      this.store.discardSnapshot(runId)
+      return resultFromRun(run)
     } catch (error) {
-      restore(candidate.workspaceRoot, before)
+      let rolledBack = false
+      try {
+        this.store.restoreSnapshot(runId, candidate.workspaceRoot)
+        this.store.discardSnapshot(runId)
+        rolledBack = true
+      } catch {
+        rolledBack = false
+      }
+      const execution = { exitCode: null, termination: controller.signal.aborted ? 'cancelled' as const : 'exited' as const, output: error instanceof Error ? error.message : String(error), truncated: false, durationMs: Date.now() - Date.parse(run.startedAt) }
+      run = this.finishRun(this.requireRun(runId), controller.signal.aborted ? 'cancelled' : 'failed', execution, [], rolledBack, progressBytes)
       if (error instanceof DevelopmentExecutorContractError) throw error
       throw new DevelopmentExecutorContractError(error instanceof Error ? error.message : 'development executor failed')
     } finally {
+      input.signal?.removeEventListener('abort', forwardAbort)
       this.active.delete(candidate.id)
+    }
+  }
+
+  private requireRun(runId: string): DevelopmentRun {
+    const run = this.store.list().find((item) => item.runId === runId)
+    if (!run) throw new DevelopmentExecutorContractError(`unknown development run: ${runId}`)
+    return run
+  }
+
+  private updateRun(run: DevelopmentRun, patch: Partial<DevelopmentRun>): DevelopmentRun {
+    const next = { ...run, ...patch, updatedAt: this.now().toISOString() }
+    this.store.save(next)
+    return next
+  }
+
+  private finishRun(
+    run: DevelopmentRun,
+    status: Extract<DevelopmentRun['status'], 'completed' | 'failed' | 'cancelled' | 'timed-out'>,
+    execution: { readonly output: string; readonly truncated: boolean; readonly durationMs: number },
+    changedFiles: readonly string[],
+    rolledBack: boolean,
+    progressBytes: number,
+  ): DevelopmentRun {
+    this.availabilityCache = undefined
+    const finishedAt = this.now().toISOString()
+    return this.updateRun(run, {
+      status,
+      finishedAt,
+      progressBytes,
+      changedFiles,
+      durationMs: execution.durationMs,
+      output: execution.output,
+      outputTruncated: execution.truncated,
+      rolledBack,
+      detail: status === 'completed'
+        ? `Completed with ${changedFiles.length} changed file${changedFiles.length === 1 ? '' : 's'}; ready for TARS-NG validation.`
+        : status === 'timed-out'
+          ? 'Timed out; the external process was terminated and Candidate changes were rolled back.'
+          : status === 'cancelled'
+            ? 'Cancelled; Candidate changes were rolled back.'
+            : 'Failed; Candidate changes were rolled back.',
+    })
+  }
+
+  private recoverInterruptedRuns(): void {
+    for (const run of this.store.list()) {
+      if (!['preparing', 'running', 'cancelling'].includes(run.status)) continue
+      const candidate = (() => { try { return this.workspace.get(run.candidateId) } catch { return undefined } })()
+      const executor = this.executors.get(run.executor)
+      const terminated = run.pid === undefined || executor?.terminateOrphan?.(run) === true
+      let rolledBack = false
+      if (candidate && terminated) {
+        try {
+          this.store.restoreSnapshot(run.runId, candidate.workspaceRoot)
+          rolledBack = true
+          this.store.discardSnapshot(run.runId)
+        } catch {
+          rolledBack = false
+        }
+      }
+      this.store.save({
+        ...run,
+        status: 'interrupted',
+        updatedAt: this.now().toISOString(),
+        finishedAt: this.now().toISOString(),
+        rolledBack,
+        detail: terminated
+          ? rolledBack ? 'Host restart interrupted this run; the orphan was terminated and Candidate snapshot restored.' : 'Host restart interrupted this run; snapshot recovery requires operator attention.'
+          : 'Host restart found an unverified external process; Candidate is frozen for operator recovery.',
+      })
     }
   }
 }
@@ -133,6 +342,10 @@ function isHostOwnedArtifact(relativePath: string): boolean {
     || relativePath === 'generated-extension-api.json'
     || relativePath === '.dsh'
     || relativePath.startsWith('.dsh/')
+}
+
+function isAuthenticationFailure(output: string | undefined): boolean {
+  return typeof output === 'string' && /authentication_failed|not logged in|unauthorized|invalid api key/i.test(output)
 }
 
 function taskPrompt(
@@ -211,26 +424,18 @@ function changed(before: Snapshot, after: Snapshot): string[] {
   }).sort()
 }
 
-function result(
-  runId: string,
-  candidateId: string,
-  executor: ExternalDevelopmentExecutorId,
-  status: DevelopmentRunResult['status'],
-  changedFiles: readonly string[],
-  execution: { exitCode: number | null; output: string; truncated: boolean; durationMs: number },
-  rolledBack: boolean,
-): DevelopmentRunResult {
+function resultFromRun(run: DevelopmentRun): DevelopmentRunResult {
   return {
-    runId,
-    candidateId,
-    executor,
-    status,
-    changedFiles,
-    durationMs: execution.durationMs,
-    output: execution.output,
-    outputTruncated: execution.truncated,
-    rolledBack,
-    next: status === 'completed'
+    runId: run.runId,
+    candidateId: run.candidateId,
+    executor: run.executor,
+    status: run.status as DevelopmentRunResult['status'],
+    changedFiles: run.changedFiles,
+    durationMs: run.durationMs ?? 0,
+    output: run.output ?? '',
+    outputTruncated: run.outputTruncated,
+    rolledBack: run.rolledBack,
+    next: run.status === 'completed'
       ? 'Inspect the changed files, update the manifest through TARS-NG if needed, then run deterministic candidate validation.'
       : 'No candidate changes were retained. Review the executor output before retrying or use TARS-NG Native.',
   }

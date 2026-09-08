@@ -54,6 +54,11 @@ export class RecoveryRoot {
     skills.bindRoot(this.rootId)
   }
 
+  /** Host bootstrap guard; intentionally unavailable through Cordis services or model-facing tools. */
+  withholdGeneratedForSafeBoot(): void {
+    this.service.withholdGeneratedForSafeBoot()
+  }
+
   approveSkill(id: string, fingerprint: string, credential: TrustedAuthorityCredential) {
     this.assertCredential(credential)
     return this.requireSkills().approve(id, fingerprint, credential)

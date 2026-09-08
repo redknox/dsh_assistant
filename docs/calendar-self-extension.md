@@ -1,6 +1,6 @@
 # Second Self-Extension vertical slice: Calendar
 
-Status: **Verified** by `test/calendar-google-e2e.test.ts`. This is the second governed lifecycle: a **credentialed external capability** mounted behind the existing Calendar seam.
+Status: **Verified** by `test/calendar-google-e2e.test.ts`. This is the second governed lifecycle: a **credentialed external capability** using exact host-owned Broker operations from the isolated runtime.
 
 **AI may produce the candidate. A human must approve the exact digest/diff before it becomes active.**
 
@@ -12,11 +12,11 @@ Calendar proves: generated code + external API + credentials + action-level auth
 ```text
 "I need Google Calendar"
         ↓
-Capability Registry                 calendar.read already owned
+Capability Registry                 generic calendar.read already owned
         ↓
-Capability Resolution Review        implement-provider on integrations.calendar
+Capability Resolution Review        Google-specific capability is distinct
         ↓
-Generated Google Calendar adapter   replaceCalendar, no second calendar domain
+Generated Google Calendar logic     isolated, no Cordis/transport/credential access
         ↓
 Restricted offline validation       fixture transport, no live token
         ↓
@@ -26,20 +26,21 @@ Write expansion                     events.create invalidates the prior approval
         ↓
 Proposal ≠ execution                propose is side-effect free
         ↓
-Host-managed Google transport       origin/path bound + credential injection
+host.google-calendar.read           bounded read/freeBusy transport
+host.google-calendar.mutate         action-policy confirmation + create
         ↓
 Reconciled create                   deterministic event id recovers timeout-after-success
         ↓
 Restart / rollback / Safe Mode      committed authority only
 ```
 
-## Why not a new Calendar plugin
+## Why the Google capability is separate
 
-`calendar.read` / `calendar.propose` / `calendar.execute` already exist on `managed/integrations` behind `integrations.calendar`. Reviewing `calendar.read` with a known Google provider therefore returns **`implement-provider`**, not `new-plugin`.
+`calendar.read` / `calendar.propose` / `calendar.execute` remain generic host-managed capabilities. Reviewing generic `calendar.read` still returns **`reuse`**. Generated code, however, cannot replace a host Cordis provider or service from its isolated process. A request for the explicitly Google-shaped capability therefore resolves to a separate governed user capability and tools.
 
-The generated owner is `generated/google-calendar`. It does **not** register a second `calendar_list_events` tool. It calls `IntegrationHub.replaceCalendar()` so the existing model-facing tools (`calendar_list_events`, `calendar_get_event`, `calendar_freebusy`, `calendar_propose_event`, `calendar_create_event`) keep their provider-neutral shapes.
+The generated owner is `generated/google-calendar`. It registers `google_calendar_*` proxy tools and calls only `ctx.broker.request(...)`. It cannot access `ctx.integrations`, `process.env`, `fetch`, services, or providers. Generic `calendar_*` tools remain owned by the host integration and are restored unchanged after rollback.
 
-The generated provider maps provider-neutral events to the real Google Calendar v3 resource shape (`summary`, `start.dateTime` / `start.date`, `attendees[].email`). It does **not** call `fetch` or receive a generic HTTP client. Outbound calls go through a host-managed transport on `ctx.integrations.googleCalendarTransport` that:
+Candidate code maps between tool inputs and Google Calendar v3 resource shapes (`summary`, `start.dateTime` / `start.date`, `attendees[].email`). It does **not** call `fetch` or receive a generic HTTP client. The host Broker alone reaches `ctx.integrations.googleCalendarTransport` and:
 
 - only accepts `https://www.googleapis.com` + `/calendar/v3/...`;
 - injects `Authorization` at that boundary;
@@ -51,9 +52,9 @@ Offline tests substitute `createFakeGoogleCalendarTransport()`, which speaks the
 
 | Capability | Permission | Effect |
 | --- | --- | --- |
-| `calendar.events.list` / `calendar.event.read` | `google.calendar.events.read` | list / get |
-| `calendar.freebusy.read` | `google.calendar.freebusy.read` | busy windows |
-| `calendar.events.create` | `google.calendar.events.create` | create after confirmation |
+| `google.calendar.events.list` / `google.calendar.event.read` | `host.google-calendar.read` | bounded GET |
+| `google.calendar.freebusy.read` | `host.google-calendar.read` | exact freeBusy POST |
+| `google.calendar.events.create` | `host.google-calendar.mutate` | action-policy confirmation, then create |
 
 A read-only approval does not authorize create. Adding create is a new exact-candidate approval.
 

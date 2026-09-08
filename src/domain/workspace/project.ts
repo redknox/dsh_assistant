@@ -59,6 +59,7 @@ export function projectMissionControl(input: WorkspaceSnapshotInput): MissionCon
     ...(input.contextEndurance ? { contextEndurance: input.contextEndurance } : {}),
     ...(input.materialInput ? { materialInput: input.materialInput } : {}),
     ...(input.developmentExecutors ? { developmentExecutors: input.developmentExecutors } : {}),
+    ...(input.developmentRuns ? { developmentRuns: input.developmentRuns } : {}),
     ...(systemState === 'SAFE_MODE' || systemState === 'RECOVERY'
       ? {
           recovery: {

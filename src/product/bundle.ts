@@ -114,6 +114,7 @@ export const SAFE_MODE_TOOL_NAMES = [
   'compare_capability_specifications',
   'inspect_validation_diagnostics',
   'inspect_development_executors',
+  'inspect_development_runs',
   'inspect_skill',
 ] as const
 
@@ -167,4 +168,5 @@ export const PRODUCT_TOOL_NAMES = [
   'repair_candidate',
   'inspect_development_executors',
   'delegate_candidate_development',
+  'cancel_development_run',
 ] as const

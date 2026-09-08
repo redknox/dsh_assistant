@@ -14,37 +14,41 @@ const candidateSource = join(root, 'fixtures/self-extension/google-calendar-cand
 const CALENDAR_NEED = 'Inspect my Google Calendar, find free time, propose an event, and create it only under the correct write authority.'
 const GOOGLE_ORIGIN = 'https://www.googleapis.com/calendar/v3'
 const RANGE = { from: '2026-08-21T00:00:00.000Z', to: '2026-08-24T00:00:00.000Z' }
-const READ_CAPABILITIES = ['calendar.events.list', 'calendar.event.read', 'calendar.freebusy.read']
-const READ_PERMISSIONS = ['google.calendar.events.read', 'google.calendar.freebusy.read']
-const WRITE_CAPABILITIES = [...READ_CAPABILITIES, 'calendar.events.create']
-const WRITE_PERMISSIONS = [...READ_PERMISSIONS, 'google.calendar.events.create']
+const READ_CAPABILITIES = ['google.calendar.events.list', 'google.calendar.event.read', 'google.calendar.freebusy.read']
+const WRITE_CAPABILITIES = [...READ_CAPABILITIES, 'google.calendar.events.create']
+const CALENDAR_READ_TOOLS = ['google_calendar_provider', 'google_calendar_events_list', 'google_calendar_event_get', 'google_calendar_freebusy', 'google_calendar_propose_event']
+const READ_PERMISSIONS = ['host.google-calendar.read']
+const WRITE_PERMISSIONS = [...READ_PERMISSIONS, 'host.google-calendar.mutate']
+const WRITE_TOOLS = [...CALENDAR_READ_TOOLS, 'google_calendar_event_create']
 
-function copyCandidateSources(workspace: { writeFile(id: string, path: string, content: string): unknown }, id: string) {
+function copyCandidateSources(
+  workspace: { writeFile(id: string, path: string, content: string): unknown },
+  id: string,
+  options: { readonly allowCreate?: boolean } = {},
+) {
   const walk = (dir: string, prefix: string) => {
     for (const entry of readdirSync(dir)) {
       const relative = prefix === '' ? entry : `${prefix}/${entry}`
       const full = join(dir, entry)
       if (statSync(full).isDirectory()) walk(full, relative)
-      else workspace.writeFile(id, relative, readFileSync(full, 'utf8'))
+      else {
+        let content = readFileSync(full, 'utf8')
+        if (relative === 'src/plugin.js') {
+          if (options.allowCreate === true) content = content.replace('const ALLOW_CREATE = false', 'const ALLOW_CREATE = true')
+          else content = content.replace(/\n  \/\/ @write-capability:start[\s\S]*?\n  \/\/ @write-capability:end/, '')
+        }
+        workspace.writeFile(id, relative, content)
+      }
     }
   }
   walk(candidateSource, '')
 }
 
-function googleProviders() {
-  return [{
-    provider: 'google',
-    seam: 'integrations.calendar',
-    capabilities: [...WRITE_CAPABILITIES, 'calendar.read'],
-    domains: ['calendar'],
-  }]
-}
-
 function reviewGoogle(ctx: { capabilityResolution: { review(input: object): { kind: string; target?: { owner?: string; seam?: string; provider?: string } } } }) {
   return ctx.capabilityResolution.review({
-    capability: 'calendar.read',
+    capability: 'google.calendar.read',
     need: CALENDAR_NEED,
-    knownProviders: googleProviders(),
+    alreadySatisfied: false,
     inventory: { complete: true, seams: CORE_KNOWN_SEAMS },
   })
 }
@@ -53,8 +57,8 @@ function readManifest() {
   return {
     capabilities: READ_CAPABILITIES,
     permissions: READ_PERMISSIONS,
-    runtimeSeams: ['integrations.calendar'],
-    tools: ['google_calendar_provider'],
+    runtimeSeams: ['host.google-calendar'],
+    tools: CALENDAR_READ_TOOLS,
     secrets: ['google.calendar.oauth'],
     configRequired: ['googleCalendarMode'],
     effects: { filesystem: [], network: [GOOGLE_ORIGIN], process: [], secrets: ['google.calendar.oauth'], remoteSideEffect: 'read-only' },
@@ -63,14 +67,14 @@ function readManifest() {
   }
 }
 
-async function tool(ctx: { tools: { execute(input: unknown): Promise<{ isError: boolean; value?: unknown }> } }, name: string, args: Record<string, unknown>) {
+async function tool(ctx: { tools: { execute(input: unknown): Promise<{ isError: boolean; value?: unknown; error?: { message?: string } }> } }, name: string, args: Record<string, unknown>) {
   const result = await ctx.tools.execute({
     callId: CallId(`gcal-${name}-${Math.random().toString(16).slice(2)}`),
     name,
     arguments: args,
     signal: AbortSignal.timeout(5000),
   })
-  assert.equal(result.isError, false, String(result.value))
+  assert.equal(result.isError, false, result.error?.message ?? String(result.value))
   return JSON.parse(String(result.value))
 }
 
@@ -80,7 +84,7 @@ function assertNoSecretValue(text: string) {
 
 async function activateReadOnly(ctx: Awaited<ReturnType<typeof bootAssistantControl>>['ctx'], recoveryRoot: Awaited<ReturnType<typeof bootAssistantControl>>['recoveryRoot']) {
   const review = reviewGoogle(ctx)
-  assert.equal(review.kind, 'implement-provider')
+  assert.equal(review.kind, 'new-plugin')
   const created = ctx.candidateWorkspace.create({
     review,
     owner: 'generated/google-calendar',
@@ -89,7 +93,7 @@ async function activateReadOnly(ctx: Awaited<ReturnType<typeof bootAssistantCont
   })
   copyCandidateSources(ctx.candidateWorkspace, created.id)
   const report = ctx.candidateValidation.validate(created.id)
-  assert.equal(report.passed, true, report.stages.map((item) => `${item.name}:${item.status}`).join(', '))
+  assert.equal(report.passed, true, report.stages.map((item) => `${item.name}:${item.status}${item.diagnostics ? `(${item.diagnostics})` : ''}`).join(', '))
   const sealed = ctx.candidateWorkspace.seal(created.id)
   const summary = ctx.extensionGovernance.inspectSummary(sealed.id)
   const human = recoveryRoot.issueAuthority({ kind: 'human-control', source: 'application-ui' })
@@ -105,8 +109,8 @@ async function activateReadOnly(ctx: Awaited<ReturnType<typeof bootAssistantCont
   return { sealed, human, review, fingerprint: requested.fingerprint, summary }
 }
 
-describe.skip('Calendar Self-Extension vertical slice (quarantined: needs isolated-runtime broker migration)', () => {
-  it('A. inspects the existing calendar seam and selects implement-provider, not a parallel plugin', async () => {
+describe('Calendar Self-Extension vertical slice', () => {
+  it('A. reuses generic Calendar but selects a distinct governed Google capability', async () => {
     const { ctx } = await bootAssistantControl()
     try {
       const reuse = ctx.capabilityResolution.review({
@@ -116,17 +120,15 @@ describe.skip('Calendar Self-Extension vertical slice (quarantined: needs isolat
       assert.equal(reuse.kind, 'reuse')
       assert.equal(reuse.target?.owner, 'managed/integrations')
       const review = reviewGoogle(ctx)
-      assert.equal(review.kind, 'implement-provider')
-      assert.equal(review.target?.owner, 'managed/integrations')
-      assert.equal(review.target?.seam, 'integrations.calendar')
-      assert.equal(review.target?.provider, 'google')
-      assert.equal(review.steps.some((item) => item.option === 'new-plugin' && item.verdict === 'accepted'), false)
+      assert.equal(review.kind, 'new-plugin')
+      assert.equal(review.steps.some((item) => item.option === 'new-plugin' && item.verdict === 'accepted'), true)
+      assert.equal(review.steps.some((item) => item.option === 'implement-provider' && item.verdict === 'accepted'), false)
     } finally {
       await ctx.fiber.dispose()
     }
   })
 
-  it('B/D/G/H/J/L. activates a read-only Google provider behind the existing calendar tools', async () => {
+  it('B/D/G/H/J/L. activates a read-only Google capability through the host Broker', async () => {
     const previous = process.env.DSH_ASSISTANT_GOOGLE_CALENDAR_ACCESS_TOKEN
     process.env.DSH_ASSISTANT_GOOGLE_CALENDAR_ACCESS_TOKEN = 'ya29.should-never-be-persisted'
     process.env.DSH_ASSISTANT_GOOGLE_CALENDAR_MODE = 'fixture'
@@ -138,34 +140,34 @@ describe.skip('Calendar Self-Extension vertical slice (quarantined: needs isolat
       const { human, summary } = await activateReadOnly(ctx, recoveryRoot)
       assert.deepEqual(summary.secrets, ['google.calendar.oauth'])
       assert.deepEqual(summary.effects.network, [GOOGLE_ORIGIN])
-      assert.ok(summary.permissions.added.includes('google.calendar.events.read'))
-      assert.equal(summary.permissions.added.includes('google.calendar.events.create'), false)
+      assert.ok(summary.permissions.added.includes('host.google-calendar.read'))
+      assert.equal(summary.permissions.added.includes('host.google-calendar.mutate'), false)
       assertNoSecretValue(JSON.stringify(summary))
 
       const identity = await tool(ctx, 'google_calendar_provider', {})
       assert.equal(identity.provider, 'google')
-      assert.equal(identity.seam, 'integrations.calendar')
+      assert.equal(identity.seam, 'host.google-calendar.read')
       assert.equal(identity.transport, 'host-managed')
       assert.equal(identity.allowCreate, false)
       assert.equal(identity.credential, 'injected')
       assert.equal(Object.hasOwn(identity, 'token'), false)
 
-      const listed = await tool(ctx, 'calendar_list_events', RANGE)
+      const listed = await tool(ctx, 'google_calendar_events_list', RANGE)
       assert.equal(listed.items.some((item: { title: string }) => item.title === 'Google standup'), true)
       assert.equal(listed.items.some((item: { title: string }) => item.title === 'Team standup'), false)
 
-      const one = await tool(ctx, 'calendar_get_event', { id: 'gcal-allday' })
+      const one = await tool(ctx, 'google_calendar_event_get', { id: 'gcal-allday' })
       assert.equal(one.allDay, true)
       assert.equal(one.start, '2026-08-22')
 
-      const dst = await tool(ctx, 'calendar_get_event', { id: 'gcal-dst' })
+      const dst = await tool(ctx, 'google_calendar_event_get', { id: 'gcal-dst' })
       assert.equal(dst.timeZone, 'America/New_York')
       assert.equal(dst.start, '2026-03-08T06:30:00.000Z')
 
-      const busy = await tool(ctx, 'calendar_freebusy', RANGE)
+      const busy = await tool(ctx, 'google_calendar_freebusy', RANGE)
       assert.ok(busy.items.some((item: { busy: boolean }) => item.busy === true))
 
-      const proposal = await tool(ctx, 'calendar_propose_event', {
+      const proposal = await tool(ctx, 'google_calendar_propose_event', {
         title: 'Focus',
         start: '2026-08-22T14:00:00.000Z',
         end: '2026-08-22T15:00:00.000Z',
@@ -178,18 +180,9 @@ describe.skip('Calendar Self-Extension vertical slice (quarantined: needs isolat
       assert.match(proposal.summary, /Focus/)
       assert.match(proposal.summary, /primary/)
       assert.deepEqual(proposal.draft.attendees, ['ada@example.com'])
-      const afterPropose = await ctx.integrations.hub.calendar().listEvents(RANGE)
+      const afterPropose = await tool(ctx, 'google_calendar_events_list', RANGE)
       assert.equal(afterPropose.items.some((item) => item.title === 'Focus'), false)
-
-      await assert.rejects(
-        () => ctx.integrations.hub.calendar().createEvent({
-          title: 'Focus',
-          start: '2026-08-22T14:00:00.000Z',
-          end: '2026-08-22T15:00:00.000Z',
-          timeZone: 'UTC',
-        }),
-        /not authorized/,
-      )
+      assert.equal(ctx.tools.get('google_calendar_event_create'), undefined)
 
       const durableText = JSON.stringify(ctx.capabilityRegistry.get('generated/google-calendar', '0.1.0'))
       assertNoSecretValue(durableText)
@@ -197,6 +190,7 @@ describe.skip('Calendar Self-Extension vertical slice (quarantined: needs isolat
         const text = readFileSync(join(candidateSource, source), 'utf8')
         assertNoSecretValue(text)
         assert.doesNotMatch(text, /\bfetch\s*\(|node:http|node:https|https\.request/)
+        assert.doesNotMatch(text, /process\.env|ctx\.integrations/)
       }
 
       const rolled = await recoveryRoot.rollback(human)
@@ -214,15 +208,16 @@ describe.skip('Calendar Self-Extension vertical slice (quarantined: needs isolat
   })
 
   it('C/E/F. write expansion needs a new approval and creates one idempotent event', async () => {
+    const previousMode = process.env.DSH_ASSISTANT_GOOGLE_CALENDAR_MODE
+    process.env.DSH_ASSISTANT_GOOGLE_CALENDAR_MODE = 'fixture'
     const { ctx, recoveryRoot } = await bootAssistantControl()
     try {
       const { human } = await activateReadOnly(ctx, recoveryRoot)
       const writeReview = ctx.capabilityResolution.review({
-        capability: 'calendar.events.create',
+        capability: 'google.calendar.events.create',
         need: 'create a Google Calendar event after a side-effect-free proposal',
         behavior: 'event-create',
         alreadySatisfied: false,
-        knownProviders: googleProviders(),
       })
       const created = ctx.candidateWorkspace.create({
         review: writeReview,
@@ -233,6 +228,7 @@ describe.skip('Calendar Self-Extension vertical slice (quarantined: needs isolat
           ...readManifest(),
           capabilities: WRITE_CAPABILITIES,
           permissions: WRITE_PERMISSIONS,
+          tools: WRITE_TOOLS,
           effects: {
             filesystem: [],
             network: [GOOGLE_ORIGIN],
@@ -243,17 +239,12 @@ describe.skip('Calendar Self-Extension vertical slice (quarantined: needs isolat
           riskModel: googleCalendarWriteRiskModel(),
         },
       })
-      copyCandidateSources(ctx.candidateWorkspace, created.id)
-      ctx.candidateWorkspace.writeFile(
-        created.id,
-        'src/plugin.js',
-        readFileSync(join(candidateSource, 'src/plugin.js'), 'utf8').replace('const ALLOW_CREATE = false', 'const ALLOW_CREATE = true'),
-      )
+      copyCandidateSources(ctx.candidateWorkspace, created.id, { allowCreate: true })
       ctx.candidateValidation.validate(created.id)
       const sealed = ctx.candidateWorkspace.seal(created.id)
       const summary = ctx.extensionGovernance.inspectSummary(sealed.id)
-      assert.ok(summary.capabilities.added.includes('calendar.events.create'))
-      assert.ok(summary.permissions.added.includes('google.calendar.events.create'))
+      assert.ok(summary.capabilities.added.includes('google.calendar.events.create'))
+      assert.ok(summary.permissions.added.includes('host.google-calendar.mutate'))
       assert.ok(ctx.extensionGovernance.eligibility(sealed.id).denials.length > 0)
       await assert.rejects(() => recoveryRoot.activate(sealed.id, human), ActivationDeniedError)
 
@@ -278,7 +269,7 @@ describe.skip('Calendar Self-Extension vertical slice (quarantined: needs isolat
         description: 'Deep work',
         idempotencyKey: 'op-focus-1',
       }
-      const pending = await tool(ctx, 'calendar_create_event', event)
+      const pending = await tool(ctx, 'google_calendar_event_create', event)
       assert.equal(pending.kind, 'pending_confirmation')
       const approved = await tool(ctx, 'confirm_action', { confirmationId: pending.confirmationId, decision: 'approve' })
       assert.equal(approved.kind, 'allow')
@@ -287,12 +278,17 @@ describe.skip('Calendar Self-Extension vertical slice (quarantined: needs isolat
       assert.equal(createdOnce.timeZone, 'UTC')
       assert.deepEqual(createdOnce.attendees, ['ada@example.com'])
 
-      const again = await ctx.integrations.hub.calendar().createEvent(event)
-      assert.equal(again.id, createdOnce.id)
-      const listed = await ctx.integrations.hub.calendar().listEvents(RANGE)
+      const againPending = await tool(ctx, 'google_calendar_event_create', event)
+      assert.equal(againPending.kind, 'pending_confirmation')
+      const againApproved = await tool(ctx, 'confirm_action', { confirmationId: againPending.confirmationId, decision: 'approve' })
+      assert.equal(againApproved.kind, 'allow')
+      assert.equal((againApproved.result as { id: string }).id, createdOnce.id)
+      const listed = await tool(ctx, 'google_calendar_events_list', RANGE)
       assert.equal(listed.items.filter((item) => item.title === 'Focus').length, 1)
     } finally {
       await ctx.fiber.dispose()
+      if (previousMode === undefined) delete process.env.DSH_ASSISTANT_GOOGLE_CALENDAR_MODE
+      else process.env.DSH_ASSISTANT_GOOGLE_CALENDAR_MODE = previousMode
     }
   })
 
@@ -309,7 +305,7 @@ describe.skip('Calendar Self-Extension vertical slice (quarantined: needs isolat
     try {
       assert.equal(second.ctx.capabilityRegistry.get('generated/google-calendar', '0.1.0')?.status, 'active')
       assert.ok(second.ctx.tools.get('google_calendar_provider'))
-      const listed = await tool(second.ctx, 'calendar_list_events', RANGE)
+      const listed = await tool(second.ctx, 'google_calendar_events_list', RANGE)
       assert.equal(listed.items.some((item: { title: string }) => item.title === 'Google standup'), true)
     } finally {
       await second.ctx.fiber.dispose()
@@ -327,6 +323,7 @@ describe.skip('Calendar Self-Extension vertical slice (quarantined: needs isolat
     }
     const safe = await bootSafeModeRuntime({ home })
     try {
+      assert.equal(safe.recoveryRoot.inspect().safeMode, true)
       assert.equal(safe.ctx.tools.get('google_calendar_provider'), undefined)
       assert.equal(safe.ctx.tools.get('calendar_list_events'), undefined)
       assert.ok(safe.ctx.tools.get('inspect_extension_governance'))

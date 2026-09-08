@@ -139,12 +139,12 @@ See [ARCHITECTURE.md](./ARCHITECTURE.md) for layers. See [ENGINEERING.md](./ENGI
 | Local third-party import (`import-local`) | no | **Implemented** | CLI-only quarantine into an inactive `third-party/import` candidate. Marketplace is out of scope. |
 | DSH-native Skill lifecycle | no | **Implemented** | Profile-scoped; [docs/skills.md](./docs/skills.md). Feature soak: [docs/skill-lifecycle-soak.md](./docs/skill-lifecycle-soak.md) |
 | Governed Capability delivery Sessions | no | **Implemented** | Conversation proposal → accepted plan → dedicated Session/Goal → candidate lifecycle → activation/archive |
-| Native / Codex / Claude development executors | no | **Experimental** | Native remains default; external execution is approval-bound and transactional; executable discovery is not authentication proof |
+| Native / Codex / Claude development executors | no | **Experimental** | Native remains default; external runs are authenticated, approval-bound, durable, cancellable, timed out, restart-recovered and Candidate-only; [operations and live evidence](./docs/development-executors.md) |
 | Daily user-asset backup + restore drill | no | **Implemented** | Sessions, attachments, Memory, sanitized configuration and committed governance; no one-click production restore |
 | TARS-NG personality + Mission-Control workspace | no | **Verified** | [docs/tars-ng-personality.md](./docs/tars-ng-personality.md) |
 | Hosted/multi-user persistence, public npm publish | no | **Unsupported** | Local product persistence is implemented; package is `private` |
 
-Known limitations: no Google OAuth refresh, no production security certification, no durable user-level Schedule, no persisted/resumable native Workflow runs, no mobile distribution, no public or LAN Web UI, no marketplace or remote Skill/plugin install. Two generated integration E2E slices remain quarantined pending isolated-runtime Broker migration, and external development executors remain Experimental. Release status: [docs/RELEASE.md](./docs/RELEASE.md). Current claim: [docs/v0.5.0-baseline.md](./docs/v0.5.0-baseline.md).
+Known limitations: no Google OAuth refresh, no production security certification, no durable user-level Schedule, no persisted/resumable native Workflow runs, no mobile distribution, no public or LAN Web UI, no marketplace or remote Skill/plugin install. Calendar and Obsidian generated integration slices now pass through the isolated-runtime Broker; external development executors remain Experimental. Release status: [docs/RELEASE.md](./docs/RELEASE.md). Current claim: [docs/v0.5.0-baseline.md](./docs/v0.5.0-baseline.md).
 
 ## Develop
 

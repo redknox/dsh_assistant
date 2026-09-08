@@ -12,6 +12,7 @@ import { inspectContextEndurance } from '../../product/context-endurance.js'
 import { inspectMaterialInput } from '../../product/material-input.js'
 import { inspectAgentTaskControl } from '../../product/agent-task-control.js'
 import type { CandidateWorkbench } from '../workbench/types.js'
+import type { DevelopmentRun } from '../development-executor/index.js'
 import { projectSessionWorkContext } from './work-context.js'
 
 export interface GatherWorkspaceInput {
@@ -182,6 +183,9 @@ export function gatherWorkspaceSnapshot(input: GatherWorkspaceInput): WorkspaceS
     developmentExecutors: (ctx.get('developmentExecutors') as {
       inspect(): WorkspaceSnapshotInput['developmentExecutors']
     } | undefined)?.inspect(),
+    developmentRuns: projectDevelopmentRuns((ctx.get('developmentExecutors') as {
+      runs(input?: { readonly limit?: number }): readonly DevelopmentRun[]
+    } | undefined)?.runs({ limit: 5 })),
     ...(taskControl ? { taskControl } : {}),
     ...(workContext ? { workContext } : {}),
     ...(input.objective
@@ -202,6 +206,24 @@ export function gatherWorkspaceSnapshot(input: GatherWorkspaceInput): WorkspaceS
     ...(input.sessions ? { sessions: input.sessions } : {}),
     ...(input.approvalOrigins ? { approvalOrigins: input.approvalOrigins } : {}),
   }
+}
+
+function projectDevelopmentRuns(runs: readonly DevelopmentRun[] | undefined): WorkspaceSnapshotInput['developmentRuns'] {
+  return runs?.map((run) => ({
+    runId: run.runId,
+    candidateId: run.candidateId,
+    executor: run.executor,
+    status: run.status,
+    startedAt: run.startedAt,
+    updatedAt: run.updatedAt,
+    ...(run.finishedAt ? { finishedAt: run.finishedAt } : {}),
+    progressBytes: run.progressBytes,
+    changedFiles: [...run.changedFiles],
+    ...(run.durationMs !== undefined ? { durationMs: run.durationMs } : {}),
+    outputTruncated: run.outputTruncated,
+    rolledBack: run.rolledBack,
+    detail: run.detail,
+  }))
 }
 
 function webIntegrationStatus(ctx: Context): readonly [string, { available: boolean; configured?: boolean; reason?: string; provider?: string }][] {

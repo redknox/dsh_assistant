@@ -1958,7 +1958,20 @@ button.nav-item::after { content: "›"; color: #7f857f; font: 500 22px/1 var(--
   white-space: nowrap;
 }
 .development-executor-list dd { margin: 0; color: var(--status-green); font: 700 10px/1 var(--font-instrument); letter-spacing: .08em; }
-.development-executor-list [data-executor-state="unavailable"] dd { color: var(--fault-red); }
+.development-executor-list [data-executor-state="unavailable"] dd,
+.development-executor-list [data-executor-state="authentication-failed"] dd { color: var(--fault-red); }
+.development-executor-list [data-executor-state="installed-unverified"] dd { color: var(--caution-amber); }
+.development-run-list { display: grid; gap: 8px; margin-top: 12px; }
+.development-run-list article { padding: 10px; border: 1px solid #454b46; background: #111511; }
+.development-run-list article > div { display: flex; justify-content: space-between; gap: 10px; color: #9da59d; font: 650 9px/1.2 var(--font-instrument); letter-spacing: .08em; }
+.development-run-list article > div:first-child strong { color: var(--ink-inverse); font-size: 11px; }
+.development-run-list article > small { display: block; margin-top: 5px; overflow: hidden; color: #7f887f; font: 500 9px/1.2 var(--font-mono); text-overflow: ellipsis; white-space: nowrap; }
+.development-run-list article > p { margin: 8px 0; color: #c6ccc3; font: 500 11px/1.35 var(--font-body); }
+.development-run-list article[data-run-status="running"] > div:first-child span { color: var(--status-green); }
+.development-run-list article[data-run-status="failed"] > div:first-child span,
+.development-run-list article[data-run-status="timed-out"] > div:first-child span,
+.development-run-list article[data-run-status="interrupted"] > div:first-child span { color: var(--fault-red); }
+.development-run-list .button { width: 100%; margin-top: 9px; }
 .task-control-status {
   padding: 16px 18px;
   border-bottom: 1px solid #555a56;

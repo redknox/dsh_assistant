@@ -28,14 +28,14 @@ Trusted rollback             Return to Last Known Good
 
 `files.read` already exists on `managed/integrations`. Resolution **reuses** that capability when the need is generic file listing.
 
-The Obsidian need is different: vault-relative note identity, YAML frontmatter, `#tags`, and `[[wikilinks]]`. Review of `obsidian.notes.read` with a complete inventory therefore returns `new-plugin`, and the implications state that generic `files.read` is insufficient. The candidate must reuse `integrations.files` confined-root primitives and must not register a second generic filesystem service or a raw `node:fs` vault path.
+The Obsidian need is different: vault-relative note identity, YAML frontmatter, `#tags`, and `[[wikilinks]]`. Review of `obsidian.notes.read` with a complete inventory therefore returns `new-plugin`, and the implications state that generic `files.read` is insufficient. The candidate must use the exact `host.obsidian.*` Broker operations and must not register a second generic filesystem service or receive a raw `node:fs` vault path.
 
 ```text
-Obsidian semantics
+isolated Obsidian semantics
+        ↓ ctx.broker.request
+host.obsidian.read / host.obsidian.mutate
         ↓
-integrations.files confined-root seam
-        ↓
-Vault root
+host-owned confined Vault access + action policy
 ```
 
 ## Human authority
@@ -55,7 +55,9 @@ These steps are Recovery Root / human-control only. They are not model tools.
 
 The generated plugin lives in the Candidate Workspace (copied from `fixtures/self-extension/obsidian-vault-candidate/` in the E2E). It is not added to the managed product tree before approval. Validation executes the candidate's Node test files only inside an OS network sandbox and binds evidence to the sealed digest.
 
-Vault IO (list / read / write) goes through `ctx.integrations.hub.files()` confined-root methods. The Obsidian layer only owns note identity, frontmatter, tags, and wikilinks. Access is confined to one approved root, including symlink parents; listing does not follow symlink directories. The inspectable permission ids are `filesystem.vault.read` and `filesystem.vault.write`; the exact root is in `effects.filesystem` and `configRequired: vaultRoot`. Network and process effects stay empty.
+The isolated candidate receives neither Cordis, `node:fs`, environment variables, nor the Vault root. It owns only note identity, frontmatter, tags, wikilinks, search, and Markdown rendering. Vault IO crosses two exact host operations: `host.obsidian.read` lists/reads scanned notes, while `host.obsidian.mutate` submits one create request to the ordinary action policy. A write therefore produces a confirmation and executes only after approval.
+
+The host owns path confinement, symlink rejection, atomic file behavior, and the configured Vault. The exact root remains visible in `effects.filesystem`; network and process effects stay empty. Unknown Broker operations, undeclared permissions, traversal, and symlink escapes fail closed.
 
 ## Offline fixture
 

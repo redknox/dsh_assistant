@@ -368,9 +368,28 @@ export interface DevelopmentExecutorStatusView {
   readonly id: 'native' | 'codex' | 'claude-code'
   readonly label: string
   readonly available: boolean
+  readonly executionReady: boolean
   readonly native: boolean
   readonly detail: string
-  readonly verification: 'built-in' | 'installed-unverified' | 'unavailable'
+  readonly verification: 'built-in' | 'authenticated' | 'custom-route-configured' | 'execution-verified' | 'installed-unverified' | 'authentication-failed' | 'unavailable'
+  readonly authenticated: boolean
+  readonly route: 'built-in' | 'provider-account' | 'custom-provider' | 'none'
+}
+
+export interface DevelopmentRunView {
+  readonly runId: string
+  readonly candidateId: string
+  readonly executor: 'codex' | 'claude-code'
+  readonly status: 'preparing' | 'running' | 'cancelling' | 'completed' | 'failed' | 'cancelled' | 'timed-out' | 'interrupted'
+  readonly startedAt: string
+  readonly updatedAt: string
+  readonly finishedAt?: string
+  readonly progressBytes: number
+  readonly changedFiles: readonly string[]
+  readonly durationMs?: number
+  readonly outputTruncated: boolean
+  readonly rolledBack: boolean
+  readonly detail: string
 }
 
 export interface MissionControlView {
@@ -403,6 +422,7 @@ export interface MissionControlView {
   readonly contextEndurance?: ContextEnduranceView
   readonly materialInput?: MaterialInputView
   readonly developmentExecutors?: readonly DevelopmentExecutorStatusView[]
+  readonly developmentRuns?: readonly DevelopmentRunView[]
   readonly recovery?: RecoveryView
   readonly controlStrip: ControlStrip
   readonly personality: {
@@ -637,6 +657,7 @@ export interface WorkspaceSnapshotInput {
   readonly contextEndurance?: ContextEnduranceView
   readonly materialInput?: MaterialInputView
   readonly developmentExecutors?: readonly DevelopmentExecutorStatusView[]
+  readonly developmentRuns?: readonly DevelopmentRunView[]
   readonly objective?: ObjectiveView
   readonly workContext?: SessionWorkContextView
   readonly taskControl?: AgentTaskControlView

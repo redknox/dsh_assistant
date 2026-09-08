@@ -131,6 +131,11 @@ export class GovernanceService implements ExtensionGovernance, ExtensionActivati
     this.runtime.bindIsolatedFailure((failure) => this.noteIsolatedRuntimeFailure(failure))
   }
 
+  /** Bootstrap-only guard: Safe Mode must withhold generated runtimes without mutating durable recovery authority. */
+  withholdGeneratedForSafeBoot(): void {
+    this.safeMode = true
+  }
+
   exportHydrate(): GovernanceHydrate {
     return {
       approvals: [...this.approvals.values()],

@@ -65,6 +65,15 @@ export async function fetchView(): Promise<UiEnvelope> {
   return parseEnvelope(await fetch('/api/view', include))
 }
 
+export async function cancelDevelopmentRun(runId: string): Promise<UiEnvelope> {
+  return parseEnvelope(await fetch('/api/development-runs/cancel', {
+    ...include,
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ runId }),
+  }))
+}
+
 export async function fetchSettings(): Promise<SettingsSnapshot> {
   const response = await fetch('/api/settings', include)
   const body = await response.json() as SettingsSnapshot & { error?: string }

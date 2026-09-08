@@ -2,7 +2,18 @@ import type { GeneratedBrokerExecution, GeneratedBrokerRequest } from './types.j
 
 export const HOST_TEXT_ECHO = 'host.text.echo'
 export const HOST_KNOWLEDGE_RETRIEVE = 'host.knowledge.retrieve'
-export const GENERATED_BROKER_OPS = [HOST_TEXT_ECHO, HOST_KNOWLEDGE_RETRIEVE] as const
+export const HOST_GOOGLE_CALENDAR_READ = 'host.google-calendar.read'
+export const HOST_GOOGLE_CALENDAR_MUTATE = 'host.google-calendar.mutate'
+export const HOST_OBSIDIAN_READ = 'host.obsidian.read'
+export const HOST_OBSIDIAN_MUTATE = 'host.obsidian.mutate'
+export const GENERATED_BROKER_OPS = [
+  HOST_TEXT_ECHO,
+  HOST_KNOWLEDGE_RETRIEVE,
+  HOST_GOOGLE_CALENDAR_READ,
+  HOST_GOOGLE_CALENDAR_MUTATE,
+  HOST_OBSIDIAN_READ,
+  HOST_OBSIDIAN_MUTATE,
+] as const
 
 const MAX_BROKER_ARGUMENT_BYTES = 16 * 1024
 const MAX_BROKER_RESULT_BYTES = 48 * 1024

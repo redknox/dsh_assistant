@@ -293,6 +293,43 @@ describe('local Mission-Control Web UI', () => {
     })
   })
 
+  it('cancels a Development Run only from the trusted local UI session', async () => {
+    const control = await bootAssistantControl()
+    const surface = new AssistantControlSurface(control.ctx, 'web-ui-development-run')
+    const runId = 'dev-00000000-0000-4000-8000-000000000011'
+    let cancelled: string | undefined
+    const web = await startWebUiServer({
+      surface,
+      recoveryRoot: control.recoveryRoot,
+      developmentExecutors: {
+        cancel(id) {
+          cancelled = id
+          return { runId: id } as ReturnType<Awaited<ReturnType<typeof bootAssistantControl>>['ctx']['developmentExecutors']['cancel']>
+        },
+      },
+      port: 0,
+    })
+    try {
+      const denied = await fetch(`${web.url}/api/development-runs/cancel`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ runId }),
+      })
+      assert.equal(denied.status, 403)
+      const cookie = await cookieHeader(web.url)
+      const accepted = await fetch(`${web.url}/api/development-runs/cancel`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', ...authHeaders(cookie) },
+        body: JSON.stringify({ runId }),
+      })
+      assert.equal(accepted.status, 200)
+      assert.equal(cancelled, runId)
+    } finally {
+      await web.close()
+      await control.ctx.fiber.dispose()
+    }
+  })
+
   it('keeps Settings behind the trusted local session and never returns secret values', async () => {
     const root = mkdtempSync(join(tmpdir(), 'tars-web-settings-'))
     const envFile = join(root, 'env')
@@ -2347,10 +2384,24 @@ export function apply(ctx) {
           imageInput: 'ready',
         },
         developmentExecutors: [
-          { id: 'native', label: 'TARS-NG Native', available: true, native: true, detail: 'Built-in candidate authoring tools', verification: 'built-in' },
-          { id: 'codex', label: 'Codex', available: true, native: false, detail: 'codex-cli 0.150.1', verification: 'installed-unverified' },
-          { id: 'claude-code', label: 'Claude Code', available: false, native: false, detail: 'Claude Code CLI is not installed', verification: 'unavailable' },
+          { id: 'native', label: 'TARS-NG Native', available: true, executionReady: true, authenticated: true, route: 'built-in', native: true, detail: 'Built-in candidate authoring tools', verification: 'built-in' },
+          { id: 'codex', label: 'Codex', available: true, executionReady: true, authenticated: true, route: 'provider-account', native: false, detail: 'codex-cli 0.150.1', verification: 'authenticated' },
+          { id: 'claude-code', label: 'Claude Code', available: false, executionReady: false, authenticated: false, route: 'none', native: false, detail: 'Claude Code CLI is not installed', verification: 'unavailable' },
         ],
+        developmentRuns: [{
+          runId: 'dev-00000000-0000-4000-8000-000000000010',
+          candidateId: 'generated--text-cleanup@0.1.0',
+          executor: 'codex',
+          status: 'running',
+          startedAt: '2026-09-08T00:00:00.000Z',
+          updatedAt: '2026-09-08T00:00:01.000Z',
+          pid: 123,
+          progressBytes: 2048,
+          changedFiles: [],
+          outputTruncated: false,
+          rolledBack: false,
+          detail: 'Codex is editing the bounded Candidate Workspace.',
+        }],
         workBrief: {
           status: 'completed',
           runId: 'run-brief-1',
@@ -2388,11 +2439,15 @@ export function apply(ctx) {
     assert.match(ready, /IMAGE STORE · ACTIVE/)
     assert.match(ready, /VISION INPUT · AVAILABLE/)
     assert.match(ready, /DEVELOPMENT EXECUTORS/)
-    assert.match(ready, /1 \/ 2 EXTERNAL INSTALLED/)
-    assert.match(ready, /data-executor="codex" data-executor-state="installed-unverified"/)
-    assert.match(ready, /INSTALLED · AUTH CHECKED ON RUN/)
+    assert.match(ready, /1 \/ 2 AVAILABLE/)
+    assert.match(ready, /data-executor="codex" data-executor-state="authenticated"/)
+    assert.match(ready, /ACCOUNT AUTHENTICATED · EXPERIMENTAL/)
     assert.match(ready, /data-executor="claude-code" data-executor-state="unavailable"/)
     assert.match(ready, /NOT INSTALLED/)
+    assert.match(ready, /data-run-status="running"/)
+    assert.match(ready, /generated--text-cleanup@0\.1\.0/)
+    assert.match(ready, /2\.0 KB OUTPUT/)
+    assert.match(ready, /CANCEL RUN/)
     assert.match(ready, /REFERENCE/)
     assert.match(ready, /@FILE/)
     assert.match(ready, /class="work-brief-card"/)
