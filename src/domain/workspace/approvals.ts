@@ -45,6 +45,7 @@ export function projectApprovalResolutions(input: WorkspaceSnapshotInput): reado
         outcome: 'completed',
         capability: 'self-extension',
         operation: 'approve-exact-diff',
+        target: `${approval.owner}@${approval.candidateVersion}`,
       })
     } else if (approval.decision === 'rejected') {
       items.push({
@@ -54,6 +55,7 @@ export function projectApprovalResolutions(input: WorkspaceSnapshotInput): reado
         outcome: 'denied',
         capability: 'self-extension',
         operation: 'approve-exact-diff',
+        target: `${approval.owner}@${approval.candidateVersion}`,
       })
     }
   }
@@ -68,6 +70,7 @@ export function projectApprovalResolutions(input: WorkspaceSnapshotInput): reado
         : approval.status === 'rejected' ? 'denied' : approval.status === 'cancelled' ? 'cancelled' : 'failed',
       capability: 'dsh-tool',
       operation: approval.toolName,
+      target: approval.toolName,
       occurredAt: approval.createdAt,
     })
   }
@@ -138,6 +141,7 @@ function resolutionFromTicket(ticket: WorkspaceSnapshotInput['pendingConfirmatio
       outcome: 'completed',
       capability: ticket.capability,
       operation: ticket.operation,
+      target: resolutionTarget(ticket.payload),
     }
   }
   if (ticket.status === 'denied') {
@@ -148,6 +152,7 @@ function resolutionFromTicket(ticket: WorkspaceSnapshotInput['pendingConfirmatio
       outcome: 'denied',
       capability: ticket.capability,
       operation: ticket.operation,
+      target: resolutionTarget(ticket.payload),
     }
   }
   if (ticket.status === 'cancelled') {
@@ -158,6 +163,7 @@ function resolutionFromTicket(ticket: WorkspaceSnapshotInput['pendingConfirmatio
       outcome: 'cancelled',
       capability: ticket.capability,
       operation: ticket.operation,
+      target: resolutionTarget(ticket.payload),
     }
   }
   if (ticket.status === 'failed') {
@@ -168,7 +174,16 @@ function resolutionFromTicket(ticket: WorkspaceSnapshotInput['pendingConfirmatio
       outcome: 'failed',
       capability: ticket.capability,
       operation: ticket.operation,
+      target: resolutionTarget(ticket.payload),
     }
+  }
+  return undefined
+}
+
+function resolutionTarget(payload: Record<string, unknown>): string | undefined {
+  for (const key of ['title', 'name', 'path']) {
+    const value = payload[key]
+    if (typeof value === 'string' && value.trim()) return value.trim()
   }
   return undefined
 }

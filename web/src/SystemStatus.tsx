@@ -22,6 +22,7 @@ export function SystemHeader(props: {
   readonly runtimeContext?: MissionControlView['runtimeContext']
 }) {
   const context = props.runtimeContext
+  const stateLabel = props.systemState === 'READY' ? 'CORE READY' : props.systemState.replaceAll('_', ' ')
   return (
     <header className="faceplate topbar" aria-label="System header">
       <PlateRivets />
@@ -34,7 +35,7 @@ export function SystemHeader(props: {
         </div>
         <div className="system-state" role="status" aria-label={`System state ${props.systemState}${props.connected ? '' : ', disconnected'}`}>
           <span className={`status-lamp status-lamp--${lampModifier(props.systemState, props.connected)}`} aria-hidden="true" />
-          <span>{props.systemState}</span>
+          <span>{stateLabel}</span>
         </div>
       </div>
       {context ? (

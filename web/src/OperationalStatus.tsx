@@ -106,7 +106,7 @@ function capabilitySignal(status: UserCapabilityStatus): 'active' | 'governed' |
 }
 
 function capabilityLabel(item: MissionControlView['capabilities'][number]): string {
-  if (item.status === 'active') return 'READY'
+  if (item.status === 'active') return 'AVAILABLE'
   if (item.status === 'approval-required') {
     if (item.area === 'Calendar' && item.action === 'Create event') return 'CONFIRM TO CREATE'
     return 'CONFIRM TO USE'
@@ -114,6 +114,31 @@ function capabilityLabel(item: MissionControlView['capabilities'][number]): stri
   if (item.status === 'not-connected') return 'NOT CONNECTED'
   if (item.status === 'safe-mode-disabled') return 'SAFE MODE OFF'
   return 'UNAVAILABLE'
+}
+
+function capabilityReadiness(item: MissionControlView['capabilities'][number]): string {
+  return item.readiness?.summary ?? (item.status === 'active' ? 'RUNTIME MOUNTED' : item.status === 'approval-required' ? 'APPROVAL ON USE' : 'NOT AVAILABLE')
+}
+
+function systemModeLabel(state: MissionControlView['systemState']): string {
+  if (state === 'READY') return 'CORE READY'
+  return state.replaceAll('_', ' ')
+}
+
+function humanizeIdentifier(value: string | undefined): string {
+  return (value ?? 'ACTION').replaceAll(/[._-]+/g, ' ').toUpperCase()
+}
+
+function approvalHistoryLabel(item: MissionControlView['approvalResolutions'][number]): string {
+  if (item.capability === 'self-extension' && item.operation === 'approve-exact-diff') return 'CAPABILITY REVISION'
+  if (item.capability === 'dsh-tool') return 'TOOL EXECUTION'
+  return [item.capability, item.operation].filter(Boolean).map(humanizeIdentifier).join(' · ') || 'GOVERNED ACTION'
+}
+
+function approvalOutcomeLabel(item: MissionControlView['approvalResolutions'][number]): string {
+  if (item.outcome === 'completed') return 'APPROVED'
+  if (item.outcome === 'resumed') return 'ALLOWED ONCE'
+  return item.outcome.toUpperCase()
 }
 
 function formatTokens(value: number | undefined): string {
@@ -149,11 +174,11 @@ function ContextEndurancePanel(props: { readonly value: MissionControlView['cont
         <span style={{ width: `${barWidth}%` }} />
       </div>
       <div className="context-meter-state">
-        <span>TOKEN METER · {value.status === 'ready' ? 'READY' : 'DEGRADED'}</span>
+        <span>TOKEN METER · {value.status === 'ready' ? 'ACTIVE' : 'DEGRADED'}</span>
         <span>COMPACTION · {value.compaction === 'automatic' ? 'AUTO' : 'INOP'}</span>
         <span>CHECKPOINT · {value.checkpoint === 'active' ? 'ACTIVE' : 'INOP'}</span>
         {value.outputRetention && <span>OUTPUT CAP · {formatTokens(value.outputRetention.maxInlineBytes)}B</span>}
-        {value.outputRetention && <span>SPILL · {value.outputRetention.spill === 'ready' ? 'READY' : 'INOP'}</span>}
+        {value.outputRetention && <span>SPILL · {value.outputRetention.spill === 'ready' ? 'ACTIVE' : 'INOP'}</span>}
       </div>
     </section>
   )
@@ -171,8 +196,8 @@ function MaterialInputPanel(props: { readonly value: MissionControlView['materia
       </div>
       <div className="context-meter-state">
         <span>@FILE REFERENCES · {value.fileReferences === 'active' ? 'ACTIVE' : 'INOP'}</span>
-        <span>IMAGE STORE · {value.imageStore === 'ready' ? 'READY' : 'INOP'}</span>
-        <span>VISION INPUT · {value.imageInput === 'ready' ? 'READY' : 'INOP'}</span>
+        <span>IMAGE STORE · {value.imageStore === 'ready' ? 'ACTIVE' : 'INOP'}</span>
+        <span>VISION INPUT · {value.imageInput === 'ready' ? 'AVAILABLE' : 'INOP'}</span>
       </div>
     </section>
   )
@@ -182,22 +207,22 @@ function DevelopmentExecutorsPanel(props: { readonly value: MissionControlView['
   const value = props.value
   if (!value || value.length === 0) return null
   const external = value.filter((item) => !item.native)
-  const ready = external.filter((item) => item.available).length
+  const installed = external.filter((item) => item.verification === 'installed-unverified').length
   return (
     <section className="development-executor-status" aria-labelledby="development-executor-title">
       <div className="ops-section-heading">
         <h2 id="development-executor-title">DEVELOPMENT EXECUTORS</h2>
-        <span>{ready} / {external.length} EXTERNAL READY</span>
+        <span>{installed} / {external.length} EXTERNAL INSTALLED</span>
       </div>
       <dl className="development-executor-list">
         {value.map((item) => (
-          <div key={item.id} data-executor={item.id} data-executor-state={item.available ? 'ready' : 'unavailable'}>
+          <div key={item.id} data-executor={item.id} data-executor-state={item.verification}>
             <dt>
               <span className={`status-lamp status-lamp--${item.available ? 'ready' : 'offline'}`} aria-hidden="true" />
               <strong>{item.label}</strong>
               <small>{item.native ? 'BUILT IN' : item.detail}</small>
             </dt>
-            <dd>{item.available ? 'READY' : 'NOT INSTALLED'}</dd>
+            <dd>{item.native ? 'BUILT IN' : item.available ? 'INSTALLED · AUTH CHECKED ON RUN' : 'NOT INSTALLED'}</dd>
           </div>
         ))}
       </dl>
@@ -296,6 +321,7 @@ export function OperationsPanel(props: {
   const systemNeedsAttention = ['SAFE_MODE', 'RECOVERY', 'DEGRADED', 'BLOCKED', 'FAULT'].includes(props.view.systemState)
   const attentionCount = pendingApprovals + unavailableCapabilities + failedCandidates + (props.connected ? 0 : 1) + (systemNeedsAttention ? 1 : 0)
   const activeExtensions = (props.view.extensions ?? []).filter((item) => item.lifecycle === 'ACTIVE').length
+  const recentDecisions = (props.view.approvalResolutions ?? []).slice(-3).reverse()
   return (
     <aside className="ops-panel instrument-panel" id="activity" aria-label="Operational state">
       <div className="panel-code"><span>OPS 04</span><span>LIVE STATUS</span></div>
@@ -322,8 +348,8 @@ export function OperationsPanel(props: {
       </section>
       <section className="ops-overview" aria-labelledby="ops-overview-title">
         <div className="ops-section-heading"><h2 id="ops-overview-title">SYSTEM HEALTH</h2><span className={`status-lamp status-lamp--${lampModifier(props.view.systemState, props.connected)}`} aria-hidden="true" /></div>
-        <strong className="ops-mode">{props.view.systemState.replaceAll('_', ' ')}</strong>
-        <p className="ops-detail">{props.connected ? degradation ?? props.view.recovery?.why ?? 'ALL CORE SYSTEMS NOMINAL' : 'CONTROL LINK OFFLINE'}</p>
+        <strong className="ops-mode">{systemModeLabel(props.view.systemState)}</strong>
+        <p className="ops-detail">{props.connected ? degradation ?? props.view.recovery?.why ?? 'CORE RUNTIME OPERATIONAL · OPTIONAL CAPABILITIES VERIFIED SEPARATELY' : 'CONTROL LINK OFFLINE'}</p>
         <div className="ops-counters" aria-label="Operational counters">
           <span><small>APPROVALS</small><strong className={pendingApprovals > 0 ? 'amber' : undefined}>{pendingApprovals}</strong></span>
           <span><small>JOBS</small><strong>{props.view.controlStrip.backgroundJobs}</strong></span>
@@ -336,7 +362,7 @@ export function OperationsPanel(props: {
       <section className="capability-section" id="capabilities" aria-labelledby="capability-title">
         <div className="ops-section-heading capability-heading"><h2 id="capability-title">CONNECTED CAPABILITIES</h2><span>{props.view.capabilities.length} CHANNELS</span></div>
         <div className="capability-summary" aria-label="Capability summary">
-          <span data-capability-state="active"><strong>{activeCapabilities}</strong> READY</span>
+          <span data-capability-state="active"><strong>{activeCapabilities}</strong> AVAILABLE</span>
           <span data-capability-state="governed"><strong>{governedCapabilities}</strong> CONFIRM</span>
           <span data-capability-state="unavailable"><strong>{unavailableCapabilities}</strong> UNAVAILABLE</span>
         </div>
@@ -346,10 +372,13 @@ export function OperationsPanel(props: {
             <div key={`${item.area}-${item.action}`}>
               <dt>
                 <span className="capability-area">{item.area}{item.advanced?.provider && item.advanced.provider !== 'fake' ? <small>{item.advanced.provider}</small> : null}</span>
-                <span className="capability-action">{item.area === 'Knowledge' ? `${props.view.knowledge.length} sources indexed` : item.action}</span>
+                <span className="capability-action">
+                  {item.area === 'Knowledge' ? `${props.view.knowledge.length} sources indexed` : item.area === 'Memory' ? `${props.view.memory.length} facts stored` : item.action}
+                  <small className="capability-readiness">{capabilityReadiness(item)}</small>
+                </span>
               </dt>
               <dd data-status={item.status} data-capability-state={capabilitySignal(item.status)}>
-                {item.area === 'Knowledge' && item.status === 'active' && props.view.knowledge.length === 0 ? 'EMPTY' : capabilityLabel(item)}
+                {item.status === 'active' && ((item.area === 'Knowledge' && props.view.knowledge.length === 0) || (item.area === 'Memory' && props.view.memory.length === 0)) ? 'EMPTY' : capabilityLabel(item)}
               </dd>
             </div>
           ))}
@@ -357,17 +386,26 @@ export function OperationsPanel(props: {
       </section>
       <WorkbenchPanel candidates={props.view.candidates ?? []} />
       <LiveExecutionLog entries={props.view.executionLog ?? []} open={props.actions.openLogs ?? (() => {})} />
-      {(props.view.approvalResolutions ?? []).length > 0 ? (
-        <ul className="ops-decisions" data-actions-history="true" aria-label="Recent human decisions">
-          {(props.view.approvalResolutions ?? []).slice(-3).reverse().map((item) => (
-            <li key={item.confirmationId} data-approval-resolution={item.confirmationId} data-approval-outcome={item.outcome}>
-              <span>{item.capability ?? 'action'}.{item.operation ?? item.decision}</span>
-              <strong>{item.decision.toUpperCase()}</strong>
-            </li>
-          ))}
-        </ul>
+      {recentDecisions.length > 0 ? (
+        <section className="ops-decisions-section" data-actions-history="true" aria-labelledby="recent-decisions-title">
+          <div className="ops-section-heading">
+            <h2 id="recent-decisions-title">RECENT DECISIONS</h2>
+            <span>LAST {recentDecisions.length}</span>
+          </div>
+          <ul className="ops-decisions" aria-label="Recent human decisions">
+            {recentDecisions.map((item) => (
+              <li key={item.confirmationId} data-approval-resolution={item.confirmationId} data-approval-outcome={item.outcome}>
+                <span><b>{approvalHistoryLabel(item)}</b>{item.target ? <small>{item.target}</small> : null}</span>
+                <strong>{approvalOutcomeLabel(item)}</strong>
+              </li>
+            ))}
+          </ul>
+        </section>
       ) : null}
-      <div className="ops-footer"><span><strong>{activeExtensions}</strong> ACTIVE · {(props.view.extensions ?? []).length} EXTENSION RECORDS</span><button type="button" className="button button--secondary" data-open-extensions="true" onClick={props.actions.openExtensions}>MANAGE</button></div>
+      <section className="ops-footer" aria-labelledby="user-capabilities-title">
+        <div className="ops-section-heading"><h2 id="user-capabilities-title">USER CAPABILITIES</h2><span>{activeExtensions} ONLINE</span></div>
+        <button type="button" className="button button--secondary" data-open-extensions="true" onClick={props.actions.openExtensions}>OPEN CAPABILITIES</button>
+      </section>
     </aside>
   )
 }

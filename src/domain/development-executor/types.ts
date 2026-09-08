@@ -8,6 +8,7 @@ export interface DevelopmentExecutorAvailability {
   readonly available: boolean
   readonly detail: string
   readonly native: boolean
+  readonly verification: 'built-in' | 'installed-unverified' | 'unavailable'
 }
 
 export interface DevelopmentTask {

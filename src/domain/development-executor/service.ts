@@ -53,6 +53,7 @@ export class DevelopmentExecutorService implements DevelopmentExecutorHub {
         available: true,
         native: true,
         detail: 'Built-in candidate authoring tools; default and fallback path.',
+        verification: 'built-in',
       },
       ...[...this.executors.values()].map((executor) => executor.inspect()),
     ]

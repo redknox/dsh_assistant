@@ -24,6 +24,7 @@ import { bootAssistantRuntime, createAssistantAgent } from '../src/runtime/boot.
 import { SAFE_MODE_PROFILE_PATCH, withDshAssistantProfile } from './helpers/dsh-profile-loader.js'
 
 const root = join(import.meta.dirname, '..')
+const packageVersion = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8')).version as string
 
 async function bootHarness() {
   const ctx = new Context()
@@ -252,7 +253,7 @@ describe('product package and profile', () => {
     assert.ok(packedName)
     const tarball = packedName.startsWith('/') ? packedName : join(packDir, packedName)
     assert.equal(existsSync(tarball), true)
-    assert.match(packedName, /dsh-assistant-0\.4\.0\.tgz$/)
+    assert.equal(packedName, `dsh-assistant-${packageVersion}.tgz`)
 
     const installDir = mkdtempSync(join(tmpdir(), 'tars-ng-install-'))
     execFileSync('npm', ['init', '-y'], { cwd: installDir, encoding: 'utf8' })
@@ -317,7 +318,7 @@ describe('product package and profile', () => {
     delete env.DEEPSEEK_API_KEY
 
     const doctor = execFileSync(bin, ['doctor', '--home', productHome], { encoding: 'utf8', env })
-    assert.match(doctor, /TARS-NG 0\.4\.0/)
+    assert.match(doctor, new RegExp(`TARS-NG ${packageVersion.replaceAll('.', '\\.')}\\b`))
     assert.match(doctor, new RegExp(productHome.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')))
     assert.match(doctor, /DSH_ASSISTANT_GOOGLE_CALENDAR_ACCESS_TOKEN: present/)
     assert.match(doctor, /DEEPSEEK_API_KEY: missing/)
@@ -357,7 +358,7 @@ describe('product package and profile', () => {
     const started = execFileSync(bin, ['start', '--once', '--home', productHome], { encoding: 'utf8', env })
     assert.match(started, /ai-runtime: configured/)
     assert.match(started, /llm-route: available/)
-    assert.match(started, /TARS-NG 0\.4\.0/)
+    assert.match(started, new RegExp(`TARS-NG ${packageVersion.replaceAll('.', '\\.')}\\b`))
     assert.doesNotMatch(started, /LLM not configured\/unavailable/)
     assert.doesNotMatch(started, /sk-offline-not-a-live-key/)
     assert.doesNotMatch(started, /Web UI:/)
@@ -407,7 +408,7 @@ describe('product package and profile', () => {
       assert.match(snapshot.webUi, /^http:\/\/127\.0\.0\.1:\d+$/)
       assert.doesNotMatch(JSON.stringify(snapshot), /sk-offline-not-a-live-key/)
       const status = execFileSync(bin, ['status', '--home', productHome], { encoding: 'utf8', env: uiEnv })
-      assert.match(status, /TARS-NG 0\.4\.0/)
+      assert.match(status, new RegExp(`TARS-NG ${packageVersion.replaceAll('.', '\\.')}\\b`))
       assert.match(status, /running: yes/)
       assert.match(status, /web-ui: http:\/\/127\.0\.0\.1:\d+/)
       const stopped = execFileSync(bin, ['stop', '--home', productHome], { encoding: 'utf8', env: uiEnv })

@@ -48,10 +48,12 @@ Projected from authoritative runtime/governance/policy/integration state, never 
 | DEGRADED | integration unavailable |
 | WORKING | agent `running` |
 | WAITING | job running/pending |
-| READY | otherwise |
+| READY | trusted core is operational and no global attention state applies; UI renders this as **CORE READY**, not as a claim that every optional provider or dataset works |
 
-Capability rows describe availability, not queued decisions. `ACTIVE` means the current policy may execute the action without a human confirmation; `CONFIRM` means the capability is available but an exact-action confirmation will be required when execution is attempted. Only the approval counter and approval cards represent decisions currently waiting for a human.
+Capability rows describe availability, not queued decisions. `AVAILABLE` means the surface is mounted under current policy; it does not claim that the next remote request will succeed. `CONFIRM` means the capability is mounted but an exact-action confirmation will be required when execution is attempted. Only the approval counter and approval cards represent decisions currently waiting for a human.
 Optional providers that were never configured render as `NOT LINKED` and do not make the system `DEGRADED`. `INOP`/`DEGRADED` is reserved for a configured provider whose authorization, executable, or upstream service has failed.
+
+Each projected capability also carries separate runtime, configuration, authentication, and data evidence. Feishu can therefore say `AUTH VERIFIED · DATA CHECKED ON USE`; a token-configured provider with no live probe says `CONFIGURED · VERIFIED ON USE`; Memory and Knowledge say `EMPTY` when their services are mounted but contain no current records. Context stores report `ACTIVE`, not `READY`. External development executors report `INSTALLED · AUTH CHECKED ON RUN` after a version probe; installation alone is never presented as authenticated readiness.
 
 ## Approvals
 

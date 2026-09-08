@@ -193,11 +193,36 @@ describe('TARS-NG mission-control workspace', () => {
   it('preserves the provider for integration-only capability rows', () => {
     const view = projectMissionControl(snapshot({
       registry: [],
-      integrationStatus: [{ capability: 'contacts', available: true, configured: true, provider: 'feishu' }],
+      integrationStatus: [{ capability: 'contacts', available: true, configured: true, provider: 'feishu', authorization: 'ready' }],
     }))
     const contacts = view.capabilities.find((item) => item.area === 'Contacts')
     assert.equal(contacts?.status, 'active')
     assert.equal(contacts?.advanced?.provider, 'feishu')
+    assert.equal(contacts?.readiness.authentication, 'verified')
+    assert.equal(contacts?.readiness.data, 'verified-on-use')
+  })
+
+  it('separates runtime availability, authorization, and data presence', () => {
+    const view = projectMissionControl(snapshot({
+      memory: [],
+      knowledge: [{ sourceUri: 'file:///assistant-vault/index.md', title: 'Index' }],
+      registry: [{
+        owner: 'managed/personal-context', version: '0.1.0', provenance: 'managed', status: 'active', capabilities: ['memory', 'knowledge'],
+      }],
+      integrationStatus: [
+        { capability: 'calendar', available: true, configured: true, provider: 'feishu', authorization: 'expiring' },
+      ],
+    }))
+    const memory = view.capabilities.find((item) => item.area === 'Memory')
+    const knowledge = view.capabilities.find((item) => item.area === 'Knowledge')
+    const calendar = view.capabilities.find((item) => item.area === 'Calendar' && item.action === 'Read schedule')
+
+    assert.equal(view.systemState, 'READY')
+    assert.equal(memory?.readiness.data, 'empty')
+    assert.equal(memory?.readiness.summary, 'AVAILABLE · NO DATA YET')
+    assert.equal(knowledge?.readiness.data, 'present')
+    assert.equal(calendar?.readiness.authentication, 'expiring')
+    assert.equal(calendar?.readiness.summary, 'AUTH EXPIRING · DATA CHECKED ON USE')
   })
 
   it('projects governed Web Search from its live provider status', () => {
@@ -222,9 +247,17 @@ describe('TARS-NG mission-control workspace', () => {
       area: 'Web',
       action: 'Search public sources',
       status: 'not-connected',
+      readiness: {
+        runtime: 'not-mounted',
+        configuration: 'not-configured',
+        authentication: 'unverified',
+        data: 'unknown',
+        summary: 'CONNECTION REQUIRED',
+      },
       advanced: { owner: 'managed/web-search', version: '0.1.0', provenance: 'managed', provider: 'deepseek' },
     })
     assert.equal(connected.capabilities.find((item) => item.area === 'Web')?.status, 'active')
+    assert.equal(connected.capabilities.find((item) => item.area === 'Web')?.readiness.summary, 'CONFIGURED · VERIFIED ON USE')
     assert.equal(connected.capabilities.some((item) => item.action.toLowerCase().includes('fetch')), false)
   })
 
@@ -387,6 +420,7 @@ describe('TARS-NG mission-control workspace', () => {
     assert.equal('acknowledgement' in mixed, false)
     assert.ok(mixed.approvalResolutions.some((item) => item.confirmationId === 'conf-denied' && item.outcome === 'denied'))
     assert.ok(mixed.approvalResolutions.some((item) => item.confirmationId === 'apr-hist' && item.outcome === 'completed'))
+    assert.equal(mixed.approvalResolutions.find((item) => item.confirmationId === 'apr-hist')?.target, 'generated/hist@0.1.0')
   })
 
   it('F. provider degradation is a product state, not theater', () => {

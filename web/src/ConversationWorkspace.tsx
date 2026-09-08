@@ -438,7 +438,7 @@ export function ConversationWorkspace(props: {
         {empty ? (
           <section className="conversation-empty" aria-labelledby="conversation-empty-title">
             <div className="empty-mark" aria-hidden="true"><Glyph name="hex" /><span>T</span></div>
-            <p className="empty-kicker">LOCAL ASSISTANT · READY</p>
+            <p className="empty-kicker">LOCAL ASSISTANT · CORE ONLINE</p>
             <h1 id="conversation-empty-title">What are we working on?</h1>
             <p className="empty-copy">Start with a question, a decision, or a concrete outcome. TARS-NG keeps the work inside this local workspace.</p>
             <div className="empty-prompts" aria-label="Suggested prompts">

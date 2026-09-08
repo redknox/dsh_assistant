@@ -38,7 +38,8 @@ abstract class LocalCliDevelopmentExecutor implements DevelopmentExecutor {
       label: this.label,
       available: inspected.status === 0,
       native: false,
-      detail: inspected.status === 0 ? detail || `${this.label} is installed` : `${this.label} CLI is not installed or not authenticated`,
+      detail: inspected.status === 0 ? detail || `${this.label} is installed` : `${this.label} CLI is not installed or its version probe failed`,
+      verification: inspected.status === 0 ? 'installed-unverified' : 'unavailable',
     }
   }
 

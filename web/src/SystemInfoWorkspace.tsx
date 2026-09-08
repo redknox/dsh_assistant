@@ -25,7 +25,7 @@ export function SystemInfoWorkspace(props: {
         <Summary label="BUILT-IN" value={info.summary.builtIn} />
         <Summary label="AVAILABLE" value={info.summary.available} />
         <Summary label="NEEDS CONNECTION" value={info.summary.needsConnection} />
-        <Summary label="SYSTEM MODE" value={info.summary.mode.replaceAll('_', ' ')} text />
+        <Summary label="SYSTEM MODE" value={info.summary.mode === 'READY' ? 'CORE READY' : info.summary.mode.replaceAll('_', ' ')} text />
       </section>
 
       <section className="system-info-body">
@@ -75,7 +75,8 @@ function Summary(props: { readonly label: string; readonly value: string | numbe
 }
 
 function Fact(props: { readonly label: string; readonly value: string }) {
-  return <div><dt>{props.label}</dt><dd>{props.value.replaceAll('-', ' ').toUpperCase()}</dd></div>
+  const value = props.value.toLowerCase() === 'ready' ? 'ACTIVE' : props.value.replaceAll('-', ' ').toUpperCase()
+  return <div><dt>{props.label}</dt><dd>{value}</dd></div>
 }
 
 function availabilityLabel(value: 'available' | 'not-connected' | 'unavailable' | 'withheld'): string {
@@ -84,5 +85,6 @@ function availabilityLabel(value: 'available' | 'not-connected' | 'unavailable' 
 
 function actionLabel(value: SystemSurfaceAction['state']): string {
   if (value === 'approval-on-use') return 'APPROVAL ON USE'
+  if (value === 'ready') return 'AVAILABLE'
   return value.replaceAll('-', ' ').toUpperCase()
 }

@@ -29,7 +29,7 @@ export function ExpenseReviewWorkspace(props: {
       <section className="expense-capability" data-expense-capability={control.availability?.status ?? 'loading'}>
         <span className="control-lamp" aria-hidden="true" />
         <div>
-          <strong>{control.availability?.status === 'ready' ? 'CAPABILITY READY' : control.loading ? 'CHECKING CAPABILITY' : 'CAPABILITY NOT READY'}</strong>
+          <strong>{control.availability?.status === 'ready' ? 'CAPABILITY AVAILABLE' : control.loading ? 'CHECKING CAPABILITY' : 'CAPABILITY UNAVAILABLE'}</strong>
           <p>{control.availability?.reason ?? 'Inspecting finance.expense-risk.review…'}</p>
           {control.availability?.owner ? <small>{control.availability.owner}@{control.availability.version}{control.availability.tool ? ` · ${control.availability.tool}` : ''}</small> : null}
         </div>

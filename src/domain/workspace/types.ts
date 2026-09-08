@@ -151,6 +151,7 @@ export interface ApprovalResolution {
   readonly outcome: 'completed' | 'resumed' | 'denied' | 'cancelled' | 'failed'
   readonly capability?: string
   readonly operation?: string
+  readonly target?: string
   readonly occurredAt?: string
 }
 
@@ -240,6 +241,13 @@ export interface UserCapabilityView {
   readonly area: string
   readonly action: string
   readonly status: UserCapabilityStatus
+  readonly readiness: {
+    readonly runtime: 'mounted' | 'not-mounted' | 'withheld'
+    readonly configuration: 'configured' | 'not-configured' | 'not-required' | 'unknown'
+    readonly authentication: 'verified' | 'expiring' | 'required' | 'not-required' | 'unverified'
+    readonly data: 'present' | 'empty' | 'verified-on-use' | 'unknown'
+    readonly summary: string
+  }
   readonly advanced?: {
     readonly owner?: string
     readonly version?: string
@@ -362,6 +370,7 @@ export interface DevelopmentExecutorStatusView {
   readonly available: boolean
   readonly native: boolean
   readonly detail: string
+  readonly verification: 'built-in' | 'installed-unverified' | 'unavailable'
 }
 
 export interface MissionControlView {
@@ -545,7 +554,14 @@ export interface WorkspaceSnapshotInput {
   }[]
   readonly executionLog?: readonly ExecutionLogEntry[]
   readonly conversation: readonly { readonly kind: 'user' | 'assistant' | 'tool_call' | 'tool_result'; readonly text: string }[]
-  readonly integrationStatus: readonly { readonly capability: string; readonly available: boolean; readonly configured?: boolean; readonly reason?: string; readonly provider?: string }[]
+  readonly integrationStatus: readonly {
+    readonly capability: string
+    readonly available: boolean
+    readonly configured?: boolean
+    readonly reason?: string
+    readonly provider?: string
+    readonly authorization?: 'ready' | 'expiring' | 'expired' | 'unavailable'
+  }[]
   readonly autoExecuteCapabilities?: readonly string[]
   readonly registry: readonly {
     readonly owner: string

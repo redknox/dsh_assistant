@@ -51,10 +51,12 @@ export function projectUserCapabilities(input: WorkspaceSnapshotInput): readonly
         if (seen.has(key)) continue
         seen.add(key)
         const provider = integrationProvider(input, row.area) ?? projectionProvider(row.area, record)
+        const status = resolveStatus(input, row, record)
         views.push({
           area: row.area,
           action: row.action,
-          status: resolveStatus(input, row, record),
+          status,
+          readiness: readinessOf(input, row, status, provider),
           advanced: {
             owner: record.owner,
             version: record.version,
@@ -70,15 +72,74 @@ export function projectUserCapabilities(input: WorkspaceSnapshotInput): readonly
       const key = `${row.area}:${row.action}`
       if (seen.has(key)) continue
       seen.add(key)
+      const status = resolveStatus(input, row)
       views.push({
         area: row.area,
         action: row.action,
-        status: resolveStatus(input, row),
+        status,
+        readiness: readinessOf(input, row, status, integration.provider),
         ...(integration.provider ? { advanced: { provider: integration.provider } } : {}),
       })
     }
   }
   return views
+}
+
+function readinessOf(
+  input: WorkspaceSnapshotInput,
+  row: CatalogRow,
+  status: UserCapabilityStatus,
+  provider?: string,
+): UserCapabilityView['readiness'] {
+  const integration = input.integrationStatus.find((item) => item.capability === row.area.toLowerCase())
+  const runtime = status === 'safe-mode-disabled'
+    ? 'withheld' as const
+    : status === 'active' || status === 'approval-required'
+      ? 'mounted' as const
+      : 'not-mounted' as const
+  const configuration = integration
+    ? integration.configured === false
+      ? 'not-configured' as const
+      : integration.configured === true || integration.available
+        ? 'configured' as const
+        : 'unknown' as const
+    : 'not-required' as const
+  const authentication = integration?.authorization === 'ready'
+    ? 'verified' as const
+    : integration?.authorization === 'expiring'
+      ? 'expiring' as const
+      : integration?.authorization === 'expired' || integration?.authorization === 'unavailable'
+        ? 'required' as const
+        : provider === 'sandbox' || !integration
+          ? 'not-required' as const
+          : 'unverified' as const
+  const data = row.area === 'Memory'
+    ? input.memory.length > 0 ? 'present' as const : 'empty' as const
+    : row.area === 'Knowledge'
+      ? input.knowledge.length > 0 ? 'present' as const : 'empty' as const
+      : integration && runtime === 'mounted'
+        ? 'verified-on-use' as const
+        : 'unknown' as const
+  return {
+    runtime,
+    configuration,
+    authentication,
+    data,
+    summary: readinessSummary({ runtime, configuration, authentication, data }),
+  }
+}
+
+function readinessSummary(input: Omit<UserCapabilityView['readiness'], 'summary'>): string {
+  if (input.runtime === 'withheld') return 'WITHHELD BY SAFE MODE'
+  if (input.configuration === 'not-configured') return 'CONNECTION REQUIRED'
+  if (input.authentication === 'required') return 'REAUTHENTICATION REQUIRED'
+  if (input.runtime !== 'mounted') return 'NOT MOUNTED'
+  if (input.data === 'empty') return 'AVAILABLE · NO DATA YET'
+  if (input.data === 'present') return 'AVAILABLE · LOCAL DATA PRESENT'
+  if (input.authentication === 'verified') return 'AUTH VERIFIED · DATA CHECKED ON USE'
+  if (input.authentication === 'expiring') return 'AUTH EXPIRING · DATA CHECKED ON USE'
+  if (input.authentication === 'unverified') return 'CONFIGURED · VERIFIED ON USE'
+  return 'LOCAL RUNTIME MOUNTED'
 }
 
 function integrationProvider(input: WorkspaceSnapshotInput, area: string): string | undefined {

@@ -2347,9 +2347,9 @@ export function apply(ctx) {
           imageInput: 'ready',
         },
         developmentExecutors: [
-          { id: 'native', label: 'TARS-NG Native', available: true, native: true, detail: 'Built-in candidate authoring tools' },
-          { id: 'codex', label: 'Codex', available: true, native: false, detail: 'codex-cli 0.150.1' },
-          { id: 'claude-code', label: 'Claude Code', available: false, native: false, detail: 'Claude Code CLI is not installed' },
+          { id: 'native', label: 'TARS-NG Native', available: true, native: true, detail: 'Built-in candidate authoring tools', verification: 'built-in' },
+          { id: 'codex', label: 'Codex', available: true, native: false, detail: 'codex-cli 0.150.1', verification: 'installed-unverified' },
+          { id: 'claude-code', label: 'Claude Code', available: false, native: false, detail: 'Claude Code CLI is not installed', verification: 'unavailable' },
         ],
         workBrief: {
           status: 'completed',
@@ -2368,6 +2368,7 @@ export function apply(ctx) {
       onRecovery() {},
     }))
     assert.match(ready, /data-system-state="READY"/)
+    assert.match(ready, /CORE READY/)
     assert.match(ready, /class="console"/)
     assert.match(ready, /Hello/)
     assert.match(ready, /TARS-NG/)
@@ -2381,14 +2382,15 @@ export function apply(ctx) {
     assert.match(ready, /COMPACTION · AUTO/)
     assert.match(ready, /CHECKPOINT · ACTIVE/)
     assert.match(ready, /OUTPUT CAP · 50\.0KB/)
-    assert.match(ready, /SPILL · READY/)
+    assert.match(ready, /SPILL · ACTIVE/)
     assert.match(ready, /MATERIAL INPUT/)
     assert.match(ready, /@FILE REFERENCES · ACTIVE/)
-    assert.match(ready, /IMAGE STORE · READY/)
-    assert.match(ready, /VISION INPUT · READY/)
+    assert.match(ready, /IMAGE STORE · ACTIVE/)
+    assert.match(ready, /VISION INPUT · AVAILABLE/)
     assert.match(ready, /DEVELOPMENT EXECUTORS/)
-    assert.match(ready, /1 \/ 2 EXTERNAL READY/)
-    assert.match(ready, /data-executor="codex" data-executor-state="ready"/)
+    assert.match(ready, /1 \/ 2 EXTERNAL INSTALLED/)
+    assert.match(ready, /data-executor="codex" data-executor-state="installed-unverified"/)
+    assert.match(ready, /INSTALLED · AUTH CHECKED ON RUN/)
     assert.match(ready, /data-executor="claude-code" data-executor-state="unavailable"/)
     assert.match(ready, /NOT INSTALLED/)
     assert.match(ready, /REFERENCE/)
@@ -2630,6 +2632,7 @@ export function apply(ctx) {
           outcome: 'denied',
           capability: 'calendar',
           operation: 'create_event',
+          target: 'Dentist',
         }],
       }),
       connected: true,
@@ -2643,6 +2646,10 @@ export function apply(ctx) {
     }))
     assert.match(rejected, /data-approval-resolution="c1"/)
     assert.match(rejected, /data-approval-outcome="denied"/)
+    assert.match(rejected, /RECENT DECISIONS/)
+    assert.match(rejected, /LAST 1/)
+    assert.match(rejected, /CALENDAR · CREATE EVENT/)
+    assert.match(rejected, /Dentist/)
     assert.doesNotMatch(rejected, /data-approval-action="approve"/)
     assert.doesNotMatch(rejected, />APPROVE</)
     assert.doesNotMatch(rejected, /data-acknowledgement/)

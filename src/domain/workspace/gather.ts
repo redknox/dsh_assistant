@@ -106,16 +106,20 @@ export function gatherWorkspaceSnapshot(input: GatherWorkspaceInput): WorkspaceS
     conversation: agent ? conversationWithoutReasoning(agent.session.events) : [],
     executionLog: agent ? executionLogFromSession(agent.session.events) : [],
     integrationStatus: [
-      ...Object.entries((ctx.get('integrations') as { hub: { status(): Record<string, { available: boolean; configured?: boolean; reason?: string; provider?: string }> } } | undefined)?.hub.status() ?? {}),
+      ...Object.entries((ctx.get('integrations') as { hub: { status(): Record<string, { available: boolean; configured?: boolean; reason?: string; provider?: string; authorization?: { state: 'ready' | 'expiring' | 'expired' | 'unavailable' } }> } } | undefined)?.hub.status() ?? {}),
       ...webIntegrationStatus(ctx),
     ]
-      .map(([capability, availability]) => ({
-        capability,
-        available: availability.available,
-        ...(availability.configured !== undefined ? { configured: availability.configured } : {}),
-        ...(availability.reason ? { reason: availability.reason } : {}),
-        ...(availability.provider ? { provider: availability.provider } : {}),
-      })),
+      .map(([capability, availability]) => {
+        const authorization = (availability as { authorization?: { state?: 'ready' | 'expiring' | 'expired' | 'unavailable' } }).authorization?.state
+        return {
+          capability,
+          available: availability.available,
+          ...(availability.configured !== undefined ? { configured: availability.configured } : {}),
+          ...(availability.reason ? { reason: availability.reason } : {}),
+          ...(availability.provider ? { provider: availability.provider } : {}),
+          ...(authorization ? { authorization } : {}),
+        }
+      }),
     registry: (ctx.get('capabilityRegistry') as { list(): { owner: string; version: string; provenance: { kind: string }; status: string; capabilities: { id: string }[]; permissions?: readonly string[]; provider?: string; providers?: readonly string[]; tools?: readonly string[]; commands?: readonly string[]; runtimeSeams?: readonly string[]; pluginDependencies?: readonly { capability: string; strength: 'hard' | 'optional' }[] }[] } | undefined)
       ?.list().map((record) => ({
         owner: record.owner,
