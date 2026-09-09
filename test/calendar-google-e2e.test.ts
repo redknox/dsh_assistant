@@ -285,6 +285,23 @@ describe('Calendar Self-Extension vertical slice', () => {
       assert.equal((againApproved.result as { id: string }).id, createdOnce.id)
       const listed = await tool(ctx, 'google_calendar_events_list', RANGE)
       assert.equal(listed.items.filter((item) => item.title === 'Focus').length, 1)
+
+      const stalePending = await tool(ctx, 'google_calendar_event_create', {
+        ...event,
+        title: 'Must not survive unplug',
+        idempotencyKey: 'op-stale-after-unplug',
+      })
+      assert.equal(stalePending.kind, 'pending_confirmation')
+      const rolled = await recoveryRoot.rollback(human)
+      assert.equal(rolled.state, 'rolled-back')
+      const staleApproval = await tool(ctx, 'confirm_action', {
+        confirmationId: stalePending.confirmationId,
+        decision: 'approve',
+      })
+      assert.equal(staleApproval.kind, 'deny')
+      assert.equal(staleApproval.code, 'cancelled')
+      const afterRollback = await tool(ctx, 'google_calendar_events_list', RANGE)
+      assert.equal(afterRollback.items.some((item) => item.title === 'Must not survive unplug'), false)
     } finally {
       await ctx.fiber.dispose()
       if (previousMode === undefined) delete process.env.DSH_ASSISTANT_GOOGLE_CALENDAR_MODE

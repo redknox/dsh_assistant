@@ -37,6 +37,17 @@ async function withTools(suite = new FakeIntegrationSuite()) {
 }
 
 describe('personal integration seams', () => {
+  it('records data verification only after a successful provider call', async () => {
+    const suite = new FakeIntegrationSuite()
+    assert.equal(suite.hub.status().calendar.lastVerifiedAt, undefined)
+    await suite.hub.calendar().listEvents(RANGE)
+    assert.match(suite.hub.status().calendar.lastVerifiedAt ?? '', /^\d{4}-\d{2}-\d{2}T/)
+
+    suite.state.fail.tasks = 'upstream 500'
+    await assert.rejects(() => suite.hub.tasks().listTasks({}))
+    assert.equal(suite.hub.status().tasks.lastVerifiedAt, undefined)
+  })
+
   it('reads calendar events through the hub without executing a create', async () => {
     const suite = new FakeIntegrationSuite()
     const page = await suite.hub.calendar().listEvents(RANGE)

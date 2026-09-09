@@ -117,7 +117,7 @@ function readinessOf(
     ? input.memory.length > 0 ? 'present' as const : 'empty' as const
     : row.area === 'Knowledge'
       ? input.knowledge.length > 0 ? 'present' as const : 'empty' as const
-      : integration && runtime === 'mounted'
+      : integration?.lastVerifiedAt && runtime === 'mounted'
         ? 'verified-on-use' as const
         : 'unknown' as const
   return {
@@ -136,8 +136,12 @@ function readinessSummary(input: Omit<UserCapabilityView['readiness'], 'summary'
   if (input.runtime !== 'mounted') return 'NOT MOUNTED'
   if (input.data === 'empty') return 'AVAILABLE · NO DATA YET'
   if (input.data === 'present') return 'AVAILABLE · LOCAL DATA PRESENT'
-  if (input.authentication === 'verified') return 'AUTH VERIFIED · DATA CHECKED ON USE'
-  if (input.authentication === 'expiring') return 'AUTH EXPIRING · DATA CHECKED ON USE'
+  if (input.authentication === 'verified') return input.data === 'verified-on-use'
+    ? 'AUTH VERIFIED · DATA CHECKED ON USE'
+    : 'AUTH VERIFIED · VERIFY ON USE'
+  if (input.authentication === 'expiring') return input.data === 'verified-on-use'
+    ? 'AUTH EXPIRING · DATA CHECKED ON USE'
+    : 'AUTH EXPIRING · VERIFY ON USE'
   if (input.authentication === 'unverified') return 'CONFIGURED · VERIFIED ON USE'
   return 'LOCAL RUNTIME MOUNTED'
 }

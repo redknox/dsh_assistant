@@ -64,30 +64,7 @@ export function projectCapabilityPortfolio(input: {
     if (representedOwners.has(ownerKey(plugin.owner, plugin.version))) continue
     representedOwners.add(ownerKey(plugin.owner, plugin.version))
     const extension = input.view.extensions?.find((item) => item.owner === plugin.owner && item.version === plugin.version)
-    const workflows = workflowsFor(input.workflows, plugin.owner)
-    const tools = toolsFor(input.tools, plugin.owner, plugin.capabilities)
-    cards.push({
-      id: `extension:${ownerKey(plugin.owner, plugin.version)}`,
-      title: friendlyOwner(plugin.owner),
-      purpose: capabilityPurpose(plugin.capabilities, tools, workflows),
-      usage: usageOf(input.tools, input.workflows, plugin.owner, plugin.tools, workflows, plugin.commands ?? []),
-      status: 'active',
-      implementation: unique<CapabilityImplementationKind>([
-        'extension',
-        ...(plugin.tools.length ? ['tool' as const] : implementationKinds(input.tools, plugin.owner, plugin.capabilities)),
-        ...(workflows.length > 0 ? ['workflow' as const] : []),
-      ]),
-      owner: plugin.owner,
-      version: plugin.version,
-      provenance: plugin.provenance,
-      capabilities: plugin.capabilities,
-      tools: plugin.tools,
-      workflows,
-      commands: plugin.commands ?? [],
-      assurance: assuranceOf(extension, 'active', plugin.digest),
-      dependency: dependencyOf(plugin),
-      unplug: { kind: 'plugin', plugin },
-    })
+    cards.push(extensionCard(input, plugin, extension, 'active', dependencyOf(plugin), { kind: 'plugin', plugin }))
   }
 
   for (const extension of input.view.extensions ?? []) {
@@ -95,29 +72,8 @@ export function projectCapabilityPortfolio(input: {
     if (!['ACTIVE', 'DISABLED_REACTIVATABLE', 'DISABLED_BLOCKED'].includes(extension.lifecycle)) continue
     if (representedOwners.has(ownerKey(extension.owner, extension.version))) continue
     representedOwners.add(ownerKey(extension.owner, extension.version))
-    const workflows = workflowsFor(input.workflows, extension.owner)
-    const tools = toolsFor(input.tools, extension.owner, extension.capabilities)
-    cards.push({
-      id: `extension:${ownerKey(extension.owner, extension.version)}`,
-      title: friendlyOwner(extension.owner),
-      purpose: capabilityPurpose(extension.capabilities, tools, workflows),
-      usage: usageOf(input.tools, input.workflows, extension.owner, extension.tools, workflows, extension.commands ?? []),
-      status: extension.lifecycle === 'ACTIVE' ? 'active' : 'disabled',
-      implementation: unique<CapabilityImplementationKind>([
-        'extension',
-        ...(extension.tools.length ? ['tool' as const] : implementationKinds(input.tools, extension.owner, extension.capabilities)),
-        ...(workflows.length > 0 ? ['workflow' as const] : []),
-      ]),
-      owner: extension.owner,
-      version: extension.version,
-      provenance: extension.provenance,
-      capabilities: extension.capabilities,
-      tools: extension.tools,
-      workflows,
-      commands: extension.commands ?? [],
-      assurance: assuranceOf(extension, extension.lifecycle === 'ACTIVE' ? 'active' : 'disabled', extension.digest),
-      dependency: { severity: 'none', dependents: [] },
-    })
+    const status = extension.lifecycle === 'ACTIVE' ? 'active' : 'disabled'
+    cards.push(extensionCard(input, extension, extension, status, { severity: 'none', dependents: [] }))
   }
 
   for (const skill of input.view.skills ?? []) {
@@ -160,6 +116,50 @@ export function projectCapabilityPortfolio(input: {
       attention: cards.filter((item) => item.status !== 'active').length,
       unplugReady: cards.filter((item) => item.unplug && item.dependency.severity === 'none').length,
     },
+  }
+}
+
+interface ExtensionCardSource {
+  readonly owner: string
+  readonly version: string
+  readonly provenance: string
+  readonly capabilities: readonly string[]
+  readonly tools: readonly string[]
+  readonly commands?: readonly string[]
+  readonly digest?: string
+}
+
+function extensionCard(
+  input: Parameters<typeof projectCapabilityPortfolio>[0],
+  source: ExtensionCardSource,
+  extension: MissionControlView['extensions'][number] | undefined,
+  status: CapabilityPortfolioStatus,
+  dependency: CapabilityPortfolioCard['dependency'],
+  unplug?: CapabilityUnplugTarget,
+): CapabilityPortfolioCard {
+  const workflows = workflowsFor(input.workflows, source.owner)
+  const discoveredTools = toolsFor(input.tools, source.owner, source.capabilities)
+  return {
+    id: `extension:${ownerKey(source.owner, source.version)}`,
+    title: friendlyOwner(source.owner),
+    purpose: capabilityPurpose(source.capabilities, discoveredTools, workflows),
+    usage: usageOf(input.tools, input.workflows, source.owner, source.tools, workflows, source.commands ?? []),
+    status,
+    implementation: unique<CapabilityImplementationKind>([
+      'extension',
+      ...(source.tools.length ? ['tool' as const] : implementationKinds(input.tools, source.owner, source.capabilities)),
+      ...(workflows.length > 0 ? ['workflow' as const] : []),
+    ]),
+    owner: source.owner,
+    version: source.version,
+    provenance: source.provenance,
+    capabilities: source.capabilities,
+    tools: source.tools,
+    workflows,
+    commands: source.commands ?? [],
+    assurance: assuranceOf(extension, status, source.digest),
+    dependency,
+    ...(unplug ? { unplug } : {}),
   }
 }
 

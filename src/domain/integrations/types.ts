@@ -19,6 +19,8 @@ export class IntegrationError extends Error {
 export interface Availability {
   readonly available: boolean
   readonly reason?: string
+  /** Set only after this exact provider instance completes a real operation successfully. */
+  readonly lastVerifiedAt?: string
   /** False means the optional integration was never connected, not that it failed. */
   readonly configured?: boolean
   /** Public provider label for operational status; never contains credentials or account ids. */

@@ -14,7 +14,7 @@ import { IsolatedGeneratedRunner } from './generated-runner.js'
 import { createGeneratedHostBroker } from './generated-broker-operations.js'
 import { contractDigestExtras, digestFiles } from '../../domain/candidate/digest.js'
 import { listSourceFiles, readSourceFile } from '../../domain/candidate/files.js'
-import type { RegisteredWorkflowCatalogService } from '../../product/registered-workflows.js'
+import type { WorkflowCatalogActivationPort } from '../../domain/workflow-catalog/index.js'
 
 interface SurfaceSnapshot {
   readonly tools: readonly string[]
@@ -200,7 +200,7 @@ export class CordisActivationRuntime implements ActivationRuntime {
       if (declared.services.length > 0 || declared.providers.length > 0) {
         return { ok: false, diagnostics: 'generated runtime does not proxy services or providers' }
       }
-      const catalog = this.ctx.get('workflowCatalog') as RegisteredWorkflowCatalogService | undefined
+      const catalog = this.ctx.get('workflowCatalog') as WorkflowCatalogActivationPort | undefined
       const activeWorkflows = new Set(catalog?.list().workflows.map((item) => item.name) ?? [])
       const missingWorkflows = declared.workflows.map((item) => item.name).filter((name) => !activeWorkflows.has(name))
       if (missingWorkflows.length > 0) {
@@ -217,7 +217,7 @@ export class CordisActivationRuntime implements ActivationRuntime {
       return { ok: true }
     }
     if (this.workflowDisposers.has(candidateId)) {
-      const catalog = this.ctx.get('workflowCatalog') as RegisteredWorkflowCatalogService | undefined
+      const catalog = this.ctx.get('workflowCatalog') as WorkflowCatalogActivationPort | undefined
       const active = new Set(catalog?.list().workflows.map((item) => item.name) ?? [])
       const missing = declared.workflows.map((item) => item.name).filter((name) => !active.has(name))
       if (missing.length > 0) return { ok: false, diagnostics: missing.map((name) => `workflow:${name} missing after candidate mount`).join('; ') }
@@ -287,6 +287,7 @@ export class CordisActivationRuntime implements ActivationRuntime {
 
   async unloadGenerated(candidateId?: string): Promise<void> {
     if (candidateId !== undefined) {
+      this.revokeCandidateActions(candidateId)
       const runner = this.generated.get(candidateId)
       if (runner !== undefined) {
         await this.dropGenerated(candidateId, runner)
@@ -357,7 +358,7 @@ export class CordisActivationRuntime implements ActivationRuntime {
   private async mountGeneratedWorkflows(candidateId: string, context: ActivationPrepareContext): Promise<{ ok: boolean; diagnostics?: string }> {
     try {
       this.verifyWorkflowArtifact(context)
-      const service = this.ctx.get('workflowCatalog') as RegisteredWorkflowCatalogService | undefined
+      const service = this.ctx.get('workflowCatalog') as WorkflowCatalogActivationPort | undefined
       if (!service) throw new Error('Workflow Catalog is unavailable')
       const disposers: Array<() => void> = []
       try {
@@ -538,6 +539,7 @@ export class CordisActivationRuntime implements ActivationRuntime {
   }
 
   private parkGenerated(candidateId: string, runner: IsolatedGeneratedRunner): void {
+    this.revokeCandidateActions(candidateId)
     this.dropCommands(candidateId)
     const disposers = this.proxyDisposers.get(candidateId) ?? []
     this.proxyDisposers.delete(candidateId)
@@ -602,6 +604,7 @@ export class CordisActivationRuntime implements ActivationRuntime {
   }
 
   private async dropGenerated(candidateId: string, runner: IsolatedGeneratedRunner, alreadyExited = false): Promise<void> {
+    this.revokeCandidateActions(candidateId)
     this.dropCommands(candidateId)
     const disposers = this.proxyDisposers.get(candidateId) ?? []
     this.proxyDisposers.delete(candidateId)
@@ -619,6 +622,10 @@ export class CordisActivationRuntime implements ActivationRuntime {
     this.baselines.delete(candidateId)
     this.candidateOwners.delete(candidateId)
     this.currentMounted = this.currentMounted.filter((id) => id !== candidateId)
+  }
+
+  private revokeCandidateActions(candidateId: string): void {
+    this.ctx.get('actionPolicy')?.policy.revokeAuthorityScope(candidateId)
   }
 
   private mountGeneratedCommands(candidateId: string, context: ActivationPrepareContext): { ok: boolean; diagnostics?: string } {

@@ -581,6 +581,7 @@ export interface WorkspaceSnapshotInput {
     readonly reason?: string
     readonly provider?: string
     readonly authorization?: 'ready' | 'expiring' | 'expired' | 'unavailable'
+    readonly lastVerifiedAt?: string
   }[]
   readonly autoExecuteCapabilities?: readonly string[]
   readonly registry: readonly {

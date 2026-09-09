@@ -1,7 +1,7 @@
 import { Service, type Context } from '@deepseek-ai/cordis'
 import type { WorkflowMeta } from '@deepseek-ai/dsh-workflow'
 import { defineTool } from '@deepseek-ai/dsh-tools'
-import { GovernedWorkflowCatalog, type GovernedWorkflowDefinition, type WorkflowCatalogView } from '../domain/workflow-catalog/index.js'
+import { GovernedWorkflowCatalog, type GovernedWorkflowDefinition, type WorkflowCatalogActivationPort, type WorkflowCatalogView } from '../domain/workflow-catalog/index.js'
 import { GOVERNED_SUBAGENT_PROVIDER, MAX_ACTIVE_DELEGATIONS } from './governed-subagent-provider.js'
 
 const MAX_INPUT_BYTES = 32 * 1024
@@ -87,7 +87,7 @@ declare module '@deepseek-ai/cordis' {
   }
 }
 
-export class RegisteredWorkflowCatalogService extends Service {
+export class RegisteredWorkflowCatalogService extends Service implements WorkflowCatalogActivationPort {
   constructor(ctx: Context, private readonly catalog: GovernedWorkflowCatalog) {
     super(ctx, 'workflowCatalog')
   }

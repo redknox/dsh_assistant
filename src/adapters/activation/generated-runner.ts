@@ -178,7 +178,12 @@ export class IsolatedGeneratedRunner {
     execution: GeneratedBrokerExecution = { signal: new AbortController().signal },
   ): Promise<unknown> {
     try {
-      const reply = await this.request({ op: 'call', tool, args }, GENERATED_CALL_TIMEOUT_MS, execution.signal, execution)
+      const reply = await this.request(
+        { op: 'call', tool, args },
+        GENERATED_CALL_TIMEOUT_MS,
+        execution.signal,
+        { ...execution, candidateId: this.input.candidateId },
+      )
       if (reply.ok !== true) throw new Error(String(reply.error ?? 'generated tool failed'))
       return reply.value
     } catch (error) {

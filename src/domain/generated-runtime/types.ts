@@ -21,6 +21,8 @@ export interface GeneratedBrokerRequest {
 export interface GeneratedBrokerExecution {
   readonly signal: AbortSignal
   readonly sessionId?: string
+  /** Active candidate whose authority permits this broker call. */
+  readonly candidateId?: string
 }
 
 export interface GeneratedToolDescriptor {

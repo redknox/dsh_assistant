@@ -122,6 +122,7 @@ function googleCalendarMutateOperation(ctx: Context): GeneratedBrokerOperation {
         operation: 'create_event',
         intent: 'execute',
         payload: args.event as Record<string, unknown>,
+        authorityScope: execution.candidateId,
         signal: execution.signal,
       })
     },
@@ -169,6 +170,7 @@ function obsidianMutateOperation(ctx: Context): GeneratedBrokerOperation {
         operation: 'create_note',
         intent: 'execute',
         payload: { path: notePath, content },
+        authorityScope: execution.candidateId,
         signal: execution.signal,
       })
     },

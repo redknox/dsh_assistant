@@ -57,6 +57,12 @@ export interface WorkflowExecutionContext {
   readonly signal?: AbortSignal
 }
 
+/** Narrow runtime port consumed by activation; product composition supplies the implementation. */
+export interface WorkflowCatalogActivationPort {
+  list(): WorkflowCatalogView
+  register<Input>(definition: GovernedWorkflowDefinition<Input>): () => void
+}
+
 interface StoredWorkflow {
   readonly entry: WorkflowCatalogEntry
   readonly script: string
@@ -69,7 +75,7 @@ interface StoredWorkflow {
  * Trusted catalog for native DSH workflows. Callers can list active metadata or
  * execute an exact registered name; script text never crosses this interface.
  */
-export class GovernedWorkflowCatalog {
+export class GovernedWorkflowCatalog implements WorkflowCatalogActivationPort {
   private readonly workflows = new Map<string, StoredWorkflow>()
 
   constructor(

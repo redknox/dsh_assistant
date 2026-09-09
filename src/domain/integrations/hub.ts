@@ -180,6 +180,8 @@ export interface IntegrationProviders {
 
 /** Owns provider selection. Tools call the hub, never a concrete vendor SDK. */
 export class IntegrationHub {
+  private readonly verifiedAt = new WeakMap<object, string>()
+
   constructor(private providers: IntegrationProviders) {}
 
   replaceCalendar(provider: CalendarProvider): () => void {
@@ -224,32 +226,53 @@ export class IntegrationHub {
 
   status(): Record<IntegrationCapability, Availability> {
     return {
-      calendar: this.providers.calendar.availability(),
-      mail: this.providers.mail.availability(),
-      contacts: this.providers.contacts.availability(),
-      files: this.providers.files.availability(),
-      tasks: this.providers.tasks.availability(),
+      calendar: this.availabilityOf(this.providers.calendar),
+      mail: this.availabilityOf(this.providers.mail),
+      contacts: this.availabilityOf(this.providers.contacts),
+      files: this.availabilityOf(this.providers.files),
+      tasks: this.availabilityOf(this.providers.tasks),
     }
   }
 
   calendar(): CalendarProvider {
-    return requireAvailable(this.providers.calendar)
+    return this.observe(requireAvailable(this.providers.calendar), ['listEvents', 'getEvent', 'freeBusy', 'createEvent'])
   }
 
   mail(): MailProvider {
-    return requireAvailable(this.providers.mail)
+    return this.observe(requireAvailable(this.providers.mail), ['listMessages', 'getMessage'])
   }
 
   contacts(): ContactsProvider {
-    return requireAvailable(this.providers.contacts)
+    return this.observe(requireAvailable(this.providers.contacts), ['listContacts'])
   }
 
   files(): FilesProvider {
-    return requireAvailable(this.providers.files)
+    return this.observe(requireAvailable(this.providers.files), ['listFiles', 'listTextFiles', 'readText', 'writeText', 'deleteFile'])
   }
 
   tasks(): TasksProvider {
-    return requireAvailable(this.providers.tasks)
+    return this.observe(requireAvailable(this.providers.tasks), ['listTasks', 'createTask'])
+  }
+
+  private availabilityOf(provider: { availability(): Availability }): Availability {
+    const availability = provider.availability()
+    const lastVerifiedAt = this.verifiedAt.get(provider)
+    return lastVerifiedAt === undefined ? availability : { ...availability, lastVerifiedAt }
+  }
+
+  private observe<T extends object>(provider: T, operations: readonly string[]): T {
+    const observed = new Set(operations)
+    return new Proxy(provider, {
+      get: (target, property) => {
+        const value = Reflect.get(target, property, target)
+        if (typeof value !== 'function') return value
+        if (typeof property !== 'string' || !observed.has(property)) return value.bind(target)
+        return (...args: unknown[]) => Promise.resolve(value.apply(target, args)).then((result) => {
+          this.verifiedAt.set(provider, new Date().toISOString())
+          return result
+        })
+      },
+    })
   }
 }
 

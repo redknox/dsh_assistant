@@ -6,6 +6,29 @@ import { CapabilityCenterWorkspace, implementationPane } from '../web/src/Capabi
 import { projectCapabilityPortfolio } from '../src/domain/capability-portfolio/index.js'
 
 describe('Capability Center workspace', () => {
+  it('deduplicates one active plugin revision and its governance projection into one card', () => {
+    const plugin = {
+      id: 'plugin', owner: 'generated/one-card', version: '0.1.0', provenance: 'generated',
+      candidateId: 'candidate', digest: 'digest', capabilities: ['one.read'], tools: ['one_read'], mounted: true,
+      registryGeneration: 1, dependency: { severity: 'none' as const, dependents: [] }, uninstallable: true,
+    }
+    const portfolio = projectCapabilityPortfolio({
+      view: {
+        plugins: [plugin],
+        extensions: [{
+          id: 'candidate', owner: plugin.owner, version: plugin.version, provenance: 'generated', capabilities: plugin.capabilities,
+          tools: plugin.tools, lifecycle: 'ACTIVE', registryStatus: 'active', mounted: true, eligibilityOk: true,
+          eligibilityDenials: [], newerAuthoritative: false, digest: 'digest', validationPassed: true,
+          reviewState: 'review-complete', approvalDecision: 'approved-for-exact-diff',
+        }],
+        skills: [],
+      },
+    })
+    assert.equal(portfolio.cards.length, 1)
+    assert.equal(portfolio.cards[0]?.assurance.approval, 'approved')
+    assert.equal(portfolio.cards[0]?.unplug?.kind, 'plugin')
+  })
+
   it('maps existing capability standards into one user-facing entry point', () => {
     const markup = renderToStaticMarkup(createElement(CapabilityCenterWorkspace, {
       locked: false,

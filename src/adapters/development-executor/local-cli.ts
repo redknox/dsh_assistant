@@ -1,5 +1,6 @@
 import { spawn, spawnSync } from 'node:child_process'
-import { existsSync, readFileSync, statSync } from 'node:fs'
+import { existsSync, mkdtempSync, readFileSync, realpathSync, rmSync, statSync } from 'node:fs'
+import { tmpdir } from 'node:os'
 import path from 'node:path'
 import type {
   DevelopmentExecution,
@@ -55,26 +56,30 @@ abstract class LocalCliDevelopmentExecutor implements DevelopmentExecutor {
       env: executorEnvironment(this.options.env),
     })
     const authenticated = this.authSucceeded({ status: auth.status, stdout: auth.stdout ?? '', stderr: auth.stderr ?? '' })
+    const confined = hostFilesystemSandboxAvailable()
     return {
       id: this.id,
       label: this.label,
       available: true,
-      executionReady: authenticated,
+      executionReady: authenticated && confined,
       native: false,
       authenticated,
       route: 'provider-account',
-      detail: detail || `${this.label} is installed`,
-      verification: authenticated ? 'authenticated' : auth.error ? 'installed-unverified' : 'authentication-failed',
+      detail: confined
+        ? detail || `${this.label} is installed`
+        : `${detail || `${this.label} is installed`}; host filesystem sandbox is unavailable`,
+      verification: authenticated && confined ? 'authenticated' : authenticated || auth.error ? 'installed-unverified' : 'authentication-failed',
     }
   }
 
   execute(task: DevelopmentTask): Promise<DevelopmentExecution> {
     const started = Date.now()
     const executable = this.options.executable ?? this.defaultExecutable()
+    const sandbox = sandboxedExecution(executable, this.argv(task), task.workspaceRoot, task.runId)
     return new Promise((resolve, reject) => {
-      const child = spawn(executable, this.argv(task), {
+      const child = spawn(sandbox.executable, sandbox.argv, {
         cwd: task.workspaceRoot,
-        env: executorEnvironment(this.options.env),
+        env: { ...executorEnvironment(this.options.env), TMPDIR: sandbox.scratchRoot },
         stdio: ['pipe', 'pipe', 'pipe'],
         detached: process.platform !== 'win32',
       })
@@ -118,6 +123,10 @@ abstract class LocalCliDevelopmentExecutor implements DevelopmentExecutor {
         clearTimeout(timeout)
         if (forceKill) clearTimeout(forceKill)
         task.signal?.removeEventListener('abort', onAbort)
+        // A CLI may detach descendants and exit first. Close the run's process
+        // group before the host snapshots Candidate bytes as completed.
+        if (process.platform !== 'win32') killProcessTree(child.pid, 'SIGKILL')
+        sandbox.cleanup()
         resolve({
           exitCode,
           termination,
@@ -132,6 +141,7 @@ abstract class LocalCliDevelopmentExecutor implements DevelopmentExecutor {
         clearTimeout(timeout)
         if (forceKill) clearTimeout(forceKill)
         task.signal?.removeEventListener('abort', onAbort)
+        sandbox.cleanup()
         reject(error)
       })
       child.once('close', finish)
@@ -171,6 +181,8 @@ export class CodexDevelopmentExecutor extends LocalCliDevelopmentExecutor {
       '--approve-for-me',
       '--skip-git-repo-check',
       '--ephemeral',
+      '--sandbox', 'workspace-write',
+      '--ignore-user-config',
       '--ignore-rules',
       '--cd', task.workspaceRoot,
       '-',
@@ -190,7 +202,7 @@ export class ClaudeCodeDevelopmentExecutor extends LocalCliDevelopmentExecutor {
   override inspect(): DevelopmentExecutorAvailability {
     const inspected = super.inspect()
     const settings = this.customRouteSettings()
-    if (!inspected.available || !settings) return inspected
+    if (!inspected.available || !settings || !hostFilesystemSandboxAvailable()) return inspected
     return {
       ...inspected,
       executionReady: true,
@@ -207,6 +219,7 @@ export class ClaudeCodeDevelopmentExecutor extends LocalCliDevelopmentExecutor {
       '--output-format', 'stream-json',
       '--verbose',
       '--no-session-persistence',
+      '--bare',
       '--safe-mode',
       '--restricted',
       '--permission-mode', 'acceptEdits',
@@ -251,7 +264,7 @@ function executorEnvironment(override?: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
   const source = override ?? process.env
   const names = [
     'HOME', 'PATH', 'TMPDIR', 'LANG', 'LC_ALL', 'TERM', 'USER', 'SHELL',
-    'XDG_CONFIG_HOME', 'CODEX_HOME', 'OPENAI_API_KEY', 'ANTHROPIC_API_KEY',
+    'XDG_CONFIG_HOME', 'CODEX_HOME',
   ] as const
   const env: NodeJS.ProcessEnv = { NO_COLOR: '1', CI: '1' }
   for (const name of names) {
@@ -259,4 +272,66 @@ function executorEnvironment(override?: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
     if (typeof value === 'string' && value !== '') env[name] = value
   }
   return env
+}
+
+interface SandboxedExecution {
+  readonly executable: string
+  readonly argv: readonly string[]
+  readonly scratchRoot: string
+  cleanup(): void
+}
+
+/** Kernel-enforced write confinement. Provider flags remain defense in depth. */
+function sandboxedExecution(
+  executable: string,
+  argv: readonly string[],
+  workspaceRoot: string,
+  runId: string,
+): SandboxedExecution {
+  const workspace = realpathSync(workspaceRoot)
+  const scratchRoot = mkdtempSync(path.join(tmpdir(), `tars-dev-${runId.slice(-8)}-`))
+  const cleanup = () => rmSync(scratchRoot, { recursive: true, force: true })
+  if (process.platform === 'darwin' && existsSync('/usr/bin/sandbox-exec')) {
+    const profile = [
+      '(version 1)',
+      '(allow default)',
+      '(deny file-write*)',
+      `(allow file-write* (subpath ${sandboxLiteral(workspace)}) (subpath ${sandboxLiteral(scratchRoot)}) (literal "/dev/null"))`,
+    ].join(' ')
+    return {
+      executable: '/usr/bin/sandbox-exec',
+      argv: ['-p', profile, executable, ...argv],
+      scratchRoot,
+      cleanup,
+    }
+  }
+  if (process.platform === 'linux' && spawnSync('bwrap', ['--version'], { stdio: 'ignore', timeout: 2_000 }).status === 0) {
+    return {
+      executable: 'bwrap',
+      argv: [
+        '--die-with-parent', '--new-session', '--unshare-all', '--share-net',
+        '--ro-bind', '/', '/',
+        '--bind', workspace, workspace,
+        '--bind', scratchRoot, scratchRoot,
+        '--chdir', workspace,
+        '--', executable, ...argv,
+      ],
+      scratchRoot,
+      cleanup,
+    }
+  }
+  cleanup()
+  throw new Error('external Development Runs require a host filesystem sandbox (sandbox-exec or bwrap)')
+}
+
+function hostFilesystemSandboxAvailable(): boolean {
+  if (process.platform === 'darwin') return existsSync('/usr/bin/sandbox-exec')
+  if (process.platform === 'linux') {
+    return spawnSync('bwrap', ['--version'], { stdio: 'ignore', timeout: 2_000 }).status === 0
+  }
+  return false
+}
+
+function sandboxLiteral(value: string): string {
+  return `"${value.replaceAll('\\', '\\\\').replaceAll('"', '\\"')}"`
 }

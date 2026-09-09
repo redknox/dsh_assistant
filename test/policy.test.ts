@@ -129,6 +129,30 @@ describe('action policy', () => {
     assert.equal(executed, 0)
   })
 
+  it('revokes pending actions when their originating capability scope is unplugged', async () => {
+    let executed = 0
+    const policy = new PolicyService(EXAMPLE_PERSONAL_POLICY)
+    policy.registerExecutor('calendar', 'create_event', async () => {
+      executed += 1
+      return { id: 'evt' }
+    })
+    const pending = await policy.apply({
+      capability: 'calendar',
+      operation: 'create_event',
+      intent: 'execute',
+      payload: EVENT,
+      authorityScope: 'candidate-1',
+    })
+    if (pending.kind !== 'pending_confirmation') throw new Error('expected pending')
+
+    assert.equal(policy.revokeAuthorityScope('candidate-1'), 1)
+    const afterUnplug = await policy.resolve(pending.confirmationId, 'approve')
+    assert.equal(afterUnplug.kind, 'deny')
+    if (afterUnplug.kind !== 'deny') throw new Error('expected deny')
+    assert.equal(afterUnplug.code, 'cancelled')
+    assert.equal(executed, 0)
+  })
+
   it('auto-executes L3 when configured and never auto-executes L4', async () => {
     let tasks = 0
     let files = 0

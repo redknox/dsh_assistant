@@ -2,6 +2,7 @@ import { createHash, randomUUID } from 'node:crypto'
 import { lstatSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import path from 'node:path'
 import type { CandidateWorkspace } from '../candidate/index.js'
+import { sanitizeProviderError } from '../integrations/sanitize.js'
 import {
   WORKBENCH_MAX_FILE_BYTES,
   WORKBENCH_MAX_FILE_COUNT,
@@ -10,6 +11,7 @@ import {
   WORKBENCH_MAX_WORKSPACE_BYTES,
   type CandidateWorkbench,
 } from '../workbench/index.js'
+import { sanitizeDiagnostic } from '../workbench/diagnostics.js'
 import type {
   DevelopmentRun,
   DevelopmentRunStore,
@@ -293,7 +295,7 @@ export class DevelopmentExecutorService implements DevelopmentExecutorHub {
       progressBytes,
       changedFiles,
       durationMs: execution.durationMs,
-      output: execution.output,
+      output: sanitizeDevelopmentOutput(execution.output),
       outputTruncated: execution.truncated,
       rolledBack,
       detail: status === 'completed'
@@ -334,6 +336,13 @@ export class DevelopmentExecutorService implements DevelopmentExecutorHub {
       })
     }
   }
+}
+
+function sanitizeDevelopmentOutput(output: string): string {
+  const credentialsRemoved = output
+    .replace(/authorization\s*[:=]\s*(?:bearer\s+)?\S+/gi, 'Authorization: [redacted]')
+    .replace(/\b[A-Z0-9_]*(?:API_KEY|ACCESS_TOKEN|AUTH_TOKEN|REFRESH_TOKEN|CLIENT_SECRET|PASSWORD)\s*=\s*\S+/gi, '[redacted]')
+  return sanitizeDiagnostic(sanitizeProviderError(credentialsRemoved))
 }
 
 function isHostOwnedArtifact(relativePath: string): boolean {

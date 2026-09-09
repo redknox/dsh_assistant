@@ -49,6 +49,27 @@ export class PolicyService {
     return [...this.audit]
   }
 
+  revokeAuthorityScope(authorityScope: string): number {
+    if (!authorityScope) return 0
+    let revoked = 0
+    for (const ticket of this.tickets.values()) {
+      if (ticket.authorityScope !== authorityScope) continue
+      if (ticket.status !== 'pending' && ticket.status !== 'approved') continue
+      this.updateTicket(ticket.id, 'cancelled')
+      this.record({
+        verdict: 'cancelled',
+        level: ticket.level,
+        capability: ticket.capability,
+        operation: ticket.operation,
+        confirmationId: ticket.id,
+        fingerprint: ticket.fingerprint,
+        reason: `authority scope ${authorityScope} was revoked`,
+      })
+      revoked += 1
+    }
+    return revoked
+  }
+
   decide(request: ActionRequest): PolicyOutcome {
     if (request.signal?.aborted) {
       return this.deny(request, 'cancelled', 'request was cancelled', this.levelFor(request.capability, request.intent))
@@ -191,6 +212,7 @@ export class PolicyService {
       capability: request.capability,
       operation: request.operation,
       payload: request.payload,
+      authorityScope: request.authorityScope,
       level,
       status: 'pending',
       createdAt: new Date().toISOString(),
@@ -359,5 +381,6 @@ function ticketRequest(ticket: ConfirmationTicket): ActionRequest {
     intent: 'execute',
     payload: ticket.payload,
     confirmationId: ticket.id,
+    authorityScope: ticket.authorityScope,
   }
 }

@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { spawn } from 'node:child_process'
 import { once } from 'node:events'
-import { chmodSync, mkdtempSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { chmodSync, existsSync, mkdtempSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { describe, it } from 'node:test'
@@ -136,6 +136,7 @@ describe('development executors', () => {
   it('invokes both CLIs non-interactively without forwarding unrelated host secrets', async () => {
     const root = mkdtempSync(path.join(tmpdir(), 'tars-dev-cli-'))
     const executable = path.join(root, 'fake-cli')
+    const escapeTarget = path.join(root, '..', `tars-dev-escape-${Date.now()}`)
     writeFileSync(executable, [
       '#!/bin/sh',
       'if [ "$1" = "--version" ]; then echo "fake 1.0"; exit 0; fi',
@@ -143,11 +144,20 @@ describe('development executors', () => {
       'if [ "$1" = "auth" ]; then echo \'{"loggedIn":true}\'; exit 0; fi',
       'printf "ARGS:%s\\n" "$*"',
       'printf "SECRET:%s\\n" "${TARS_TEST_SECRET-unset}"',
+      'printf "OPENAI:%s\\n" "${OPENAI_API_KEY-unset}"',
+      'printf "ANTHROPIC:%s\\n" "${ANTHROPIC_API_KEY-unset}"',
       'cat > prompt.txt',
       'printf "export const authored = true\\n" > authored.js',
+      `printf "escape" > "${escapeTarget}" 2>/dev/null || printf "ESCAPE:DENIED\\n"`,
     ].join('\n'))
     chmodSync(executable, 0o700)
-    const env = { HOME: root, PATH: process.env.PATH, TARS_TEST_SECRET: 'must-not-leak' }
+    const env = {
+      HOME: root,
+      PATH: process.env.PATH,
+      TARS_TEST_SECRET: 'must-not-leak',
+      OPENAI_API_KEY: 'must-not-reach-child',
+      ANTHROPIC_API_KEY: 'must-not-reach-child',
+    }
     const task = { runId: 'dev-00000000-0000-4000-8000-000000000000', candidateId: 'candidate', workspaceRoot: root, prompt: 'bounded prompt' }
 
     const codex = new CodexDevelopmentExecutor({ executable, env })
@@ -155,15 +165,24 @@ describe('development executors', () => {
     const codexRun = await codex.execute(task)
     assert.equal(codexRun.exitCode, 0)
     assert.match(codexRun.output, /--approve-for-me/)
+    assert.match(codexRun.output, /--sandbox workspace-write/)
+    assert.match(codexRun.output, /--ignore-user-config/)
     assert.doesNotMatch(codexRun.output, /dangerously-bypass/)
     assert.match(codexRun.output, /SECRET:unset/)
+    assert.match(codexRun.output, /OPENAI:unset/)
+    assert.match(codexRun.output, /ANTHROPIC:unset/)
+    assert.match(codexRun.output, /ESCAPE:DENIED/)
+    assert.equal(existsSync(escapeTarget), false)
 
     const claude = new ClaudeCodeDevelopmentExecutor({ executable, env })
     assert.equal(claude.inspect().available, true)
     const claudeRun = await claude.execute(task)
     assert.equal(claudeRun.exitCode, 0)
     assert.match(claudeRun.output, /--restricted/)
+    assert.match(claudeRun.output, /--bare/)
     assert.match(claudeRun.output, /--tools Read,Write,Edit,Glob,Grep/)
+    assert.match(claudeRun.output, /ESCAPE:DENIED/)
+    assert.equal(existsSync(escapeTarget), false)
     assert.equal(readFileSync(path.join(root, 'prompt.txt'), 'utf8'), 'bounded prompt')
   })
 
@@ -181,6 +200,29 @@ describe('development executors', () => {
     })
     assert.equal(run.termination, 'timed-out')
     assert.ok(run.durationMs < 3_000)
+  })
+
+  it('terminates executor descendants before accepting a completed run', async () => {
+    const root = mkdtempSync(path.join(tmpdir(), 'tars-dev-descendant-'))
+    const executable = path.join(root, 'forking-cli')
+    writeFileSync(executable, [
+      '#!/bin/sh',
+      'if [ "$1" = "--version" ]; then echo "fake 1.0"; exit 0; fi',
+      'if [ "$1" = "login" ]; then echo "Logged in using test"; exit 0; fi',
+      '(sleep 0.15; printf "late" > late-write.js) >/dev/null 2>&1 &',
+      'exit 0',
+    ].join('\n'))
+    chmodSync(executable, 0o700)
+    const executor = new CodexDevelopmentExecutor({ executable, env: { HOME: root, PATH: process.env.PATH } })
+    const run = await executor.execute({
+      runId: 'dev-00000000-0000-4000-8000-000000000021',
+      candidateId: 'candidate',
+      workspaceRoot: root,
+      prompt: 'bounded prompt',
+    })
+    assert.equal(run.exitCode, 0)
+    await new Promise((resolve) => setTimeout(resolve, 250))
+    assert.equal(existsSync(path.join(root, 'late-write.js')), false)
   })
 
   it('terminates only a verified orphan process before restart recovery', async () => {
@@ -293,6 +335,29 @@ describe('development executors', () => {
     assert.equal(status?.executionReady, false)
     assert.equal(status?.verification, 'authentication-failed')
     assert.match(status?.detail ?? '', /most recent Development Run/)
+  })
+
+  it('redacts executor credentials before returning or persisting Development Run output', async () => {
+    const fixture = setup()
+    class LeakingExecutor extends FakeExecutor {
+      constructor() { super(() => {}) }
+      override async execute(): Promise<DevelopmentExecution> {
+        return {
+          exitCode: 0,
+          termination: 'exited',
+          output: 'Authorization: Bearer leaked.token\nOPENAI_API_KEY=sk-development-secret-123456\n',
+          truncated: false,
+          durationMs: 10,
+        }
+      }
+    }
+    const hub = new DevelopmentExecutorService(fixture.workspace, fixture.workbench, [new LeakingExecutor()])
+    const result = await hub.develop({ candidateId: fixture.record.id, executor: 'codex' })
+    const persisted = hub.runs()[0]
+
+    assert.doesNotMatch(result.output, /leaked\.token|sk-development-secret/)
+    assert.doesNotMatch(persisted?.output ?? '', /leaked\.token|sk-development-secret/)
+    assert.match(result.output, /\[redacted\]/)
   })
 
   it('validates a persisted snapshot completely before replacing the Candidate workspace', () => {

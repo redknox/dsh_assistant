@@ -199,7 +199,8 @@ describe('TARS-NG mission-control workspace', () => {
     assert.equal(contacts?.status, 'active')
     assert.equal(contacts?.advanced?.provider, 'feishu')
     assert.equal(contacts?.readiness.authentication, 'verified')
-    assert.equal(contacts?.readiness.data, 'verified-on-use')
+    assert.equal(contacts?.readiness.data, 'unknown')
+    assert.equal(contacts?.readiness.summary, 'AUTH VERIFIED · VERIFY ON USE')
   })
 
   it('separates runtime availability, authorization, and data presence', () => {
@@ -222,7 +223,24 @@ describe('TARS-NG mission-control workspace', () => {
     assert.equal(memory?.readiness.summary, 'AVAILABLE · NO DATA YET')
     assert.equal(knowledge?.readiness.data, 'present')
     assert.equal(calendar?.readiness.authentication, 'expiring')
-    assert.equal(calendar?.readiness.summary, 'AUTH EXPIRING · DATA CHECKED ON USE')
+    assert.equal(calendar?.readiness.summary, 'AUTH EXPIRING · VERIFY ON USE')
+  })
+
+  it('shows data as checked only when the provider reports successful-use evidence', () => {
+    const view = projectMissionControl(snapshot({
+      registry: [],
+      integrationStatus: [{
+        capability: 'contacts',
+        available: true,
+        configured: true,
+        provider: 'feishu',
+        authorization: 'ready',
+        lastVerifiedAt: '2026-09-09T08:00:00.000Z',
+      }],
+    }))
+    const contacts = view.capabilities.find((item) => item.area === 'Contacts')
+    assert.equal(contacts?.readiness.data, 'verified-on-use')
+    assert.equal(contacts?.readiness.summary, 'AUTH VERIFIED · DATA CHECKED ON USE')
   })
 
   it('projects governed Web Search from its live provider status', () => {

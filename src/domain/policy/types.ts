@@ -25,6 +25,8 @@ export interface ActionRequest {
   readonly intent: ActionIntent
   readonly payload: Record<string, unknown>
   readonly confirmationId?: string
+  /** Identity of the runtime/candidate that authorized this action. */
+  readonly authorityScope?: string
   readonly signal?: AbortSignal
 }
 
@@ -34,6 +36,7 @@ export interface ConfirmationTicket {
   readonly capability: string
   readonly operation: string
   readonly payload: Record<string, unknown>
+  readonly authorityScope?: string
   readonly level: TrustLevel
   readonly status: ConfirmationStatus
   readonly createdAt: string
